@@ -1,0 +1,67 @@
+{
+  "name": "hive-iam-core",
+  "version": "0.1.0",
+  "description": "Hive IAM Core API \u2014 centralized authentication, authorization and audit",
+  "type": "module",
+  "engines": {
+    "node": ">=24.22.1 <25"
+  },
+  "scripts": {
+    "build": "tsc --build && rm -rf dist/db/generated && mkdir -p dist/db && cp -r src/db/generated dist/db/generated",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:ci": "vitest run --coverage",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "reset:admin": "node dist/scripts/reset-admin-password.js",
+    "db:studio": "prisma studio",
+    "db:reset": "prisma migrate reset --force",
+    "pretypecheck": "npm run db:generate",
+    "prebuild": "npm run db:generate"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.5",
+    "@hono/swagger-ui": "^0.5.3",
+    "@prisma/adapter-better-sqlite3": "^7.4.1",
+    "@prisma/client": "^7.0.0",
+    "@simplewebauthn/server": "^13.3.0",
+    "argon2": "^0.43.0",
+    "better-sqlite3": "^12.6.2",
+    "bullmq": "^5.30.0",
+    "dotenv": "^17.3.1",
+    "hono": "4.13.13",
+    "ioredis": "^5.4.0",
+    "jose": "^6.0.0",
+    "ky": "^1.7.5",
+    "nanoid": "^5.0.0",
+    "otpauth": "^9.5.0",
+    "qrcode": "^1.5.4",
+    "zod": "^3.24.4",
+    "zod-to-json-schema": "^3.25.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.6",
+    "prisma": "^7.0.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.1"
+  },
+  "overrides": {
+    "@hono/node-server": "2.1.5",
+    "fast-uri": "3.1.9",
+    "hono": "4.13.13",
+    "valibot": "1.4.2",
+    "mysql2": "3.24.3",
+    "deepmerge-ts": "8.0.0"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma",
+    "seed": "tsx prisma/seed.ts"
+  }
+}

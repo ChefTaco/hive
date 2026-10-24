@@ -1,0 +1,32 @@
+import type { MiddlewareHandler } from 'hono'
+import { logAuditEvent } from '../services/audit-service.js'
+import { getClientIp } from '../utils/ip.js'
+
+const SKIP_PATHS = ['/api/v1/health', '/api/v1/auth/public-key']
+
+export const requestLoggerMiddleware: MiddlewareHandler = async (c, next) => {
+  const start = Date.now()
+  await next()
+
+  const path = c.req.path
+  if (SKIP_PATHS.some((p) => path.startsWith(p))) return
+
+  const status = c.res.status
+  const duration = Date.now() - start
+  const principal = c.get('principal')
+  const requestId = c.req.header('x-hive-request-id') ?? c.req.header('x-request-id')
+
+  await logAuditEvent({
+    eventType: 'api.request',
+    category: 'ADMIN',
+    actorId: principal?.sub,
+    actorType: principal?.actorType ?? 'SYSTEM',
+    actorEmail: principal?.email,
+    ipAddress: getClientIp(c),
+    userAgent: c.req.header('user-agent'),
+    action: `${c.req.method} ${path}`,
+    outcome: status >= 400 ? (status === 403 ? 'DENIED' : 'FAILURE') : 'SUCCESS',
+    detail: { status, duration, method: c.req.method, path, ...(requestId ? { requestId } : {}) },
+    source: 'iam-api',
+  })
+}

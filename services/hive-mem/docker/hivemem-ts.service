@@ -1,0 +1,36 @@
+[Unit]
+Description=HiveMem TypeScript Compatibility API
+Documentation=https://github.com/ChefTaco/hive
+After=network-online.target qdrant.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=hivemem
+Group=hivemem
+WorkingDirectory=/opt/hivemem/ts-core
+EnvironmentFile=/opt/hivemem/.env
+Environment=HIVEMEM_TS_CORE_HOST=0.0.0.0
+Environment=HIVEMEM_TS_PERSISTENCE=qdrant
+Environment=HIVEMEM_TS_TLS_CERT_FILE=/opt/hivemem/certs/server.crt
+Environment=HIVEMEM_TS_TLS_KEY_FILE=/opt/hivemem/certs/server.key
+ExecStart=/usr/bin/env node /opt/hivemem/ts-core/dist/src/cli.js
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hivemem-ts
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/hivemem /var/opt/hivemem /var/log/hivemem
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+name: hivemem
+version: 0.2.0
+description: "HiveMem shared memory provider for Hermes Agent."
+hooks:
+  - sync_turn
+  - on_memory_write
+  - on_session_end

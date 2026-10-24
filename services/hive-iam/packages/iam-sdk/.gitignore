@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Environment secrets — never commit
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+*.swp
+*.swo

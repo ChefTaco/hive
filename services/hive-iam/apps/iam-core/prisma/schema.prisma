@@ -1,0 +1,423 @@
+// ─── Prisma Schema — Hive IAM Core ─────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/db/generated"
+}
+
+datasource db {
+  provider = "sqlite"
+  // url is provided by prisma.config.ts (Prisma 7 pattern)
+}
+
+// ─── Registered client projects ────────────────────────────────────────────
+
+model Client {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  secretHash  String?  // null for public clients (PKCE-only)
+  active      Boolean  @default(true)
+  clientType  String   @default("confidential") // "public" | "confidential"
+  allowedIps  String   @default("[]")
+  redirectUris String  @default("[]")  // JSON array of allowed redirect URIs
+  grantTypes   String  @default("[\"authorization_code\",\"refresh_token\"]")
+  firstParty   Boolean @default(false) // Skip consent screen for first-party apps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  serviceAccounts    ServiceAccount[]
+  auditEvents        AuditEvent[]
+  authorizationCodes AuthorizationCode[]
+
+  @@map("clients")
+}
+
+// ─── Users ─────────────────────────────────────────────────────────────────
+
+model User {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  username          String    @unique
+  displayName       String
+  passwordHash      String
+  encryptedPassword String?   // Legacy migration column; production writes and migrations keep this null.
+  active            Boolean   @default(true)
+  mfaEnabled     Boolean   @default(false)
+  mfaSecret      String?
+  mfaBackupCodes String?   // JSON array of hashed backup codes
+  mfaVerifiedAt  DateTime?
+  allowedIps     String    @default("[]") // JSON array of allowed IPs (CIDR/wildcard)
+  passwordChangedAt DateTime?
+  passwordPolicyId  String?
+  lastLoginAt    DateTime?
+  lastLoginIp    String?
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  roles         UserRoleAssignment[]
+  systemUser    SystemUser?
+  sessions      Session[]
+  refreshTokens RefreshToken[]
+  auditEvents   AuditEvent[]
+  passwordHistory PasswordHistory[]
+  groupMemberships GroupMember[]
+  passwordResetTokens PasswordResetToken[]
+  authorizationCodes  AuthorizationCode[]
+  webauthnCredentials WebAuthnCredential[]
+  trustedDevices      TrustedDevice[]
+
+  @@index([email])
+  @@index([username])
+  @@map("users")
+}
+
+// ─── Roles ─────────────────────────────────────────────────────────────────
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  label       String
+  description String?
+  isSystem    Boolean  @default(false)
+  permissions String   @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users           UserRoleAssignment[]
+  serviceAccounts ServiceAccountRoleAssignment[]
+  groupAssignments GroupRoleAssignment[]
+
+  @@map("roles")
+}
+
+model UserRoleAssignment {
+  userId    String
+  roleId    String
+  grantedAt DateTime @default(now())
+  grantedBy String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_role_assignments")
+}
+
+// ─── Service Accounts ──────────────────────────────────────────────────────
+
+model ServiceAccount {
+  provisionId String? @unique
+  provisionDigest String?
+  id           String    @id @default(cuid())
+  name         String    @unique
+  description  String?
+  clientId     String
+  apiKeyHash   String    @unique
+  apiKeyPrefix String
+  active       Boolean   @default(true)
+  expiresAt    DateTime?
+  lastUsedAt   DateTime?
+  lastUsedIp   String?
+  allowedIps   String    @default("[]")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  createdBy    String?
+
+  client      Client                         @relation(fields: [clientId], references: [id])
+  roles       ServiceAccountRoleAssignment[]
+  auditEvents AuditEvent[]
+
+  @@index([apiKeyHash])
+  @@index([clientId])
+  @@map("service_accounts")
+}
+
+model ServiceAccountRoleAssignment {
+  serviceAccountId String
+  roleId           String
+  grantedAt        DateTime @default(now())
+
+  serviceAccount ServiceAccount @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
+  role           Role           @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([serviceAccountId, roleId])
+  @@map("service_account_role_assignments")
+}
+
+// ─── Sessions & Tokens ─────────────────────────────────────────────────────
+
+model Session {
+  id              String    @id @default(cuid())
+  userId          String
+  ipAddress       String?
+  userAgent       String?
+  riskScore       Float     @default(0)
+  riskFactors     String?   // JSON array of risk factor labels
+  deviceFingerprint String?
+  stepUpVerifiedAt DateTime? // When step-up auth was last verified
+  createdAt       DateTime  @default(now())
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  revokedBy       String?
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([userId, revokedAt, expiresAt])
+  @@map("sessions")
+}
+
+model RefreshToken {
+  id          String    @id @default(cuid())
+  userId      String
+  sessionId   String?
+  tokenHash   String    @unique
+  ipAddress   String?
+  userAgent   String?
+  clientId    String?
+  issuedAt    DateTime  @default(now())
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  rotatedToId String?
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([tokenHash])
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ─── System Users (Ubuntu agent integration) ───────────────────────────────
+
+model SystemUser {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  linuxUsername   String   @unique
+  sudoEnabled     Boolean  @default(false)
+  sshPublicKey    String?
+  authorizedHosts String   @default("[]")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("system_users")
+}
+
+// ─── IAM Agents (Ubuntu host registrations) ────────────────────────────────
+
+model IamAgent {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  hostname    String
+  ipAddress   String
+  token       String    @unique
+  active      Boolean   @default(true)
+  lastSeenAt  DateTime?
+  version     String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([token])
+  @@map("iam_agents")
+}
+
+// ─── Centralized Audit Log ─────────────────────────────────────────────────
+
+model AuditEvent {
+  id               String   @id @default(cuid())
+  timestamp        DateTime @default(now())
+  eventType        String
+  category         String   @default("AUTHENTICATION")
+  actorId          String?
+  actorType        String   @default("USER")
+  actorEmail       String?
+  clientId         String?
+  serviceAccountId String?
+  ipAddress        String?
+  userAgent        String?
+  resourceType     String?
+  resourceId       String?
+  action           String
+  outcome          String   @default("SUCCESS")
+  detail           String   @default("{}")
+  source           String?
+  hostName         String?
+
+  client         Client?         @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  serviceAccount ServiceAccount? @relation(fields: [serviceAccountId], references: [id], onDelete: SetNull)
+  user           User?           @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([timestamp])
+  @@index([actorId])
+  @@index([eventType])
+  @@index([category])
+  @@index([outcome])
+  @@index([hostName])
+  @@map("audit_events")
+}
+
+// ─── Groups & Team Management ──────────────────────────────────────────────
+
+model Group {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  system      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members GroupMember[]
+  roles   GroupRoleAssignment[]
+
+  @@map("groups")
+}
+
+model GroupMember {
+  id        String   @id @default(cuid())
+  groupId   String
+  userId    String
+  createdAt DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([userId])
+  @@map("group_members")
+}
+
+model GroupRoleAssignment {
+  id        String   @id @default(cuid())
+  groupId   String
+  roleId    String
+  createdAt DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  role  Role  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, roleId])
+  @@map("group_role_assignments")
+}
+
+// ─── Password Reset Tokens ──────────────────────────────────────────────────
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    // SHA-256 of the reset token
+  expiresAt DateTime  // 1 hour validity
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tokenHash])
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// ─── Password Policies ───
+
+model PasswordPolicy {
+  id                 String   @id @default(cuid())
+  name               String   @default("Default Policy")
+  minLength          Int      @default(8)
+  maxLength          Int      @default(128)
+  requireUppercase   Boolean  @default(true)
+  requireLowercase   Boolean  @default(true)
+  requireNumbers     Boolean  @default(true)
+  requireSpecial     Boolean  @default(false)
+  maxAgeDays         Int      @default(90)       // 0 = never expires
+  historyCount       Int      @default(5)        // Prevent reuse of last N passwords
+  lockoutAttempts    Int      @default(5)
+  lockoutDurationMin Int      @default(15)
+  isDefault          Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("password_policies")
+}
+
+model PasswordHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  hash      String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("password_history")
+}
+
+// ─── WebAuthn Credentials ───────────────────────────────────────────────────
+
+model WebAuthnCredential {
+  id               String   @id @default(cuid())
+  userId           String
+  credentialId     String   @unique         // Base64url credential ID from authenticator
+  publicKey        String                   // Base64url-encoded COSE public key
+  counter          Int      @default(0)     // Sign count for clone detection
+  deviceType       String   @default("singleDevice") // singleDevice | multiDevice
+  backedUp         Boolean  @default(false) // Whether the credential is backed up
+  transports       String   @default("[]")  // JSON array: usb | ble | nfc | internal | hybrid
+  friendlyName     String   @default("")    // User-provided label
+  lastUsedAt       DateTime?
+  createdAt        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([credentialId])
+  @@map("webauthn_credentials")
+}
+
+// ─── OAuth2 Authorization Codes ─────────────────────────────────────────────
+
+model AuthorizationCode {
+  id            String    @id @default(cuid())
+  code          String    @unique
+  clientId      String
+  userId        String
+  redirectUri   String
+  scope         String?   // Space-separated scopes
+  codeChallenge String?   // PKCE S256 challenge
+  state         String?   // Opaque state passed by client
+  expiresAt     DateTime  // 10-minute validity
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([code])
+  @@index([clientId])
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("authorization_codes")
+}
+
+model TrustedDevice {
+  id              String    @id @default(cuid())
+  userId          String
+  fingerprint     String    // SHA-256 of device characteristics
+  name            String?   // User-assigned name e.g. "MacBook Pro"
+  userAgent       String?
+  ipAddress       String?
+  trusted         Boolean   @default(true)
+  lastSeenAt      DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, fingerprint])
+  @@index([userId])
+  @@map("trusted_devices")
+}

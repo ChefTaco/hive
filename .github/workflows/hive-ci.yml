@@ -1,0 +1,138 @@
+name: Hive CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hive-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install repository check tools
+        run: sudo apt-get update -qq && sudo apt-get install -y ripgrep redis-server
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: npm
+          cache-dependency-path: |
+            packages/hive-contracts/package-lock.json
+            services/hive-router/package-lock.json
+            services/hive-iam/package-lock.json
+            services/hive-mem/ts-core/package-lock.json
+            services/hive-skills/package-lock.json
+
+      - name: Install contracts dependencies
+        run: npm ci
+        working-directory: packages/hive-contracts
+
+      - name: Install router dependencies
+        run: npm ci
+        working-directory: services/hive-router
+
+      - name: Install IAM dependencies
+        run: npm ci
+        working-directory: services/hive-iam
+
+      - name: Verify IAM deployment lockfile
+        run: npm ci --ignore-scripts --dry-run --workspaces=false
+        working-directory: services/hive-iam/apps/iam-core
+
+      - name: Install HiveMem TypeScript core dependencies
+        run: npm ci
+        working-directory: services/hive-mem/ts-core
+
+      - name: Install Hive Skills dependencies
+        run: npm ci
+        working-directory: services/hive-skills
+
+      - name: Secret scan
+        run: npm run scan:secrets
+
+      - name: Production dependency audit
+        run: npm run audit:production
+
+      - name: Shell and deploy artifact syntax
+        run: npm run scripts:check && npm run tls:check
+
+      - name: Doctor fails closed and reports deploy truth
+        shell: bash
+        run: |
+          set -euo pipefail
+          private_env="${RUNNER_TEMP}/hivemem.env"
+          doctor_env="${RUNNER_TEMP}/hive.env"
+          printf 'HIVEMEM_JWT_SECRET=%s\n' "$(openssl rand -hex 32)" > "$private_env"
+          printf '%s\n' \
+            "HIVEMEM_ENV_FILE=$private_env" \
+            'DEPLOY_USERNAME=ci' \
+            'HIVE_DEPLOY_HOST=hive' \
+            'HIVE_PUBLIC_FQDN=hive.example.com' \
+            'HIVE_ROUTER_AUTH_MODE=os' \
+            'HIVE_ROUTER_SECURITY_EXPORT_STATIC_FALLBACK_ENABLED=false' > "$doctor_env"
+          chmod 600 "$private_env" "$doctor_env"
+          npm run doctor -- --env-file "$doctor_env" --json
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Canonical test, OpenAPI, migration, restore, and release gates
+        run: npm run test
+
+      - name: Real Qdrant process recovery and bounded corpus drill
+        timeout-minutes: 8
+        env:
+          HIVE_MEMORY_DRILL_REPORT: ${{ runner.temp }}/memory-recovery.json
+        run: npm run test:memory-recovery
+
+      - name: Memory recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-recovery
+          path: ${{ runner.temp }}/memory-recovery.json
+          if-no-files-found: warn
+
+      - name: Setup Python integration environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: SDK and Hermes contracts
+        run: |
+          python -m pip install pytest httpx
+          python scripts/hive-state-backup.test.py
+          PYTHONPATH=services/hive-mem/sdks/python/src python -m pytest -q services/hive-mem/sdks/python/tests services/hive-mem/hermes-plugin/tests
+          npm --prefix services/hive-mem/sdks/typescript ci
+          npm --prefix services/hive-mem/sdks/typescript run build
+          npm --prefix services/hive-mem/sdks/typescript test
+          node --test scripts/hivemem-webhook-sdk.test.mjs
+
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+        working-directory: services/hive-router
+
+      - name: Isolated console integration
+        run: npm run test:e2e
+        working-directory: services/hive-router
+
+      - name: Browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failures
+          path: services/hive-router/test-results

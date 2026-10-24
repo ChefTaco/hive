@@ -1,0 +1,9 @@
+node_modules
+dist
+tsconfig.tsbuildinfo
+*.log
+.env*
+audit-logs/
+docker/
+.git
+.github

@@ -1,0 +1,15 @@
+{
+  "name": "hivemem",
+  "version": "1.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "typecheck:ts-core": "npm --prefix ts-core run typecheck",
+    "build:ts-core": "npm --prefix ts-core run build",
+    "test:ts-core": "npm --prefix ts-core test",
+    "test:ts-sdk": "npm --prefix sdks/typescript run build && npm --prefix sdks/typescript test",
+    "test:dual-stack": "npm --prefix ts-core run test:dual-stack",
+    "test:hermes-dual-stack": "npm --prefix ts-core run build && .venv/bin/python -m pytest -q hermes-plugin/tests/test_hivemem_provider.py::test_typescript_core_hermes_plugin_contract"
+  }
+}

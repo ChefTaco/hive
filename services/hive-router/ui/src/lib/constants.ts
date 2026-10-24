@@ -1,0 +1,10 @@
+export const PROVIDER_KINDS = ['OPENAI', 'CODEX', 'OPENAI_GENERIC', 'OPENROUTER', 'ANTHROPIC', 'OLLAMA', 'LLAMACPP', 'VLLM'] as const;
+export const AUTH_MODES = ['NONE', 'BEARER', 'API_KEY', 'HEADER'] as const;
+export const ROUTE_RULE_KINDS = [
+  'MODEL_ALIAS',
+  'PROVIDER_PREFERENCE',
+  'CAPABILITY',
+  'SAFETY',
+  'PASSTHROUGH',
+  'LOCAL_ONLY',
+] as const;

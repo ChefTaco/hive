@@ -1,0 +1,29 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Environment secrets — never commit
+.env
+
+# Generated Prisma client
+src/db/generated/
+
+# SQLite database files
+prisma/*.db
+prisma/*.db-journal
+
+# Audit log files
+audit-logs/
+
+# Local TLS certs
+certs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+*.swp
+*.swo
+.iam-api-deploy.tar.gz

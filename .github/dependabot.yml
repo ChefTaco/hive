@@ -1,0 +1,30 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - /packages/hive-contracts
+      - /services/hive-router
+      - /services/hive-iam
+      - /services/hive-iam/apps/iam-core
+      - /services/hive-iam/packages/iam-sdk
+      - /services/hive-mem
+      - /services/hive-mem/ts-core
+      - /services/hive-mem/sdks/typescript
+      - /services/hive-skills
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"

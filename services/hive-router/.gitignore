@@ -1,0 +1,17 @@
+node_modules
+dist
+coverage
+playwright-report
+test-results
+ui/dist
+data/*.db
+data/*.db-journal
+data/*.db-shm
+data/*.db-wal
+data/traces
+.env
+.env.apikeys
+.DS_Store
+tsconfig.tsbuildinfo
+ui/tsconfig.tsbuildinfo
+.deploy-vendor/

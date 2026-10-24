@@ -1,0 +1,20 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.coverage
+htmlcov/
+.pytest_cache/
+*.snapshot
+certs/
+node_modules
+test-results/
+playwright-report/
+
+# Local-only VS Code MCP config (contains agent JWT tokens)
+.vscode/mcp.json
