@@ -51,6 +51,7 @@ function testEnv(): Env {
     HIVE_ROUTER_IAM_JWKS_MAX_AGE_MS: 900_000,
     HIVE_ROUTER_IAM_ISSUER: 'hive-iam',
     HIVE_ROUTER_IAM_AUDIENCE: 'hive-router',
+    HIVE_ROUTER_SECURITY_EXPORTER_CLIENT_ID: 'security-exporter',
     DATABASE_URL: 'file:./data/test-router.db',
     DATA_DIR: './data/test',
     TRACE_DIR: './data/test/traces',

@@ -164,6 +164,7 @@ Variables with no default are optional unless marked **required**.
 | `HIVE_ROUTER_IAM_SCOPES` | `openid profile email` | Scopes requested at sign-in. |
 | `HIVE_ROUTER_IAM_PROXY_SCOPES` | IAM admin scopes | Permissions requested for the server-side proxy token. |
 | `HIVE_ROUTER_IAM_ISSUER` / `HIVE_ROUTER_IAM_AUDIENCE` | `hive-iam` / `hive-router` | Claims required on IAM tokens presented to the router. |
+| `HIVE_ROUTER_SECURITY_EXPORTER_CLIENT_ID` | `security-exporter` | IAM client id accepted for the security event exporter. |
 | `HIVE_ROUTER_IAM_CA_CERT_PATH` | | CA certificate trusted for IAM HTTPS (OIDC, JWKS, proxy). |
 | `HIVE_ROUTER_IAM_JWKS_REFRESH_MS` / `HIVE_ROUTER_IAM_JWKS_MAX_AGE_MS` | `300000` / `900000` | JWKS refresh interval and the maximum age of cached keys. When the maximum is exceeded, the router rejects tokens. |
 | `HIVE_ROUTER_IAM_ALLOW_INSECURE_TLS` | `false` | Development only, loopback only. Rejected in production. |

@@ -43,7 +43,7 @@ type SecurityExporterEnv = Pick<
   | 'HIVE_ROUTER_IAM_AUDIENCE'
   | 'HIVE_ROUTER_IAM_JWKS_REFRESH_MS'
   | 'HIVE_ROUTER_IAM_JWKS_MAX_AGE_MS'
->;
+> & Partial<Pick<Env, 'HIVE_ROUTER_SECURITY_EXPORTER_CLIENT_ID'>>;
 
 interface TrustedJwks {
   key: JWTVerifyGetKey;
@@ -292,8 +292,9 @@ export function createSecurityExporterAuthorizer(
         algorithms: [...SECURITY_EXPORTER_ALGORITHMS],
         requiredClaims: ['sub', 'iss', 'aud', 'iat', 'exp', 'jti'],
       });
-      const authorized = payload.sub === SECURITY_EXPORTER_CLIENT_ID
-        && payload['clientId'] === SECURITY_EXPORTER_CLIENT_ID
+      const clientId = options.env.HIVE_ROUTER_SECURITY_EXPORTER_CLIENT_ID ?? SECURITY_EXPORTER_CLIENT_ID;
+      const authorized = payload.sub === clientId
+        && payload['clientId'] === clientId
         && payload['actorType'] === 'SERVICE_ACCOUNT'
         && payload['token_type'] === SECURITY_EXPORTER_TOKEN_TYPE
         && Array.isArray(payload['permissions'])

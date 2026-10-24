@@ -81,6 +81,7 @@ export const envSchema = z.object({
   HIVE_ROUTER_IAM_JWKS_MAX_AGE_MS: z.coerce.number().int().min(1_000).default(15 * 60_000),
   HIVE_ROUTER_IAM_ISSUER: z.string().min(1).default('hive-iam'),
   HIVE_ROUTER_IAM_AUDIENCE: z.string().min(1).default('hive-router'),
+  HIVE_ROUTER_SECURITY_EXPORTER_CLIENT_ID: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).default('security-exporter'),
   DATABASE_URL: z.string().startsWith('file:').default('file:./data/router.db'),
   DATA_DIR: z.string().default('./data'),
   TRACE_DIR: z.string().default('./data/traces'),

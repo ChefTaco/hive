@@ -78,6 +78,22 @@ describe('Security exporter exporter IAM authorization', () => {
     });
   });
 
+  it('accepts only the configured exporter client id', async () => {
+    const { jwks, sign } = await signingFixture();
+    const custom = createSecurityExporterAuthorizer({
+      env: { ...baseEnv, HIVE_ROUTER_SECURITY_EXPORTER_CLIENT_ID: 'legacy-exporter' },
+      loadJwks: async () => jwks,
+      reportTrustedKeys: vi.fn(),
+      reportRefreshFailure: vi.fn(),
+      reportRejectedRotation: vi.fn(),
+    });
+    await expect(custom(await sign(
+      { ...expectedClaims, clientId: 'legacy-exporter' },
+      { subject: 'legacy-exporter' },
+    ))).resolves.toMatchObject({ status: 'authorized' });
+    await expect(custom(await sign())).resolves.not.toMatchObject({ status: 'authorized' });
+  });
+
   it('accepts a legacy IAM token without kid when exactly one key is trusted', async () => {
     const { jwks, sign } = await signingFixture();
     await expect(authorizer(async () => jwks)(await sign(expectedClaims, {
