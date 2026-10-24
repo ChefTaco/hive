@@ -467,15 +467,17 @@ if [[ -f /etc/systemd/system/${SERVICE_NAME}.service ]]; then
   cp /etc/systemd/system/${SERVICE_NAME}.service "\$SHARED/unit-backups/${SERVICE_NAME}-\$(date -u +%Y%m%d%H%M%S).service" 2>/dev/null || true
 fi
 
+# IAM owns the Router client secret: prefer a co-located IAM install's value,
+# then the Router's previous value.
 ROUTER_IAM_CLIENT_SECRET='${PROD_IAM_CLIENT_SECRET}'
-if [[ -z "\$ROUTER_IAM_CLIENT_SECRET" && -f "\$ENV_FILE" ]]; then
-  ROUTER_IAM_CLIENT_SECRET=\$(read_env "\$ENV_FILE" HIVE_ROUTER_IAM_CLIENT_SECRET)
-fi
 if [[ -z "\$ROUTER_IAM_CLIENT_SECRET" && -f /opt/hive-iam/.env && -r /opt/hive-iam/.env ]]; then
   ROUTER_IAM_CLIENT_SECRET=\$(grep '^SEED_HIVE_ROUTER_CLIENT_SECRET=' /opt/hive-iam/.env 2>/dev/null | cut -d= -f2- || true)
 fi
 if [[ -z "\$ROUTER_IAM_CLIENT_SECRET" ]] && do_sudo test -f /opt/hive-iam/.env; then
   ROUTER_IAM_CLIENT_SECRET=\$(do_sudo grep '^SEED_HIVE_ROUTER_CLIENT_SECRET=' /opt/hive-iam/.env | cut -d= -f2- || true)
+fi
+if [[ -z "\$ROUTER_IAM_CLIENT_SECRET" && -f "\$ENV_FILE" ]]; then
+  ROUTER_IAM_CLIENT_SECRET=\$(read_env "\$ENV_FILE" HIVE_ROUTER_IAM_CLIENT_SECRET)
 fi
 if [[ '${PROD_AUTH_MODE}' == 'iam-oidc' && -z "\$ROUTER_IAM_CLIENT_SECRET" ]]; then
   echo "ERROR: HIVE_ROUTER_AUTH_MODE=iam-oidc requires HIVE_ROUTER_IAM_CLIENT_SECRET or /opt/hive-iam/.env SEED_HIVE_ROUTER_CLIENT_SECRET" >&2

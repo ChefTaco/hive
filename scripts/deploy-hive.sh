@@ -46,10 +46,9 @@ HIVE_DEPLOY_SKIP_VERIFY="${HIVE_DEPLOY_SKIP_VERIFY:-false}"
 HIVE_DEPLOY_VERIFY_PLAYWRIGHT="${HIVE_DEPLOY_VERIFY_PLAYWRIGHT:-false}"
 HIVE_DEPLOY_DRY_RUN="${HIVE_DEPLOY_DRY_RUN:-false}"
 HIVE_DEPLOY_FORCE_IAM_SEED="${HIVE_DEPLOY_FORCE_IAM_SEED:-false}"
+# Optional. IAM owns the Router client secret: a first install generates it, and
+# later deploys recover it from the IAM install instead of inventing a new one.
 HIVE_DEPLOY_ROUTER_IAM_SECRET="${HIVE_DEPLOY_ROUTER_IAM_SECRET:-}"
-if [[ "$HIVE_DEPLOY_FORCE_IAM_SEED" == "true" && -z "$HIVE_DEPLOY_ROUTER_IAM_SECRET" ]]; then
-  HIVE_DEPLOY_ROUTER_IAM_SECRET="$(openssl rand -hex 32)"
-fi
 
 usage() {
   cat <<EOF
