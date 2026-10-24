@@ -29,7 +29,7 @@ export const MfaDisableSchema = z.object({
 })
 
 export const ForgotPasswordSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
 })
 
 export const ResetPasswordSchema = z.object({

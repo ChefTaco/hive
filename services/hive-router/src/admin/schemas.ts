@@ -46,12 +46,12 @@ export const providerModelSchema = z.object({
 export const providerSchema = z.object({
   slug: z.string().min(2),
   name: z.string().min(2),
-  kind: z.nativeEnum(ProviderKind),
-  baseUrl: z.string().url(),
-  authMode: z.nativeEnum(AuthMode).default(AuthMode.BEARER),
+  kind: z.enum(ProviderKind),
+  baseUrl: z.url(),
+  authMode: z.enum(AuthMode).default(AuthMode.BEARER),
   authHeaderName: z.string().default('Authorization'),
   authSecret: z.string().optional(),
-  defaultHeaders: z.record(z.string()).default({}),
+  defaultHeaders: z.record(z.string(), z.string()).default({}),
   capabilities: providerCapabilitySchema.default({}),
   timeoutMs: z.number().int().positive().default(120000),
   maxRetries: z.number().int().min(0).default(1),
@@ -79,7 +79,7 @@ export const routeRuleMatchSchema = z.object({
 
 export const routeRuleActionSchema = z.object({
   providerIds: z.array(z.string().min(1)).optional(),
-  providerKinds: z.array(z.nativeEnum(ProviderKind)).optional(),
+  providerKinds: z.array(z.enum(ProviderKind)).optional(),
   requiredTag: z.string().min(1).optional(),
   deny: z.boolean().optional(),
   denyReason: z.string().min(1).optional(),
@@ -87,7 +87,7 @@ export const routeRuleActionSchema = z.object({
 
 export const routeRuleSchema = z.object({
   name: z.string().min(2),
-  kind: z.nativeEnum(RouteRuleKind),
+  kind: z.enum(RouteRuleKind),
   priority: z.number().int().default(100),
   enabled: z.boolean().default(true),
   matchJson: routeRuleMatchSchema,
@@ -132,11 +132,11 @@ export const clientKeyMetadataSchema = z.object({
   scopes: z.array(z.string().min(1)).optional(),
   tags: z.array(z.string().min(1)).optional(),
   environment: z.enum(['dev', 'test', 'staging', 'prod']).optional(),
-  expiresAt: z.string().datetime({ offset: true }).optional(),
+  expiresAt: z.iso.datetime({ offset: true }).optional(),
   rotation: z.object({
     cadenceDays: z.number().int().positive().optional(),
-    lastRotatedAt: z.string().datetime({ offset: true }).optional(),
-    nextRotateBy: z.string().datetime({ offset: true }).optional(),
+    lastRotatedAt: z.iso.datetime({ offset: true }).optional(),
+    nextRotateBy: z.iso.datetime({ offset: true }).optional(),
   }).strict().optional(),
   quota: z.object({
     dailyRequests: z.number().int().positive().optional(),
@@ -146,7 +146,7 @@ export const clientKeyMetadataSchema = z.object({
     warnAtPercent: z.number().int().min(1).max(99).optional(),
   }).strict().optional(),
   notes: z.string().max(2000).optional(),
-  labels: z.record(z.string()).optional(),
+  labels: z.record(z.string(), z.string()).optional(),
 }).strict();
 
 export const clientKeySchema = z.object({
@@ -169,7 +169,7 @@ function jsonStringSchema(label: string): z.ZodType<string> {
     try {
       parseJsonString(value);
     } catch {
-      context.addIssue({ code: z.ZodIssueCode.custom, message: `${label} must be valid JSON` });
+      context.addIssue({ code: 'custom', message: `${label} must be valid JSON` });
     }
   });
 }
@@ -180,12 +180,12 @@ function jsonStringMatching<T>(label: string, schema: z.ZodType<T>): z.ZodType<s
     try {
       parsed = parseJsonString(value);
     } catch {
-      context.addIssue({ code: z.ZodIssueCode.custom, message: `${label} must be valid JSON` });
+      context.addIssue({ code: 'custom', message: `${label} must be valid JSON` });
       return;
     }
     const result = schema.safeParse(parsed);
     if (!result.success) {
-      context.addIssue({ code: z.ZodIssueCode.custom, message: `${label} does not match the expected shape` });
+      context.addIssue({ code: 'custom', message: `${label} does not match the expected shape` });
     }
   });
 }
@@ -201,12 +201,12 @@ const importProviderModelSchema = z.object({
 const importProviderSchema = z.object({
   slug: z.string().min(2),
   name: z.string().min(2),
-  kind: z.nativeEnum(ProviderKind),
-  baseUrl: z.string().url(),
-  authMode: z.nativeEnum(AuthMode).optional(),
+  kind: z.enum(ProviderKind),
+  baseUrl: z.url(),
+  authMode: z.enum(AuthMode).optional(),
   authHeaderName: z.string().optional(),
   encryptedAuthSecret: z.string().nullable().optional(),
-  defaultHeadersJson: jsonStringMatching('defaultHeadersJson', z.record(z.string())).nullable().optional(),
+  defaultHeadersJson: jsonStringMatching('defaultHeadersJson', z.record(z.string(), z.string())).nullable().optional(),
   capabilityJson: jsonStringMatching('capabilityJson', providerCapabilitySchema).nullable().optional(),
   tlsInsecure: z.boolean().optional(),
   timeoutMs: z.number().int().positive().optional(),
@@ -229,7 +229,7 @@ const importModelAliasSchema = z.object({
 
 const importRouteRuleSchema = z.object({
   name: z.string().min(2),
-  kind: z.nativeEnum(RouteRuleKind),
+  kind: z.enum(RouteRuleKind),
   priority: z.number().int().optional(),
   enabled: z.boolean().optional(),
   matchJson: jsonStringMatching('route matchJson', routeRuleMatchSchema),

@@ -33,13 +33,13 @@ import {
 export const webauthnRouter = new Hono();
 
 const RegisterBodySchema = z.object({
-  response: z.record(z.unknown()),
+  response: z.record(z.string(), z.unknown()),
   friendlyName: z.string().max(100).default(''),
 });
 
 const AuthenticationBodySchema = z.object({
   mfaToken: z.string().min(1).max(8192),
-  response: z.record(z.unknown()),
+  response: z.record(z.string(), z.unknown()),
 });
 
 async function userIdFromMfaToken(token: string): Promise<string> {

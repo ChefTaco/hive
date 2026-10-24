@@ -34,7 +34,7 @@ export const iamServiceAccountSummarySchema = z.object({
 }).passthrough();
 
 export const memorySearchResultSchema = z.object({
-  memories: z.array(z.record(z.unknown())).default([]),
+  memories: z.array(z.record(z.string(), z.unknown())).default([]),
 }).passthrough();
 
 export type IamUserSummary = z.infer<typeof iamUserSummarySchema>;
@@ -91,7 +91,7 @@ export function createMemoryServiceClient(options: HiveClientOptions) {
     },
     memories(limit = 50) {
       return requestJson(options, `/v1/memories?limit=${limit}`, z.object({
-        memories: z.array(z.record(z.unknown())).default([]),
+        memories: z.array(z.record(z.string(), z.unknown())).default([]),
       }).passthrough());
     },
     search(body: { query: string; limit?: number; workspace_id?: string }) {
@@ -102,12 +102,12 @@ export function createMemoryServiceClient(options: HiveClientOptions) {
     },
     queueJobs(limit = 50) {
       return requestJson(options, `/v1/queue/jobs?limit=${limit}`, z.object({
-        jobs: z.array(z.record(z.unknown())).default([]),
+        jobs: z.array(z.record(z.string(), z.unknown())).default([]),
       }).passthrough());
     },
     agents() {
       return requestJson(options, '/v1/agents', z.object({
-        agents: z.array(z.record(z.unknown())).default([]),
+        agents: z.array(z.record(z.string(), z.unknown())).default([]),
       }).passthrough());
     },
   };

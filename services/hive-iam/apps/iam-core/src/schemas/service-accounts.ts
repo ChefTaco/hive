@@ -6,13 +6,13 @@ export const CreateServiceAccountSchema = z.object({
   description: z.string().optional(),
   clientId: z.string().min(1),
   roleIds: z.array(z.string()).default([]),
-  expiresAt: z.string().datetime().optional(),
-  allowedIps: z.array(z.string().ip({ version: 'v4' })).default([]),
+  expiresAt: z.iso.datetime().optional(),
+  allowedIps: z.array(z.ipv4()).default([]),
 })
 
 export const UpdateServiceAccountSchema = z.object({
   description: z.string().optional(),
   active: z.boolean().optional(),
-  expiresAt: z.string().datetime().nullable().optional(),
-  allowedIps: z.array(z.string().ip({ version: 'v4' })).optional(),
+  expiresAt: z.iso.datetime().nullable().optional(),
+  allowedIps: z.array(z.ipv4()).optional(),
 })

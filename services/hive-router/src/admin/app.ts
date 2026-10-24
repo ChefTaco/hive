@@ -122,7 +122,7 @@ const actorCreateSchema = z.object({
 });
 
 const actorLifecycleSchema = z.object({
-  operationId: z.string().uuid().optional(),
+  operationId: z.guid().optional(),
   kind: z.enum(['user', 'service-account', 'system-user', 'router-key', 'memory-agent']).optional(),
   label: z.string().optional(),
   identifiers: z.record(z.string(), z.unknown()).optional().default({}),
@@ -1675,7 +1675,7 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}): Hono<{ 
   app.post('/api/hive/actors', requireAdminAuth, createActor);
   app.delete('/api/hive/actors/:id/receipt', requireAdminAuth, async (context) => { await prisma.actorEnrollment.updateMany({ where: { actorId: getParamId(context), ownerId: context.get('adminUser')!.id }, data: { encryptedSecrets: null, receiptExpiresAt: null } }); return context.json({ ok: true }); });
   app.delete('/api/hive/actors/:id/operations/:operationId/receipt', requireAdminAuth, async (context) => {
-    await actorJournalWrite(() => actorJournal().acknowledge(z.string().uuid().parse(context.req.param('operationId')), context.get('adminUser')!.id));
+    await actorJournalWrite(() => actorJournal().acknowledge(z.guid().parse(context.req.param('operationId')), context.get('adminUser')!.id));
     return context.json({ ok: true });
   });
   app.post('/api/hive/actors/:id/disable', requireAdminAuth, disableActor);

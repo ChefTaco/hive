@@ -6,7 +6,7 @@ export const MemoryWriteSchema = z.object({
   scope: z.enum(['private', 'shared']),
   source: MemorySourceSchema,
   workspace_id: z.string().trim().min(1).refine((value) => value !== '*', 'Choose a specific workspace'),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 }).passthrough();
 export type MemoryWrite = z.infer<typeof MemoryWriteSchema>;
 export const OperationEvidenceSchema = z.object({

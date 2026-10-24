@@ -7,25 +7,25 @@ export const CreateClientSchema = z.object({
   description: z.string().optional(),
   secret: z.string().min(16).optional(),
   clientType: z.enum(['public', 'confidential']).default('confidential'),
-  redirectUris: z.array(z.string().url()).default([]),
+  redirectUris: z.array(z.url()).default([]),
   grantTypes: z.array(z.enum(VALID_GRANT_TYPES)).default(['authorization_code', 'refresh_token']),
   firstParty: z.boolean().default(false),
-  allowedIps: z.array(z.string().ip({ version: 'v4' })).default([]),
+  allowedIps: z.array(z.ipv4()).default([]),
 }).refine(
   (data) => data.clientType === 'public' || data.secret,
-  { message: 'Confidential clients must provide a secret', path: ['secret'] },
+  { error: 'Confidential clients must provide a secret', path: ['secret'] },
 ).refine(
   (data) => data.clientType !== 'public' || !data.grantTypes.includes('client_credentials'),
-  { message: 'Public clients cannot use client_credentials grant', path: ['grantTypes'] },
+  { error: 'Public clients cannot use client_credentials grant', path: ['grantTypes'] },
 )
 
 export const UpdateClientSchema = z.object({
   description: z.string().optional(),
   active: z.boolean().optional(),
-  redirectUris: z.array(z.string().url()).optional(),
+  redirectUris: z.array(z.url()).optional(),
   grantTypes: z.array(z.enum(VALID_GRANT_TYPES)).optional(),
   firstParty: z.boolean().optional(),
-  allowedIps: z.array(z.string().ip({ version: 'v4' })).optional(),
+  allowedIps: z.array(z.ipv4()).optional(),
 })
 
 export const RotateClientSecretSchema = z.object({

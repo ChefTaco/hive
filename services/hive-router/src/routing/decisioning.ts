@@ -35,7 +35,7 @@ export const decisionResponseSchema = z.object({
   model: z.string().min(1),
   provider: z.string().optional(),
   answers: z.object({
-    profile: z.object({ type: z.literal('choice'), choice: z.enum(['standard', 'coding', 'hard', 'internet_data', 'dangerous']), confidence: probability.optional(), probabilities: z.record(probability).optional() }),
+    profile: z.object({ type: z.literal('choice'), choice: z.enum(['standard', 'coding', 'hard', 'internet_data', 'dangerous']), confidence: probability.optional(), probabilities: z.record(z.string(), probability).optional() }),
     injection: z.object({ type: z.literal('noul'), noul: probability }),
     nsfw: z.object({ type: z.literal('noul'), noul: probability }),
   }),

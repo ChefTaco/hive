@@ -7,7 +7,7 @@ all welcome.
 
 ```bash
 nvm use               # Node.js version from .nvmrc
-npm run bootstrap     # install every workspace
+npm run bootstrap     # install every workspace and the git hooks
 npm run dev:hive      # run the full stack locally
 ```
 
@@ -37,7 +37,10 @@ npm run scan:secrets
 - If you change an HTTP route or schema, run `npm run generate:openapi` and commit the updated
   snapshot.
 - If you change IAM request schemas, run `npm --prefix packages/hive-contracts run generate:ui`.
-- Never commit `.env` files, keys, certificates, databases, or other credentials.
+- Never commit `.env` files, keys, certificates, databases, or other credentials, or details of
+  private infrastructure (real hostnames, IPs, usernames, home paths). The git hooks in `.githooks/`
+  enforce this. See [AGENTS.md](AGENTS.md) for the full rules, which apply to people and AI agents
+  alike.
 
 ## Commit messages
 

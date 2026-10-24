@@ -18,7 +18,7 @@
     "node": ">=24.22.1 <25"
   },
   "scripts": {
-    "bootstrap": "for d in packages/hive-contracts services/hive-router services/hive-iam services/hive-mem/ts-core services/hive-skills; do (cd \"$d\" && npm ci) || exit 1; done",
+    "bootstrap": "for d in packages/hive-contracts services/hive-router services/hive-iam services/hive-mem/ts-core services/hive-skills; do (cd \"$d\" && npm ci) || exit 1; done && npm run hooks:install",
     "typecheck": "npm run typecheck:contracts && npm run build:contracts && npm run typecheck:router && npm run typecheck:iam && npm run typecheck:memory-ts && npm run typecheck:skills",
     "typecheck:router": "npm --prefix services/hive-router run typecheck",
     "typecheck:iam": "npm --prefix services/hive-iam run typecheck",
@@ -61,6 +61,8 @@
     "test:memory-hermes-dual-stack": "npm --prefix services/hive-mem run test:hermes-dual-stack",
     "typecheck:skills": "npm --prefix services/hive-skills run check",
     "build:skills": "npm --prefix services/hive-skills run build",
-    "test:skills": "npm --prefix services/hive-skills run test"
+    "test:skills": "npm --prefix services/hive-skills run test",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "check:private": "bash scripts/check-private-data.sh"
   }
 }

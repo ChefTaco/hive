@@ -36,3 +36,10 @@ qdrant_storage/
 .vscode/mcp.json
 **/.vscode/mcp.json
 .DS_Store
+
+# Private, per-developer agent notes and denylists (never commit)
+AGENTS.local.md
+**/AGENTS.local.md
+CLAUDE.local.md
+**/CLAUDE.local.md
+.private-terms

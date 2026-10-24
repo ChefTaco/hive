@@ -1,8 +1,8 @@
 import type { Context } from 'hono'
-import type { ZodSchema, z } from 'zod'
+import type { ZodType, z } from 'zod'
 import { ApiError } from '../types/index.js'
 
-export async function parseBody<S extends ZodSchema>(
+export async function parseBody<S extends ZodType>(
   c: Context,
   schema: S,
 ): Promise<z.infer<S>> {

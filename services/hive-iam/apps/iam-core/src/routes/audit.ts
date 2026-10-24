@@ -38,7 +38,7 @@ const IngestEventSchema = z.object({
   hostName: z.string().optional(),
   resourceType: z.string().optional(),
   resourceId: z.string().optional(),
-  detail: z.record(z.unknown()).optional(),
+  detail: z.record(z.string(), z.unknown()).optional(),
   source: z.string().optional(),
   targetType: z.string().optional(),
   targetId: z.string().optional(),
@@ -53,8 +53,8 @@ const QuerySchema = z.object({
   eventType: z.string().optional(),
   hostName: z.string().optional(),
   source: z.string().optional(),
-  from: z.string().datetime().optional(),
-  to: z.string().datetime().optional(),
+  from: z.iso.datetime().optional(),
+  to: z.iso.datetime().optional(),
 })
 
 auditRouter.get('/', authMiddleware, requirePermission('iam:audit:read'), async (c) => {

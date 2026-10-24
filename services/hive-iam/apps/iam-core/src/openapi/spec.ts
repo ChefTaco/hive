@@ -1,5 +1,4 @@
-import { zodToJsonSchema } from 'zod-to-json-schema'
-import type { ZodType } from 'zod'
+import { z, type ZodType } from 'zod'
 import {
   LoginSchema,
   RefreshSchema,
@@ -17,7 +16,22 @@ import { CreateSystemUserSchema, UpdateSystemUserSchema } from '../schemas/syste
 // ── Helpers ──
 
 function zod(schema: ZodType) {
-  return zodToJsonSchema(schema, { target: 'openApi3' })
+  return z.toJSONSchema(schema, {
+    target: 'openapi-3.0',
+    // Request bodies: fields with defaults are optional for the caller.
+    io: 'input',
+    override: ({ zodSchema, jsonSchema }) => {
+      // Keep the published contract stable with the previous zod-to-json-schema
+      // output: objects are documented as closed, and string formats are
+      // described by `format` alone rather than zod's internal regexes.
+      if (zodSchema._zod.def.type === 'object' && jsonSchema.additionalProperties === undefined) {
+        jsonSchema.additionalProperties = false
+      }
+      if (typeof jsonSchema.format === 'string' && typeof jsonSchema.pattern === 'string') {
+        delete jsonSchema.pattern
+      }
+    },
+  })
 }
 
 function ref(name: string) {

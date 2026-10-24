@@ -3,7 +3,7 @@ import { z } from 'zod'
 /** GET /oauth/authorize query parameters */
 export const AuthorizeQuerySchema = z.object({
   client_id: z.string().min(1),
-  redirect_uri: z.string().url(),
+  redirect_uri: z.url(),
   response_type: z.string().min(1),
   code_challenge: z.string().optional(),
   code_challenge_method: z.enum(['S256']).optional(),
@@ -14,7 +14,7 @@ export const AuthorizeQuerySchema = z.object({
 /** POST /oauth/authorize — user consent approval */
 export const AuthorizeConsentSchema = z.object({
   clientId: z.string().min(1),
-  redirectUri: z.string().url(),
+  redirectUri: z.url(),
   responseType: z.string().min(1),
   codeChallenge: z.string().optional(),
   codeChallengeMethod: z.enum(['S256']).optional(),

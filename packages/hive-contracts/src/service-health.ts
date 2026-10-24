@@ -13,7 +13,7 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() => z.union([
   z.boolean(),
   z.null(),
   z.array(jsonValueSchema),
-  z.record(jsonValueSchema),
+  z.record(z.string(), jsonValueSchema),
 ]));
 
 export interface HiveHealthCheck {
@@ -154,7 +154,7 @@ function parseJsonRecord(text: string): Record<string, JsonValue> | null {
     return null;
   }
 
-  const result = z.record(jsonValueSchema).safeParse(parsed);
+  const result = z.record(z.string(), jsonValueSchema).safeParse(parsed);
   return result.success ? result.data : null;
 }
 
@@ -337,7 +337,7 @@ export const hiveAppStatusSchema = z.object({
   consoleUrl: z.string(),
   latencyMs: z.number().finite().optional(),
   checks: z.array(hiveHealthCheckSchema),
-  details: z.record(jsonValueSchema).optional(),
+  details: z.record(z.string(), jsonValueSchema).optional(),
 }).strict();
 
 export const hiveStatusResponseSchema = z.object({
