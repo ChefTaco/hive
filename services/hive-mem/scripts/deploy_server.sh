@@ -384,7 +384,10 @@ remote_sudo "mkdir -p ${REMOTE_DIR} && chown ${SSH_USER}:${SSH_USER} ${REMOTE_DI
 echo "[3/8] Syncing project files ..."
 # Use rsync if available, fall back to tar+scp
 if command -v rsync &>/dev/null; then
+  # Protect hidden top-level directories on the target (operator backups and
+  # release records) from --delete; they are server-side state, not source.
   remote_rsync -az --delete \
+    --filter 'P /.*/' \
     --exclude '.venv' \
     --exclude '__pycache__' \
     --exclude '*.pyc' \
