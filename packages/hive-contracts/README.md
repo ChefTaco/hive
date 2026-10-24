@@ -66,8 +66,8 @@ Without `HIVE_HOSTS`, the example topology (`hive.example.com`, `memory.example.
 
 | Import path | Contents |
 |---|---|
-| `@hivemem/contracts` | Everything below |
-| `@hivemem/contracts/service-health` | Hive status and IAM/HiveMem health schemas |
+| `@hivemem/contracts` | Everything below except the Node-only health probes. Safe to use in browsers. |
+| `@hivemem/contracts/service-health` | Hive status and IAM/HiveMem health schemas, plus the Node-only `requestServiceHealth`, `requestIamHealth` and `requestMemoryHealth` probes |
 | `@hivemem/contracts/service-clients` | `createIamServiceClient`, `createMemoryServiceClient` |
 | `@hivemem/contracts/service-manifest` | Service manifest and host resolution helpers |
 | `@hivemem/contracts/memory-operations` | HiveMem write/operation schemas |

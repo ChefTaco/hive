@@ -32,7 +32,7 @@ npm install hono
 
 ```typescript
 import { Hono } from 'hono'
-import { createIamMiddleware } from '@hivemem/iam-sdk'
+import { createIamMiddleware } from '@hivemem/iam-sdk/hono'
 
 const iam = createIamMiddleware({
   publicKeyUrl: 'https://iam.example.com/api/v1/auth/public-key',
@@ -198,21 +198,23 @@ import {
   IamVerifier,
   PublicKeyCache,
 
-  // Hono middleware factory
-  createIamMiddleware,
-
   // Types
   type Principal,
   type ActorType,
   type IamToken,
   type IamMiddlewareOptions,
   type IamHonoOptions,
-  type IamHonoMiddleware,
 
   // Token refresh helper
   refreshAccessToken,
 } from '@hivemem/iam-sdk'
+
+// Hono middleware (requires the optional `hono` peer dependency)
+import { createIamMiddleware, type IamHonoMiddleware } from '@hivemem/iam-sdk/hono'
 ```
+
+The main entry point has no framework dependency. Only `@hivemem/iam-sdk/hono` needs `hono`
+installed.
 
 ## Error Responses
 

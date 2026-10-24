@@ -1,7 +1,7 @@
 {
   "name": "hive-iam-core",
   "version": "0.1.0",
-  "description": "Hive IAM Core API \u2014 centralized authentication, authorization and audit",
+  "description": "Hive IAM Core API — centralized authentication, authorization and audit",
   "type": "module",
   "engines": {
     "node": ">=24.22.1 <25"
@@ -49,7 +49,7 @@
     "prisma": "^7.0.0",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
-    "vitest": "^3.2.1"
+    "vitest": "^5.0.5"
   },
   "overrides": {
     "@hono/node-server": "2.1.5",

@@ -1,6 +1,4 @@
 export type { Principal, IamToken, IamMiddlewareOptions, IamHonoOptions, ActorType } from './types.js'
 export { IamVerifier } from './verify.js'
 export { PublicKeyCache } from './cache.js'
-export { createIamMiddleware } from './middleware/hono.js'
-export type { IamHonoMiddleware } from './middleware/hono.js'
 export { refreshAccessToken } from './refresh.js'
