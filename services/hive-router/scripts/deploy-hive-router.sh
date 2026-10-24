@@ -20,7 +20,7 @@
 #   HIVE_ROUTER_DEPLOY_PATH       install root (default /opt/hive-router)
 #   HIVE_ROUTER_SERVICE_NAME      systemd unit name (default hive-router)
 #   HIVE_ROUTER_CERT_DOMAIN       public FQDN for TLS (default DEPLOY_HOST)
-#   HIVE_ROUTER_ADMIN_USERS       admin allowlist written to a new .env (default admin)
+#   HIVE_ROUTER_ADMIN_USERS       admin allowlist (default admin for a new .env; an existing one is kept unless set)
 #   HIVE_ROUTER_USE_TAILSCALE_CERT=true  request the TLS cert with `tailscale cert`
 #   DEPLOY_SSH_KEY / HIVE_ROUTER_DEPLOY_SSH_KEY, DEPLOY_SUDO_PASSWORD
 # Values are also read from .env at the repository root and in this service.
@@ -348,6 +348,7 @@ remote_scp "$RELEASE_MANAGER_LIB" "$SSH_USER@$REMOTE_HOST:/tmp/.hive-release-man
 
 PROD_SECRET="${HIVE_ROUTER_SECRET:-$(openssl rand -hex 32)}"
 PROD_ADMIN_USERS="${HIVE_ROUTER_ADMIN_USERS:-admin}"
+PROD_ADMIN_USERS_EXPLICIT="${HIVE_ROUTER_ADMIN_USERS:+true}"
 PROD_CLIENT_KEY="${SEED_CLIENT_API_KEY:-}"
 PROD_METRICS_TOKEN="${HIVE_ROUTER_METRICS_TOKEN:-}"
 PROD_SECURITY_EXPORT_TOKEN_HASH="${HIVE_ROUTER_SECURITY_EXPORT_TOKEN_HASH:-}"
@@ -667,7 +668,10 @@ upsert_env "\$ENV_FILE" REQUIRE_TLS 'true'
 upsert_env "\$ENV_FILE" DATABASE_URL 'file:${REMOTE_PATH}/shared/data/router.db'
 upsert_env "\$ENV_FILE" DATA_DIR '${REMOTE_PATH}/shared/data'
 upsert_env "\$ENV_FILE" TRACE_DIR '${REMOTE_PATH}/shared/data/traces'
-upsert_env "\$ENV_FILE" HIVE_ROUTER_ADMIN_USERS '${PROD_ADMIN_USERS}'
+# Keep an existing allowlist unless one is passed explicitly.
+if [[ '${PROD_ADMIN_USERS_EXPLICIT}' == 'true' ]]; then
+  upsert_env "\$ENV_FILE" HIVE_ROUTER_ADMIN_USERS '${PROD_ADMIN_USERS}'
+fi
 upsert_env "\$ENV_FILE" HIVE_ROUTER_OS_AUTH_COMMAND ''
 METRICS_TOKEN_VALUE='${PROD_METRICS_TOKEN}'
 if [[ -z "\$METRICS_TOKEN_VALUE" ]]; then
