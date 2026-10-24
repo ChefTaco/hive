@@ -64,7 +64,7 @@
     "prepublishOnly": "npm run clean && npm run build && npm test"
   },
   "dependencies": {
-    "jose": "^6.0.0",
+    "jose": "^6.2.13",
     "ky": "^1.7.5"
   },
   "peerDependencies": {
@@ -76,7 +76,7 @@
     }
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
+    "@types/node": "^24.19.2",
     "hono": "^4.0.0",
     "typescript": "^5.8.3",
     "vitest": "^5.0.5"
