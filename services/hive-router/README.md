@@ -61,19 +61,18 @@ On first start the app creates its SQLite schema. You do not need to run
 is generated from `prisma/schema.prisma`. Run `npm run db:generate-bootstrap`
 after you edit the schema; `npm test` fails if the generated file is stale.
 
+The IAM request types in `src/contracts/ui-api.generated.ts` are generated from the
+Hive IAM OpenAPI spec. Run `npm run contracts:generate` after you change IAM request
+schemas; `npm run typecheck` fails if the generated file is stale.
+
 ## Requirements
 
 - Node.js `>=24.22.1 <25` and npm
-- The `@hivemem/contracts` package from this monorepo (`packages/hive-contracts`).
-  Build it once from the repository root with `npm run build:contracts`.
 - For OS (PAM) login in production: `pamtester` on the host
 
 ## Run locally
 
 ```bash
-# from the repository root
-npm run build:contracts
-
 cd services/hive-router
 npm install
 cp .env.example .env
@@ -297,8 +296,7 @@ recovers `HIVE_ROUTER_IAM_CLIENT_SECRET` from `/opt/hive-iam/.env` and
 
 ### Docker
 
-The image is built from the repository root so it can include
-`@hivemem/contracts`:
+Build the image from the repository root:
 
 ```bash
 docker build -f services/hive-router/Dockerfile -t hive-router:local .

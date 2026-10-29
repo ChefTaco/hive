@@ -14,4 +14,4 @@ Initial public release.
 - Durable reasoning queue (summaries, consolidation, dream, forgetting review) with idempotent operation receipts.
 - Bounded HS256 JWT auth, scoped agent tokens, renewal grants, and persistent `jti` revocation.
 - HMAC-signed webhooks with SSRF-safe destination policy, metrics, audit log, and an operator dashboard.
-- TypeScript (`@hivemem/sdk`) and Python SDKs, and a Hermes Agent memory-provider plugin.
+- TypeScript (`@hivemagnus/hivemem-sdk`) and Python SDKs, and a Hermes Agent memory-provider plugin.

@@ -13,7 +13,7 @@ import {
   type HiveHostTarget,
   type HiveServiceKey,
   type HiveSystemdServiceName,
-} from '../packages/hive-contracts/src/service-manifest.ts';
+} from './lib/service-manifest.ts';
 
 type Severity = 'info' | 'warn' | 'fail';
 type ServiceName = HiveSystemdServiceName;

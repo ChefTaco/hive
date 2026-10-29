@@ -1,5 +1,4 @@
 *
-!packages/hive-contracts
 !services/hive-router
 **/node_modules
 **/dist

@@ -100,7 +100,7 @@ export type {
   HiveHealthCheck,
   HiveStatusResponse as HiveStatus,
   TlsCertificateStatus,
-} from '@hivemem/contracts';
+} from '@contracts/service-health-schemas.js';
 
 export type {
   IamAssignRolesRequest,
@@ -115,7 +115,7 @@ export type {
   IamUpdateServiceAccountRequest as UpdateIamServiceAccountRequest,
   IamUpdateSystemUserRequest as UpdateIamSystemUserRequest,
   IamUpdateUserRequest as UpdateIamUserRequest,
-} from '@hivemem/contracts/ui-api';
+} from '@contracts/ui-api.generated.js';
 
 export interface IamLoginResult {
   accessToken: string;

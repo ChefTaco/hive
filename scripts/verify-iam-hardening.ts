@@ -1,7 +1,7 @@
 #!/usr/bin/env node --experimental-strip-types
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { parseHiveHostTarget, resolveHiveHosts, type HiveHostTarget } from '../packages/hive-contracts/src/service-manifest.ts';
+import { parseHiveHostTarget, resolveHiveHosts, type HiveHostTarget } from './lib/service-manifest.ts';
 
 type HardeningStatus = 'pass' | 'warn' | 'fail';
 

@@ -36,6 +36,14 @@ describe('architecture boundaries', () => {
     assert.deepEqual(offenders, []);
   });
 
+  it('keeps Node-only health probes out of the UI bundle', () => {
+    const offenders = relativeFiles('services/hive-router/ui/src')
+      .filter((file) => /from ['"]@contracts\/service-health(?:\.js)?['"]/.test(file.text))
+      .map((file) => file.path);
+
+    assert.deepEqual(offenders, [], 'Import @contracts/service-health-schemas instead');
+  });
+
   it('keeps active services from importing sibling service internals', () => {
     const serviceDirs = ['services/hive-router/src', 'services/hive-iam/apps/iam-core/src', 'services/hive-mem/ts-core/src'];
     const offenders = serviceDirs.flatMap((dir) => relativeFiles(dir)

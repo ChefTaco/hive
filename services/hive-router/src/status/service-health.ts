@@ -7,7 +7,7 @@ export {
   requestIamHealth,
   requestMemoryHealth,
   requestServiceHealth,
-} from '@hivemem/contracts/service-health';
+} from '../contracts/service-health.js';
 export type {
   HiveAppKey,
   HiveAppState,
@@ -21,4 +21,4 @@ export type {
   ServiceHealthProbeResult,
   ServiceHealthRequestOptions,
   TypedServiceHealthProbeResult,
-} from '@hivemem/contracts/service-health';
+} from '../contracts/service-health.js';

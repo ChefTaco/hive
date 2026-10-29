@@ -955,7 +955,7 @@ npm --prefix sdks/typescript run build
 ```
 
 ```ts
-import { HiveMem } from "@hivemem/sdk";
+import { HiveMem } from "@hivemagnus/hivemem-sdk";
 
 const client = new HiveMem({ apiUrl: process.env.HIVEMEM_API_URL, token: process.env.HIVEMEM_TOKEN });
 const results = await client.searchMemories({ query: "communication style", limit: 5 });

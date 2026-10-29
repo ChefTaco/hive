@@ -60,12 +60,11 @@ change.
 
 | Path | Contents |
 |---|---|
-| `packages/hive-contracts` | `@hivemem/contracts`, shared Zod schemas and typed clients (published to npm) |
-| `services/hive-router` | OpenAI-compatible model gateway, admin API, and the unified console (React/Vite in `ui/`) |
-| `services/hive-iam` | IAM Core (`apps/iam-core`) and `@hivemem/iam-sdk` (`packages/iam-sdk`, published to npm) |
-| `services/hive-mem` | HiveMem TypeScript core (`ts-core`), SDKs (`sdks/typescript` is `@hivemem/sdk`), and the Python Hermes plugin |
+| `services/hive-router` | OpenAI-compatible model gateway, admin API, and the unified console (React/Vite in `ui/`). `src/contracts` holds the Zod schemas the Router and console share with IAM and HiveMem |
+| `services/hive-iam` | IAM Core (`apps/iam-core`) and `@hivemagnus/hive-iam-sdk` (`packages/iam-sdk`, published to npm) |
+| `services/hive-mem` | HiveMem TypeScript core (`ts-core`), SDKs (`sdks/typescript` is `@hivemagnus/hivemem-sdk`), and the Python Hermes plugin |
 | `services/hive-skills` | Skills registry for Hermes Agent |
-| `scripts/` | Deploy, backup, audit, and repository check tooling |
+| `scripts/` | Deploy, backup, audit, and repository check tooling. `scripts/lib/service-manifest.ts` describes the deployed services |
 | `docs/` | Architecture, runbooks, and OpenAPI snapshots |
 
 Each workspace has its own `package-lock.json`. Install them all with `npm run bootstrap`.
@@ -73,11 +72,11 @@ Each workspace has its own `package-lock.json`. Install them all with `npm run b
 ## Engineering conventions
 
 - TypeScript is strict everywhere. Match the style of the file you are editing.
-- Use Zod 4 for runtime validation. Shared request and response shapes belong in
-  `packages/hive-contracts`.
+- Use Zod 4 for runtime validation. Request and response shapes the Router and console share with
+  IAM and HiveMem belong in `services/hive-router/src/contracts`.
 - Add or update tests with every behaviour change. Security-relevant fixes need a regression test.
 - After changing routes or schemas, run `npm run generate:openapi`. After changing IAM request
-  schemas, run `npm --prefix packages/hive-contracts run generate:ui`.
+  schemas, run `npm --prefix services/hive-router run contracts:generate`.
 - Published packages follow semver. Note user-facing changes in `CHANGELOG.md`.
 - Use Conventional Commits (`feat:`, `fix(router):`, `docs:` and so on).
 

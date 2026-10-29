@@ -9,7 +9,7 @@ Hive IAM is the identity service for the Hive control plane. It runs as the stri
 | IAM Core API | `apps/iam-core` | Hono HTTPS API for auth, users, roles, service accounts, clients, sessions, system users, audit, OAuth/OIDC, and health. |
 | IAM SDK | `packages/iam-sdk` | Node/Hono helpers for local JWT verification and RBAC middleware. |
 | Deploy script | `scripts/deploy-iam-core.sh` | Builds, packages, uploads, migrates, seeds when needed, and restarts `hive-iam.service`. |
-| Generated UI contracts | `../../packages/hive-contracts` from repo root | Zod/OpenAPI-derived request body schemas consumed by the Hive Router UI proxy. |
+| Generated UI contracts | `services/hive-router/src/contracts` from repo root | Zod/OpenAPI-derived request body schemas consumed by the Hive Router UI proxy. |
 
 ## Runtime
 

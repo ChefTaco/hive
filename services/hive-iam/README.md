@@ -13,7 +13,7 @@ operational scripts used to deploy and maintain them.
 | Path | Purpose |
 | --- | --- |
 | [`apps/iam-core`](apps/iam-core) | IAM Core API (Hono, SQLite via Prisma, Redis): auth, users, roles, groups, service accounts, clients, sessions, MFA/WebAuthn, OAuth/OIDC, audit |
-| [`packages/iam-sdk`](packages/iam-sdk) | [`@hivemem/iam-sdk`](https://www.npmjs.com/package/@hivemem/iam-sdk): JWT verification and RBAC middleware for Node.js and Hono |
+| [`packages/iam-sdk`](packages/iam-sdk) | [`@hivemagnus/hive-iam-sdk`](https://www.npmjs.com/package/@hivemagnus/hive-iam-sdk): JWT verification and RBAC middleware for Node.js and Hono |
 | [`scripts`](scripts) | Key generation, deployment, lockout reset, and end-to-end smoke tests |
 | [`docs`](docs) | [Architecture notes](docs/APP_ARCHITECTURE_IAM.md) |
 

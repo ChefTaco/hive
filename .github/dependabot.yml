@@ -2,7 +2,6 @@ version: 2
 updates:
   - package-ecosystem: npm
     directories:
-      - /packages/hive-contracts
       - /services/hive-router
       - /services/hive-iam
       - /services/hive-iam/apps/iam-core

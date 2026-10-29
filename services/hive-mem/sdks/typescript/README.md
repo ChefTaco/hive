@@ -1,4 +1,4 @@
-# @hivemem/sdk
+# @hivemagnus/hivemem-sdk
 
 TypeScript client for [HiveMem](https://github.com/ChefTaco/hive/tree/main/services/hive-mem), the shared long-term memory service for AI agents. It wraps the HiveMem REST API with typed helpers for memories, search, sessions, prompt context, peer cards, conclusions, queue operations, and webhooks.
 
@@ -9,7 +9,7 @@ TypeScript client for [HiveMem](https://github.com/ChefTaco/hive/tree/main/servi
 ## Install
 
 ```bash
-npm install @hivemem/sdk
+npm install @hivemagnus/hivemem-sdk
 ```
 
 You need a running HiveMem server and an agent token. See the [HiveMem README](https://github.com/ChefTaco/hive/tree/main/services/hive-mem#readme) for how to run the server and register an agent.
@@ -17,7 +17,7 @@ You need a running HiveMem server and an agent token. See the [HiveMem README](h
 ## Quick start
 
 ```ts
-import { HiveMem } from "@hivemem/sdk";
+import { HiveMem } from "@hivemagnus/hivemem-sdk";
 
 const hivemem = new HiveMem({
   baseUrl: "https://memory.example.com", // or set HIVEMEM_API_URL
@@ -87,7 +87,7 @@ await hivemem.syncKnowledgeSource({ mode: "preview", project_id: "docs", source_
 Non-2xx responses throw `HiveMemHTTPError` with `statusCode`, the server's `detail` as `message`, and the parsed body as `details`. All SDK errors extend `HiveMemError`.
 
 ```ts
-import { HiveMemHTTPError } from "@hivemem/sdk";
+import { HiveMemHTTPError } from "@hivemagnus/hivemem-sdk";
 
 try {
   await hivemem.getMemory("missing");
@@ -103,7 +103,7 @@ try {
 HiveMem signs webhook deliveries with HMAC-SHA256. Verify them before trusting the payload:
 
 ```ts
-import { verifyHiveMemWebhook } from "@hivemem/sdk";
+import { verifyHiveMemWebhook } from "@hivemagnus/hivemem-sdk";
 
 const ok = await verifyHiveMemWebhook({
   secret: process.env.HIVEMEM_WEBHOOK_SECRET!,

@@ -9,7 +9,7 @@ import {
   renderHiveEndpoint,
   resolveHiveHosts,
   type HiveHostTarget,
-} from '../packages/hive-contracts/src/service-manifest.ts';
+} from './lib/service-manifest.ts';
 
 type DoctorStatus = 'pass' | 'warn' | 'fail';
 

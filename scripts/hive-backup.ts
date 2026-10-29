@@ -2,7 +2,7 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync, existsSync, openSync, closeSync, unlinkSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { HIVE_SERVICES, hiveServicesForHost, parseHiveHostTarget, resolveHiveHosts, type HiveHostTarget } from '../packages/hive-contracts/src/service-manifest.ts';
+import { HIVE_SERVICES, hiveServicesForHost, parseHiveHostTarget, resolveHiveHosts, type HiveHostTarget } from './lib/service-manifest.ts';
 
 type BackupMode = 'backup' | 'restore';
 

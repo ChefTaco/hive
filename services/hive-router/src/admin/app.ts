@@ -2,7 +2,7 @@ import { HTTPException } from 'hono/http-exception';
 import { actorJournal, actorJournalWrite } from './actor-journal-runtime.js';
 import type { ActorLease, ActorStep } from './actor-journal.js';
 import { routingPatchSchema, routingSnapshot, applyRoutingRevision, routingHistory, savedRoutingRevision } from '../routing/revisions.js';
-import { MemoryWriteSchema } from '@hivemem/contracts';
+import { MemoryWriteSchema } from '../contracts/memory-operations.js';
 import { AuthMode, ProviderKind, RouteRuleKind, type AdminUser, type ClientApiKey } from '@prisma/client';
 import { Hono, type Context, type Next } from 'hono';
 import { bodyLimit } from 'hono/body-limit';

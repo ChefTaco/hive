@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- The npm packages are published under the `@hivemagnus` scope as `@hivemagnus/hivemem-sdk` and
+  `@hivemagnus/hive-iam-sdk`.
+- The shared contracts package is no longer a separate package. Its schemas now live in the Hive
+  Router (`services/hive-router/src/contracts`), and the service manifest used by the ops scripts
+  lives in `scripts/lib/service-manifest.ts`.
+
 ## [1.0.0] - 2026-10-24
 
 The first public release.
@@ -19,6 +29,6 @@ The first public release.
   graph, temporal queries, historical reads, consolidation and reasoning jobs, webhooks, and peer
   conclusions.
 - **Hive Skills**: a checksummed skills registry for Hermes Agent.
-- npm packages `@hivemem/sdk`, `@hivemem/iam-sdk`, and `@hivemem/contracts`.
+- TypeScript SDKs for HiveMem and Hive IAM, and shared Zod contracts.
 
 [1.0.0]: https://github.com/ChefTaco/hive/releases/tag/v1.0.0

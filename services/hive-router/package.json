@@ -15,7 +15,7 @@
     "start": "node dist/src/index.js",
     "cli": "tsx src/cli.ts",
     "clean": "rm -rf dist ui/dist coverage tsconfig.tsbuildinfo ui/tsconfig.tsbuildinfo playwright-report test-results",
-    "typecheck": "tsc --project tsconfig.json --noEmit && tsc --project ui/tsconfig.json --noEmit",
+    "typecheck": "npm run contracts:check && tsc --project tsconfig.json --noEmit && tsc --project ui/tsconfig.json --noEmit",
     "test": "npm run db:check-bootstrap && vitest run --passWithNoTests",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
@@ -31,10 +31,11 @@
     "eval:decisions": "tsx scripts/eval-decisions.ts",
     "test:routing-contract": "vitest run tests/routing",
     "baseline:routing": "tsx scripts/baseline-routing.ts",
-    "smoke:jev": "tsx scripts/smoke-jev.ts"
+    "smoke:jev": "tsx scripts/smoke-jev.ts",
+    "contracts:generate": "tsx scripts/generate-ui-contracts.ts",
+    "contracts:check": "tsx scripts/generate-ui-contracts.ts --check"
   },
   "dependencies": {
-    "@hivemem/contracts": "file:../../packages/hive-contracts",
     "@hono/node-server": "2.1.5",
     "@prisma/adapter-better-sqlite3": "^7.8.0",
     "@prisma/client": "^7.8.0",

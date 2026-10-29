@@ -5,6 +5,11 @@ import { resolve } from 'node:path';
 export default defineConfig({
   root: resolve(import.meta.dirname),
   plugins: [react()],
+  resolve: {
+    alias: {
+      '@contracts': resolve(import.meta.dirname, '../src/contracts'),
+    },
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

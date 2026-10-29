@@ -28,15 +28,10 @@ jobs:
           node-version: 24.22.1
           cache: npm
           cache-dependency-path: |
-            packages/hive-contracts/package-lock.json
             services/hive-router/package-lock.json
             services/hive-iam/package-lock.json
             services/hive-mem/ts-core/package-lock.json
             services/hive-skills/package-lock.json
-
-      - name: Install contracts dependencies
-        run: npm ci
-        working-directory: packages/hive-contracts
 
       - name: Install router dependencies
         run: npm ci

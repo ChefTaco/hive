@@ -16,7 +16,7 @@ A clear, concise description of the problem.
 - [ ] Hive IAM
 - [ ] HiveMem
 - [ ] Hive Skills
-- [ ] `@hivemem/contracts` or an SDK
+- [ ] An SDK (`@hivemagnus/hivemem-sdk`, `@hivemagnus/hive-iam-sdk`, Python)
 - [ ] Deploy / backup / operational scripts
 - [ ] Other:
 

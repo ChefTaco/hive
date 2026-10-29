@@ -17,8 +17,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "iam-core:build": "npm --workspace hive-iam-core run build",
     "iam-core:test": "npm --workspace hive-iam-core test",
-    "iam-sdk:build": "npm --workspace @hivemem/iam-sdk run build",
-    "iam-sdk:test": "npm --workspace @hivemem/iam-sdk test",
+    "iam-sdk:build": "npm --workspace @hivemagnus/hive-iam-sdk run build",
+    "iam-sdk:test": "npm --workspace @hivemagnus/hive-iam-sdk test",
     "deploy:iam-core": "bash scripts/deploy-iam-core.sh"
   },
   "overrides": {

@@ -293,17 +293,6 @@ fi
 
 if [[ "$PINNED_STAGE" == false ]]; then
   info "Packaging hive-router..."
-# The router depends on the @hivemem/contracts workspace package via a file: link.
-# A standalone target has no monorepo, so vendor the built package into the
-# tarball and install it into node_modules on the target (see vendor_contracts).
-CONTRACTS_DIR="$MONOREPO_ROOT/packages/hive-contracts"
-if [[ ! -d "$CONTRACTS_DIR/dist" ]]; then
-  info "Building @hivemem/contracts for vendoring..."
-  ( cd "$CONTRACTS_DIR" && npm run build >/dev/null )
-fi
-rm -rf "$REPO_ROOT/.deploy-vendor"
-mkdir -p "$REPO_ROOT/.deploy-vendor/hive-contracts"
-cp -R "$CONTRACTS_DIR/dist" "$CONTRACTS_DIR/package.json" "$REPO_ROOT/.deploy-vendor/hive-contracts/"
 tar czf "$TARBALL" \
   --exclude='node_modules' \
   --exclude='.git' \
@@ -316,7 +305,6 @@ tar czf "$TARBALL" \
   -C "$REPO_ROOT" .
 ARTIFACT_SHA256="$(sha256sum "$TARBALL" | awk '{print $1}')"
 SOURCE_REVISION="$(git -C "$MONOREPO_ROOT" rev-parse HEAD)"
-rm -rf "$REPO_ROOT/.deploy-vendor"
 
 if [[ "$DRY_RUN" == "true" && -n "$RELEASE_OVERRIDE" ]]; then
   STAGE_DIR="$STAGE_ROOT/$RELEASE_OVERRIDE"
@@ -696,18 +684,8 @@ upsert_env "\$ENV_FILE" CAPTURE_RESPONSE_BODIES 'false'
 
 cd "\$RELEASE_DIR"
 
-vendor_contracts() {
-  if [[ -d .deploy-vendor/hive-contracts ]]; then
-    echo ">>> Vendoring @hivemem/contracts into node_modules..."
-    rm -rf node_modules/@hivemem/contracts
-    mkdir -p node_modules/@hivemem
-    cp -R .deploy-vendor/hive-contracts node_modules/@hivemem/contracts
-  fi
-}
-
 echo ">>> Installing dependencies..."
 npm ci
-vendor_contracts
 
 if ! command -v pamtester >/dev/null 2>&1; then
   echo ">>> Installing pamtester for Ubuntu PAM-backed admin auth..."
@@ -721,7 +699,6 @@ npm run build
 echo ">>> Pruning dev and peer-only tooling from runtime install..."
 npm prune --omit=dev --omit=peer
 npm audit --omit=dev --audit-level=high
-vendor_contracts
 
 echo ">>> Writing systemd service..."
 do_sudo bash -c "cat > /etc/systemd/system/${SERVICE_NAME}.service << 'SVCEOF'

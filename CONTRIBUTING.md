@@ -15,9 +15,8 @@ The repository is a monorepo of independently locked workspaces:
 
 | Path | Workspace |
 |---|---|
-| `packages/hive-contracts` | Shared Zod contracts (`@hivemem/contracts`) |
 | `services/hive-router` | Model gateway and Hive console |
-| `services/hive-iam` | IAM service and `@hivemem/iam-sdk` |
+| `services/hive-iam` | IAM service and `@hivemagnus/hive-iam-sdk` |
 | `services/hive-mem` | HiveMem core, SDKs, and Hermes plugin |
 | `services/hive-skills` | Skills registry |
 
@@ -36,7 +35,7 @@ npm run scan:secrets
 - Add or update tests for behaviour changes.
 - If you change an HTTP route or schema, run `npm run generate:openapi` and commit the updated
   snapshot.
-- If you change IAM request schemas, run `npm --prefix packages/hive-contracts run generate:ui`.
+- If you change IAM request schemas, run `npm --prefix services/hive-router run contracts:generate`.
 - Never commit `.env` files, keys, certificates, databases, or other credentials, or details of
   private infrastructure (real hostnames, IPs, usernames, home paths). The git hooks in `.githooks/`
   enforce this. See [AGENTS.md](AGENTS.md) for the full rules, which apply to people and AI agents

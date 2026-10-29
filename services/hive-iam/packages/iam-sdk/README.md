@@ -1,4 +1,4 @@
-# @hivemem/iam-sdk
+# @hivemagnus/hive-iam-sdk
 
 RS256 JWT verification and RBAC middleware for Node.js backends. Ships a **Hono v4 middleware** out of the box and a framework-agnostic **`IamVerifier`** class you can use anywhere.
 
@@ -19,7 +19,7 @@ RS256 JWT verification and RBAC middleware for Node.js backends. Ships a **Hono 
 ## Installation
 
 ```bash
-npm install @hivemem/iam-sdk
+npm install @hivemagnus/hive-iam-sdk
 ```
 
 `hono ^4.0.0` is an optional peer dependency, needed only if you use the Hono middleware:
@@ -32,7 +32,7 @@ npm install hono
 
 ```typescript
 import { Hono } from 'hono'
-import { createIamMiddleware } from '@hivemem/iam-sdk/hono'
+import { createIamMiddleware } from '@hivemagnus/hive-iam-sdk/hono'
 
 const iam = createIamMiddleware({
   publicKeyUrl: 'https://iam.example.com/api/v1/auth/public-key',
@@ -77,7 +77,7 @@ const iam = createIamMiddleware({
 Use `IamVerifier` directly when you are not on Hono (Express, Fastify, plain Node.js, etc.):
 
 ```typescript
-import { IamVerifier } from '@hivemem/iam-sdk'
+import { IamVerifier } from '@hivemagnus/hive-iam-sdk'
 
 const verifier = new IamVerifier({
   publicKeyUrl: 'https://iam.example.com/api/v1/auth/public-key',
@@ -207,13 +207,13 @@ import {
 
   // Token refresh helper
   refreshAccessToken,
-} from '@hivemem/iam-sdk'
+} from '@hivemagnus/hive-iam-sdk'
 
 // Hono middleware (requires the optional `hono` peer dependency)
-import { createIamMiddleware, type IamHonoMiddleware } from '@hivemem/iam-sdk/hono'
+import { createIamMiddleware, type IamHonoMiddleware } from '@hivemagnus/hive-iam-sdk/hono'
 ```
 
-The main entry point has no framework dependency. Only `@hivemem/iam-sdk/hono` needs `hono`
+The main entry point has no framework dependency. Only `@hivemagnus/hive-iam-sdk/hono` needs `hono`
 installed.
 
 ## Error Responses

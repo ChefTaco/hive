@@ -1,4 +1,4 @@
-import { MemoryWriteSchema, type MemoryWrite } from '@hivemem/contracts/memory-operations';
+import { MemoryWriteSchema, type MemoryWrite } from '@contracts/memory-operations.js';
 import type {
   AdminUser,
   ApiDoc,
@@ -51,7 +51,7 @@ import type {
   UpdateIamSystemUserRequest,
   UpdateIamUserRequest,
 } from './types';
-import type { IamAssignRolesRequest, IamRotatePasswordRequest, JsonRequestBody } from '@hivemem/contracts/ui-api';
+import type { IamAssignRolesRequest, IamRotatePasswordRequest, JsonRequestBody } from '@contracts/ui-api.generated.js';
 
 export class ApiError extends Error {
   status: number;

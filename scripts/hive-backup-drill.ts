@@ -4,7 +4,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { HIVE_SERVICES } from '../packages/hive-contracts/src/service-manifest.ts';
+import { HIVE_SERVICES } from './lib/service-manifest.ts';
 
 interface DrillOptions {
   keep: boolean;

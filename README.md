@@ -12,7 +12,6 @@ provider, long-term memory, and a model gateway, and manages all three from one 
 | [**Hive IAM**](services/hive-iam) | OAuth 2.0 / OIDC identity service for users, service accounts, and agents. It issues signed JWTs, supports scoped client credentials, keeps an audit log, and runs with a hardened systemd sandbox. |
 | [**HiveMem**](services/hive-mem) | Long-term memory API for agents, persisted to Qdrant. It supports semantic and filtered search, a knowledge graph, temporal (as-of) queries, consolidation and reasoning jobs, webhooks, and peer conclusions. |
 | [**Hive Skills**](services/hive-skills) | Optional HTTPS registry that distributes versioned, checksummed skills to [Hermes Agent](https://github.com/NousResearch/hermes-agent) installations. |
-| [**@hivemem/contracts**](packages/hive-contracts) | Shared Zod schemas and typed service clients used across all services. |
 
 Everything is strict TypeScript on Node.js 24. The only exception is the HiveMem plugin for Hermes Agent, which is written in Python.
 
@@ -20,9 +19,8 @@ Everything is strict TypeScript on Node.js 24. The only exception is the HiveMem
 
 | Package | Description |
 |---|---|
-| [`@hivemem/sdk`](services/hive-mem/sdks/typescript) | TypeScript client for the HiveMem REST API |
-| [`@hivemem/iam-sdk`](services/hive-iam/packages/iam-sdk) | JWT verification and auth middleware for Hono and Express services that trust Hive IAM |
-| [`@hivemem/contracts`](packages/hive-contracts) | Zod contracts and typed clients for Hive service APIs |
+| [`@hivemagnus/hivemem-sdk`](services/hive-mem/sdks/typescript) | TypeScript client for the HiveMem REST API |
+| [`@hivemagnus/hive-iam-sdk`](services/hive-iam/packages/iam-sdk) | JWT verification and auth middleware for Hono and Express services that trust Hive IAM |
 
 ## Quick start (local development)
 
