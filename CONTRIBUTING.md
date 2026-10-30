@@ -19,6 +19,7 @@ The repository is a monorepo of independently locked workspaces:
 | `services/hive-iam` | IAM service and `@hivemagnus/hive-iam-sdk` |
 | `services/hive-mem` | HiveMem core, SDKs, and Hermes plugin |
 | `services/hive-skills` | Skills registry |
+| `packages/hive` | The `hive` launcher (`@hivemagnus/hive`) |
 
 ## Before opening a pull request
 
@@ -29,6 +30,7 @@ npm run typecheck
 npm test
 npm run check:openapi
 npm run scan:secrets
+npm run check:private
 ```
 
 - Keep TypeScript strict and follow the style of the surrounding code.

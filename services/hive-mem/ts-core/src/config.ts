@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync, readFileSync, statSync } from "node:
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { isUsableSigningSecret } from "./auth.js";
+import { ADMIN_SCOPE, ISSUE_TOKEN_DEFAULT_TTL_SECONDS, ISSUE_TOKEN_MAX_TTL_SECONDS, ISSUE_TOKEN_MIN_TTL_SECONDS, TOKEN_ROLES } from "./issue-token.js";
 import { qdrantUrlFromEnv } from "./persistence.js";
 import { semanticConfig } from "./semantic-index.js";
 
@@ -229,6 +230,20 @@ export interface EnvSchema {
   defaultPort: number;
   healthPath: string;
   dependencies: Array<{ name: string; envVar: string; default: string; docker: string }>;
+  /**
+   * How to mint a bearer token for another service (for example Hive Router's
+   * HIVE_ROUTER_MEMORY_PROXY_TOKEN): run this command with the same env file.
+   * It prints only the token on stdout.
+   */
+  issueToken: {
+    command: "issue-token";
+    signedWith: "HIVEMEM_JWT_SECRET";
+    roles: readonly string[];
+    adminScope: string;
+    defaultTtlSeconds: number;
+    minTtlSeconds: number;
+    maxTtlSeconds: number;
+  };
   env: EnvSchemaEntry[];
 }
 
@@ -240,6 +255,15 @@ export function envSchema(): EnvSchema {
     defaultPort: DEFAULT_PORT,
     healthPath: HEALTH_PATH,
     dependencies: [{ name: "qdrant", envVar: "HIVEMEM_QDRANT_URL", default: DEFAULT_QDRANT_URL, docker: QDRANT_DOCKER_COMMAND }],
+    issueToken: {
+      command: "issue-token",
+      signedWith: "HIVEMEM_JWT_SECRET",
+      roles: TOKEN_ROLES,
+      adminScope: ADMIN_SCOPE,
+      defaultTtlSeconds: ISSUE_TOKEN_DEFAULT_TTL_SECONDS,
+      minTtlSeconds: ISSUE_TOKEN_MIN_TTL_SECONDS,
+      maxTtlSeconds: ISSUE_TOKEN_MAX_TTL_SECONDS,
+    },
     env: [
       { name: "HIVEMEM_JWT_SECRET", required: true, secret: true, generate: "hex32", description: "HS256 signing secret for agent and admin bearer tokens (at least 32 bytes). Rotating it invalidates every issued token." },
       { name: "HIVEMEM_RENEWAL_SECRET", required: false, secret: true, generate: "hex32", description: "Independent secret for long-lived token renewal grants (POST /v1/auth/renew). Must differ from HIVEMEM_JWT_SECRET; unset disables renewal." },

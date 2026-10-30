@@ -10,6 +10,7 @@ updates:
       - /services/hive-mem/ts-core
       - /services/hive-mem/sdks/typescript
       - /services/hive-skills
+      - /packages/hive
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

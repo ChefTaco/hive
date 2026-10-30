@@ -15,13 +15,28 @@ provider, long-term memory, and a model gateway, and manages all three from one 
 
 Everything is strict TypeScript on Node.js 24 or 26. The only exception is the HiveMem plugin for Hermes Agent, which is written in Python.
 
+## Quick start with npm
+
+On Linux or macOS with Node.js 24 or 26 and openssl (Docker is optional; it runs Qdrant and Redis
+for you):
+
+```bash
+npx @hivemagnus/hive init     # choose services, install the servers, generate secrets and TLS
+npx @hivemagnus/hive start    # run IAM, HiveMem and the Router; Ctrl-C stops them
+```
+
+Then open the console at `https://localhost:9443/` and sign in as `admin` with the password IAM
+writes to `~/.hive/iam/initial-credentials.env` on its first start. Everything lives in `~/.hive`.
+See the [launcher README](packages/hive) for options, upgrading and uninstalling.
+
 ## Packages on npm
 
 | Package | Description |
 |---|---|
+| [`@hivemagnus/hive`](packages/hive) | The `hive` launcher: installs, configures and runs the three servers below (`npx @hivemagnus/hive init`) |
 | [`@hivemagnus/hivemem-sdk`](services/hive-mem/sdks/typescript) | TypeScript client for the HiveMem REST API |
 | [`@hivemagnus/hive-iam-sdk`](services/hive-iam/packages/iam-sdk) | JWT verification and auth middleware for Hono and Express services that trust Hive IAM |
-| [`@hivemagnus/hivemem-server`](services/hive-mem/ts-core) | The HiveMem memory server (`npx @hivemagnus/hivemem-server --env-file hivemem.env`) |
+| [`@hivemagnus/hivemem-server`](services/hive-mem/ts-core) | The HiveMem memory server (`npx @hivemagnus/hivemem-server --env-file hivemem.env`); `issue-token` mints access tokens |
 | [`@hivemagnus/hive-router`](services/hive-router) | The Hive Router and the Hive console (`npx @hivemagnus/hive-router --env-file router.env`) |
 | [`@hivemagnus/hive-iam-server`](services/hive-iam/apps/iam-core) | The Hive IAM server (`npx @hivemagnus/hive-iam-server --env-file iam.env`); also available as a Docker image |
 

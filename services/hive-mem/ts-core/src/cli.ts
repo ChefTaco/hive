@@ -5,6 +5,7 @@ import { createServer as createHttpServer, type Server } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { envSchema, packageVersion, PACKAGE_NAME, probeQdrant, redactUrl, resolveConfig, storageStatus, type ServerConfig } from "./config.js";
 import { qdrantPersistenceFromEnv } from "./persistence.js";
+import { issueToken, ISSUE_TOKEN_MAX_TTL_SECONDS, resolveIssueTokenRequest, signingSecretProblem } from "./issue-token.js";
 import { createHiveMemHandler } from "./server.js";
 import { InMemoryHiveMemStore } from "./store.js";
 import { acquireWriterLock } from "./writer-lock.js";
@@ -22,6 +23,7 @@ Commands:
   start        Start the server (default)
   check        Validate configuration and check that Qdrant is reachable; exits 0 or 1
   env-schema   Print the supported environment variables as JSON
+  issue-token  Sign an access token with HIVEMEM_JWT_SECRET and print only the token
 
 Options:
   --env-file <path>  Load environment variables from a dotenv file before reading
@@ -29,23 +31,55 @@ Options:
   -h, --help         Show this help
   -v, --version      Print the version
 
+issue-token options:
+  --subject <id>     Agent or service identity (sub claim); required
+  --role <role>      agent (default) or admin
+  --scope <scopes>   Scopes, repeatable or space/comma separated. Defaults: admin:all
+                     for admin, the standard agent scopes for agent. Agent tokens
+                     cannot carry admin:* or * scopes.
+  --ttl <duration>   Lifetime such as 3600, 90m, 12h or 30d (default and maximum 30d)
+
+  Example (the Hive Router's memory proxy token):
+    ${BIN} issue-token --env-file hivemem.env --subject hive-router --role admin
+
 Required: HIVEMEM_JWT_SECRET (generate one with \`openssl rand -hex 32\`).
 Data is stored in Qdrant (HIVEMEM_QDRANT_URL, default http://127.0.0.1:6333); set
 HIVEMEM_TS_PERSISTENCE=memory for a throwaway server whose data is lost on exit.
 Run \`${BIN} env-schema\` for every supported variable.`;
 
+type Command = "start" | "check" | "env-schema" | "issue-token";
+const COMMANDS: readonly Command[] = ["start", "check", "env-schema", "issue-token"];
+const TOKEN_OPTIONS = ["--subject", "--role", "--scope", "--ttl"] as const;
+type TokenOption = (typeof TOKEN_OPTIONS)[number];
+
 interface ParsedArgs {
-  command: "start" | "check" | "env-schema" | "help" | "version";
+  command: Command | "help" | "version";
   envFiles: string[];
+  token: { subject?: string; role?: string; scopes: string[]; ttl?: string };
 }
 
 function parseArgs(argv: readonly string[]): ParsedArgs {
   const envFiles: string[] = [];
-  let command: ParsedArgs["command"] | undefined;
+  const token: ParsedArgs["token"] = { scopes: [] };
+  const tokenOptionsSeen: string[] = [];
+  let command: Command | undefined;
   let flag: "help" | "version" | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] ?? "";
-    if (arg === "--env-file") {
+    const equals = arg.indexOf("=");
+    const optionName = arg.startsWith("--") && equals > 0 ? arg.slice(0, equals) : arg;
+    if ((TOKEN_OPTIONS as readonly string[]).includes(optionName)) {
+      const inline = equals > 0 && arg.startsWith("--") ? arg.slice(equals + 1) : undefined;
+      const value = inline ?? argv[index + 1];
+      if (value === undefined || value === "" || (inline === undefined && value.startsWith("--"))) throw new CliError(`${optionName} requires a value`);
+      if (inline === undefined) index += 1;
+      const option = optionName as TokenOption;
+      tokenOptionsSeen.push(option);
+      if (option === "--scope") token.scopes.push(value);
+      else if (option === "--subject") token.subject = value;
+      else if (option === "--role") token.role = value;
+      else token.ttl = value;
+    } else if (arg === "--env-file") {
       const path = argv[index + 1];
       if (!path || path.startsWith("-")) throw new CliError("--env-file requires a path");
       envFiles.push(path);
@@ -60,13 +94,27 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
       flag ??= "version";
     } else if (arg.startsWith("-")) {
       throw new CliError(`unknown option ${arg}; run \`${BIN} --help\``);
-    } else if (command === undefined && (arg === "start" || arg === "check" || arg === "env-schema")) {
-      command = arg;
+    } else if (command === undefined && (COMMANDS as readonly string[]).includes(arg)) {
+      command = arg as Command;
     } else {
       throw new CliError(`unknown command ${arg}; run \`${BIN} --help\``);
     }
   }
-  return { command: flag ?? command ?? "start", envFiles };
+  if (tokenOptionsSeen.length > 0 && command !== "issue-token" && flag === undefined) {
+    throw new CliError(`${tokenOptionsSeen[0]} is only valid with issue-token; run \`${BIN} --help\``);
+  }
+  return { command: flag ?? command ?? "start", envFiles, token };
+}
+
+function runIssueToken(options: ParsedArgs["token"]): void {
+  const { request, problems } = resolveIssueTokenRequest(options);
+  const secretProblem = signingSecretProblem(process.env.HIVEMEM_JWT_SECRET);
+  if (secretProblem) problems.unshift(secretProblem);
+  if (!request || problems.length > 0) throw new CliError(problems.join(`\n${BIN}: `));
+  const issued = issueToken(process.env.HIVEMEM_JWT_SECRET ?? "", request);
+  // Only the token goes to stdout so it can be captured; nothing is written to disk.
+  process.stdout.write(`${issued.token}\n`);
+  if (process.stderr.isTTY) console.error(`${BIN}: ${request.role} token for ${request.subject} (${request.scopes.join(" ")}), expires ${issued.expiresAt.toISOString()} (maximum lifetime ${ISSUE_TOKEN_MAX_TTL_SECONDS / 86_400} days)`);
 }
 
 function loadEnvFiles(paths: readonly string[]): void {
@@ -202,6 +250,10 @@ async function main(argv: readonly string[]): Promise<void> {
     return;
   }
   loadEnvFiles(args.envFiles);
+  if (args.command === "issue-token") {
+    runIssueToken(args.token);
+    return;
+  }
   if (args.command === "check") {
     process.exitCode = await runCheck();
     return;

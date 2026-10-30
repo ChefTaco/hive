@@ -36,6 +36,7 @@ jobs:
             services/hive-iam/package-lock.json
             services/hive-mem/ts-core/package-lock.json
             services/hive-skills/package-lock.json
+            packages/hive/package-lock.json
 
       - name: Install router dependencies
         run: npm ci
@@ -56,6 +57,10 @@ jobs:
       - name: Install Hive Skills dependencies
         run: npm ci
         working-directory: services/hive-skills
+
+      - name: Install launcher dependencies
+        run: npm ci
+        working-directory: packages/hive
 
       - name: Secret scan
         run: npm run scan:secrets
@@ -123,6 +128,9 @@ jobs:
           npm --prefix services/hive-mem/sdks/typescript run build
           npm --prefix services/hive-mem/sdks/typescript test
           node --test scripts/hivemem-webhook-sdk.test.mjs
+
+      - name: npm package contents (pack --dry-run of every publishable package)
+        run: npm run check:packs
 
       - name: Install browser
         run: npx playwright install --with-deps chromium

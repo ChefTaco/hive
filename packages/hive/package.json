@@ -1,0 +1,54 @@
+{
+  "name": "@hivemagnus/hive",
+  "version": "1.0.0",
+  "description": "Hive launcher: installs, configures and runs the Hive Router, Hive IAM and HiveMem servers, with generated secrets, local TLS and cross-service wiring",
+  "keywords": [
+    "hive",
+    "launcher",
+    "cli",
+    "ai-agents",
+    "llm",
+    "model-router",
+    "agent-memory",
+    "iam",
+    "oidc",
+    "self-hosted"
+  ],
+  "license": "Apache-2.0",
+  "author": "ChefTaco",
+  "homepage": "https://github.com/ChefTaco/hive/tree/main/packages/hive#readme",
+  "bugs": {
+    "url": "https://github.com/ChefTaco/hive/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ChefTaco/hive.git",
+    "directory": "packages/hive"
+  },
+  "type": "module",
+  "bin": {
+    "hive": "dist/src/cli.js"
+  },
+  "files": [
+    "dist/src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc && node -e \"require('node:fs').chmodSync('dist/src/cli.js', 0o755)\"",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "prepublishOnly": "npm run clean && npm test"
+  },
+  "engines": {
+    "node": "^24.22.1 || ^26.13.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.6.0"
+  }
+}

@@ -61,10 +61,41 @@ token issuance, registration, and every endpoint.
 | `hivemem-server` or `hivemem-server start` | Start the server |
 | `hivemem-server check` | Validate the configuration and check that Qdrant is reachable. Prints a report and exits 0 when the server can start, 1 otherwise. It does not start the server or write data. |
 | `hivemem-server env-schema` | Print every supported environment variable as JSON (name, default, whether it is required or secret, and a description). Tools such as the Hive launcher use it to generate env files. |
+| `hivemem-server issue-token --subject <id>` | Sign an access token with `HIVEMEM_JWT_SECRET` and print only the token. See [Issuing tokens](#issuing-tokens). |
 | `hivemem-server --help` / `--version` | Show usage or the version |
 
-`--env-file <path>` loads a dotenv file before the configuration is read. It works with `start` and
-`check`, can be repeated, and never overrides variables that are already set in the environment.
+`--env-file <path>` loads a dotenv file before the configuration is read. It works with `start`,
+`check` and `issue-token`, can be repeated, and never overrides variables that are already set in
+the environment.
+
+### Issuing tokens
+
+`issue-token` mints a token locally from the signing secret, so you can create the first admin
+token, or a server-side credential for another service, without calling the API:
+
+```bash
+# Admin token for the Hive Router's memory proxy (HIVE_ROUTER_MEMORY_PROXY_TOKEN)
+npx @hivemagnus/hivemem-server issue-token --env-file hivemem.env --subject hive-router --role admin
+
+# Agent token with two scopes, valid for 12 hours
+npx @hivemagnus/hivemem-server issue-token --env-file hivemem.env --subject agent-1 \
+  --scope memories:read --scope memories:write --ttl 12h
+```
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `--subject <id>` | required | The agent or service identity (`sub`). |
+| `--role <role>` | `agent` | `agent` or `admin`. |
+| `--scope <scopes>` | by role | Repeatable, or space or comma separated. Admin tokens default to `admin:all`; agent tokens default to the standard agent scopes and cannot carry `admin:*` or `*`. |
+| `--ttl <duration>` | `30d` | `3600`, `90m`, `12h` or `30d`; between 60 seconds and 30 days, the same cap as `POST /v1/auth/tokens`. |
+
+The token carries the same claims the server issues (`iss`, `aud`, `token_type`, `jti`, `iat`,
+`exp`, `sub`, `role`, `scope`) and is checked with the server's own verifier before it is printed.
+Only the token goes to stdout; nothing is written to disk. The secret is validated exactly as the
+server validates it. Tokens stay valid until they expire, the secret is rotated, or they are
+revoked with `POST /v1/auth/revoke`. Issue a new one before the old one expires. A token for an
+agent whose credentials were rotated through the API is rejected; use `POST /v1/auth/tokens` for
+those agents.
 
 ## Configuration
 

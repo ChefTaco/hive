@@ -2,6 +2,7 @@ import type { JsonValue } from "./types.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { AuthError, isUsableSigningSecret, MAX_TOKEN_LINEAGE, parentTokenIds, signToken, verifyBearerToken } from "./auth.js";
+import { DEFAULT_AGENT_SCOPES } from "./issue-token.js";
 import { InMemoryHiveMemStore } from "./store.js";
 import type { AuthPrincipal, ChatResponse } from "./types.js";
 import { ValidationError } from "./validation.js";
@@ -282,7 +283,7 @@ function wantsStream(body: unknown): boolean {
   return Boolean(body && typeof body === "object" && !Array.isArray(body) && "stream" in body && body.stream === true);
 }
 
-const defaultAgentScopes = ["memories:read", "memories:write", "sessions:read", "sessions:write", "context:read", "agents:read", "agents:write", "workspaces:read", "workspaces:write", "webhooks:read", "webhooks:write", "queue:read"];
+const defaultAgentScopes = DEFAULT_AGENT_SCOPES;
 
 function safeAgentScopes(value: unknown): string[] {
   const scopes = Array.isArray(value) && value.every((scope) => typeof scope === "string") ? value : defaultAgentScopes;

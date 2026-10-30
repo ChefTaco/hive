@@ -104,6 +104,24 @@ describe('env-schema document', () => {
     expect(unknown).toEqual([]);
     for (const dependency of buildEnvSchemaDocument().dependencies) {
       expect(dependency.env.filter((name) => !known.has(name))).toEqual([]);
+      for (const shared of [...dependency.sharedSecrets, ...dependency.issuedTokens]) {
+        expect(dependency.env).toContain(shared.name);
+      }
     }
+  });
+
+  it('describes the HiveMem proxy token as minted by hivemem-server issue-token', () => {
+    const memory = buildEnvSchemaDocument().dependencies.find((dependency) => dependency.service === 'memory');
+    expect(memory?.sharedSecrets).toEqual([]);
+    expect(memory?.issuedTokens).toEqual([
+      expect.objectContaining({
+        name: 'HIVE_ROUTER_MEMORY_PROXY_TOKEN',
+        command: 'hivemem-server issue-token',
+        args: ['--subject', 'hive-router', '--role', 'admin'],
+        signedWith: 'HIVEMEM_JWT_SECRET',
+      }),
+    ]);
+    const iam = buildEnvSchemaDocument().dependencies.find((dependency) => dependency.service === 'iam');
+    expect(iam?.sharedSecrets).toEqual([{ name: 'HIVE_ROUTER_IAM_CLIENT_SECRET', peerEnv: 'SEED_HIVE_ROUTER_CLIENT_SECRET' }]);
   });
 });

@@ -5,6 +5,7 @@ import type { Context, Next } from 'hono';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { randomUUID } from 'node:crypto';
 import { loadEnv } from '../config/env.js';
+import { expandAdminPermissions } from './admin-permissions.js';
 import { authenticateIamOidcUser } from './iam-oidc.js';
 import { EXTERNALLY_MANAGED_PASSWORD_HASH, authenticateOsUser, isAllowedAdminUser } from './os-auth.js';
 import { prisma } from '../storage/client.js';
@@ -26,10 +27,6 @@ function getJwtSecret(): Uint8Array {
   return new TextEncoder().encode(loadEnv().HIVE_ROUTER_SECRET);
 }
 
-function expandAdminPermissions(authMode: 'os' | 'iam-oidc', roles: string[], permissions: string[]): string[] {
-  if (authMode === 'os' || roles.includes('admin') || roles.includes('super_admin')) return ['*'];
-  return [...new Set(permissions)].sort();
-}
 
 export async function createAdminSession(principal: AuthenticatedAdmin, context: Context<{ Variables: AppVariables }>): Promise<void> {
   const sessionId = randomUUID();

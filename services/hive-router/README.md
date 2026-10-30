@@ -79,8 +79,11 @@ variable and how to fix it.
 **Connecting IAM and HiveMem.** Set `HIVE_ROUTER_AUTH_MODE=iam-oidc`,
 `HIVE_IAM_INTERNAL_URL` and `HIVE_ROUTER_IAM_CLIENT_SECRET` (equal to IAM's
 `SEED_HIVE_ROUTER_CLIENT_SECRET`) to sign in through IAM and enable the IAM
-pages. Set `HIVEMEM_INTERNAL_URL` and `HIVE_ROUTER_MEMORY_PROXY_TOKEN` (equal to
-HiveMem's `HIVEMEM_ADMIN_TOKEN`) for the Memory pages. See
+pages. Set `HIVEMEM_INTERNAL_URL` and `HIVE_ROUTER_MEMORY_PROXY_TOKEN` for the Memory
+pages. The token is a HiveMem admin token; mint it with
+`hivemem-server issue-token --env-file hivemem.env --subject hive-router --role admin`
+(valid for at most 30 days, so re-issue it and restart the Router before it
+expires). See
 [Configuration](#configuration) for everything else.
 
 ## Features
@@ -260,7 +263,7 @@ directory. Variables with no default are optional unless marked **required**.
 | `HIVEMEM_INTERNAL_URL` | `http://127.0.0.1:18790` | HiveMem base URL for the Memory panels and the `/v1/*` and `/dashboard` proxy. |
 | `HIVEMEM_PUBLIC_URL` | `PUBLIC_ADMIN_URL` | HiveMem URL shown to users and agents. |
 | `HIVEMEM_CA_CERT_PATH` | | Certificate trusted for HiveMem HTTPS. |
-| `HIVE_ROUTER_MEMORY_PROXY_TOKEN` | | Server-side HiveMem token for `/api/memory/*`. It is never sent to the browser. |
+| `HIVE_ROUTER_MEMORY_PROXY_TOKEN` | | Server-side HiveMem admin token for `/api/memory/*`, minted with `hivemem-server issue-token --subject hive-router --role admin`. It is never sent to the browser. |
 | `HIVE_SKILLS_INTERNAL_URL` / `HIVE_SKILLS_PUBLIC_URL` | | Optional Hive Skills registry shown in the console. |
 | `HIVE_STATUS_ALLOW_INSECURE_TLS` | `false` | Development only, loopback only. Rejected in production. |
 

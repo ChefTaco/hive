@@ -64,6 +64,7 @@ change.
 | `services/hive-iam` | IAM Core (`apps/iam-core`) and `@hivemagnus/hive-iam-sdk` (`packages/iam-sdk`, published to npm) |
 | `services/hive-mem` | HiveMem TypeScript core (`ts-core`), SDKs (`sdks/typescript` is `@hivemagnus/hivemem-sdk`), and the Python Hermes plugin |
 | `services/hive-skills` | Skills registry for Hermes Agent |
+| `packages/hive` | `@hivemagnus/hive`, the `hive` launcher CLI that installs, configures and runs the three servers (published to npm, no runtime dependencies) |
 | `scripts/` | Deploy, backup, audit, and repository check tooling. `scripts/lib/service-manifest.ts` describes the deployed services |
 | `docs/` | Architecture, runbooks, and OpenAPI snapshots |
 

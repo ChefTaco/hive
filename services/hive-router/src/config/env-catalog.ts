@@ -27,6 +27,12 @@ export interface DependencySpec {
   env: string[];
   /** Router variables whose value must equal a variable of the other service. */
   sharedSecrets: Array<{ name: string; peerEnv: string }>;
+  /**
+   * Router variables that hold a token minted by the other service's command
+   * (for example `hivemem-server issue-token`), signed with `signedWith` of that
+   * service. Tokens expire, so launchers re-issue them before `maxTtlSeconds`.
+   */
+  issuedTokens: Array<{ name: string; command: string; args: string[]; signedWith: string; maxTtlSeconds: number; description: string }>;
   description: string;
 }
 
@@ -80,7 +86,7 @@ export const routerEnvCatalog: EnvVarSpec[] = [
   { name: 'HIVEMEM_INTERNAL_URL', required: false, secret: false, default: 'http://127.0.0.1:18790', description: 'HiveMem base URL as the Router reaches it (console Memory pages and the /v1/* compatibility proxy).' },
   { name: 'HIVEMEM_PUBLIC_URL', required: false, secret: false, default: '$PUBLIC_ADMIN_URL', description: 'HiveMem URL shown to users and agents.' },
   { name: 'HIVEMEM_CA_CERT_PATH', required: false, secret: false, description: 'CA certificate trusted for HiveMem HTTPS.' },
-  { name: 'HIVE_ROUTER_MEMORY_PROXY_TOKEN', required: false, secret: true, description: 'Server-side HiveMem admin token for the console Memory pages. Must equal HIVEMEM_ADMIN_TOKEN in HiveMem; never sent to browsers.' },
+  { name: 'HIVE_ROUTER_MEMORY_PROXY_TOKEN', required: false, secret: true, description: 'Server-side HiveMem admin token for the console Memory pages, minted with `hivemem-server issue-token --subject hive-router --role admin` (signed with HiveMem\'s HIVEMEM_JWT_SECRET, valid for at most 30 days). Never sent to browsers.' },
 ];
 
 export function buildEnvSchemaDocument(): EnvSchemaDocument {
@@ -112,6 +118,7 @@ export function buildEnvSchemaDocument(): EnvSchemaDocument {
           'HIVE_ROUTER_IAM_AUDIENCE',
         ],
         sharedSecrets: [{ name: 'HIVE_ROUTER_IAM_CLIENT_SECRET', peerEnv: 'SEED_HIVE_ROUTER_CLIENT_SECRET' }],
+        issuedTokens: [],
         description: 'Identity provider for console sign-in (iam-oidc mode) and the IAM console pages.',
       },
       {
@@ -120,7 +127,17 @@ export function buildEnvSchemaDocument(): EnvSchemaDocument {
         optional: true,
         healthPath: '/v1/health/ready',
         env: ['HIVEMEM_INTERNAL_URL', 'HIVEMEM_PUBLIC_URL', 'HIVEMEM_CA_CERT_PATH', 'HIVE_ROUTER_MEMORY_PROXY_TOKEN'],
-        sharedSecrets: [{ name: 'HIVE_ROUTER_MEMORY_PROXY_TOKEN', peerEnv: 'HIVEMEM_ADMIN_TOKEN' }],
+        sharedSecrets: [],
+        issuedTokens: [
+          {
+            name: 'HIVE_ROUTER_MEMORY_PROXY_TOKEN',
+            command: 'hivemem-server issue-token',
+            args: ['--subject', 'hive-router', '--role', 'admin'],
+            signedWith: 'HIVEMEM_JWT_SECRET',
+            maxTtlSeconds: 30 * 24 * 60 * 60,
+            description: 'HiveMem admin token for the Memory pages and the memory proxy. Re-issue it before it expires and restart the Router.',
+          },
+        ],
         description: 'Memory service behind the console Memory pages.',
       },
     ],
