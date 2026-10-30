@@ -15,11 +15,11 @@
     "seed": "npm run build && node dist/seed.js"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.0",
-    "hono": "^4.13.1"
+    "@hono/node-server": "^2.1.5",
+    "hono": "^4.13.14"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
+    "@types/node": "^24.19.2",
     "typescript": "^5.9.3"
   }
 }
