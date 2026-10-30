@@ -1,0 +1,32 @@
+[project]
+name = "hivemem-sdk"
+version = "1.0.0"
+description = "Python client for HiveMem, the shared long-term memory service for AI agents"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "ChefTaco" }]
+keywords = ["hivemem", "hive", "memory", "agents", "ai", "llm", "rag", "sdk"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = ["httpx>=0.28.0"]
+
+[project.urls]
+Homepage = "https://github.com/ChefTaco/hive/tree/main/services/hive-mem/sdks/python"
+Repository = "https://github.com/ChefTaco/hive"
+Issues = "https://github.com/ChefTaco/hive/issues"
+Changelog = "https://github.com/ChefTaco/hive/blob/main/services/hive-mem/CHANGELOG.md"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

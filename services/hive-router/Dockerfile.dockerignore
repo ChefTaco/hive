@@ -1,0 +1,15 @@
+*
+!services/hive-router
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+**/certs
+**/data
+**/coverage
+**/output
+**/playwright-report
+**/test-results
+**/*.db
+**/*.db-*
+**/src/generated

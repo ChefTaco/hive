@@ -1,0 +1,59 @@
+{
+  "name": "@hivemagnus/hivemem-sdk",
+  "version": "1.0.0",
+  "description": "TypeScript client for HiveMem, the shared long-term memory service for AI agents",
+  "keywords": [
+    "hivemem",
+    "hive",
+    "memory",
+    "agents",
+    "ai",
+    "llm",
+    "rag",
+    "context",
+    "sdk"
+  ],
+  "homepage": "https://github.com/ChefTaco/hive/tree/main/services/hive-mem/sdks/typescript#readme",
+  "bugs": {
+    "url": "https://github.com/ChefTaco/hive/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ChefTaco/hive.git",
+    "directory": "services/hive-mem/sdks/typescript"
+  },
+  "license": "Apache-2.0",
+  "author": "ChefTaco",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18.17"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.mjs",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

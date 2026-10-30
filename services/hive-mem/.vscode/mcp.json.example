@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "hivemem": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": ["-m", "hivemem.mcp.server"],
+      "env": {
+        "HIVEMEM_MCP_API_URL": "http://localhost:18790",
+        "HIVEMEM_MCP_TOKEN": ""
+      }
+    }
+  }
+}

@@ -1,0 +1,21 @@
+# Keep local state and credentials out of every build context
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pem
+**/*.key
+**/*.crt
+**/certs/
+**/node_modules/
+**/dist/
+**/data/
+**/*.db
+**/*.sqlite*
+.git/
+.hive-dev/
+.artifacts/
+backups/
+output/
+qdrant_storage/
+test-results/
+playwright-report/

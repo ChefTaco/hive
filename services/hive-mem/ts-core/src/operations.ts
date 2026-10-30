@@ -1,0 +1,19 @@
+/** Public operation promises. Partial operations name their actual limits. */
+export const memoryOperations = [
+  { id: 'memory-write', state: 'implemented', routes: ['POST /v1/memories', 'POST /v1/memories/batch', 'PUT /v1/memories/:id', 'DELETE /v1/memories/:id'], effect: 'Authorized records change and durable persistence completes before success.' },
+  { id: 'identity-and-workspace', state: 'implemented', routes: ['POST /v1/agents/register', 'PUT /v1/agents/:id', 'POST /v1/auth/tokens', 'POST /v1/auth/revoke', 'POST /v1/workspaces', 'PUT /v1/workspaces/:id', 'DELETE /v1/workspaces/:id'], effect: 'Scoped identities, credential generations, revocations and workspace state persist.' },
+  { id: 'session-and-episode', state: 'implemented', routes: ['POST /v1/sessions', 'PUT /v1/sessions/:id', 'DELETE /v1/sessions/:id', 'POST /v1/episodes', 'POST /v1/episodes/:id/messages'], effect: 'Session/message records persist; requested extraction queues deterministic derived memories.' },
+  { id: 'reasoning', state: 'partial', routes: ['POST /v1/memories/consolidate', 'POST /v1/peers/:id/dream', 'POST /v1/chat'], effect: 'Local deterministic conclusions and cited answers; no external model or provider comparison.' },
+  { id: 'peer-artifacts', state: 'implemented', routes: ['POST /v1/peers/:id/conclusions', 'DELETE /v1/conclusions/:id', 'POST /v1/peers/:id/card', 'PUT /v1/peers/:id/card/:cardId', 'DELETE /v1/peers/:id/card/:cardId'], effect: 'Authorized conclusion/card state persists and withdrawn sources are excluded from current views.' },
+  { id: 'lifecycle', state: 'implemented', routes: ['POST /v1/lifecycle/forget-me', 'POST /v1/lifecycle/retention/apply'], effect: 'Preview is inert; explicit apply forgets or archives matching authorized records and invalidates derived content.' },
+  { id: 'queue-controls', state: 'partial', routes: ['POST /v1/queue/jobs/:id/run', 'POST /v1/queue/jobs/:id/retry', 'DELETE /v1/queue/jobs/:id'], effect: 'Persisted job results and explicit failed/dead-letter states. Running/completed work cannot be cancelled or retried; no arbitrary job-submission API.' },
+  { id: 'webhooks', state: 'implemented', routes: ['POST /v1/webhooks', 'PUT /v1/webhooks/:id', 'DELETE /v1/webhooks/:id', 'POST /v1/webhooks/test'], effect: 'Endpoint state persists; accepted test emission queues work, while delivery history records actual HTTPS receiver outcomes.' },
+  { id: 'media', state: 'partial', routes: ['POST /v1/memories/multimodal'], effect: 'Stores media references and metadata only; no image/audio/video inference.' },
+  { id: 'http-backup', state: 'unavailable', routes: ['POST /v1/backup'], effect: '501. Use the installation-bound backup script.' },
+  { id: 'http-restore', state: 'unavailable', routes: ['POST /v1/restore'], effect: '501. Use isolated staging and the recovery runbook.' },
+  { id: 'workspace-import', state: 'unavailable', routes: ['POST /v1/admin/workspaces/:id/import'], effect: '501. No imported records or pretend success.' },
+  { id: 'unscoped-cleanup', state: 'unavailable', routes: ['POST /v1/admin/test-data/cleanup', 'POST /v1/admin/prune'], effect: '501. Use explicit workspace lifecycle preview/apply.' },
+  { id: 'critic-review', state: 'unavailable', routes: ['POST /v1/memories/critic/review', 'POST /dashboard/api/memories/critic/review'], effect: '501. No review result is fabricated.' },
+  { id: 'provider-comparison', state: 'unavailable', routes: ['POST /v1/reasoning/providers/compare', 'POST /dashboard/api/reasoning/providers/compare'], effect: '501. No providers are queried or ranked.' },
+  { id: 'issued-token-inventory', state: 'unavailable', routes: ['GET /v1/auth/tokens'], effect: '501. JWT issuance does not maintain a complete token inventory; use generations and revocation IDs for containment.' },
+] as const;

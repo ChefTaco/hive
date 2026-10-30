@@ -1,0 +1,261 @@
+{
+  "info": {
+    "description": "Core HiveMem REST surface. See services/hive-mem/HIVEMEM_API.md for the full reference.",
+    "title": "HiveMem TypeScript Core API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/dashboard-data": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Dashboard data"
+      }
+    },
+    "/dashboard/memories": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Dashboard memory list"
+      }
+    },
+    "/dashboard/queue": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Dashboard queue"
+      }
+    },
+    "/metrics": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Prometheus metrics"
+      }
+    },
+    "/v1/agents": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "List agents"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Register agent"
+      }
+    },
+    "/v1/auth/login": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Token compatibility login"
+      }
+    },
+    "/v1/conclusions/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Delete conclusion"
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Get conclusion (supports include_history)"
+      }
+    },
+    "/v1/context": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Build context pack"
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/v1/health/live": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Liveness"
+      }
+    },
+    "/v1/health/ready": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Readiness"
+      }
+    },
+    "/v1/memories": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "List memories"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Create memory"
+      }
+    },
+    "/v1/memories/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Delete memory"
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Get memory"
+      },
+      "patch": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Update memory"
+      }
+    },
+    "/v1/memories/search": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Search memories"
+      }
+    },
+    "/v1/peers/{peerId}/conclusions": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "List peer conclusions (supports paginate and cursor)"
+      }
+    },
+    "/v1/queue/jobs": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "List queue jobs"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Create queue job"
+      }
+    },
+    "/v1/queue/jobs/{id}/run": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Run queue job"
+      }
+    },
+    "/v1/queue/operations/{id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Get queue operation receipt"
+      }
+    },
+    "/v1/workspaces": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "List workspaces"
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "summary": "Create workspace"
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:18790"
+    }
+  ]
+}

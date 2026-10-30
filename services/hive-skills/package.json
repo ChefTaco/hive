@@ -1,0 +1,25 @@
+{
+  "name": "@hivemagnus/hive-skills",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^24.22.1 || ^26.13.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "npm run build",
+    "start": "node dist/server.js",
+    "dev": "npm run build && node --watch dist/server.js",
+    "test": "npm run build && node --test dist/*.test.js scripts/*.test.mjs",
+    "seed": "npm run build && node dist/seed.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.0",
+    "hono": "^4.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}

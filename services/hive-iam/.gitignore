@@ -1,0 +1,33 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Environment secrets
+.env
+apps/*/.env
+packages/*/.env
+
+# Local certificates and keys
+certs/
+
+# Databases and logs
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+audit-logs/
+**/audit-logs/
+**/prisma/*.db
+**/prisma/*.db-journal
+**/prisma/*.db-shm
+**/prisma/*.db-wal
+
+# Deployment bundles
+*.tar.gz
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo

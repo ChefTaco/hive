@@ -1,0 +1,109 @@
+{
+  "name": "@hivemagnus/hive-iam-server",
+  "version": "1.0.0",
+  "description": "Hive IAM server: OAuth 2.0 / OpenID Connect identity service with RS256 JWTs, RBAC, MFA/WebAuthn, service accounts and audit logging",
+  "keywords": [
+    "hive",
+    "iam",
+    "oauth2",
+    "oidc",
+    "openid-connect",
+    "identity",
+    "authentication",
+    "authorization",
+    "jwt",
+    "rbac",
+    "webauthn",
+    "server"
+  ],
+  "author": "ChefTaco",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/ChefTaco/hive/tree/main/services/hive-iam/apps/iam-core#readme",
+  "bugs": {
+    "url": "https://github.com/ChefTaco/hive/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ChefTaco/hive.git",
+    "directory": "services/hive-iam/apps/iam-core"
+  },
+  "type": "module",
+  "bin": {
+    "hive-iam-server": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.d.ts",
+    "!dist/**/*.d.ts.map",
+    "!dist/**/*.js.map",
+    "prisma/migrations",
+    "prisma/schema.prisma",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^24.22.1 || ^26.13.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc --build && tsc -p tsconfig.seed.json && node scripts/finalize-seed-build.mjs && rm -rf dist/db/generated && mkdir -p dist/db && cp -r src/db/generated dist/db/generated && chmod +x dist/cli.js",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:ci": "vitest run --coverage",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "reset:admin": "node dist/scripts/reset-admin-password.js",
+    "db:studio": "prisma studio",
+    "db:reset": "prisma migrate reset --force",
+    "pretypecheck": "npm run db:generate",
+    "prebuild": "npm run db:generate",
+    "prepublishOnly": "npm run clean && npm run build && npm test"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.5",
+    "@hono/swagger-ui": "^0.5.3",
+    "@prisma/adapter-better-sqlite3": "^7.4.1",
+    "@prisma/client": "^7.0.0",
+    "@simplewebauthn/server": "^13.3.0",
+    "argon2": "^0.43.0",
+    "better-sqlite3": "^12.6.2",
+    "bullmq": "^5.30.0",
+    "dotenv": "^17.3.1",
+    "hono": "4.13.13",
+    "ioredis": "^5.4.0",
+    "jose": "^6.0.0",
+    "ky": "^1.7.5",
+    "nanoid": "^5.0.0",
+    "otpauth": "^9.5.0",
+    "qrcode": "^1.5.4",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.6",
+    "prisma": "^7.0.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vitest": "^5.0.5"
+  },
+  "overrides": {
+    "@hono/node-server": "2.1.5",
+    "fast-uri": "3.1.9",
+    "hono": "4.13.13",
+    "valibot": "1.4.2",
+    "mysql2": "3.24.3",
+    "deepmerge-ts": "8.0.0"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma",
+    "seed": "tsx prisma/seed.ts"
+  }
+}
