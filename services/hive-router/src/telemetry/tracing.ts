@@ -1,6 +1,6 @@
 import { sqliteWrite } from '../storage/sqlite-write.js';
 import { quotaLedger } from "../security/quota.js";
-import { TraceOutcome, type Prisma } from '@prisma/client';
+import { TraceOutcome, type Prisma } from '../generated/prisma/client.js';
 import { prisma } from '../storage/client.js';
 import { prettyJson, safeJsonParse } from '../utils/json.js';
 import { storeBody } from '../storage/bodies.js';

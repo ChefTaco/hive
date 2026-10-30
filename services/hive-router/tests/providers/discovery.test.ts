@@ -1,4 +1,4 @@
-import { ProviderKind, type Provider } from '@prisma/client';
+import { ProviderKind, type Provider } from '../../src/generated/prisma/client.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   parseAnthropicModels,

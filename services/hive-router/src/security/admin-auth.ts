@@ -1,4 +1,4 @@
-import type { AdminUser } from '@prisma/client';
+import type { AdminUser } from '../generated/prisma/client.js';
 import { SignJWT, jwtVerify } from 'jose';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Context, Next } from 'hono';

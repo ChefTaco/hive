@@ -1,4 +1,4 @@
-import { ProviderKind, type RouteRule, type ModelAlias } from '@prisma/client';
+import { ProviderKind, type RouteRule, type ModelAlias } from '../generated/prisma/client.js';
 import { prisma } from '../storage/client.js';
 import { evaluateHeuristics } from './heuristics.js';
 import { resolveAdaptiveScores } from './adaptive.js';

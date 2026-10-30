@@ -1,4 +1,4 @@
-import { AuthMode, ProviderKind, RouteRuleKind } from '@prisma/client';
+import { AuthMode, ProviderKind, RouteRuleKind } from '../generated/prisma/client.js';
 import { z } from 'zod';
 
 const endpointKindSchema = z.enum([

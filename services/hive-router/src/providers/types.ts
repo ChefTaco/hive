@@ -1,4 +1,4 @@
-import type { Provider, ProviderKind } from '@prisma/client';
+import type { Provider, ProviderKind } from '../generated/prisma/client.js';
 import type { UsageSnapshot } from '../telemetry/tracing.js';
 
 export type EndpointKind =

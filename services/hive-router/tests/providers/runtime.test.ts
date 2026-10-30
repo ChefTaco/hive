@@ -1,4 +1,4 @@
-import { AuthMode, ProviderKind, type Provider } from '@prisma/client';
+import { AuthMode, ProviderKind, type Provider } from '../../src/generated/prisma/client.js';
 import { describe, expect, it } from 'vitest';
 import { encryptText } from '../../src/security/crypto.js';
 import { buildProviderCreateData, parseProviderRuntime } from '../../src/providers/runtime.js';

@@ -3,7 +3,7 @@ import { actorJournal, actorJournalWrite } from './actor-journal-runtime.js';
 import type { ActorLease, ActorStep } from './actor-journal.js';
 import { routingPatchSchema, routingSnapshot, applyRoutingRevision, routingHistory, savedRoutingRevision } from '../routing/revisions.js';
 import { MemoryWriteSchema } from '../contracts/memory-operations.js';
-import { AuthMode, ProviderKind, RouteRuleKind, type AdminUser, type ClientApiKey } from '@prisma/client';
+import { AuthMode, ProviderKind, RouteRuleKind, type AdminUser, type ClientApiKey } from '../generated/prisma/client.js';
 import { Hono, type Context, type Next } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { getConnInfo } from '@hono/node-server/conninfo';
@@ -41,6 +41,7 @@ import {
 import { recordAuditEvent } from '../storage/audit.js';
 import { buildRouterOpenApiDocument, builtinApiDocs } from '../openapi/spec.js';
 import { loadEnv } from '../config/env.js';
+import { uiDistDir } from '../config/paths.js';
 import { buildRouterDependencyReport } from '../status/router-health.js';
 import { getSecurityExporterJwksStatus } from '../security/security-exporter-jwks-status.js';
 import { inspectTlsCertificate } from '../status/tls-certificate.js';
@@ -1475,7 +1476,7 @@ async function listHiveIncidents(requestId: string): Promise<Response> {
 }
 
 async function readUiIndex(): Promise<string> {
-  const builtIndex = resolve(process.cwd(), 'ui/dist/index.html');
+  const builtIndex = resolve(uiDistDir, 'index.html');
   if (existsSync(builtIndex)) {
     return readFile(builtIndex, 'utf8');
   }
@@ -2778,7 +2779,6 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}): Hono<{ 
   });
 
   app.get('/assets/*', async (context) => {
-    const uiDistDir = resolve(process.cwd(), 'ui/dist');
     // Resolve and validate that the path stays within ui/dist to prevent traversal.
     const filePath = resolve(uiDistDir, context.req.path.slice(1));
     if (!filePath.startsWith(uiDistDir + '/') || !existsSync(filePath)) {

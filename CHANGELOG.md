@@ -6,8 +6,25 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- The servers are published to npm, each with a command that can `start`, `check` its
+  configuration and dependencies, print an `env-schema`, and load settings with `--env-file`:
+  - `@hivemagnus/hivemem-server` (`hivemem-server`)
+  - `@hivemagnus/hive-router` (`hive-router`), with the Hive console bundled
+  - `@hivemagnus/hive-iam-server` (`hive-iam-server`), which also runs its database migrations and
+    creates the first admin account on first start. A Docker image and a Compose example with Redis
+    are in `services/hive-iam/apps/iam-core`.
+- Node.js 26 is supported alongside Node.js 24.
+
 ### Changed
 
+- Without explicit paths, the servers keep their data in `${HIVE_HOME:-~/.hive}/<service>`. The
+  production systemd units, deploy scripts and Docker images set their existing paths explicitly.
+- HiveMem defaults to Qdrant persistence and refuses to start if Qdrant is unreachable. Set
+  `HIVEMEM_TS_PERSISTENCE=memory` to opt in to volatile in-memory storage.
+- The Router's default API port is 4020 instead of 443.
+- Setting only one of a TLS certificate and key is now an error instead of a silent fallback to HTTP.
 - The npm packages are published under the `@hivemagnus` scope as `@hivemagnus/hivemem-sdk` and
   `@hivemagnus/hive-iam-sdk`.
 - The shared contracts package is no longer a separate package. Its schemas now live in the Hive

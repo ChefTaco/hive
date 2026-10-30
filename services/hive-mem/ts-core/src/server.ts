@@ -1,7 +1,7 @@
 import type { JsonValue } from "./types.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
-import { AuthError, MAX_TOKEN_LINEAGE, parentTokenIds, signToken, verifyBearerToken } from "./auth.js";
+import { AuthError, isUsableSigningSecret, MAX_TOKEN_LINEAGE, parentTokenIds, signToken, verifyBearerToken } from "./auth.js";
 import { InMemoryHiveMemStore } from "./store.js";
 import type { AuthPrincipal, ChatResponse } from "./types.js";
 import { ValidationError } from "./validation.js";
@@ -362,7 +362,7 @@ export type HiveMemRequestHandler = (request: IncomingMessage, response: ServerR
 export function createHiveMemHandler(options: HiveMemServerOptions = {}): HiveMemRequestHandler {
   const jwtSecret = options.jwtSecret ?? process.env.HIVEMEM_JWT_SECRET;
   const renewalSecret = options.renewalSecret ?? process.env.HIVEMEM_RENEWAL_SECRET;
-  if (!jwtSecret || Buffer.byteLength(jwtSecret) < 32 || /change[_-]?me|placeholder|example|development/i.test(jwtSecret)) {
+  if (!isUsableSigningSecret(jwtSecret)) {
     throw new Error("HIVEMEM_JWT_SECRET must be a non-placeholder secret of at least 32 bytes");
   }
   if (renewalSecret && (Buffer.byteLength(renewalSecret) < 32 || renewalSecret === jwtSecret)) {

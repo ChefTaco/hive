@@ -19,6 +19,15 @@ RUN npm prune --omit=dev
 FROM node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS production
 
 ENV NODE_ENV=production
+# Keep this image's historical defaults. The npm package defaults differ
+# (API_PORT 4020, PUBLIC_API_URL from the port, data under $HIVE_HOME/router).
+ENV API_PORT=443 \
+    ADMIN_PORT=9443 \
+    PUBLIC_API_URL=https://localhost:443 \
+    PUBLIC_ADMIN_URL=https://localhost:9443 \
+    DATA_DIR=/repo/services/hive-router/data \
+    DATABASE_URL=file:/repo/services/hive-router/data/router.db \
+    TRACE_DIR=/repo/services/hive-router/data/traces
 WORKDIR /repo/services/hive-router
 
 COPY --from=builder /repo/services/hive-router/node_modules ./node_modules

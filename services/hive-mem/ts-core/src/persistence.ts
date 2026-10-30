@@ -478,8 +478,13 @@ export class QdrantHiveMemPersistence implements HiveMemPersistence {
   }
 }
 
+/** Qdrant REST base URL from HIVEMEM_QDRANT_URL, QDRANT_URL, or the host/port pair (default http://127.0.0.1:6333). */
+export function qdrantUrlFromEnv(env: NodeJS.ProcessEnv = process.env): string {
+  return env.HIVEMEM_QDRANT_URL ?? env.QDRANT_URL ?? "http://" + (env.HIVEMEM_QDRANT_HOST ?? env.QDRANT_HOST ?? "127.0.0.1") + ":" + (env.HIVEMEM_QDRANT_PORT ?? env.QDRANT_PORT ?? "6333");
+}
+
 export function qdrantPersistenceFromEnv(env: NodeJS.ProcessEnv = process.env): QdrantHiveMemPersistence | null {
   if (env.HIVEMEM_TS_PERSISTENCE !== "qdrant") return null;
-  const host = env.HIVEMEM_QDRANT_URL ?? env.QDRANT_URL ?? "http://" + (env.HIVEMEM_QDRANT_HOST ?? env.QDRANT_HOST ?? "127.0.0.1") + ":" + (env.HIVEMEM_QDRANT_PORT ?? env.QDRANT_PORT ?? "6333");
+  const host = qdrantUrlFromEnv(env);
   return new QdrantHiveMemPersistence({ url: host, ...(env.HIVEMEM_STORAGE_PATH ? { journalPath: env.HIVEMEM_STORAGE_PATH + "/pending-write.json" } : {}), ...(env.QDRANT_API_KEY ? { apiKey: env.QDRANT_API_KEY } : {}) });
 }

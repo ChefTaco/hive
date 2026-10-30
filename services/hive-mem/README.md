@@ -31,6 +31,17 @@ The production runtime is the strict TypeScript core in [`ts-core/`](ts-core), b
 - **Operator and agent surfaces.** The self-contained `/dashboard`, Python/TypeScript SDKs, REST helper scripts, and Hermes Agent memory-provider plugin all share the same REST API.
 - **Compatibility tests.** The TypeScript core uses deterministic node:test coverage for REST compatibility, Qdrant hydration, reasoning, dashboard routes, and the Hermes plugin contract.
 
+## Install from npm
+
+The server is published as [`@hivemagnus/hivemem-server`](ts-core/README.md):
+
+```bash
+npx @hivemagnus/hivemem-server check --env-file hivemem.env
+npx @hivemagnus/hivemem-server --env-file hivemem.env
+```
+
+See [ts-core/README.md](ts-core/README.md) for requirements, the Qdrant one-liner, and configuration.
+
 ## Quick Start (development)
 
 ```bash
@@ -64,7 +75,7 @@ Agent clients (SDKs, Hermes provider, custom integrations)
   └─ Plain text over HTTPS to HiveMem API ($HIVEMEM_API_URL)
        └─ Server-side nomic-embed-text-v1.5 embeddings
        └─ Qdrant :6333/:6334 (bound to localhost by default)
-       └─ Local storage under $HIVEMEM_STORAGE_PATH (default /var/opt/hivemem)
+       └─ Local storage under $HIVEMEM_STORAGE_PATH (/var/opt/hivemem in the systemd unit and Docker image; ~/.hive/memory for the npm CLI)
 ```
 
 See [APP_ARCHITECTURE.md](APP_ARCHITECTURE.md) for internals, request flow, data model, and operational behavior, and [HIVEMEM_API.md](HIVEMEM_API.md) for the REST contract.

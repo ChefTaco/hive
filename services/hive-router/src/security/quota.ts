@@ -3,7 +3,7 @@ import { loadEnv } from "../config/env.js";
 import { resolveSqlitePath } from "../storage/schema.js";
 import { QuotaLedger } from "./quota-ledger.js";
 import { sqliteWrite } from '../storage/sqlite-write.js';
-import type { ClientApiKey } from '@prisma/client';
+import type { ClientApiKey } from '../generated/prisma/client.js';
 import { safeJsonParse } from '../utils/json.js';
 
 /**

@@ -1,4 +1,4 @@
-import type { ProviderKind } from '@prisma/client';
+import type { ProviderKind } from '../generated/prisma/client.js';
 
 export interface BuiltinApiDocEntry {
   scope: 'router' | 'provider';

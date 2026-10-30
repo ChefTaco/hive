@@ -12,7 +12,7 @@ operational scripts used to deploy and maintain them.
 
 | Path | Purpose |
 | --- | --- |
-| [`apps/iam-core`](apps/iam-core) | IAM Core API (Hono, SQLite via Prisma, Redis): auth, users, roles, groups, service accounts, clients, sessions, MFA/WebAuthn, OAuth/OIDC, audit |
+| [`apps/iam-core`](apps/iam-core) | [`@hivemagnus/hive-iam-server`](https://www.npmjs.com/package/@hivemagnus/hive-iam-server): the IAM server and its `hive-iam-server` CLI (Hono, SQLite via Prisma, Redis): auth, users, roles, groups, service accounts, clients, sessions, MFA/WebAuthn, OAuth/OIDC, audit |
 | [`packages/iam-sdk`](packages/iam-sdk) | [`@hivemagnus/hive-iam-sdk`](https://www.npmjs.com/package/@hivemagnus/hive-iam-sdk): JWT verification and RBAC middleware for Node.js and Hono |
 | [`scripts`](scripts) | Key generation, deployment, lockout reset, and end-to-end smoke tests |
 | [`docs`](docs) | [Architecture notes](docs/APP_ARCHITECTURE_IAM.md) |
@@ -29,11 +29,23 @@ operational scripts used to deploy and maintain them.
 
 ## Requirements
 
-- Node.js 24 (`>=24.22.1 <25`)
+- Node.js 24 (`>=24.22.1`) or 26 (`>=26.13.0`)
 - Redis (local, used for queues and rate limiting)
 - OpenSSL (key and certificate generation)
 
-## Getting Started
+## Run it from npm
+
+```bash
+npx @hivemagnus/hive-iam-server --env-file iam.env
+```
+
+The package needs only Node.js and Redis: it creates its SQLite database,
+signing keys and initial admin account on first start. See the
+[package README](apps/iam-core/README.md) for the quick start, configuration,
+Docker image and Compose example. To run Hive Router, IAM and HiveMem together,
+use the `@hivemagnus/hive` launcher.
+
+## Getting Started (from source)
 
 ```bash
 cd services/hive-iam
@@ -72,6 +84,10 @@ npm run build       # all workspaces
 
 Workspace-specific shortcuts: `npm run iam-core:test`, `npm run iam-sdk:test`,
 `npm run iam-core:build`, `npm run iam-sdk:build`.
+
+Publishing: `npm publish --workspace @hivemagnus/hive-iam-server` (or
+`--workspace @hivemagnus/hive-iam-sdk`); `prepublishOnly` cleans, builds and
+tests the package first.
 
 ## Deployment
 

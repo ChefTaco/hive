@@ -1,4 +1,4 @@
-import { ProviderKind, type Provider } from '@prisma/client';
+import { ProviderKind, type Provider } from '../../src/generated/prisma/client.js';
 import { describe, expect, it } from 'vitest';
 import type { ProviderRuntime } from '../../src/providers/types.js';
 import {

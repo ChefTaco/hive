@@ -1,5 +1,5 @@
 import { defaultHeuristicRules, defaultRouteRules, ROUTING_PROFILE_ALIASES, ROUTING_PROFILE_RULES } from '../routing/defaults.js';
-import { AuthMode, ProviderKind } from '@prisma/client';
+import { AuthMode, ProviderKind } from '../generated/prisma/client.js';
 import { loadEnv } from '../config/env.js';
 import { encryptText, hashValue } from '../security/crypto.js';
 import { EXTERNALLY_MANAGED_PASSWORD_HASH, isAllowedAdminUser } from '../security/os-auth.js';

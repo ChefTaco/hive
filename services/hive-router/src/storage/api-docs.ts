@@ -1,4 +1,4 @@
-import { ProviderKind } from '@prisma/client';
+import { ProviderKind } from '../generated/prisma/client.js';
 import { builtinApiDocs, buildRouterOpenApiDocument } from '../openapi/spec.js';
 import { prisma } from './client.js';
 

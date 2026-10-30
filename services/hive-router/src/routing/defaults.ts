@@ -1,5 +1,5 @@
 // Shared seed definitions: baseline tests and bootstrap must use the same policy.
-import { ProviderKind, RouteRuleKind } from '@prisma/client';
+import { ProviderKind, RouteRuleKind } from '../generated/prisma/client.js';
 
 export const defaultHeuristicRules = [
   {

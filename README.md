@@ -13,7 +13,7 @@ provider, long-term memory, and a model gateway, and manages all three from one 
 | [**HiveMem**](services/hive-mem) | Long-term memory API for agents, persisted to Qdrant. It supports semantic and filtered search, a knowledge graph, temporal (as-of) queries, consolidation and reasoning jobs, webhooks, and peer conclusions. |
 | [**Hive Skills**](services/hive-skills) | Optional HTTPS registry that distributes versioned, checksummed skills to [Hermes Agent](https://github.com/NousResearch/hermes-agent) installations. |
 
-Everything is strict TypeScript on Node.js 24. The only exception is the HiveMem plugin for Hermes Agent, which is written in Python.
+Everything is strict TypeScript on Node.js 24 or 26. The only exception is the HiveMem plugin for Hermes Agent, which is written in Python.
 
 ## Packages on npm
 
@@ -21,10 +21,13 @@ Everything is strict TypeScript on Node.js 24. The only exception is the HiveMem
 |---|---|
 | [`@hivemagnus/hivemem-sdk`](services/hive-mem/sdks/typescript) | TypeScript client for the HiveMem REST API |
 | [`@hivemagnus/hive-iam-sdk`](services/hive-iam/packages/iam-sdk) | JWT verification and auth middleware for Hono and Express services that trust Hive IAM |
+| [`@hivemagnus/hivemem-server`](services/hive-mem/ts-core) | The HiveMem memory server (`npx @hivemagnus/hivemem-server --env-file hivemem.env`) |
+| [`@hivemagnus/hive-router`](services/hive-router) | The Hive Router and the Hive console (`npx @hivemagnus/hive-router --env-file router.env`) |
+| [`@hivemagnus/hive-iam-server`](services/hive-iam/apps/iam-core) | The Hive IAM server (`npx @hivemagnus/hive-iam-server --env-file iam.env`); also available as a Docker image |
 
 ## Quick start (local development)
 
-Requirements: Node.js `>=24.22.1 <25` (see `.nvmrc`). Docker with Compose is optional and only
+Requirements: Node.js 24 (`>=24.22.1`) or 26 (`>=26.13.0`); `.nvmrc` pins the development version. Docker with Compose is optional and only
 needed to run Redis and Qdrant locally.
 
 ```bash

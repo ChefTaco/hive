@@ -1,4 +1,4 @@
-import type { AdminUser, ClientApiKey } from '@prisma/client';
+import type { AdminUser, ClientApiKey } from '../generated/prisma/client.js';
 
 export interface TraceRuntimeContext {
   traceId: string;

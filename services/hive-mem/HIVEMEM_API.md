@@ -1191,7 +1191,7 @@ Recommended standalone defaults:
 | `HIVEMEM_CA_FILE` | system CA store | Client-side PEM trust anchor for private PKI; certificate and hostname verification remain mandatory |
 | `HIVEMEM_WEB_PORT` | `443` | Production HTTPS port used by systemd/deploy scripts |
 | `HIVEMEM_CORS_ORIGINS` | `http://localhost:18790` in `.env.example` | Add other dashboard origins explicitly |
-| `HIVEMEM_STORAGE_PATH` | `/var/opt/hivemem` | Local standalone storage root |
+| `HIVEMEM_STORAGE_PATH` | `/var/opt/hivemem` | Local standalone storage root (set by the systemd unit and Docker image; the `hivemem-server` CLI defaults to `${HIVE_HOME:-~/.hive}/memory`) |
 | `HIVEMEM_BACKUP_PATH` | `/var/opt/hivemem/backups` | Qdrant snapshot storage |
 | `HIVEMEM_NFS_BASE_PATH` | `/var/opt/hivemem` | Local resource root unless NFS is explicitly enabled |
 | `HIVEMEM_USE_NFS` | `false` | Set true only when intentionally using shared NFS resources |

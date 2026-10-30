@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ProviderKind } from '@prisma/client';
+import { ProviderKind } from '../../src/generated/prisma/client.js';
 import type { ProviderCapability, RouteObservation } from '../../src/providers/types.js';
 import { buildRoute, buildRuntime } from '../fixtures/routing-runtime.js';
 import { defaultRouteRules, defaultHeuristicRules, ROUTING_PROFILE_ALIASES, ROUTING_PROFILE_RULES } from '../../src/routing/defaults.js';

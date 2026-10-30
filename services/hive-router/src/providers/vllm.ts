@@ -1,4 +1,4 @@
-import { ProviderKind } from '@prisma/client';
+import { ProviderKind } from '../generated/prisma/client.js';
 import { OpenAiCompatibleAdapter } from './openai-compatible.js';
 import { shouldForwardClientHeader } from '../security/headers.js';
 import type { DiscoveredModel, ProviderAdapter, ProviderExecution, ProviderRuntime, RouteRequest } from './types.js';

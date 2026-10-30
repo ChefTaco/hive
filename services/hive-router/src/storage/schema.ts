@@ -1,19 +1,13 @@
 import { QuotaLedger } from '../security/quota-ledger.js';
 import { chmodSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import { loadEnv } from '../config/env.js';
 import { columnMigrations, schemaStatements } from './generated-sqlite-schema.js';
+import { resolveSqlitePath } from './sqlite-path.js';
 import { log } from '../telemetry/logger.js';
 
-export function resolveSqlitePath(databaseUrl: string): string {
-  if (!databaseUrl.startsWith('file:')) {
-    throw new Error('Unsupported DATABASE_URL for sqlite bootstrap: ' + databaseUrl);
-  }
-
-  const rawPath = databaseUrl.slice('file:'.length).split('?', 1)[0] ?? '';
-  return rawPath.startsWith('/') ? rawPath : resolve(process.cwd(), rawPath);
-}
+export { resolveSqlitePath } from './sqlite-path.js';
 
 /**
  * Apply additive `ALTER TABLE ... ADD COLUMN` migrations for any column defined

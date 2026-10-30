@@ -598,6 +598,11 @@ else
   echo ">>> Preserving existing shared/.env"
 fi
 
+# The Router's built-in API_PORT default is now 4020. Keep the previous
+# built-in default (443) for an env file that never recorded API_PORT.
+if [[ -z "\$(read_env "\$ENV_FILE" API_PORT)" ]]; then
+  upsert_env "\$ENV_FILE" API_PORT '443'
+fi
 upsert_env "\$ENV_FILE" API_HOST '0.0.0.0'
 upsert_env "\$ENV_FILE" ADMIN_HOST '${PROD_ADMIN_HOST}'
 upsert_env "\$ENV_FILE" ADMIN_PORT '${PROD_ADMIN_PORT}'

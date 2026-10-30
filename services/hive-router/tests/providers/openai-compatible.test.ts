@@ -1,4 +1,4 @@
-import { AuthMode, ProviderKind, type Provider } from '@prisma/client';
+import { AuthMode, ProviderKind, type Provider } from '../../src/generated/prisma/client.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OpenAiCompatibleAdapter } from '../../src/providers/openai-compatible.js';
 import type { ProviderRuntime, RouteRequest } from '../../src/providers/types.js';

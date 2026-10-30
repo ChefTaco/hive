@@ -7,7 +7,7 @@ HiveMem is the shared long-term memory service for Hive, Hermes, SDK clients, an
 | Component | Current implementation | Notes |
 | --- | --- | --- |
 | API server | Node 24 TypeScript core | `ts-core/src/server.ts` exposes REST, dashboard compatibility, and health endpoints. |
-| Persistence | Qdrant snapshot adapter | Enabled in production with `HIVEMEM_TS_PERSISTENCE=qdrant` and the deployed Qdrant env. |
+| Persistence | Qdrant snapshot adapter | The CLI (`hivemem-server`) defaults to `HIVEMEM_TS_PERSISTENCE=qdrant` and refuses to start when Qdrant is unreachable. `HIVEMEM_TS_PERSISTENCE=memory` is an explicit volatile opt-in for tests and demos. |
 | Memory store | TypeScript `HiveMemStore` | Hydrates Qdrant collections, normalizes legacy payloads, and flushes snapshots back to Qdrant. |
 | Reasoning | Deterministic TypeScript local heuristics | Summaries, consolidation, dreams, peer cards, conflict scans, and message extraction run without external LLM calls. |
 | Auth | HS256 JWT with role/scopes | `HIVEMEM_JWT_SECRET` signs agent/admin tokens. `HIVEMEM_ADMIN_TOKEN` is a deploy/tooling convention, not a separate server credential. |
@@ -15,6 +15,12 @@ HiveMem is the shared long-term memory service for Hive, Hermes, SDK clients, an
 | Hermes plugin | Python REST client | Kept Python because Hermes Agent is Python; it talks to HiveMem over REST only. |
 
 Full Hive deployments run HiveMem on internal HTTPS port `18443`. Hive Router serves the public UI on `443` and proxies `/v1/*`, `/dashboard`, and `/dashboard/*` to the internal HiveMem listener.
+
+Local state (writer lock, write-recovery journal, revocation list) lives under `HIVEMEM_STORAGE_PATH`. The systemd unit and Docker image set it to `/var/opt/hivemem`; without it, the CLI uses `${HIVE_HOME:-~/.hive}/memory`.
+
+The Qdrant adapter writes memories to the active memory collections such as `shared_semantic` and `<agent>_private_semantic`, stores metadata records in underscore collections, and keeps episode headers and messages together in `_episodes` using `record_type`. On load, it normalizes legacy memory payloads that predate `id` and `workspace_id`, giving them stable synthetic ids instead of collapsing them during hydration.
+
+`ts-core/src/reasoning.ts` is a deterministic, local-only port of the former Python `LocalHeuristicReasoningProvider`: `extractConclusions`, `summarizeSession`, `dream`, and `buildPeerCard` use the same heuristics, and reasoning conclusions use stable UUIDv5 identities so re-running a job is idempotent.
 
 ## Data Model
 

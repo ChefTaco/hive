@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ProviderKind, RouteRuleKind } from '@prisma/client';
+import { ProviderKind, RouteRuleKind } from '../../src/generated/prisma/client.js';
 import {
   clientKeyMetadataSchema,
   configImportSchema,

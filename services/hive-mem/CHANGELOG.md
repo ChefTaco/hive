@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `@hivemagnus/hivemem-server` is published to npm with a `hivemem-server` command (`start`, `check`, `env-schema`, `--env-file`, `--help`, `--version`). `hivemem-ts-core` remains as an alias.
+
+### Changed
+
+- The CLI defaults to Qdrant persistence and refuses to start when Qdrant is unreachable. Set `HIVEMEM_TS_PERSISTENCE=memory` to run a volatile server explicitly; any other value is rejected.
+- Without `HIVEMEM_STORAGE_PATH`, local state goes to `${HIVE_HOME:-~/.hive}/memory` (mode `0700`) instead of `/var/opt/hivemem`. The systemd unit and Docker image now set `/var/opt/hivemem` explicitly, so existing deployments keep their paths.
+- Invalid or missing settings (JWT secret, port, half-configured TLS, embedding config) stop startup with one line naming the variable and the fix, without a stack trace.
+
 ## [1.0.0]
 
 Initial public release.

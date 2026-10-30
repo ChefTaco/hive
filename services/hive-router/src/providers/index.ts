@@ -1,4 +1,4 @@
-import { ProviderKind, type Provider } from '@prisma/client';
+import { ProviderKind, type Provider } from '../generated/prisma/client.js';
 import { prisma } from '../storage/client.js';
 import { parseProviderRuntime } from './runtime.js';
 import { OpenAiCompatibleAdapter } from './openai-compatible.js';

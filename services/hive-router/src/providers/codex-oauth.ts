@@ -1,4 +1,4 @@
-import { AuthMode, ProviderKind } from '@prisma/client';
+import { AuthMode, ProviderKind } from '../generated/prisma/client.js';
 import { prisma } from '../storage/client.js';
 import { encryptText } from '../security/crypto.js';
 import { shouldForwardClientHeader } from '../security/headers.js';

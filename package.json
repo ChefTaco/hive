@@ -15,7 +15,7 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=24.22.1 <25"
+    "node": "^24.22.1 || ^26.13.0"
   },
   "scripts": {
     "bootstrap": "for d in services/hive-router services/hive-iam services/hive-mem/ts-core services/hive-skills; do (cd \"$d\" && npm ci) || exit 1; done && npm run hooks:install",
@@ -41,7 +41,7 @@
     "rotate:secrets": "bash scripts/rotate-secrets.sh",
     "audit:deployments": "node --experimental-strip-types scripts/audit-deployments.ts",
     "verify:iam-hardening": "node --experimental-strip-types scripts/verify-iam-hardening.ts",
-    "audit:production": "npm --prefix services/hive-router audit --omit=dev --audit-level=high && npm --prefix services/hive-iam audit --workspace hive-iam-core --omit=dev --audit-level=high && npm --prefix services/hive-iam/apps/iam-core audit --omit=dev --audit-level=high && npm --prefix services/hive-iam audit --workspace @hivemagnus/hive-iam-sdk --omit=dev --audit-level=high && npm --prefix services/hive-mem/ts-core audit --omit=dev --audit-level=high && npm --prefix services/hive-skills audit --omit=dev --audit-level=high",
+    "audit:production": "npm --prefix services/hive-router audit --omit=dev --audit-level=high && npm --prefix services/hive-iam audit --workspace @hivemagnus/hive-iam-server --omit=dev --audit-level=high && npm --prefix services/hive-iam/apps/iam-core audit --omit=dev --audit-level=high && npm --prefix services/hive-iam audit --workspace @hivemagnus/hive-iam-sdk --omit=dev --audit-level=high && npm --prefix services/hive-mem/ts-core audit --omit=dev --audit-level=high && npm --prefix services/hive-skills audit --omit=dev --audit-level=high",
     "scripts:check": "bash -n scripts/*.sh services/hive-iam/scripts/*.sh services/hive-iam/apps/iam-core/scripts/*.sh services/hive-mem/scripts/*.sh services/hive-router/scripts/*.sh services/hive-skills/scripts/*.sh",
     "tls:check": "bash scripts/check-tls-bypasses.sh",
     "deploy:router": "bash services/hive-router/scripts/deploy-hive-router.sh",

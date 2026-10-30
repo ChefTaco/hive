@@ -15,6 +15,11 @@ export class AuthError extends Error {
 export const HIVEMEM_JWT_ISSUER = "hivemem";
 export const HIVEMEM_JWT_AUDIENCE = "hivemem-api";
 
+/** A signing secret must be at least 32 bytes and must not look like a placeholder value. */
+export function isUsableSigningSecret(secret: string | undefined): secret is string {
+  return Boolean(secret) && Buffer.byteLength(secret ?? "") >= 32 && !/change[_-]?me|placeholder|example|development/i.test(secret ?? "");
+}
+
 export interface VerifyTokenOptions {
   issuer?: string;
   audience?: string;

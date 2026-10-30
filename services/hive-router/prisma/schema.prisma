@@ -1,5 +1,10 @@
 generator client {
-  provider = "prisma-client-js"
+  provider            = "prisma-client"
+  // Generated into the source tree so tsc compiles it into dist/ and the
+  // published package ships a ready client: npm consumers never run prisma.
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
 }
 
 datasource db {

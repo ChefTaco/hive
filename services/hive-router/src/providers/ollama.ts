@@ -1,4 +1,4 @@
-import { ProviderKind } from '@prisma/client';
+import { ProviderKind } from '../generated/prisma/client.js';
 import type { DiscoveredModel, ProviderAdapter, ProviderExecution, ProviderRuntime, RouteRequest } from './types.js';
 import type { UsageSnapshot } from '../telemetry/tracing.js';
 import { parseOllamaTags } from './model-parsers.js';

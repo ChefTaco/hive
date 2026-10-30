@@ -1,4 +1,4 @@
-import { ProviderKind } from '@prisma/client';
+import { ProviderKind } from '../generated/prisma/client.js';
 import { prettyJson } from '../utils/json.js';
 import { shouldForwardClientHeader } from '../security/headers.js';
 import { parseOpenAiModels } from './model-parsers.js';

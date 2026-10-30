@@ -12,6 +12,9 @@ WorkingDirectory=/opt/hivemem/ts-core
 EnvironmentFile=/opt/hivemem/.env
 Environment=HIVEMEM_TS_CORE_HOST=0.0.0.0
 Environment=HIVEMEM_TS_PERSISTENCE=qdrant
+# Explicit production storage root (the CLI default is ${HIVE_HOME:-~/.hive}/memory).
+# EnvironmentFile values override these defaults.
+Environment=HIVEMEM_STORAGE_PATH=/var/opt/hivemem
 Environment=HIVEMEM_TS_TLS_CERT_FILE=/opt/hivemem/certs/server.crt
 Environment=HIVEMEM_TS_TLS_KEY_FILE=/opt/hivemem/certs/server.key
 ExecStart=/usr/bin/env node /opt/hivemem/ts-core/dist/src/cli.js

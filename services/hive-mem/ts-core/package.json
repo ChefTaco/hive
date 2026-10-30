@@ -1,26 +1,58 @@
 {
   "name": "@hivemagnus/hivemem-server",
-  "version": "0.1.0",
-  "private": true,
+  "version": "1.0.0",
+  "description": "HiveMem: a self-hosted shared memory server for AI agents, with a REST API, JWT auth, and Qdrant persistence.",
+  "keywords": [
+    "hive",
+    "hivemem",
+    "memory",
+    "agent-memory",
+    "ai-agents",
+    "llm",
+    "qdrant",
+    "rest-api",
+    "server"
+  ],
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/ChefTaco/hive/tree/main/services/hive-mem/ts-core#readme",
+  "bugs": {
+    "url": "https://github.com/ChefTaco/hive/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ChefTaco/hive.git",
+    "directory": "services/hive-mem/ts-core"
+  },
   "type": "module",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
+  "bin": {
+    "hivemem-server": "dist/src/cli.js",
+    "hivemem-ts-core": "dist/src/cli.js"
+  },
+  "files": [
+    "dist/src",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "typecheck": "tsc --noEmit",
-    "build": "tsc",
+    "build": "tsc && node -e \"require('node:fs').chmodSync('dist/src/cli.js', 0o755)\"",
     "test": "npm run build && node --test dist/tests/*.test.js",
     "start": "node dist/src/cli.js",
     "dev": "node --experimental-strip-types src/cli.ts",
-    "test:dual-stack": "npm run build && node --test dist/tests/dual-stack-compat.test.js"
+    "test:dual-stack": "npm run build && node --test dist/tests/dual-stack-compat.test.js",
+    "prepublishOnly": "npm run clean && npm test"
   },
   "engines": {
-    "node": ">=24.22.1 <25"
+    "node": "^24.22.1 || ^26.13.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "typescript": "^5.6.0"
-  },
-  "bin": {
-    "hivemem-ts-core": "dist/src/cli.js"
   }
 }

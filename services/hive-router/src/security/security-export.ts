@@ -1,4 +1,4 @@
-import type { AuditEvent, Prisma } from '@prisma/client';
+import type { AuditEvent, Prisma } from '../generated/prisma/client.js';
 
 export const SECURITY_EXPORT_ACTIONS = [
   'auth.login',

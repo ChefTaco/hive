@@ -1,4 +1,4 @@
-import { AuthMode, ProviderKind, type Provider } from '@prisma/client';
+import { AuthMode, ProviderKind, type Provider } from '../generated/prisma/client.js';
 import { decryptText } from '../security/crypto.js';
 import type { EndpointKind, ProviderCapability, ProviderRuntime } from './types.js';
 import { safeJsonParse } from '../utils/json.js';

@@ -1,0 +1,59 @@
+# Example: Hive IAM plus Redis with Docker Compose.
+#
+#   cd services/hive-iam/apps/iam-core/docker
+#   cp .env.example .env      # fill in every required value, then chmod 600 .env
+#   docker compose up -d --build
+#   curl http://127.0.0.1:4200/api/v1/health/ready
+#
+# Secrets come only from the environment or the .env file next to this file;
+# Compose refuses to start while a required one is missing. Ports are published
+# on loopback only: put a TLS reverse proxy in front for remote access, or set
+# TLS_CERT_PATH / TLS_KEY_PATH and mount the files.
+name: hive-iam
+
+services:
+  redis:
+    image: redis:7.4.7-alpine
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD (for example openssl rand -hex 32)}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  iam:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: hive-iam-server:local
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${IAM_PORT:-4200}:4200"
+    environment:
+      COOKIE_SECRET: ${COOKIE_SECRET:?set COOKIE_SECRET (for example openssl rand -hex 32)}
+      IAM_AGENT_SECRET: ${IAM_AGENT_SECRET:?set IAM_AGENT_SECRET (for example openssl rand -hex 32)}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?set SEED_ADMIN_PASSWORD, the initial admin password (16+ characters)}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379
+      # Optional. Unset values are generated on first start and written to
+      # /data/iam/initial-credentials.env inside the iam-data volume.
+      SEED_HIVE_ROUTER_CLIENT_SECRET: ${SEED_HIVE_ROUTER_CLIENT_SECRET:-}
+      SEED_HIVE_CLIENT_SECRET: ${SEED_HIVE_CLIENT_SECRET:-}
+      SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME:-admin}
+      SEED_HIVE_PUBLIC_URL: ${SEED_HIVE_PUBLIC_URL:-}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-}
+      WEBAUTHN_RP_ORIGIN: ${WEBAUTHN_RP_ORIGIN:-}
+    volumes:
+      - iam-data:/data
+    restart: unless-stopped
+
+volumes:
+  iam-data:
+  redis-data:

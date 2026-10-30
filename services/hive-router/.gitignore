@@ -15,3 +15,6 @@ data/traces
 tsconfig.tsbuildinfo
 ui/tsconfig.tsbuildinfo
 .deploy-vendor/
+
+# Prisma client generated from prisma/schema.prisma (npm run db:generate)
+src/generated/

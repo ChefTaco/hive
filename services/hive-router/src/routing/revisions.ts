@@ -1,6 +1,6 @@
 import { HTTPException } from 'hono/http-exception';
 import { randomUUID } from 'node:crypto';
-import type { Prisma } from '@prisma/client';
+import type { Prisma } from '../generated/prisma/client.js';
 import { z } from 'zod';
 import { prisma } from '../storage/client.js';
 import { digestText } from '../security/crypto.js';

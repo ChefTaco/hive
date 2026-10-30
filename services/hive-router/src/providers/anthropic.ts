@@ -1,4 +1,4 @@
-import { ProviderKind } from '@prisma/client';
+import { ProviderKind } from '../generated/prisma/client.js';
 import { prettyJson } from '../utils/json.js';
 import { parseAnthropicModels } from './model-parsers.js';
 import type { DiscoveredModel, ProviderAdapter, ProviderExecution, ProviderRuntime, RouteRequest } from './types.js';

@@ -6,8 +6,82 @@ provider, fails over when it is safe to, enforces per-key quotas, and records a
 trace for every request. The admin plane serves the unified Hive console, which
 also fronts Hive IAM and HiveMem when they are deployed.
 
-It is a single Node.js 24 process written in strict TypeScript (Hono, Prisma 7,
-SQLite). The admin UI is React + Vite.
+It is a single Node.js process written in strict TypeScript (Hono, Prisma 7,
+SQLite). The console is React + Vite and ships prebuilt in the package.
+
+## Quick start (npm)
+
+The easiest way to run Router, IAM and HiveMem together is the
+[`@hivemagnus/hive`](https://www.npmjs.com/package/@hivemagnus/hive) launcher,
+which writes the env files and secrets for you. To run the Router on its own:
+
+**Requirements**
+
+- Node.js 24 (`>=24.22.1`) or 26 (`>=26.13.0`). `better-sqlite3` installs from
+  a prebuilt binary on common platforms, or compiles with a C++ toolchain.
+- For console sign-in, either Linux with `pamtester` installed
+  (`HIVE_ROUTER_AUTH_MODE=os`, the default: operators use their OS password),
+  or a running [Hive IAM](https://github.com/ChefTaco/hive/tree/main/services/hive-iam)
+  (`HIVE_ROUTER_AUTH_MODE=iam-oidc`).
+
+**1. Write an env file**
+
+```bash
+mkdir -p ~/.hive && chmod 700 ~/.hive
+install -m 600 /dev/null ~/.hive/router.env
+echo "HIVE_ROUTER_SECRET=$(openssl rand -hex 32)" >> ~/.hive/router.env
+echo "HIVE_ROUTER_ADMIN_USERS=$USER" >> ~/.hive/router.env
+```
+
+That is the whole minimal configuration. By default the API listens on
+`127.0.0.1:4020`, the console on `127.0.0.1:9443`, and the SQLite database and
+traces go to `${HIVE_HOME:-~/.hive}/router` (created with mode `0700`).
+
+**2. Check and start**
+
+```bash
+npx @hivemagnus/hive-router check --env-file ~/.hive/router.env
+npx @hivemagnus/hive-router --env-file ~/.hive/router.env
+```
+
+Open `http://127.0.0.1:9443/` and sign in as one of `HIVE_ROUTER_ADMIN_USERS`.
+The OpenAI-compatible API is at `http://127.0.0.1:4020/v1`; both listeners
+answer `GET /health`. You can also install it globally with
+`npm install -g @hivemagnus/hive-router` and run `hive-router`.
+
+**TLS.** Set `TLS_CERT_PATH` and `TLS_KEY_PATH` to a PEM certificate and key
+to serve HTTPS on both listeners. TLS is required when `NODE_ENV=production`
+(or `REQUIRE_TLS=true`). For a quick test certificate:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes -days 365 -subj /CN=localhost \
+  -keyout ~/.hive/router.key -out ~/.hive/router.crt
+```
+
+To expose the Router beyond this machine, also set `HOST=0.0.0.0` (or
+`API_HOST`/`ADMIN_HOST`), `PUBLIC_API_URL` and `PUBLIC_ADMIN_URL`, for example
+`https://hive.example.com:4020` and `https://hive.example.com:9443`.
+
+**Commands**
+
+| Command | Purpose |
+|---|---|
+| `hive-router [start]` | Start the API and admin listeners (default). |
+| `hive-router check [--json]` | Validate configuration: env values, TLS files, writable data directory, `pamtester` or IAM, and reachability of IAM and HiveMem when configured. Starts nothing, writes nothing, exits `1` on problems. |
+| `hive-router env-schema` | Print every install-time setting as JSON (name, required, secret, default, how to generate secrets), plus ports, health path and optional dependencies. |
+| `hive-router create-key --name <name>` | Create a client API key (see [API keys from the command line](#api-keys-from-the-command-line)). |
+| `--env-file <path>` | Load a dotenv file first. Variables already in the environment win. Without it, `.env` and `.env.apikeys` in the working directory are read. |
+| `--help`, `--version` | Usage and version. |
+
+A missing or invalid setting stops startup with one line that names the
+variable and how to fix it.
+
+**Connecting IAM and HiveMem.** Set `HIVE_ROUTER_AUTH_MODE=iam-oidc`,
+`HIVE_IAM_INTERNAL_URL` and `HIVE_ROUTER_IAM_CLIENT_SECRET` (equal to IAM's
+`SEED_HIVE_ROUTER_CLIENT_SECRET`) to sign in through IAM and enable the IAM
+pages. Set `HIVEMEM_INTERNAL_URL` and `HIVE_ROUTER_MEMORY_PROXY_TOKEN` (equal to
+HiveMem's `HIVEMEM_ADMIN_TOKEN`) for the Memory pages. See
+[Configuration](#configuration) for everything else.
 
 ## Features
 
@@ -65,12 +139,19 @@ The IAM request types in `src/contracts/ui-api.generated.ts` are generated from 
 Hive IAM OpenAPI spec. Run `npm run contracts:generate` after you change IAM request
 schemas; `npm run typecheck` fails if the generated file is stale.
 
-## Requirements
+## Requirements (source checkout)
 
-- Node.js `>=24.22.1 <25` and npm
+- Node.js 24 (`>=24.22.1`) or 26 (`>=26.13.0`) and npm
 - For OS (PAM) login in production: `pamtester` on the host
 
-## Run locally
+## Run from a source checkout
+
+The Prisma client is generated into `src/generated/prisma` (gitignored).
+`npm run build` and `npm run typecheck` always regenerate it, and `dev`, `test`,
+`cli` and the smoke scripts regenerate it when it is missing or older than
+`prisma/schema.prisma` (`npm run db:generate` does it by hand). The build
+compiles it into `dist/`, so the published package needs no Prisma CLI and
+runs no install scripts of its own.
 
 ```bash
 cd services/hive-router
@@ -106,9 +187,12 @@ Next steps:
 
 ## Configuration
 
-Configuration comes from environment variables. The process loads `.env` from
-its working directory, then `.env.apikeys` if it exists, which overrides `.env`.
-Variables with no default are optional unless marked **required**.
+Configuration comes from environment variables. With `--env-file <path>` the
+process loads that file (existing environment variables win). Otherwise it
+loads `.env` from its working directory, then `.env.apikeys` if it exists,
+which overrides `.env`. Relative paths are resolved against the working
+directory. Variables with no default are optional unless marked **required**.
+`hive-router env-schema` prints the install-time subset as JSON.
 
 ### Listeners and URLs
 
@@ -118,11 +202,11 @@ Variables with no default are optional unless marked **required**.
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
 | `HOST` | `127.0.0.1` | Default bind address for both listeners. Set `0.0.0.0` (or a specific interface) to expose the router. |
 | `API_HOST` / `ADMIN_HOST` | `HOST` | Bind address for each listener. |
-| `API_PORT` | `443` | API plane port. |
+| `API_PORT` | `4020` | API plane port. |
 | `ADMIN_PORT` | `9443` | Admin plane port. |
-| `PUBLIC_API_URL` | `https://localhost:443` | Externally visible API URL, used in docs and enrollment output. |
-| `PUBLIC_ADMIN_URL` | `https://localhost:9443` | Externally visible admin URL. Also the base of the default OIDC redirect URI. |
-| `HIVE_UI_PUBLIC_URL` | `https://localhost:9443` | Public URL of the Hive console. |
+| `PUBLIC_API_URL` | `http(s)://localhost:API_PORT` | Externally visible API URL, used in docs and enrollment output. The default scheme is `https` when TLS is configured. |
+| `PUBLIC_ADMIN_URL` | `http(s)://localhost:ADMIN_PORT` | Externally visible admin URL. Also the base of the default OIDC redirect URI. |
+| `HIVE_UI_PUBLIC_URL` | `PUBLIC_ADMIN_URL` | Public URL of the Hive console. |
 | `TLS_CERT_PATH` / `TLS_KEY_PATH` | | PEM certificate and key. Both are required when `NODE_ENV=production` or `REQUIRE_TLS=true`. |
 | `REQUIRE_TLS` | `false` | Refuse to start without TLS, even outside production. |
 
@@ -130,9 +214,10 @@ Variables with no default are optional unless marked **required**.
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATABASE_URL` | `file:./data/router.db` | SQLite database (`file:` URLs only). |
-| `DATA_DIR` | `./data` | Data directory, created with mode `0700`. |
-| `TRACE_DIR` | `./data/traces` | Trace body storage. |
+| `HIVE_HOME` | `~/.hive` | Base directory for Hive state. |
+| `DATA_DIR` | `$HIVE_HOME/router` | Data directory, created with mode `0700`. |
+| `DATABASE_URL` | `file:$DATA_DIR/router.db` | SQLite database (`file:` URLs only). |
+| `TRACE_DIR` | `$DATA_DIR/traces` | Trace body storage. |
 | `DEFAULT_TRACE_RETENTION_DAYS` | `7` | Trace retention. |
 | `CAPTURE_REQUEST_BODIES` / `CAPTURE_RESPONSE_BODIES` | `false` | Keep raw request and response bodies with traces. |
 | `CAPTURE_BINARY_MEDIA` | `false` | Keep binary media in trace bodies. |
@@ -148,7 +233,7 @@ Variables with no default are optional unless marked **required**.
 | `HIVE_ROUTER_ADMIN_USERS` | `admin` | Comma-separated allowlist of account names that may sign in. Set it explicitly. |
 | `HIVE_ROUTER_AUTH_MODE` | `os` | `os`: verify the OS password through PAM (`pamtester`). `iam-oidc`: sign in through Hive IAM. |
 | `HIVE_ROUTER_OS_AUTH_COMMAND` | | Replaces `pamtester` with another command. Intended for tests and development. |
-| `HIVE_ROUTER_CLI_TOKEN` | | Shared token required by `npm run cli -- create-key` when set. |
+| `HIVE_ROUTER_CLI_TOKEN` | | Shared token required by `hive-router create-key` when set. |
 | `SEED_CLIENT_API_KEY` | | Optional client key inserted on first start. |
 
 ### Hive IAM integration (optional)
@@ -156,7 +241,7 @@ Variables with no default are optional unless marked **required**.
 | Variable | Default | Description |
 |---|---|---|
 | `HIVE_IAM_INTERNAL_URL` | `http://127.0.0.1:4200` | IAM base URL as the router reaches it. |
-| `HIVE_IAM_PUBLIC_URL` | `https://localhost:9443/iam` | IAM URL shown to users. |
+| `HIVE_IAM_PUBLIC_URL` | `PUBLIC_ADMIN_URL/iam` | IAM URL shown to users. |
 | `HIVE_ROUTER_IAM_CLIENT_ID` | `hive-router` | OAuth client the router uses. |
 | `HIVE_ROUTER_IAM_CLIENT_SECRET` | | Secret for that client. Required when `HIVE_ROUTER_AUTH_MODE=iam-oidc`; also enables the `/api/iam/*` proxy. |
 | `HIVE_ROUTER_IAM_REDIRECT_URI` | `PUBLIC_ADMIN_URL/api/auth/oidc/callback` | OIDC redirect URI. |
@@ -173,7 +258,7 @@ Variables with no default are optional unless marked **required**.
 | Variable | Default | Description |
 |---|---|---|
 | `HIVEMEM_INTERNAL_URL` | `http://127.0.0.1:18790` | HiveMem base URL for the Memory panels and the `/v1/*` and `/dashboard` proxy. |
-| `HIVEMEM_PUBLIC_URL` | `https://localhost:9443` | HiveMem URL shown to users and agents. |
+| `HIVEMEM_PUBLIC_URL` | `PUBLIC_ADMIN_URL` | HiveMem URL shown to users and agents. |
 | `HIVEMEM_CA_CERT_PATH` | | Certificate trusted for HiveMem HTTPS. |
 | `HIVE_ROUTER_MEMORY_PROXY_TOKEN` | | Server-side HiveMem token for `/api/memory/*`. It is never sent to the browser. |
 | `HIVE_SKILLS_INTERNAL_URL` / `HIVE_SKILLS_PUBLIC_URL` | | Optional Hive Skills registry shown in the console. |
@@ -222,8 +307,13 @@ Variables with no default are optional unless marked **required**.
 ## API keys from the command line
 
 ```bash
-npm run cli -- create-key --name "my-service" --metadata '{"service":"my-api","env":"prod"}'
+hive-router create-key --name "my-service" --metadata '{"service":"my-api","env":"prod"}'
+# from a source checkout:
+npm run cli -- create-key --name "my-service"
 ```
+
+It uses the same configuration (and `--env-file`) as the server and writes to
+the same database.
 
 Flags: `--disabled` creates the key disabled, `--json` prints machine-readable
 output, and `--token <value>` supplies `HIVE_ROUTER_CLI_TOKEN` when that is set.
@@ -311,6 +401,12 @@ writable by that user. The image does not include PAM, so in a container use
 `HIVE_ROUTER_AUTH_MODE=iam-oidc` or provide your own
 `HIVE_ROUTER_OS_AUTH_COMMAND`.
 
+The image keeps its historical defaults, which differ from the npm package:
+`API_PORT=443`, `ADMIN_PORT=9443`, `PUBLIC_API_URL=https://localhost:443`,
+`PUBLIC_ADMIN_URL=https://localhost:9443`, and data under
+`/repo/services/hive-router/data`. `docker-compose.example.yml` overrides the
+ports and data paths.
+
 ### Production checklist
 
 - Set `NODE_ENV=production`. The router then refuses to start without
@@ -354,8 +450,8 @@ The evaluation reads credentials from the repository-root `.env` (override with
 `EVAL_FIXTURES`, `EVAL_OUTPUT`, `EVAL_LIMIT`, `EVAL_REPEATS` (1–5),
 `EVAL_TIMEOUT_MS`, `EVAL_MAX_TOKENS`, `LLAMACPP_MODEL`, `LLAMACPP_API_KEY` and
 `LLAMACPP_THINKING=low`. See
-[the routing contract](../../docs/HIVEROUTER_ROUTING_CONTRACT.md) and
-[the TypeSafe direct API notes](../../docs/TYPESAFE_DIRECT_API.md).
+[the routing contract](https://github.com/ChefTaco/hive/blob/main/docs/HIVEROUTER_ROUTING_CONTRACT.md) and
+[the TypeSafe direct API notes](https://github.com/ChefTaco/hive/blob/main/docs/TYPESAFE_DIRECT_API.md).
 
 ## Repository layout
 

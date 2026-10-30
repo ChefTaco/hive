@@ -1,6 +1,6 @@
 import { sqliteWrite } from '../storage/sqlite-write.js';
 import { observeStream } from "./observed-stream.js";
-import { TraceOutcome, type Provider as ProviderRecord } from '@prisma/client';
+import { TraceOutcome, type Provider as ProviderRecord } from '../generated/prisma/client.js';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import type { Context } from 'hono';

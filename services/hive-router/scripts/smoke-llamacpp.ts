@@ -1,4 +1,4 @@
-import { ProviderKind } from '@prisma/client';
+import { ProviderKind } from '../src/generated/prisma/client.js';
 import { OpenAiCompatibleAdapter } from '../src/providers/openai-compatible.js';
 import type { ProviderRuntime, RouteRequest } from '../src/providers/types.js';
 

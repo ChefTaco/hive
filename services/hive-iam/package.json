@@ -5,7 +5,7 @@
   "description": "Hive IAM core API and Node middleware SDK",
   "type": "module",
   "engines": {
-    "node": ">=24.22.1 <25"
+    "node": "^24.22.1 || ^26.13.0"
   },
   "workspaces": [
     "apps/*",
@@ -15,8 +15,8 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "iam-core:build": "npm --workspace hive-iam-core run build",
-    "iam-core:test": "npm --workspace hive-iam-core test",
+    "iam-core:build": "npm --workspace @hivemagnus/hive-iam-server run build",
+    "iam-core:test": "npm --workspace @hivemagnus/hive-iam-server test",
     "iam-sdk:build": "npm --workspace @hivemagnus/hive-iam-sdk run build",
     "iam-sdk:test": "npm --workspace @hivemagnus/hive-iam-sdk test",
     "deploy:iam-core": "bash scripts/deploy-iam-core.sh"

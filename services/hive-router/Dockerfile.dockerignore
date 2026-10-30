@@ -12,3 +12,4 @@
 **/test-results
 **/*.db
 **/*.db-*
+**/src/generated
