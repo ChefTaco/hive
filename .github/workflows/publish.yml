@@ -75,6 +75,7 @@ jobs:
           npm --prefix services/hive-mem/sdks/typescript run build
           npm --prefix services/hive-mem/sdks/typescript test
           npm run check:packs
+          npm run check:npm12
 
       - name: Publish
         env:

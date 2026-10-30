@@ -33,6 +33,10 @@ hive init
 hive start
 ```
 
+The Router and IAM servers use native add-ons (`better-sqlite3`, `argon2`) whose install scripts
+npm 12 blocks by default. `hive` installs the servers into `~/.hive/runtime` with those two
+allowed in its `package.json`, and `hive doctor` checks that they load.
+
 `hive init` explains each step and asks before it installs anything, starts a Docker container or
 changes an existing file. Press Enter to take the default answer. In scripts, `hive init --yes`
 takes every default without asking. Without `--yes`, `init` refuses to run when standard input is

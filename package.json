@@ -64,6 +64,7 @@
     "test:launcher": "npm --prefix packages/hive test",
     "hooks:install": "git config core.hooksPath .githooks",
     "check:private": "bash scripts/check-private-data.sh",
+    "check:npm12": "bash scripts/check-npm12-install.sh",
     "check:packs": "node scripts/check-npm-packs.mjs"
   }
 }

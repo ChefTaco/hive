@@ -37,8 +37,8 @@ See the [launcher README](packages/hive) for options, upgrading and uninstalling
 | [`@hivemagnus/hivemem-sdk`](services/hive-mem/sdks/typescript) | TypeScript client for the HiveMem REST API |
 | [`@hivemagnus/hive-iam-sdk`](services/hive-iam/packages/iam-sdk) | JWT verification and auth middleware for Hono and Express services that trust Hive IAM |
 | [`@hivemagnus/hivemem-server`](services/hive-mem/ts-core) | The HiveMem memory server (`npx @hivemagnus/hivemem-server --env-file hivemem.env`); `issue-token` mints access tokens |
-| [`@hivemagnus/hive-router`](services/hive-router) | The Hive Router and the Hive console (`npx @hivemagnus/hive-router --env-file router.env`) |
-| [`@hivemagnus/hive-iam-server`](services/hive-iam/apps/iam-core) | The Hive IAM server (`npx @hivemagnus/hive-iam-server --env-file iam.env`); also available as a Docker image |
+| [`@hivemagnus/hive-router`](services/hive-router) | The Hive Router and the Hive console (`npx --allow-scripts=better-sqlite3 @hivemagnus/hive-router --env-file router.env`) |
+| [`@hivemagnus/hive-iam-server`](services/hive-iam/apps/iam-core) | The Hive IAM server (`npx --allow-scripts=better-sqlite3,argon2 @hivemagnus/hive-iam-server --env-file iam.env`); also available as a Docker image |
 
 ## Quick start (local development)
 

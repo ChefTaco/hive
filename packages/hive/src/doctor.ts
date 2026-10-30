@@ -6,7 +6,7 @@ import { EnvDocument } from "./envfile.js";
 import { isPortFree } from "./net.js";
 import { paint, type Output } from "./output.js";
 import type { HivePaths } from "./paths.js";
-import { envFileArgs, installedServer, npmAvailable, runServerCommandAsync, type CommandResult } from "./runtime.js";
+import { envFileArgs, installedServer, nativeModuleFix, nativeModuleProblems, npmAvailable, runServerCommandAsync, type CommandResult } from "./runtime.js";
 import { SERVICES, type ServiceName } from "./services.js";
 import { collectStatus, configuredServices } from "./status.js";
 import { opensslVersion } from "./tls.js";
@@ -96,6 +96,11 @@ export async function runDoctor(paths: HivePaths): Promise<DoctorCheck[]> {
     if (!installed) add("Packages", "fail", `${SERVICES[service].packageName} is not installed; run \`hive install ${service}\``);
     else if (majorOf(installed.version) !== launcherMajor()) add("Packages", "warn", `${SERVICES[service].packageName} ${installed.version} does not match the launcher's major version ${launcherMajor()}; run \`hive install ${service}\``);
     else add("Packages", "ok", `${SERVICES[service].packageName} ${installed.version}`);
+    if (installed) {
+      const broken = nativeModuleProblems(paths, service);
+      if (broken.length > 0) add("Packages", "fail", `${SERVICES[service].packageName}: ${broken.map((item) => item.module).join(", ")} does not load`, [...broken.map((item) => `${item.module}: ${item.error}`), nativeModuleFix(paths, broken.map((item) => item.module))]);
+      else if (SERVICES[service].nativeModules.length > 0) add("Packages", "ok", `${SERVICES[service].packageName}: native add-ons load (${SERVICES[service].nativeModules.join(", ")})`);
+    }
   }
 
   for (const service of status.services) {

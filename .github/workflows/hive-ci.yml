@@ -132,6 +132,9 @@ jobs:
       - name: npm package contents (pack --dry-run of every publishable package)
         run: npm run check:packs
 
+      - name: Install the packed servers with npm 12
+        run: npm run check:npm12
+
       - name: Install browser
         run: npx playwright install --with-deps chromium
         working-directory: services/hive-router

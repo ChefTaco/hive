@@ -26,9 +26,16 @@ own.
 
 - Node.js 24 (`>=24.22.1`) or 26 (`>=26.13.0`) on Linux or macOS
 - Redis 7 or later (queues, rate limiting, WebAuthn ceremonies)
-- npm must be allowed to run install scripts: `better-sqlite3` downloads a
-  prebuilt binary during install, and builds from source (needs `python3`,
-  `make` and a C++ compiler) when none matches your platform.
+- npm must be allowed to run the install scripts of `better-sqlite3` and
+  `argon2`. `better-sqlite3` downloads a prebuilt binary during install, and
+  either one builds from source (needs `python3`, `make` and a C++ compiler)
+  when no binary matches your platform. npm 12 blocks dependency install
+  scripts unless you allow them: pass `--allow-scripts=better-sqlite3,argon2`
+  to `npx` or `npm install -g`, or, in your own project, add
+  `"allowScripts": { "better-sqlite3": true, "argon2": true }` to its
+  `package.json` (npm rejects the flag there). Without it, the install succeeds
+  but the server cannot open its database. The `@hivemagnus/hive` launcher sets
+  this up for you.
 
 No Prisma CLI, database server or post-install step is needed; the database
 schema is created and upgraded automatically on start.
@@ -48,15 +55,16 @@ EOF
 chmod 600 iam.env
 
 # 3. Check, then start
-npx @hivemagnus/hive-iam-server check --env-file iam.env
-npx @hivemagnus/hive-iam-server --env-file iam.env
+npx --allow-scripts=better-sqlite3,argon2 @hivemagnus/hive-iam-server check --env-file iam.env
+npx --allow-scripts=better-sqlite3,argon2 @hivemagnus/hive-iam-server --env-file iam.env
 
 # 4. In another terminal
 curl http://127.0.0.1:4200/api/v1/health/ready
 curl http://127.0.0.1:4200/api/v1/oauth/.well-known/openid-configuration
 ```
 
-Install it permanently with `npm install -g @hivemagnus/hive-iam-server` and run
+Install it permanently with
+`npm install -g --allow-scripts=better-sqlite3,argon2 @hivemagnus/hive-iam-server` and run
 `hive-iam-server --env-file iam.env`.
 
 On the first start the server:

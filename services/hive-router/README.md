@@ -40,14 +40,29 @@ traces go to `${HIVE_HOME:-~/.hive}/router` (created with mode `0700`).
 **2. Check and start**
 
 ```bash
-npx @hivemagnus/hive-router check --env-file ~/.hive/router.env
-npx @hivemagnus/hive-router --env-file ~/.hive/router.env
+npx --allow-scripts=better-sqlite3 @hivemagnus/hive-router check --env-file ~/.hive/router.env
+npx --allow-scripts=better-sqlite3 @hivemagnus/hive-router --env-file ~/.hive/router.env
 ```
 
 Open `http://127.0.0.1:9443/` and sign in as one of `HIVE_ROUTER_ADMIN_USERS`.
 The OpenAI-compatible API is at `http://127.0.0.1:4020/v1`; both listeners
 answer `GET /health`. You can also install it globally with
-`npm install -g @hivemagnus/hive-router` and run `hive-router`.
+`npm install -g --allow-scripts=better-sqlite3 @hivemagnus/hive-router` and run `hive-router`.
+
+**Install scripts (npm 12 and later).** The Router uses `better-sqlite3`, a
+native add-on whose install script downloads (or, if none matches your
+platform, builds) its binary. npm 12 blocks dependency install scripts unless
+you allow them, which is what `--allow-scripts=better-sqlite3` does for `npx`
+and global installs. When you add the Router to your own project, allow it in
+that project's `package.json` instead (npm rejects the flag there):
+
+```json
+{ "allowScripts": { "better-sqlite3": true } }
+```
+
+Without this, the install succeeds but the Router cannot open its database.
+npm 11 runs the script without asking. The `@hivemagnus/hive` launcher sets
+this up for you.
 
 **TLS.** Set `TLS_CERT_PATH` and `TLS_KEY_PATH` to a PEM certificate and key
 to serve HTTPS on both listeners. TLS is required when `NODE_ENV=production`

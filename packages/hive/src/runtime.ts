@@ -152,13 +152,77 @@ export function installPlan(paths: HivePaths, services: readonly ServiceName[], 
   });
 }
 
-function ensureRuntimeManifest(paths: HivePaths): void {
+/** Every native add-on the servers need, which the runtime manifest allows to run its install script. */
+export const NATIVE_MODULES: readonly string[] = [...new Set(Object.values(SERVICES).flatMap((service) => service.nativeModules))].sort();
+
+/** Optional add-ons with a JavaScript fallback; denied explicitly so npm 12 does not warn about them. */
+export const DENIED_INSTALL_SCRIPTS: readonly string[] = ["msgpackr-extract"];
+
+/**
+ * The runtime folder is an npm project, so npm 12 only runs dependency install scripts
+ * listed in its `allowScripts`. Adds the servers' native add-ons, keeping any entries
+ * already there (including a deliberate `false`).
+ */
+export function runtimeManifest(existing: Record<string, unknown> | null): Record<string, unknown> {
+  const manifest: Record<string, unknown> = existing ?? { name: "hive-runtime", private: true, description: "Hive server packages installed by @hivemagnus/hive. Manage them with `hive install`." };
+  const current = manifest["allowScripts"];
+  const allow: Record<string, unknown> = current && typeof current === "object" && !Array.isArray(current) ? { ...(current as Record<string, unknown>) } : {};
+  for (const name of NATIVE_MODULES) if (!(name in allow)) allow[name] = true;
+  for (const name of DENIED_INSTALL_SCRIPTS) if (!(name in allow)) allow[name] = false;
+  manifest["allowScripts"] = allow;
+  return manifest;
+}
+
+export function ensureRuntimeManifest(paths: HivePaths): void {
   ensurePrivateDir(paths.home);
   ensurePrivateDir(paths.runtime);
-  const manifest = join(paths.runtime, "package.json");
-  if (!existsSync(manifest)) {
-    writePrivateFile(manifest, `${JSON.stringify({ name: "hive-runtime", private: true, description: "Hive server packages installed by @hivemagnus/hive. Manage them with `hive install`." }, null, 2)}\n`);
+  const file = join(paths.runtime, "package.json");
+  let existing: Record<string, unknown> | null = null;
+  if (existsSync(file)) {
+    try {
+      existing = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    } catch {
+      throw new CliError(`${file} is not valid JSON; fix or remove it, then retry`);
+    }
   }
+  const next = `${JSON.stringify(runtimeManifest(existing), null, 2)}\n`;
+  if (existing === null || readFileSync(file, "utf8") !== next) writePrivateFile(file, next);
+}
+
+/**
+ * Native add-ons of an installed server that fail to load (for example because npm skipped
+ * their install script). Each entry is the module name and the first line of its error.
+ */
+export function nativeModuleProblems(paths: HivePaths, service: ServiceName): Array<{ module: string; error: string }> {
+  const modules = SERVICES[service].nativeModules;
+  const server = installedServer(paths, service);
+  if (!server || modules.length === 0) return [];
+  const packageJson = join(paths.runtime, "node_modules", ...SERVICES[service].packageName.split("/"), "package.json");
+  const probe = [
+    'const { createRequire } = require("node:module");',
+    "const load = createRequire(process.argv[1]);",
+    "const failures = [];",
+    "for (const name of process.argv.slice(2)) {",
+    "  try {",
+    '    const mod = load(name);',
+    '    if (name === "better-sqlite3") new mod(":memory:").close();',
+    "  } catch (error) {",
+    '    failures.push({ module: name, error: String(error && error.message || error).split("\\n")[0] });',
+    "  }",
+    "}",
+    "process.stdout.write(JSON.stringify(failures));",
+  ].join("\n");
+  const result = spawnSync(process.execPath, ["-e", probe, packageJson, ...modules], { encoding: "utf8", timeout: 30_000 });
+  if (result.status !== 0) return modules.map((module) => ({ module, error: (result.stderr || "the check could not run").trim().split("\n")[0] ?? "" }));
+  try {
+    return JSON.parse(result.stdout) as Array<{ module: string; error: string }>;
+  } catch {
+    return modules.map((module) => ({ module, error: "the check produced no result" }));
+  }
+}
+
+export function nativeModuleFix(paths: HivePaths, modules: readonly string[]): string {
+  return `npm did not build ${modules.join(" and ")}. Run \`hive install\` again, or \`npm rebuild ${modules.join(" ")} --prefix ${paths.runtime}\`. On npm 12, ${join(paths.runtime, "package.json")} must list them under "allowScripts"; \`hive install\` adds them.`;
 }
 
 export function npmAvailable(): string | null {
@@ -195,6 +259,8 @@ export async function installServers(paths: HivePaths, services: readonly Servic
   for (const entry of plan) {
     const installed = installedServer(paths, entry.service);
     if (!installed) throw new CliError(`${entry.packageName} did not install a ${SERVICES[entry.service].bin} command in ${paths.runtime}`);
+    const broken = nativeModuleProblems(paths, entry.service);
+    if (broken.length > 0) throw new CliError(`${entry.packageName} installed, but ${broken.map((item) => `${item.module} does not load (${item.error})`).join("; ")}. ${nativeModuleFix(paths, broken.map((item) => item.module))}`);
     output.ok(`${entry.packageName} ${installed.version}`);
   }
   return true;

@@ -43,5 +43,9 @@ The first public release.
 - Without explicit paths, the servers keep their data in `${HIVE_HOME:-~/.hive}/<service>`.
 - HiveMem refuses to start if Qdrant is unreachable. Set `HIVEMEM_TS_PERSISTENCE=memory` to opt in
   to volatile in-memory storage.
+- The Router and IAM servers use native add-ons (`better-sqlite3`, and `argon2` for IAM) whose
+  install scripts npm 12 blocks by default. The `hive` launcher allows them; when installing a
+  server yourself, pass `--allow-scripts=better-sqlite3,argon2` to `npx` or `npm install -g`, or
+  list them under `allowScripts` in your project's `package.json`.
 
 [1.0.0]: https://github.com/ChefTaco/hive/releases/tag/v1.0.0

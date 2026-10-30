@@ -12,6 +12,8 @@ export interface ServiceDef {
   summary: string;
   /** External store the server needs, set up by `hive init`. */
   store: "qdrant" | "redis" | null;
+  /** Native add-ons whose install scripts must run (npm 12 blocks them unless allowed). */
+  nativeModules: readonly string[];
 }
 
 export const SERVICES: Record<ServiceName, ServiceDef> = {
@@ -22,6 +24,7 @@ export const SERVICES: Record<ServiceName, ServiceDef> = {
     bin: "hivemem-server",
     summary: "long-term memory API for agents (needs Qdrant)",
     store: "qdrant",
+    nativeModules: [],
   },
   router: {
     name: "router",
@@ -30,6 +33,7 @@ export const SERVICES: Record<ServiceName, ServiceDef> = {
     bin: "hive-router",
     summary: "model gateway and the Hive console (signs in through IAM when it is set up, shows HiveMem in the console when it is set up)",
     store: null,
+    nativeModules: ["better-sqlite3"],
   },
   iam: {
     name: "iam",
@@ -38,6 +42,7 @@ export const SERVICES: Record<ServiceName, ServiceDef> = {
     bin: "hive-iam-server",
     summary: "identity provider: users, roles, OAuth clients (needs Redis)",
     store: "redis",
+    nativeModules: ["better-sqlite3", "argon2"],
   },
 };
 
