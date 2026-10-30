@@ -2,7 +2,8 @@
 #
 #   cd services/hive-iam/apps/iam-core/docker
 #   cp .env.example .env      # fill in every required value, then chmod 600 .env
-#   docker compose up -d --build
+#   docker compose up -d --build                 # or, with the published image:
+#   IAM_IMAGE=ghcr.io/cheftaco/hive-iam-server:1 docker compose up -d --no-build
 #   curl http://127.0.0.1:4200/api/v1/health/ready
 #
 # Secrets come only from the environment or the .env file next to this file;
@@ -30,7 +31,9 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: hive-iam-server:local
+    # Set IAM_IMAGE (for example ghcr.io/cheftaco/hive-iam-server:1) and run
+    # `docker compose up -d --no-build` to use the published image instead.
+    image: ${IAM_IMAGE:-hive-iam-server:local}
     depends_on:
       redis:
         condition: service_healthy

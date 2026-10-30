@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- The Hive IAM server is published as the Docker image `ghcr.io/cheftaco/hive-iam-server`
+  (`linux/amd64` and `linux/arm64`, with build provenance and an SBOM). The Compose example can
+  run it instead of building (`IAM_IMAGE`), and `npm run check:iam-compose` runs that example end
+  to end.
+
 ## [1.0.0] - 2026-10-30
 
 The first public release.
@@ -48,4 +57,5 @@ The first public release.
   server yourself, pass `--allow-scripts=better-sqlite3,argon2` to `npx` or `npm install -g`, or
   list them under `allowScripts` in your project's `package.json`.
 
+[Unreleased]: https://github.com/ChefTaco/hive/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/ChefTaco/hive/releases/tag/v1.0.0

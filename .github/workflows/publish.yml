@@ -1,6 +1,7 @@
 name: Publish to npm
 
-# Publishes every @hivemagnus package whose version is not on npm yet, with provenance.
+# Publishes every @hivemagnus package whose version is not on npm yet, with provenance, then the
+# hive-iam-server Docker image (linux/amd64 and linux/arm64) to GitHub Container Registry.
 # - Push a tag vX.Y.Z (matching every package version) to publish.
 # - Run it by hand (Actions > Publish to npm > Run workflow) for a dry run.
 # Publishing waits for approval on the `npm-publish` environment, then authenticates to npm
@@ -95,3 +96,105 @@ jobs:
               (cd "$dir" && npm publish --provenance --ignore-scripts --access public)
             fi
           done
+
+  docker:
+    name: Publish the IAM Docker image
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+      IMAGE: ghcr.io/cheftaco/hive-iam-server
+      CONTEXT: services/hive-iam/apps/iam-core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Image tags
+        id: meta
+        run: |
+          version="$(node -p "require('./$CONTEXT/package.json').version")"
+          # A manual (non-dry) run may only publish the image of a released version, built
+          # from the same IAM sources as its tag.
+          if [ "$DRY_RUN" != "true" ] && ! git diff --quiet "v$version" HEAD -- "$CONTEXT"; then
+            echo "::error::$CONTEXT differs from tag v$version; release a new version instead"; exit 1
+          fi
+          tags="$IMAGE:$version"
+          if [[ "$version" != *-* ]]; then
+            IFS=. read -r major minor _ <<< "$version"
+            tags+=",$IMAGE:$major.$minor,$IMAGE:$major,$IMAGE:latest"
+          fi
+          exists=false
+          if docker buildx imagetools inspect "$IMAGE:$version" >/dev/null 2>&1; then
+            echo "$IMAGE:$version is already published; skipping"
+            exists=true
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "exists=$exists" >> "$GITHUB_OUTPUT"
+
+      - name: Setup QEMU
+        if: steps.meta.outputs.exists == 'false'
+        uses: docker/setup-qemu-action@v4
+
+      - name: Setup Docker Buildx
+        if: steps.meta.outputs.exists == 'false'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build the amd64 image
+        if: steps.meta.outputs.exists == 'false'
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ env.CONTEXT }}
+          platforms: linux/amd64
+          load: true
+          tags: hive-iam-server:local
+          cache-from: type=gha,scope=hive-iam
+          cache-to: type=gha,mode=max,scope=hive-iam
+
+      - name: Run the Compose example against it
+        if: steps.meta.outputs.exists == 'false'
+        run: bash scripts/check-iam-compose.sh --no-build
+
+      - name: Log in to GitHub Container Registry
+        if: steps.meta.outputs.exists == 'false' && env.DRY_RUN != 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build linux/amd64 and linux/arm64${{ env.DRY_RUN != 'true' && ' and push' || '' }}
+        id: build
+        if: steps.meta.outputs.exists == 'false'
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ env.CONTEXT }}
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.DRY_RUN != 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=hive-iam-server
+            org.opencontainers.image.description=Hive IAM server: OAuth 2.0 / OpenID Connect identity service
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}/tree/main/${{ env.CONTEXT }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=Apache-2.0
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=hive-iam
+
+      - name: Attest the image
+        if: steps.meta.outputs.exists == 'false' && env.DRY_RUN != 'true'
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

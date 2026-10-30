@@ -177,23 +177,31 @@ separate step.
 
 ## Docker
 
-The [`Dockerfile`](https://github.com/ChefTaco/hive/blob/main/services/hive-iam/apps/iam-core/Dockerfile)
-builds an image that runs the same `hive-iam-server` entry point as an
-unprivileged user, keeps all state in the `/data` volume, listens on
-`0.0.0.0:4200` inside the container and has a readiness health check.
+Each release is published as `ghcr.io/cheftaco/hive-iam-server` for
+`linux/amd64` and `linux/arm64`, tagged with its version (`1.0.0`, `1.0`, `1`
+and `latest`) and carrying build provenance and an SBOM. The image runs the
+same `hive-iam-server` entry point as an unprivileged user, keeps all state in
+the `/data` volume, listens on `0.0.0.0:4200` inside the container and has a
+readiness health check.
 
 ```bash
-docker build -t hive-iam-server:local services/hive-iam/apps/iam-core
 docker run -d --name hive-iam -p 127.0.0.1:4200:4200 -v hive-iam-data:/data \
   --env-file iam.env -e REDIS_URL=redis://:PASSWORD@redis-host:6379 \
-  hive-iam-server:local
+  ghcr.io/cheftaco/hive-iam-server:1
 ```
+
+To build it yourself from a clone, use the
+[`Dockerfile`](https://github.com/ChefTaco/hive/blob/main/services/hive-iam/apps/iam-core/Dockerfile):
+`docker build -t hive-iam-server:local services/hive-iam/apps/iam-core`.
 
 [`docker/compose.yml`](https://github.com/ChefTaco/hive/blob/main/services/hive-iam/apps/iam-core/docker/compose.yml)
 runs IAM with a password-protected Redis, named volumes and loopback-only
 ports. Copy `docker/.env.example` to `docker/.env`, fill in the required
-secrets, then `docker compose up -d --build` in that directory. Compose refuses
-to start while a required secret is missing.
+secrets, then run `docker compose up -d --build` in that directory, or set
+`IAM_IMAGE=ghcr.io/cheftaco/hive-iam-server:1` and run
+`docker compose up -d --no-build` to use the published image. Compose refuses
+to start while a required secret is missing. `npm run check:iam-compose` from
+the repository root runs this example end to end with throwaway secrets.
 
 ## Health
 
