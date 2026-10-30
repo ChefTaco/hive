@@ -121,8 +121,8 @@ jobs:
         run: |
           version="$(node -p "require('./$CONTEXT/package.json').version")"
           # A manual (non-dry) run may only publish the image of a released version, built
-          # from the same IAM sources as its tag.
-          if [ "$DRY_RUN" != "true" ] && ! git diff --quiet "v$version" HEAD -- "$CONTEXT"; then
+          # from the same IAM sources as its tag (the Compose example and docs may differ).
+          if [ "$DRY_RUN" != "true" ] && ! git diff --quiet "v$version" HEAD -- "$CONTEXT" ":!$CONTEXT/docker" ":!$CONTEXT/*.md"; then
             echo "::error::$CONTEXT differs from tag v$version; release a new version instead"; exit 1
           fi
           tags="$IMAGE:$version"
