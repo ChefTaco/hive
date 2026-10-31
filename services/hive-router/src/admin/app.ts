@@ -671,9 +671,12 @@ async function probeHiveService(
   }
 }
 
-async function buildHiveStatus(env: ReturnType<typeof loadEnv>, requestId?: string): Promise<HiveStatusResponse> {
+export async function buildHiveStatus(env: ReturnType<typeof loadEnv>, requestId?: string): Promise<HiveStatusResponse> {
   const tlsCertificate = inspectTlsCertificate({ publicUrl: env.PUBLIC_ADMIN_URL, ...(env.TLS_CERT_PATH ? { certPath: env.TLS_CERT_PATH } : {}) });
   const securityExporterJwks = getSecurityExporterJwksStatus(env.HIVE_ROUTER_IAM_JWKS_MAX_AGE_MS);
+  // Exporter keys load on demand; an unused cache is expected on a fresh install.
+  const exporterKeysDegraded = securityExporterJwks.state !== 'healthy'
+    && securityExporterJwks.state !== 'uninitialized';
   const [providerCount, enabledProviders, routeRuleCount, traceCount, failureCount, failoverCount] = await Promise.all([
     prisma.provider.count(),
     prisma.provider.count({ where: { enabled: true } }),
@@ -687,7 +690,7 @@ async function buildHiveStatus(env: ReturnType<typeof loadEnv>, requestId?: stri
     key: 'router',
     name: 'Hive Router',
     role: 'traffic routing and OpenAI-compatible gateway',
-    status: failureCount > 0 || tlsCertificate.status !== 'pass' || securityExporterJwks.state !== 'healthy' ? 'degraded' : 'online',
+    status: failureCount > 0 || tlsCertificate.status !== 'pass' || exporterKeysDegraded ? 'degraded' : 'online',
     summary: `${enabledProviders}/${providerCount} providers enabled`,
     internalUrl: env.PUBLIC_ADMIN_URL,
     publicUrl: env.PUBLIC_API_URL,
@@ -701,7 +704,7 @@ async function buildHiveStatus(env: ReturnType<typeof loadEnv>, requestId?: stri
         name: 'security-exporter-jwks',
         status: securityExporterJwks.state === 'healthy' ? 'pass' : securityExporterJwks.state === 'expired' ? 'fail' : 'warn',
         message: securityExporterJwks.state === 'uninitialized'
-          ? 'not cached yet'
+          ? 'not cached yet; first exporter request will load IAM keys'
           : `${Math.ceil(securityExporterJwks.remainingMs / 1_000)}s remaining (${securityExporterJwks.state})`,
       },
     ],

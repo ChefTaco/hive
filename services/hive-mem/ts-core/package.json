@@ -1,6 +1,6 @@
 {
   "name": "@hivemagnus/hivemem-server",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "HiveMem: a self-hosted shared memory server for AI agents, with a REST API, JWT auth, and Qdrant persistence.",
   "keywords": [
     "hive",

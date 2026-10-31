@@ -1,1 +1,1 @@
-export const IAM_VERSION = '1.0.1'
+export const IAM_VERSION = '1.0.2'

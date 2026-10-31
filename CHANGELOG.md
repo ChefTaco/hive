@@ -6,6 +6,14 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-31
+
+### Fixed
+
+- **Hive console**: a fresh Router no longer appears degraded solely because the optional
+  security exporter has not loaded IAM keys yet. The key-cache diagnostic remains visible,
+  and aging or expired cached keys still degrade the Router status.
+
 ## [1.0.1] - 2026-10-31
 
 ### Added

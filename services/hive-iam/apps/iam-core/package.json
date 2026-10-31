@@ -1,6 +1,6 @@
 {
   "name": "@hivemagnus/hive-iam-server",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Hive IAM server: OAuth 2.0 / OpenID Connect identity service with RS256 JWTs, RBAC, MFA/WebAuthn, service accounts and audit logging",
   "keywords": [
     "hive",
