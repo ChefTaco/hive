@@ -166,9 +166,19 @@ export interface WebhookEndpoint {
   deleted_at?: string | null;
 }
 
+export interface ContextMemory {
+  memory: MemoryRecord;
+  collection: string;
+  score: number | null;
+  tokens_used: number;
+  citation?: SearchResponse["results"][number]["citation"];
+  score_components?: Record<string, number | null>;
+  selection_reason?: "query" | "relationship" | "entity";
+}
+
 export interface ContextResponse {
   summary?: unknown;
-  memories?: MemoryRecord[];
+  memories?: Array<ContextMemory | MemoryRecord>;
   representation?: unknown;
   formatted_context?: unknown;
   [key: string]: unknown;

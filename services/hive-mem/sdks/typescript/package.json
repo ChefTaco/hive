@@ -1,6 +1,6 @@
 {
   "name": "@hivemagnus/hivemem-sdk",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "TypeScript client for HiveMem, the shared long-term memory service for AI agents",
   "keywords": [
     "hivemem",

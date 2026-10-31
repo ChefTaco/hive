@@ -97,3 +97,43 @@ test("HiveMem history, conclusion and operation reads use the documented routes"
   assert.equal(urls[3].searchParams.get("task_type"), "dream");
   assert.equal(urls[3].searchParams.get("workspace_id"), "team");
 });
+
+test("HiveMem context helpers preserve real server context, citations and budget", async () => {
+  const formatted = "- [memory:memory-1] The synthetic launch code is amber-cedar.";
+  const client = new HiveMem({
+    baseUrl: "https://memory.example.com",
+    workspaceId: "verification",
+    fetchImpl: async () => new Response(JSON.stringify({
+      memories: [{
+        memory: { id: "memory-1", agent_id: "agent-1", content: "The synthetic launch code is amber-cedar.", type: "semantic", scope: "private" },
+        collection: "private_semantic", score: 1, tokens_used: 12,
+        citation: { memory_id: "memory-1" },
+      }],
+      summary: { content: "1 memories selected for context.", memory_count: 1 },
+      formatted_context: { format: "markdown", content: formatted },
+      metadata: { token_budget: 100, tokens_used: 20 },
+    }), { headers: { "content-type": "application/json" } }),
+  });
+  const context = await client.context({ search_query: "synthetic launch code" });
+  assert.deepEqual(context.toOpenAI(), [{ role: "system", content: formatted }]);
+  assert.deepEqual(context.toOpenAI({ assistantPeerId: "bot" }), [
+    { role: "system", content: "Assistant peer id: bot" },
+    { role: "system", content: formatted },
+  ]);
+  assert.deepEqual(context.toAnthropic(), [{ role: "user", content: formatted }]);
+  const empty = new ContextPackage({
+    memories: context.raw().memories,
+    formatted_context: { format: "markdown", content: "" },
+  });
+  assert.deepEqual(empty.toOpenAI(), []);
+  assert.deepEqual(empty.toAnthropic(), []);
+});
+
+test("ContextPackage supports nested retrieval entries without preformatted context", () => {
+  const context = new ContextPackage({ memories: [{
+    memory: { id: "memory-1", agent_id: "agent-1", content: "The synthetic code is amber-cedar.", type: "semantic", scope: "private" },
+    collection: "private_semantic", score: 1, tokens_used: 10,
+  }] });
+  assert.deepEqual(context.toOpenAI(), [{ role: "system", content: "Memory: The synthetic code is amber-cedar." }]);
+  assert.deepEqual(context.toAnthropic(), [{ role: "user", content: "Memory: The synthetic code is amber-cedar." }]);
+});

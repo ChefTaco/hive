@@ -28,7 +28,13 @@ export async function requireApiKey(
     return context.json({ error: 'Invalid API key' }, 401);
   }
 
-  const metadata = safeJsonParse<{ scopes?: string[] }>(match.metadataJson, {});
+  const metadata = safeJsonParse<{ scopes?: string[]; expiresAt?: unknown }>(match.metadataJson, {});
+  if (metadata.expiresAt !== undefined) {
+    const expiresAt = typeof metadata.expiresAt === 'string' ? Date.parse(metadata.expiresAt) : NaN;
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+      return context.json({ error: 'Invalid API key' }, 401);
+    }
+  }
   const permission = context.req.method === 'GET' ? 'models:read' : 'inference:write';
   if (Array.isArray(metadata.scopes) && !metadata.scopes.includes('*') && !metadata.scopes.includes(permission)) return context.json({ error: 'Client key does not permit this operation' }, 403);
   context.set('clientApiKey', match);

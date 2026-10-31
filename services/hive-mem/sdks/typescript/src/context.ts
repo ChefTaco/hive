@@ -13,6 +13,16 @@ export class ContextPackage {
     if (formatted && typeof formatted === "object" && Array.isArray((formatted as { messages?: unknown }).messages)) {
       return (formatted as { messages: Array<{ role: string; content: string }> }).messages;
     }
+    if (formatted && typeof formatted === "object"
+      && (formatted as { format?: unknown }).format === "markdown"
+      && typeof (formatted as { content?: unknown }).content === "string") {
+      // Use the server's selected context verbatim, preserving citations and its token budget.
+      const content = (formatted as { content: string }).content;
+      const messages: Array<{ role: string; content: string }> = [];
+      if (options.assistantPeerId) messages.push({ role: "system", content: `Assistant peer id: ${options.assistantPeerId}` });
+      if (content) messages.push({ role: "system", content });
+      return messages;
+    }
     const messages: Array<{ role: string; content: string }> = [];
     if (options.assistantPeerId) {
       messages.push({ role: "system", content: `Assistant peer id: ${options.assistantPeerId}` });
@@ -26,8 +36,11 @@ export class ContextPackage {
       const content = typeof representation === "string" ? representation : representation.context;
       if (content) messages.push({ role: "system", content: `HiveMem peer context:\n${content}` });
     }
-    for (const memory of (this.data.memories ?? []) as MemoryRecord[]) {
-      messages.push({ role: "system", content: `Memory: ${memory.content}` });
+    for (const entry of this.data.memories ?? []) {
+      const memory = "memory" in entry && entry.memory && typeof entry.memory === "object"
+        ? entry.memory as MemoryRecord
+        : entry as MemoryRecord;
+      if (typeof memory.content === "string") messages.push({ role: "system", content: `Memory: ${memory.content}` });
     }
     return messages;
   }

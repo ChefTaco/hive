@@ -1,6 +1,6 @@
 {
   "name": "hive-monorepo",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "description": "Self-hosted AI infrastructure: IAM, HiveMem memory service, model router, and the unified Hive console.",
   "license": "Apache-2.0",

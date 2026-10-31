@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-10-31
+
+### Fixed
+
+- **Memory SDK**: context helpers preserve the server's formatted recall content, citations and
+  token budget, and support nested retrieval records alongside legacy flat memories. Real model
+  prompts no longer lose retrieved facts as `Memory: undefined`.
+- **Router authentication**: client-key expiry in metadata is enforced, including existing keys
+  without a database expiry. Expired or malformed metadata expiry fails closed.
+
 ## [1.0.2] - 2026-10-31
 
 ### Fixed
