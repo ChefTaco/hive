@@ -72,5 +72,6 @@ The first public release.
   server yourself, pass `--allow-scripts=better-sqlite3,argon2` to `npx` or `npm install -g`, or
   list them under `allowScripts` in your project's `package.json`.
 
-[Unreleased]: https://github.com/ChefTaco/hive/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ChefTaco/hive/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/ChefTaco/hive/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/ChefTaco/hive/releases/tag/v1.0.0
