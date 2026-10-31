@@ -18,6 +18,7 @@ import { resolveStore } from "./stores.js";
 import { certificateNames, createCertificates, inspectServerCertificate, namesOnCertificate, OPENSSL_MISSING, opensslVersion, tlsFiles, type TlsFiles } from "./tls.js";
 import { describeTokenProblem, MEMORY_TOKEN_VAR, memoryTokenProblem, mintMemoryToken, tokenExpiry } from "./token.js";
 import { launcherMajor, majorOf } from "./version.js";
+import { displayUrl } from "./privacy.js";
 
 export const PORT_KEYS = ["memory", "iam", "router", "router-admin", "qdrant", "redis"] as const;
 export type PortKey = (typeof PORT_KEYS)[number];
@@ -292,7 +293,7 @@ function wiringEntries(service: ServiceName, docs: Map<ServiceName, EnvDocument>
 }
 
 function describeChange([key, before, after]: [string, string | undefined, string], secretKeys: ReadonlySet<string>): string {
-  const show = (value: string) => (secretKeys.has(key) ? mask(value) : value);
+  const show = (value: string) => secretKeys.has(key) ? mask(value) : /^[a-z][a-z0-9+.-]*:\/\//iu.test(value) ? displayUrl(value) : value;
   return before === undefined ? `add ${key}=${show(after)}` : `${key}: ${show(before)} -> ${show(after)}`;
 }
 
@@ -442,7 +443,7 @@ export async function runInit(context: InitContext): Promise<InitResult> {
   writeState(paths, state);
 
   summarize(context, services, docs, tls);
-  return { services, written, consoleUrl: router ? consoleUrl(router) : null };
+  return { services, written, consoleUrl: router ? displayUrl(consoleUrl(router)) : null };
 }
 
 function summarize(context: InitContext, services: ServiceName[], docs: Map<ServiceName, EnvDocument>, tls: TlsFiles | null): void {
@@ -456,7 +457,7 @@ function summarize(context: InitContext, services: ServiceName[], docs: Map<Serv
   const router = docs.get("router");
   if (router) {
     output.info("");
-    output.info(`  Console    ${consoleUrl(router)}`);
+    output.info(`  Console    ${displayUrl(consoleUrl(router))}`);
     if (usesTls("router", router)) output.info("             Your browser warns about the certificate until you trust the local CA above (or accept the warning once).");
     const iam = docs.get("iam");
     if (iam) {

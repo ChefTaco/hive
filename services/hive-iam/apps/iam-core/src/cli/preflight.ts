@@ -31,7 +31,10 @@ function errorMessage(error: unknown): string {
 export function redactUrl(url: string): string {
   try {
     const parsed = new URL(url)
+    parsed.username = ''
     if (parsed.password) parsed.password = '***'
+    parsed.search = ''
+    parsed.hash = ''
     return parsed.toString()
   } catch {
     return '(unparseable URL)'

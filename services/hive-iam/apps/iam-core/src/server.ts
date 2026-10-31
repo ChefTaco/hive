@@ -1,10 +1,9 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { logger } from 'hono/logger'
 import { bodyLimit } from 'hono/body-limit'
 import { env } from './config/env.js'
 import { errorHandler } from './middleware/error-handler.js'
-import { requestLoggerMiddleware } from './middleware/request-logger.js'
+import { accessLoggerMiddleware, requestLoggerMiddleware } from './middleware/request-logger.js'
 import { securityHeaders } from './middleware/security-headers.js'
 import { healthRouter } from './routes/health.js'
 import { authRouter } from './routes/auth.js'
@@ -51,7 +50,7 @@ export function createApp(): Hono {
   )
 
   // ── Request logger ────────────────────────────────────────────────
-  app.use(logger())
+  app.use('*', accessLoggerMiddleware)
   app.use('*', securityHeaders)
   app.use('/api/v1/*', requestLoggerMiddleware)
 

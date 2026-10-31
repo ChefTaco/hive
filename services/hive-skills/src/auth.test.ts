@@ -8,8 +8,17 @@ import type { ChildProcess, spawn } from 'node:child_process';
 
 process.env.HIVE_SKILLS_DATA_DIR = mkdtempSync(join(tmpdir(), 'hive-skills-auth-test-'));
 process.env.HIVE_SKILLS_SESSION_SECRET = 'auth-test-session-secret-0123456789abcdef';
-const { createOsAuthenticator } = await import('./auth.js');
+const { createOsAuthenticator, createSession, readAuth } = await import('./auth.js');
 const { default: app } = await import('./app.js');
+
+test('malformed multibyte session signatures are rejected without throwing', async () => {
+  const token = createSession('admin');
+  assert.equal(readAuth(`hive_skills_session=${token}`)?.username, 'admin');
+  const [id, signature] = token.split('.');
+  const invalid = `${id}.${'é'.repeat(signature!.length)}`;
+  assert.equal(readAuth(`hive_skills_session=${invalid}`), undefined);
+  assert.equal((await app.request('https://registry.test/auth/me', { headers: { cookie: `hive_skills_session=${invalid}` } })).status, 401);
+});
 
 test('PAM authentication is asynchronous and rejects work beyond its concurrency bound', async () => {
   const children: EventEmitter[] = [];

@@ -89,7 +89,11 @@ async function readBody(request: IncomingMessage, maxBodyBytes = Number.parseInt
   if (chunks.length === 0) return {};
   const raw = Buffer.concat(chunks).toString("utf8");
   if (!raw.trim()) return {};
-  return JSON.parse(raw) as unknown;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    throw new SyntaxError("Invalid JSON request body");
+  }
 }
 
 function auth(request: IncomingMessage, secret: string, isRevoked: (jti: string) => boolean, store: InMemoryHiveMemStore): AuthPrincipal {

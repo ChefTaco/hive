@@ -34,6 +34,7 @@ describe("env files", () => {
     }
     assert.equal(quote("plain"), "plain");
     assert.throws(() => quote("two\nlines"), /line breaks/);
+    assert.throws(() => quote('dummy-private-value\'"'), (error: Error) => !error.message.includes("dummy-private-value"));
   });
 
   it("writes owner-only files in owner-only directories", () => {

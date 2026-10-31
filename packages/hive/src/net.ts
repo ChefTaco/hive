@@ -37,7 +37,7 @@ export function probeHttp(url: string, options: { ca?: string | Buffer | Array<s
     try {
       target = new URL(url);
     } catch {
-      resolve({ ok: false, status: 0, body: "", error: `invalid URL ${url}` });
+      resolve({ ok: false, status: 0, body: "", error: "invalid URL" });
       return;
     }
     const timeoutMs = options.timeoutMs ?? 3000;

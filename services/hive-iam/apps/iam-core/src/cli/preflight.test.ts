@@ -74,6 +74,7 @@ describe('preflight checks', () => {
 
   it('never prints Redis credentials', () => {
     expect(redactUrl('redis://:hunter2hunter2@redis:6379/0')).toBe('redis://:***@redis:6379/0')
+    expect(redactUrl('redis://dummy-user:dummy-password@redis:6379/0?password=dummy-query#dummy-fragment')).toBe('redis://:***@redis:6379/0')
     const line = redisFailureLine('redis://user:hunter2hunter2@redis:6379', new Error('connect ECONNREFUSED'))
     expect(line).not.toContain('hunter2')
     expect(line).toMatch(/^Dependency error: cannot reach Redis .*REDIS_URL.*Fix: start Redis \(for example `docker run/)

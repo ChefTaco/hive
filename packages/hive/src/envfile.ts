@@ -67,7 +67,7 @@ export function quote(value: string): string {
   if (SAFE_VALUE.test(value)) return value;
   if (!value.includes("'")) return `'${value}'`;
   if (!value.includes('"') && !value.includes("\\")) return `"${value}"`;
-  throw new Error(`cannot write the value ${JSON.stringify(value)} to an env file; it contains both quote characters`);
+  throw new Error("cannot write an env value containing both quote characters");
 }
 
 export function ensurePrivateDir(path: string): void {

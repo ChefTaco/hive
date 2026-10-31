@@ -36,7 +36,7 @@ const CLIENT_CONTROLLED_PROXY_HEADER_NAMES = new Set([
 
 export function shouldForwardClientHeader(name: string): boolean {
   const lower = name.toLowerCase();
-  return !SENSITIVE_HEADER_NAMES.has(lower)
+  return !isSensitiveHeaderName(lower)
     && !HOP_BY_HOP_HEADER_NAMES.has(lower)
     && !CLIENT_CONTROLLED_PROXY_HEADER_NAMES.has(lower)
     && lower !== 'host'
@@ -54,7 +54,9 @@ function isSensitiveHeaderName(name: string): boolean {
   return SENSITIVE_HEADER_NAMES.has(lower)
     || lower.includes('secret')
     || lower.includes('token')
-    || lower.includes('credential');
+    || lower.includes('credential')
+    || lower.includes('password')
+    || /(?:^|[-_])api[-_]?key(?:$|[-_])/.test(lower);
 }
 
 export function redactHeaders(headers: Record<string, string>): Record<string, string> {

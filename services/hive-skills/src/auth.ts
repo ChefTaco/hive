@@ -44,8 +44,9 @@ export const readAuth = (cookieHeader: string | undefined): AuthContext | undefi
   if (!token) return undefined;
   const [id, signature, ...extra] = token.split('.');
   if (!id || !signature || extra.length > 0) return undefined;
-  const expected = sign(id);
-  if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return undefined;
+  const expected = Buffer.from(sign(id));
+  const actual = Buffer.from(signature);
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return undefined;
   const session = store.getSession(id);
   return session ? { username: session.username, isAdmin: config.adminUsers.has(session.username) } : undefined;
 };

@@ -96,6 +96,22 @@ describe('providers/openai-compatible', () => {
     vi.restoreAllMocks();
   });
 
+  it('drops caller credentials while preserving configured provider credentials and safe headers', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ choices: [] }));
+    const route = buildModelLessChatRoute();
+    route.headers = { ...route.headers, 'X-Client-Secret': 'dummy-caller-secret', 'x-agent-token': 'dummy-caller-token', 'x-password': 'dummy-caller-password', 'x-request-id': 'request-123' };
+    const provider = buildRuntime(ProviderKind.LLAMACPP);
+    provider.authMode = 'API_KEY';
+    provider.authSecret = 'dummy-provider-key';
+    provider.defaultHeaders = { 'x-provider-token': 'dummy-provider-token' };
+    await new OpenAiCompatibleAdapter(ProviderKind.LLAMACPP).execute(route, provider);
+    const headers = new Headers(fetchMock.mock.calls[0]![1]!.headers);
+    for (const name of ['x-client-secret', 'x-agent-token', 'x-password']) expect(headers.has(name)).toBe(false);
+    expect(headers.get('x-api-key')).toBe('dummy-provider-key');
+    expect(headers.get('x-provider-token')).toBe('dummy-provider-token');
+    expect(headers.get('x-request-id')).toBe('request-123');
+  });
+
   it('forwards llama.cpp chat requests without injecting a model name', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       Response.json({ choices: [{ message: { content: 'ok' } }] }),

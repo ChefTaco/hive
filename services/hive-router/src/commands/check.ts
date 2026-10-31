@@ -179,14 +179,19 @@ async function checkDependency(
   results: CheckResult[],
 ): Promise<void> {
   const failStatus: CheckStatus = required ? 'fail' : 'warn';
+  const displayUrl = new URL(url);
+  displayUrl.username = '';
+  displayUrl.password = '';
+  displayUrl.search = '';
+  displayUrl.hash = '';
   try {
     const result = await probe(url, tls());
     results.push(result.ok
-      ? { name, status: 'ok', message: `${url} is reachable (HTTP ${result.statusCode})` }
-      : { name, status: failStatus, message: `${url} answered HTTP ${result.statusCode}; the service is up but not ready.` });
-  } catch (error) {
+      ? { name, status: 'ok', message: `${displayUrl} is reachable (HTTP ${result.statusCode})` }
+      : { name, status: failStatus, message: `${displayUrl} answered HTTP ${result.statusCode}; the service is up but not ready.` });
+  } catch {
     const variable = name === 'iam' ? 'HIVE_IAM_INTERNAL_URL' : 'HIVEMEM_INTERNAL_URL';
-    results.push({ name, status: failStatus, message: `${url} is unreachable (${error instanceof Error ? error.message : String(error)}). Start the service or fix ${variable}.` });
+    results.push({ name, status: failStatus, message: `${displayUrl} is unreachable. Start the service or fix ${variable}.` });
   }
 }
 

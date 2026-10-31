@@ -15,6 +15,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Privacy and authentication**: IAM access logs omit query strings; launcher diagnostics
+  omit URL credentials, queries and fragments, and env quoting errors omit rejected values.
+  Router strips credential-like caller headers before forwarding to providers and redacts them
+  in traces. HiveMem rejects malformed JWT claims and returns safe JSON parse errors while
+  continuing to accept legacy tokens that omit optional claims. Skills rejects malformed
+  session signatures without a server error and updates its Hono server adapter.
+
 - **Hive console**: opening a memory no longer fails to load its conflicts with
   `422 content is required`. The console now sends the memory's content, workspace, scope and type,
   as HiveMem's conflicts API expects.

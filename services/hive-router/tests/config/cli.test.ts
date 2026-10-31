@@ -76,6 +76,19 @@ describe('hive-router check', () => {
     expect(report.ok).toBe(false);
     expect(report.checks[0]?.message).toMatch(/HIVE_ROUTER_SECRET/u);
   });
+
+  it.each([200, 503, 'network'])('omits URL credentials from dependency reports for %s', async (outcome) => {
+    const report = await runChecks({
+      source: { HIVE_ROUTER_SECRET: secret, HIVE_HOME: home, HIVEMEM_INTERNAL_URL: 'http://dummy-user:dummy-password@memory.example.com?key=dummy-query#dummy-fragment' },
+      findExecutable: () => '/usr/bin/pamtester',
+      probe: async () => {
+        if (outcome === 'network') throw new Error('dummy-private-error');
+        return { ok: outcome === 200, statusCode: Number(outcome) };
+      },
+    });
+    expect(report.checks.find((check) => check.name === 'memory')).toBeDefined();
+    expect(JSON.stringify(report)).not.toMatch(/dummy-(?:user|password|query|fragment|private-error)/);
+  });
 });
 
 describe('hive-router CLI', () => {

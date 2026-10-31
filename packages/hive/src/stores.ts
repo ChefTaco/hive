@@ -5,6 +5,7 @@ import type { Output } from "./output.js";
 import type { Prompter } from "./prompt.js";
 import type { StoreDependency } from "./schema.js";
 import type { LauncherState, StoreName } from "./state.js";
+import { displayUrl } from "./privacy.js";
 
 export const STORES: Record<StoreName, { title: string; envVar: string; defaultPort: number; service: "memory" | "iam"; url: (port: number) => string }> = {
   qdrant: { title: "Qdrant", envVar: "HIVEMEM_QDRANT_URL", defaultPort: 6333, service: "memory", url: (port) => `http://127.0.0.1:${port}` },
@@ -67,7 +68,7 @@ function specFor(store: StoreName, dependency: StoreDependency, prefix: string, 
 
 function manualInstructions(context: StoreContext, store: StoreName, url: string, dependency: StoreDependency, spec: DockerRunSpec | null): void {
   const title = STORES[store].title;
-  context.output.warn(`${title} is not running at ${url}. Start it before \`hive start\`, for example:`);
+  context.output.warn(`${title} is not running at ${displayUrl(url)}. Start it before \`hive start\`, for example:`);
   context.output.info(`    ${spec ? dockerCommandLine(spec) : dependency.docker}`);
   context.output.info(`  or install ${title} natively and point ${STORES[store].envVar} in the ${STORES[store].service}.env file at it.`);
 }
@@ -83,10 +84,10 @@ async function startContainer(context: StoreContext, store: StoreName, spec: Doc
     if (!(await context.prompter.confirm(`Start ${title} in Docker with this command?`, true))) return false;
     if ((await docker(dockerRunArgs(spec))) !== 0) throw new Error(`docker run for ${title} failed; see the Docker output above`);
   }
-  context.output.step(`waiting for ${title} at ${url}`);
-  if (!(await waitForStore(store, url))) throw new Error(`${title} did not answer at ${url} within 60 seconds; check \`docker logs ${spec.name}\``);
+  context.output.step(`waiting for ${title} at ${displayUrl(url)}`);
+  if (!(await waitForStore(store, url))) throw new Error(`${title} did not answer at ${displayUrl(url)} within 60 seconds; check \`docker logs ${spec.name}\``);
   context.state.containers[store] = { name: spec.name, image: spec.image, hostPort: spec.hostPort, ...(spec.volume ? { volume: spec.volume.name } : {}) };
-  context.output.ok(`${title} is running in container ${spec.name} at ${url}`);
+  context.output.ok(`${title} is running in container ${spec.name} at ${displayUrl(url)}`);
   return true;
 }
 
@@ -103,7 +104,7 @@ export async function resolveStore(context: StoreContext, store: StoreName, depe
     const url = options.url;
     const probe = await probeStore(store, url);
     if (probe === "ok") {
-      context.output.ok(`${title} answers at ${url}`);
+      context.output.ok(`${title} answers at ${displayUrl(url)}`);
       return url;
     }
     const managed = context.state.containers[store];
@@ -117,8 +118,8 @@ export async function resolveStore(context: StoreContext, store: StoreName, depe
       }
       if (spec && (await startContainer(context, store, spec, url))) return url;
     }
-    if (probe === "auth-required") context.output.warn(`${title} at ${url} requires credentials; put them in the URL in the ${STORES[store].service}.env file.`);
-    else if (probe === "other-service") context.output.warn(`Something other than ${title} answers at ${url}.`);
+    if (probe === "auth-required") context.output.warn(`${title} at ${displayUrl(url)} requires credentials; put them in the URL in the ${STORES[store].service}.env file.`);
+    else if (probe === "other-service") context.output.warn(`Something other than ${title} answers at ${displayUrl(url)}.`);
     else manualInstructions(context, store, url, dependency, specFor(store, dependency, context.dockerPrefix, port));
     return url;
   }
@@ -126,12 +127,12 @@ export async function resolveStore(context: StoreContext, store: StoreName, depe
   let port = options.preferredPort ?? STORES[store].defaultPort;
   const url = STORES[store].url(port);
   const probe = await probeStore(store, url);
-  if (probe === "ok" && (await context.prompter.confirm(`${title} is already running at ${url}. Use it for ${store === "qdrant" ? "HiveMem" : "Hive IAM"}?`, true))) {
+  if (probe === "ok" && (await context.prompter.confirm(`${title} is already running at ${displayUrl(url)}. Use it for ${store === "qdrant" ? "HiveMem" : "Hive IAM"}?`, true))) {
     return url;
   }
   if (probe !== "down" || !(await isPortFree(port))) {
     const next = await nextFreePort(port + 1, new Set());
-    if (probe === "auth-required") context.output.info(`  ${title} at ${url} requires a password; using port ${next} for a separate ${title}.`);
+    if (probe === "auth-required") context.output.info(`  ${title} at ${displayUrl(url)} requires a password; using port ${next} for a separate ${title}.`);
     else if (probe === "other-service") context.output.info(`  Port ${port} is used by something other than ${title}; using port ${next}.`);
     else if (probe === "down") context.output.info(`  Port ${port} is in use; using port ${next} for ${title}.`);
     port = next;
@@ -171,7 +172,7 @@ export async function ensureStoreRunning(context: { output: Output; state: Launc
     context.output.step(`starting the ${managed.name} container (${title})`);
     if ((await docker(["start", managed.name])) !== 0) throw new Error(`docker start ${managed.name} failed`);
     if (await waitForStore(store, url)) return;
-    throw new Error(`${title} did not answer at ${url} within 60 seconds after docker start; check \`docker logs ${managed.name}\``);
+    throw new Error(`${title} did not answer at ${displayUrl(url)} within 60 seconds after docker start; check \`docker logs ${managed.name}\``);
   }
-  throw new Error(`${title} is not reachable at ${url} (${STORES[store].envVar} in ${STORES[store].service}.env). Start it, or run \`hive init\` to set it up.`);
+  throw new Error(`${title} is not reachable at ${displayUrl(url)} (${STORES[store].envVar} in ${STORES[store].service}.env). Start it, or run \`hive init\` to set it up.`);
 }

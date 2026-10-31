@@ -40,9 +40,18 @@ function base64UrlEncode(input: Buffer | string): string {
 }
 
 function parseClaims(payload: Buffer): JsonObject {
-  const parsed = JSON.parse(payload.toString("utf8")) as unknown;
+  const parsed = parseJwtJson(payload);
   if (!isJsonObject(parsed)) throw new AuthError(401, "JWT payload must be an object");
   return parsed;
+}
+
+function parseJwtJson(value: Buffer): unknown {
+  try {
+    return JSON.parse(value.toString("utf8")) as unknown;
+  } catch {
+    // Parser errors may include fragments of the supplied token.
+    throw new AuthError(401, "Invalid JWT JSON");
+  }
 }
 
 function normalizeScopes(value: JsonValue | undefined): readonly string[] {
@@ -59,7 +68,7 @@ export function verifyBearerToken(header: string | undefined, secret: string, op
   const [encodedHeader, encodedPayload, encodedSignature] = parts;
   if (!encodedHeader || !encodedPayload || !encodedSignature) throw new AuthError(401, "Invalid JWT format");
 
-  const jwtHeader = JSON.parse(base64UrlDecode(encodedHeader).toString("utf8")) as unknown;
+  const jwtHeader = parseJwtJson(base64UrlDecode(encodedHeader));
   if (!isJsonObject(jwtHeader) || jwtHeader.alg !== "HS256") throw new AuthError(401, "Unsupported JWT algorithm");
 
   const expected = createHmac("sha256", secret).update(`${encodedHeader}.${encodedPayload}`).digest();
@@ -80,12 +89,17 @@ export function verifyBearerToken(header: string | undefined, secret: string, op
   if (claims.exp <= now) {
     throw new AuthError(401, "JWT has expired");
   }
+  for (const name of ["iat", "nbf"] as const) {
+    if (claims[name] !== undefined && (typeof claims[name] !== "number" || !Number.isFinite(claims[name]))) throw new AuthError(401, `Invalid JWT ${name} claim`);
+  }
+  if (typeof claims.iat === "number" && claims.iat >= claims.exp) throw new AuthError(401, "Invalid JWT iat claim");
   // `iat` is optional; when present it must not be in the future (allow skew).
   if (typeof claims.iat === "number" && Number.isFinite(claims.iat) && claims.iat > now + 60) throw new AuthError(401, "Invalid JWT iat claim");
   // Maximum-lifetime enforcement is opt-in (no default cap) so long-lived
   // legacy agent tokens keep working. Revocation remains the primary control.
-  if (typeof options.maxLifetimeSeconds === "number" && typeof claims.iat === "number" && claims.exp - claims.iat > options.maxLifetimeSeconds) {
-    throw new AuthError(401, "JWT lifetime exceeds policy");
+  if (typeof options.maxLifetimeSeconds === "number") {
+    if (!Number.isFinite(options.maxLifetimeSeconds) || options.maxLifetimeSeconds <= 0) throw new Error("maxLifetimeSeconds must be positive and finite");
+    if (typeof claims.iat !== "number" || claims.exp - claims.iat > options.maxLifetimeSeconds) throw new AuthError(401, "JWT lifetime exceeds policy");
   }
   if (typeof claims.nbf === "number" && claims.nbf > now + 60) throw new AuthError(401, "JWT is not active yet");
   // `iss`/`aud` are validated only when the token carries them (legacy agent
@@ -94,12 +108,13 @@ export function verifyBearerToken(header: string | undefined, secret: string, op
   if (claims.iss !== undefined && claims.iss !== expectedIssuer) throw new AuthError(401, "Invalid JWT issuer");
   const expectedAudience = options.audience ?? HIVEMEM_JWT_AUDIENCE;
   const audiences = typeof claims.aud === "string" ? [claims.aud] : Array.isArray(claims.aud) && claims.aud.every((item) => typeof item === "string") ? claims.aud : [];
-  if (audiences.length > 0 && !audiences.includes(expectedAudience)) throw new AuthError(401, "Invalid JWT audience");
+  if (claims.aud !== undefined && !audiences.includes(expectedAudience)) throw new AuthError(401, "Invalid JWT audience");
   // `token_type`, when present, must be an access token (legacy tokens defaulted
   // to "access" when the claim was absent).
   if (claims.token_type !== undefined && claims.token_type !== (options.tokenType ?? "access")) throw new AuthError(401, "Invalid JWT token type");
   // `jti` is optional; when present it enables revocation.
-  const jti = typeof claims.jti === "string" && claims.jti.trim() ? claims.jti : undefined;
+  if (claims.jti !== undefined && (typeof claims.jti !== "string" || !claims.jti.trim())) throw new AuthError(401, "Invalid JWT jti claim");
+  const jti = typeof claims.jti === "string" ? claims.jti : undefined;
   if (jti && options.isRevoked?.(jti)) throw new AuthError(401, "JWT has been revoked");
   const parentJtis = parentTokenIds(claims);
   if (options.isRevoked && parentJtis.some((parent) => options.isRevoked?.(parent))) throw new AuthError(401, "JWT has been revoked");

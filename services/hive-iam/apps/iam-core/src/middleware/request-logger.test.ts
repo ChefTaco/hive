@@ -5,7 +5,7 @@ vi.mock('../services/audit-service.js', () => ({
 }))
 
 import { Hono } from 'hono'
-import { requestLoggerMiddleware } from './request-logger.js'
+import { accessLoggerMiddleware, requestLoggerMiddleware } from './request-logger.js'
 import { logAuditEvent } from '../services/audit-service.js'
 
 const mockedLogAuditEvent = vi.mocked(logAuditEvent)
@@ -50,5 +50,22 @@ describe('requestLoggerMiddleware', () => {
 
     expect(response.status).toBe(200)
     expect(mockedLogAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('logs access outcomes without OAuth parameters or request credentials', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      const app = new Hono()
+      app.use('*', accessLoggerMiddleware)
+      app.get('/callback', (c) => c.json({ ok: true }))
+      await app.request('/callback?code=dummy-code&state=dummy-state&token=dummy-token', {
+        headers: { authorization: 'Bearer dummy-bearer', cookie: 'session=dummy-cookie' },
+      })
+      expect(log).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(log.mock.calls[0]![0])).toMatchObject({ method: 'GET', path: '/callback', status: 200 })
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/dummy-|code=|state=|token=/)
+    } finally {
+      log.mockRestore()
+    }
   })
 })

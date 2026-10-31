@@ -4,6 +4,13 @@ import { getClientIp } from '../utils/ip.js'
 
 const SKIP_PATHS = ['/api/v1/health', '/api/v1/auth/public-key']
 
+/** Query strings can carry OAuth codes, state, and credentials. Log only the path. */
+export const accessLoggerMiddleware: MiddlewareHandler = async (c, next) => {
+  const start = Date.now()
+  await next()
+  console.log(JSON.stringify({ method: c.req.method, path: c.req.path, status: c.res.status, duration: Date.now() - start }))
+}
+
 export const requestLoggerMiddleware: MiddlewareHandler = async (c, next) => {
   const start = Date.now()
   await next()

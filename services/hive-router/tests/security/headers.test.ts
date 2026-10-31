@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { redactHeaders, shouldCopyResponseHeader, shouldForwardClientHeader } from '../../src/security/headers.js';
 
 describe('security/headers', () => {
+  it.each(['X-Client-Secret', 'x-agent-token', 'X-Custom-Credential', 'x-password', 'api-key', 'x-goog-api-key'])('keeps %s out of providers and traces', (name) => {
+    expect(shouldForwardClientHeader(name)).toBe(false);
+    expect(redactHeaders({ [name]: 'dummy-sensitive-value' })).toEqual({ [name]: '[redacted]' });
+  });
+
   it('redacts secrets before trace persistence', () => {
     expect(redactHeaders({
       authorization: 'Bearer client-secret',

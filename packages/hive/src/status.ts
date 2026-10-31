@@ -8,6 +8,7 @@ import { installedServer } from "./runtime.js";
 import { START_ORDER, type ServiceName } from "./services.js";
 import { probeStore, STORES, type StoreProbe } from "./stores.js";
 import { MEMORY_TOKEN_VAR, tokenExpiry } from "./token.js";
+import { displayUrl } from "./privacy.js";
 import { probeCa, processAlive, readPidFile } from "./supervisor.js";
 
 export interface ListenerStatus {
@@ -45,16 +46,16 @@ export async function collectStatus(paths: HivePaths): Promise<StatusReport> {
     const doc = EnvDocument.load(paths.envFile(service));
     const probes = await Promise.all(listeners(service, doc).map(async (entry): Promise<ListenerStatus> => {
       const probe = await probeHttp(entry.healthUrl, { ca, timeoutMs: 3000 });
-      return { plane: entry.plane, url: entry.url, healthy: probe.ok, detail: probe.ok ? "healthy" : probe.error ?? `HTTP ${probe.status}` };
+      return { plane: entry.plane, url: displayUrl(entry.url), healthy: probe.ok, detail: probe.ok ? "healthy" : probe.error ?? `HTTP ${probe.status}` };
     }));
     const status: ServiceStatus = { service, installed: installedServer(paths, service)?.version ?? null, listeners: probes };
     if (service === "memory" && doc.get("HIVEMEM_TS_PERSISTENCE") !== "memory") {
       const url = doc.get("HIVEMEM_QDRANT_URL") ?? STORES.qdrant.url(STORES.qdrant.defaultPort);
-      status.store = { name: "qdrant", url, state: await probeStore("qdrant", url) };
+      status.store = { name: "qdrant", url: displayUrl(url), state: await probeStore("qdrant", url) };
     }
     if (service === "iam") {
       const url = doc.get("REDIS_URL") ?? "redis://localhost:6379";
-      status.store = { name: "redis", url, state: await probeStore("redis", url) };
+      status.store = { name: "redis", url: displayUrl(url), state: await probeStore("redis", url) };
     }
     return status;
   }));
@@ -66,7 +67,7 @@ export async function collectStatus(paths: HivePaths): Promise<StatusReport> {
     home: paths.home,
     launcher: pid && processAlive(pid.pid) ? { running: true, pid: pid.pid } : { running: false },
     services,
-    consoleUrl: router ? consoleUrl(router) : null,
+    consoleUrl: router ? displayUrl(consoleUrl(router)) : null,
     memoryTokenExpires: exp ? new Date(exp * 1000).toISOString() : null,
     ok: services.length > 0 && services.every((service) => service.listeners.every((entry) => entry.healthy)),
   };
