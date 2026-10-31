@@ -24,6 +24,13 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+// HiveMem finds conflicts by content: other agents' memories similar to this one.
+function conflictQuery(memory: Record<string, unknown>): Record<string, unknown> {
+  const query: Record<string, unknown> = { content: text(memory.content, ''), workspace_id: text(memory.workspace_id, 'default') };
+  for (const key of ['scope', 'type']) if (typeof memory[key] === 'string') query[key] = memory[key];
+  return query;
+}
+
 function recordsFrom(value: unknown, keys: string[]): Array<Record<string, unknown>> {
   const source = record(value);
   for (const key of keys) {
@@ -124,7 +131,7 @@ export function MemoryDashboardPage({ currentUser }: { currentUser: AdminUser | 
     const graphData = await run('memory-graph', () => adminApi.memoryGraph(id), isCurrent);
     if (generation !== detailGeneration.current) return;
     if (graphData) setGraph(graphData);
-    const conflictData = await run('memory-conflicts', () => adminApi.memoryConflicts({ memory_id: id }), isCurrent);
+    const conflictData = await run('memory-conflicts', () => adminApi.memoryConflicts(conflictQuery(detail)), isCurrent);
     if (generation === detailGeneration.current && conflictData) setConflicts(conflictData);
   }
 

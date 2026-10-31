@@ -76,8 +76,12 @@ test('creates, searches, edits and deletes a private memory through the real API
   await page.getByLabel('Visibility').selectOption('private');
   await page.getByPlaceholder('What should Hive remember?').fill(content);
   const created = page.waitForResponse((response) => response.url().endsWith('/api/memory/memories') && response.request().method() === 'POST');
+  const conflicts = page.waitForResponse((response) => response.url().endsWith('/api/memory/conflicts'));
   await page.getByRole('button', { name: 'Create', exact: true }).click();
   const response = await created; expect(response.status()).toBe(201);
+  const conflictResponse = await conflicts;
+  expect(conflictResponse.status()).toBe(200);
+  expect(conflictResponse.request().postDataJSON()).toMatchObject({ content, workspace_id: 'default', scope: 'private' });
   const memory = await response.json();
   expect(memory).toMatchObject({ scope: 'private', workspace_id: 'default', source: 'user_feedback', agent_id: 'console-fixture' });
   await page.getByRole('textbox', { name: 'Content', exact: true }).fill(content + '-edited');

@@ -13,6 +13,12 @@ All notable changes to this project are documented in this file. The format is b
   run it instead of building (`IAM_IMAGE`), and `npm run check:iam-compose` runs that example end
   to end.
 
+### Fixed
+
+- **Hive console**: opening a memory no longer fails to load its conflicts with
+  `422 content is required`. The console now sends the memory's content, workspace, scope and type,
+  as HiveMem's conflicts API expects.
+
 ## [1.0.0] - 2026-10-30
 
 The first public release.
