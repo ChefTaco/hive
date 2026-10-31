@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- `npm run test:e2e:model`: environment-configured real-provider verification covering ordinary
+  inference, streaming, SDK memory recall, authentication, traces and cleanup, with private reports
+  and network-free regression tests.
+
 ## [1.0.3] - 2026-10-31
 
 ### Fixed

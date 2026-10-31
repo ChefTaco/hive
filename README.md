@@ -80,6 +80,10 @@ npm run doctor         # local environment checklist
 Each service also has its own scripts. For example, `npm --prefix services/hive-router test` runs
 only the router tests. See the README in each service directory for details.
 
+For opt-in verification against a real model provider, run `npm run test:e2e:model`.
+See [real-model end-to-end testing](docs/model-e2e.md) for environment configuration, streaming and
+memory-recall checks, private reports, and automatic cleanup.
+
 The OpenAPI specifications for all three HTTP APIs live in [`docs/openapi/`](docs/openapi). Run
 `npm run generate:openapi` after an intentional route or schema change.
 
