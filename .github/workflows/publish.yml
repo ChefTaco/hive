@@ -35,13 +35,13 @@ jobs:
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Install repository check tools
         run: sudo apt-get update -qq && sudo apt-get install -y ripgrep redis-server
 
       - name: Setup Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 24.22.1
           registry-url: https://registry.npmjs.org
@@ -112,7 +112,7 @@ jobs:
       CONTEXT: services/hive-iam/apps/iam-core
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
