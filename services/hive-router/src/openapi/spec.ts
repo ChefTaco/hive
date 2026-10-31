@@ -1,4 +1,5 @@
 import type { ProviderKind } from '../generated/prisma/client.js';
+import { packageInfo } from '../config/paths.js';
 
 export interface BuiltinApiDocEntry {
   scope: 'router' | 'provider';
@@ -56,7 +57,7 @@ export function buildRouterOpenApiDocument(adminBaseUrl: string): Record<string,
     openapi: '3.1.0',
     info: {
       title: 'Hive Router Admin API',
-      version: '0.1.0',
+      version: packageInfo().version,
       description: 'Administrative and enumerated API surface for Hive Router',
     },
     servers: [{ url: adminBaseUrl }],

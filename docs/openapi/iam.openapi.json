@@ -792,7 +792,7 @@
   "info": {
     "description": "Centralized Identity & Access Management API for the Hive platform. Handles authentication (RS256 JWT), authorization (RBAC), user management, service accounts, audit logging, MFA, and password policies.",
     "title": "Hive IAM Core API",
-    "version": "1.0.0"
+    "version": "1.0.1"
   },
   "openapi": "3.1.0",
   "paths": {

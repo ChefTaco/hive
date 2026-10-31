@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -108,7 +108,7 @@ describe('hive-router CLI', () => {
 
   it('prints the version and help', async () => {
     expect(await main(['--version'])).toBe(0);
-    expect(output[0]).toBe('1.0.0');
+    expect(output[0]).toBe(JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version);
     expect(await main(['--help'])).toBe(0);
     expect(output[1]).toMatch(/hive-router check/u);
   });

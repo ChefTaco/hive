@@ -1,4 +1,5 @@
 import { z, type ZodType } from 'zod'
+import { IAM_VERSION } from '../config/version.js'
 import {
   LoginSchema,
   RefreshSchema,
@@ -786,7 +787,7 @@ export function buildOpenApiSpec() {
     openapi: '3.1.0',
     info: {
       title: 'Hive IAM Core API',
-      version: '1.0.0',
+      version: IAM_VERSION,
       description: 'Centralized Identity & Access Management API for the Hive platform. Handles authentication (RS256 JWT), authorization (RBAC), user management, service accounts, audit logging, MFA, and password policies.',
     },
     servers: [

@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-31
+
 ### Added
 
 - The Hive IAM server is published as the Docker image `ghcr.io/cheftaco/hive-iam-server`

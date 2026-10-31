@@ -1,6 +1,6 @@
 {
   "name": "@hivemagnus/hive-router",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Hive Router: OpenAI-compatible model gateway with routing, failover, quotas and traces, plus the admin API and the unified Hive console",
   "keywords": [
     "hive",

@@ -1,6 +1,6 @@
 {
   "name": "@hivemagnus/hive-iam-sdk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "RS256 JWT verification and RBAC middleware for services that trust Hive IAM, with a framework-agnostic verifier and Hono v4 middleware",
   "keywords": [
     "hive",
