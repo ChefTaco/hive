@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-01
+
 ### Added
 
 - Hive 1.2 managed release bundles, versioned npm runtimes, explicit adoption, whole-stack
