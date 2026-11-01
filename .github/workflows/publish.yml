@@ -55,7 +55,7 @@ jobs:
         if: github.event_name == 'push'
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          for dir in services/hive-mem/sdks/typescript services/hive-iam/packages/iam-sdk services/hive-mem/ts-core services/hive-router services/hive-iam/apps/iam-core packages/hive; do
+          for dir in services/hive-mem/sdks/typescript services/hive-iam/packages/iam-sdk services/hive-mem/ts-core services/hive-router services/hive-iam/apps/iam-core services/hive-skills packages/hive; do
             version="$(node -p "require('./$dir/package.json').version")"
             if [ "$version" != "$tag" ]; then echo "::error::$dir is $version, tag is v$tag"; exit 1; fi
           done
@@ -77,12 +77,13 @@ jobs:
           npm --prefix services/hive-mem/sdks/typescript run build
           npm --prefix services/hive-mem/sdks/typescript test
           npm run check:packs
+          npm run check:skills-install
           npm run check:npm12
 
       - name: Publish
         run: |
           # Order: libraries, then servers, then the launcher that installs them.
-          for dir in services/hive-mem/sdks/typescript services/hive-iam/packages/iam-sdk services/hive-mem/ts-core services/hive-router services/hive-iam/apps/iam-core packages/hive; do
+          for dir in services/hive-mem/sdks/typescript services/hive-iam/packages/iam-sdk services/hive-mem/ts-core services/hive-router services/hive-iam/apps/iam-core services/hive-skills packages/hive; do
             name="$(node -p "require('./$dir/package.json').name")"
             version="$(node -p "require('./$dir/package.json').version")"
             if npm view "$name@$version" version >/dev/null 2>&1; then

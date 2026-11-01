@@ -68,6 +68,7 @@
     "check:packs": "node scripts/check-npm-packs.mjs",
     "check:iam-compose": "bash scripts/check-iam-compose.sh",
     "test:e2e:model": "npm --prefix services/hive-mem/sdks/typescript run build && node --experimental-strip-types scripts/model-e2e.ts",
-    "typecheck:model-e2e": "services/hive-router/node_modules/.bin/tsc -p scripts/tsconfig.model-e2e.json"
+    "typecheck:model-e2e": "services/hive-router/node_modules/.bin/tsc -p scripts/tsconfig.model-e2e.json",
+    "check:skills-install": "node scripts/check-skills-package.mjs"
   }
 }

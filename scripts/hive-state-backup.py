@@ -106,14 +106,17 @@ def deployment_paths(units, root=Path('/')):
         paths.append(str(service))
         overrides = service.with_name(service.name + '.d')
         if overrides.exists(): paths.append(str(overrides))
-    runtime = root / 'opt/hive-npm/current/runtime'
-    if runtime.exists():
-        for name in ('package.json', 'package-lock.json'):
-            file = runtime / name
-            if not file.is_file(): raise RuntimeError('npm runtime is missing ' + name)
-            # Archive regular files at their release paths, never npm code or
-            # the mutable current symlink. Recovery reinstalls from the lock.
-            paths.append(str(file.resolve()))
+    bases = ['opt/hive-npm']
+    if 'hive-skills' in units: bases.append('opt/hive-skills/npm')
+    for base in bases:
+        runtime = root / base / 'current/runtime'
+        if runtime.exists():
+            for name in ('package.json', 'package-lock.json'):
+                file = runtime / name
+                if not file.is_file(): raise RuntimeError('npm runtime is missing ' + name)
+                # Archive regular files at their release paths, never npm code or
+                # the mutable current symlink. Recovery reinstalls from the lock.
+                paths.append(str(file.resolve()))
     return paths
 
 

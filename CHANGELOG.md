@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Public `@hivemagnus/hive-skills` server package with a CLI, explicit environment-file loading,
+  Hermes distribution scripts, bundled seed source, and fresh-install CI coverage.
 - A migration runbook for existing systemd installations using pinned public npm packages.
 
 - `npm run test:e2e:model`: environment-configured real-provider verification covering ordinary
@@ -16,6 +18,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- Skills resolves its deployment helper and bundled seed source from the installed package,
+  and explicit initial seeding promotes the bundled release to the stable channel.
 - Full-state backups retain systemd drop-ins and the active npm runtime's manifest and lockfile,
   so isolated recovery preserves service overrides and the inputs needed to reinstall code.
 

@@ -1,4 +1,5 @@
 import { config } from './config.js';
+import { bundledSeedSource } from './paths.js';
 import { persistArchiveFromFile } from './archive.js';
 import { store } from './db.js';
 import { existsSync, unlinkSync } from 'node:fs';
@@ -8,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 let archive = process.env.HIVEMEM_ARCHIVE;
 let generatedArchive: string | undefined;
 if (!archive) {
-  const source = resolve(process.cwd(), 'registry-sources/hivemem');
+  const source = bundledSeedSource;
   if (!existsSync(resolve(source, 'SKILL.md'))) throw new Error('Set HIVEMEM_ARCHIVE to a HiveMem Hermes skill tar.gz');
   generatedArchive = resolve(config.dataDir, 'hivemem-bundled.tgz');
   const pack = spawnSync('/usr/bin/tar', ['-czf', generatedArchive, '-C', source, '.'], { encoding: 'utf8', timeout: 10_000 });
@@ -20,5 +21,6 @@ if (store.getRelease('hivemem', '1.0.0')) throw new Error('hivemem@1.0.0 already
 const persisted = persistArchiveFromFile('hivemem', '1.0.0', archive);
 if (generatedArchive) unlinkSync(generatedArchive);
 store.addRelease({ skillSlug: 'hivemem', version: '1.0.0', sha256: persisted.sha256, archivePath: persisted.path, notes: 'Initial HiveMem registry release.', createdAt: new Date().toISOString() });
+store.promoteRelease('hivemem', '1.0.0', 'stable');
 store.audit('system', 'seed', 'hivemem@1.0.0', { source: 'HIVEMEM_ARCHIVE' });
 console.log(`Seeded hivemem@1.0.0 (${persisted.sha256}) into ${config.dataDir}`);

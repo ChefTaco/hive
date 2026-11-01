@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { DeploymentTarget } from './types.js';
+import { bundledDeployScript } from './paths.js';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
 
@@ -55,7 +56,7 @@ export const config = {
   pamService: process.env.HIVE_SKILLS_PAM_SERVICE ?? 'hive-skills',
   tlsKeyFile: process.env.HIVE_SKILLS_TLS_KEY_FILE,
   tlsCertFile: process.env.HIVE_SKILLS_TLS_CERT_FILE,
-  deployScript: process.env.HIVE_SKILLS_DEPLOY_SCRIPT ?? resolve(process.cwd(), 'scripts/deploy-hermes-agent.sh'),
+  deployScript: process.env.HIVE_SKILLS_DEPLOY_SCRIPT ?? bundledDeployScript,
   targets: parseTargets(process.env.HIVE_SKILLS_TARGETS),
 } as const;
 

@@ -12,7 +12,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 echo ">>> Packing the launcher and the servers"
 mkdir -p "$WORK/tgz"
-for dir in packages/hive services/hive-mem/ts-core services/hive-router services/hive-iam/apps/iam-core; do
+for dir in packages/hive services/hive-mem/ts-core services/hive-router services/hive-iam/apps/iam-core services/hive-skills; do
   (cd "$ROOT/$dir" && npm pack --ignore-scripts --silent --pack-destination "$WORK/tgz" >/dev/null)
 done
 
@@ -37,10 +37,11 @@ mkdir -p "$WORK/project"
 cat > "$WORK/project/package.json" <<'EOF'
 { "name": "npm12-check", "private": true, "allowScripts": { "better-sqlite3": true, "argon2": true } }
 EOF
-(cd "$WORK/project" && npm install --silent --no-fund --no-audit "$WORK"/tgz/hivemagnus-hive-router-1.*.tgz "$WORK"/tgz/hivemagnus-hive-iam-server-1.*.tgz >/dev/null)
+(cd "$WORK/project" && npm install --silent --no-fund --no-audit "$WORK"/tgz/hivemagnus-hive-router-1.*.tgz "$WORK"/tgz/hivemagnus-hive-iam-server-1.*.tgz "$WORK"/tgz/hivemagnus-hive-skills-1.*.tgz >/dev/null)
 (cd "$WORK/project" && node -e '
   new (require("better-sqlite3"))(":memory:").close();
   require("argon2").hash("check").then(() => console.log("better-sqlite3 and argon2 load"));
 ')
 
+"$WORK/project/node_modules/.bin/hive-skills" --help >/dev/null
 echo "npm 12 install check passed."

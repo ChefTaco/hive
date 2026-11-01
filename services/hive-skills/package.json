@@ -1,18 +1,20 @@
 {
   "name": "@hivemagnus/hive-skills",
-  "version": "0.1.0",
-  "private": true,
+  "version": "1.0.3",
   "type": "module",
   "engines": {
     "node": "^24.22.1 || ^26.13.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
     "check": "npm run build",
     "start": "node dist/server.js",
     "dev": "npm run build && node --watch dist/server.js",
     "test": "npm run build && node --test dist/*.test.js scripts/*.test.mjs",
-    "seed": "npm run build && node dist/seed.js"
+    "seed": "npm run build && node dist/seed.js",
+    "clean": "node -e \"require('node:fs').rmSync('dist', {recursive: true, force: true})\"",
+    "prepack": "npm run clean && npm run build",
+    "prepublishOnly": "npm test"
   },
   "dependencies": {
     "@hono/node-server": "2.1.5",
@@ -21,5 +23,40 @@
   "devDependencies": {
     "@types/node": "^24.10.1",
     "typescript": "^5.9.3"
-  }
+  },
+  "description": "Hive Skills: HTTPS registry for digest-verified Hermes skills, OS-authenticated administration and agent distribution",
+  "license": "Apache-2.0",
+  "author": "ChefTaco",
+  "keywords": [
+    "hive",
+    "hermes",
+    "skills",
+    "registry",
+    "self-hosted"
+  ],
+  "homepage": "https://github.com/ChefTaco/hive/tree/main/services/hive-skills#readme",
+  "bugs": {
+    "url": "https://github.com/ChefTaco/hive/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ChefTaco/hive.git",
+    "directory": "services/hive-skills"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "hive-skills": "dist/cli.js"
+  },
+  "files": [
+    "dist/*.js",
+    "!dist/*.test.js",
+    "scripts/archive-utils.mjs",
+    "scripts/hermes-sync.mjs",
+    "scripts/deploy-hermes-agent.sh",
+    "registry-sources",
+    "README.md",
+    "LICENSE"
+  ]
 }

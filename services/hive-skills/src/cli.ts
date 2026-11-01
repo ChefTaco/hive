@@ -1,0 +1,47 @@
+#!/usr/bin/env node
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { packageRoot } from './paths.js';
+
+const usage = `Hive Skills: HTTPS skill registry and Hermes distribution bridge.
+
+Usage: hive-skills [start|seed] [--env-file FILE]
+       hive-skills --help | --version
+
+start         Start the registry (default); requires TLS key and certificate.
+seed          Explicitly seed the bundled HiveMem skill; never runs on start.
+--env-file    Load a dotenv file; existing environment values win.
+
+Configure HIVE_SKILLS_DATA_DIR, HIVE_SKILLS_SESSION_SECRET,
+HIVE_SKILLS_ADMIN_USERS, HIVE_SKILLS_TLS_KEY_FILE and HIVE_SKILLS_TLS_CERT_FILE.
+See the package README for the complete configuration and migration guide.`;
+
+export async function main(args: readonly string[]): Promise<number> {
+  try {
+    if (args.length === 1 && ['--help', '-h'].includes(args[0]!)) { console.log(usage); return 0; }
+    if (args.length === 1 && ['--version', '-v'].includes(args[0]!)) {
+      const manifest = JSON.parse(readFileSync(resolve(packageRoot, 'package.json'), 'utf8')) as { version: string };
+      console.log(manifest.version); return 0;
+    }
+    let command: string | undefined;
+    const files: string[] = [];
+    for (let index = 0; index < args.length; index++) {
+      const arg = args[index]!;
+      if (arg === '--env-file' || arg.startsWith('--env-file=')) {
+        const file = arg === '--env-file' ? args[++index] : arg.slice('--env-file='.length);
+        if (!file || file.startsWith('--')) throw new Error('--env-file requires a file path');
+        files.push(file);
+      } else if (!command && (arg === 'start' || arg === 'seed')) command = arg;
+      else throw new Error('Invalid arguments. Run hive-skills --help.');
+    }
+    for (const file of files) process.loadEnvFile(resolve(file));
+    if (command === 'seed') await import('./seed.js');
+    else await import('./server.js');
+    return 0;
+  } catch (error) {
+    console.error(`hive-skills: ${error instanceof Error ? error.message : 'Command failed'}`);
+    return 1;
+  }
+}
+
+process.exitCode = await main(process.argv.slice(2));

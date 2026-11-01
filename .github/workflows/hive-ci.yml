@@ -132,6 +132,9 @@ jobs:
       - name: npm package contents (pack --dry-run of every publishable package)
         run: npm run check:packs
 
+      - name: Fresh Skills package integration
+        run: npm run check:skills-install
+
       - name: Install the packed servers with npm 12
         run: npm run check:npm12
 

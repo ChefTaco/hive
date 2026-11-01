@@ -38,8 +38,9 @@ locked dependency has a public registry URL and an integrity hash. Check native 
 and Argon2 hash/verify using that runtime before activation. Code stays root-owned and readable
 by the service users, with no secrets stored in the runtime directory.
 
-The optional Skills registry has no public npm package. Preserve its existing deployment and
-state independently; installing the three public servers does not replace it.
+The optional Skills registry is published separately as `@hivemagnus/hive-skills`.
+It has its own runtime and data; see [its migration procedure](#optional-skills-registry).
+The launcher continues to manage the three core servers.
 
 ## Preservation and rehearsal
 
@@ -118,3 +119,35 @@ steps. The repository's `npm run deploy` scripts deploy source code and do not m
 pointer; their entrypoint changes are overridden while these drop-ins exist. The installed
 launcher remains available inside the runtime for inspection, but its `init`, `install` and
 `start` commands manage a separate `$HIVE_HOME` layout, rather than these existing systemd units.
+
+## Optional Skills registry
+
+Install an exact `@hivemagnus/hive-skills` version from the public registry into a new
+`/opt/hive-skills/npm/releases/<release-id>/runtime` with its own private `package.json`
+and lockfile. This package uses Node's SQLite and needs no native add-on allowlist.
+Keep `/opt/hive-skills/npm/current` as an atomic pointer to that release. On installations
+whose unit and helper override use `/opt/hive-skills/current`, that link can point to
+`npm/current/runtime/node_modules/@hivemagnus/hive-skills`. The package retains
+`dist/server.js` and `scripts/deploy-hermes-agent.sh`, so those existing paths still work.
+
+Before switching, stop only `hive-skills` and take a focused archive of its complete shared
+directory, unit/overrides, PAM policy and original code pointer. Verify an isolated SQLite
+restore and hashes of all archives and configuration. Inspect queued/running deployment jobs
+and reconcile any in-flight effects before migration. Rehearse the new package's database
+initialization against a copy and compare every existing row. Do not run `seed`.
+
+Switch the pointers atomically and restart the same service with the original unit, account,
+environment, writable paths and TLS. Verify readiness, real OS login, unauthenticated denial,
+the existing catalog, promoted archive digests and Hermes manifest. Test a bridge pull into
+a disposable profile with a restart callback; do not modify a real agent or change its
+assignments to prove a server packaging migration. Check that an existing valid session
+survives the restart, then log out the test session. Compare all pre-existing database rows,
+archive bytes, targets, policies and secret/certificate hashes after migration. Retain audit
+records from verification. If activation fails, restore only the original code pointer,
+restart and verify; leave the live data in place for a code-only rollback.
+
+Full-state backups include the separate Skills npm manifest/lockfile when
+`/opt/hive-skills/npm/current/runtime` exists and Skills belongs to the installation.
+Reinstall its recorded release and reconstruct both code pointers during disaster recovery.
+Source deployment scripts do not manage the npm runtime pointer and must not replace it
+as part of a later source deployment.

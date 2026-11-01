@@ -13,6 +13,18 @@ backup = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(backup)
 
 class RecoveryTests(unittest.TestCase):
+    def test_optional_skills_runtime_is_inventoried_separately(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            release = root / 'opt/hive-skills/npm/releases/fixture/runtime'
+            release.mkdir(parents=True)
+            for name in ('package.json', 'package-lock.json'): (release / name).write_text('{}')
+            (root / 'opt/hive-skills/npm/current').symlink_to('releases/fixture')
+            paths = backup.deployment_paths(['hive-skills'], root)
+            self.assertIn(str(release / 'package.json'), paths)
+            self.assertIn(str(release / 'package-lock.json'), paths)
+            self.assertNotIn(str(release / 'package.json'), backup.deployment_paths(['hive-router'], root))
+
     def test_deployment_inventory_keeps_overrides_and_resolved_npm_lock(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

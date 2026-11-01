@@ -17,6 +17,7 @@ export const PUBLISHABLE = [
   'services/hive-mem/ts-core',
   'services/hive-router',
   'services/hive-iam/apps/iam-core',
+  'services/hive-skills',
   'packages/hive',
 ];
 
