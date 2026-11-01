@@ -6,6 +6,12 @@ import { runBackupTool } from './hive-backup.ts';
 import { runBackupRestoreDrill } from './hive-backup-drill.ts';
 
 describe('hive backup and restore planner', () => {
+  it('retains npm deployment inputs and systemd overrides through isolated recovery', () => {
+    const suite = new URL('./hive-state-backup.test.py', import.meta.url).pathname;
+    const result = spawnSync('python3', [suite], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  });
+
   it('backs up every Qdrant collection in deterministic order', () => {
     const engine = new URL('./hive-state-backup.py', import.meta.url).pathname;
     const python = `

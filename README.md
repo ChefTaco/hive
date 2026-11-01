@@ -133,6 +133,7 @@ releases with health-checked activation and automatic rollback. Operational tool
 
 Operational runbooks:
 
+- [Migrate existing systemd installations to public npm packages](docs/npm-deployments.md)
 - [Backup and recovery](docs/BACKUP_RECOVERY.md)
 - [Secret rotation](docs/SECRET_ROTATION.md)
 - [Memory process drill](docs/MEMORY_PROCESS_DRILL.md)

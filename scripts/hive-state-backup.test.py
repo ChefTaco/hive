@@ -13,13 +13,36 @@ backup = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(backup)
 
 class RecoveryTests(unittest.TestCase):
+    def test_deployment_inventory_keeps_overrides_and_resolved_npm_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            unit = root / 'etc/systemd/system/hive-router.service'
+            unit.parent.mkdir(parents=True)
+            unit.write_text('[Service]\n')
+            overrides = unit.with_name(unit.name + '.d')
+            overrides.mkdir()
+            (overrides / '50-npm-runtime.conf').write_text('[Service]\nExecStart=/opt/example/server\n')
+            release = root / 'opt/hive-npm/releases/fixture/runtime'
+            release.mkdir(parents=True)
+            for name in ('package.json', 'package-lock.json'): (release / name).write_text('{}')
+            (release / '.npmrc').write_text('fixture-private-configuration')
+            (root / 'opt/hive-npm/current').symlink_to('releases/fixture')
+            self.assertEqual(set(backup.deployment_paths(['hive-router'], root)), {
+                str(unit), str(overrides), str(release / 'package.json'), str(release / 'package-lock.json'),
+            })
+            (release / 'package-lock.json').unlink()
+            with self.assertRaisesRegex(RuntimeError, 'missing package-lock.json'):
+                backup.deployment_paths(['hive-router'], root)
+
     def fixture(self, directory):
         database = Path(directory) / 'fixture.db'
         connection = sqlite3.connect(database)
         connection.execute('CREATE TABLE revoked(token TEXT PRIMARY KEY)')
         connection.execute("INSERT INTO revoked VALUES ('fixture-revoked-id')")
         connection.commit(); connection.close()
-        files = {'state/opt/fixture.db': database.read_bytes(), 'recovery/redis.json': b'{"prefix":"fixture:","records":[]}'}
+        files = {'state/opt/fixture.db': database.read_bytes(), 'recovery/redis.json': b'{"prefix":"fixture:","records":[]}',
+                 'state/etc/systemd/system/hive-router.service.d/50-npm-runtime.conf': b'[Service]\nExecStart=/opt/example/server\n',
+                 'state/opt/hive-npm/releases/fixture/runtime/package-lock.json': b'{"lockfileVersion":3}'}
         manifest = {'schemaVersion': 2, 'host': 'hive', 'createdAt': 1, 'qdrant': [], 'files': {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}
         files['recovery/manifest.json'] = json.dumps(manifest).encode()
         archive = Path(directory) / 'archive.tar.gz'
@@ -39,6 +62,8 @@ class RecoveryTests(unittest.TestCase):
             connection = sqlite3.connect(root / 'state/opt/fixture.db')
             self.assertEqual(connection.execute('SELECT token FROM revoked').fetchone()[0], 'fixture-revoked-id')
             connection.close()
+            self.assertEqual((root / 'state/etc/systemd/system/hive-router.service.d/50-npm-runtime.conf').read_bytes(), b'[Service]\nExecStart=/opt/example/server\n')
+            self.assertEqual((root / 'state/opt/hive-npm/releases/fixture/runtime/package-lock.json').read_bytes(), b'{"lockfileVersion":3}')
             with self.assertRaisesRegex(RuntimeError, 'new isolated'): backup.restore_isolated(archive, 'hive', root)
 
     def test_corruption_fails_before_materialization(self):

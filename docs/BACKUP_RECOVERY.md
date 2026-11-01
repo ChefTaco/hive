@@ -27,6 +27,10 @@ Qdrant collection snapshots, saves the scoped IAM Redis DUMP records with expiry
 archives SQLite and file state with checksums, then restarts those previously
 active units in reverse order even if backup fails. Qdrant and Redis stay running.
 Only the active signing-key release is retained, not retired private keys.
+Service unit drop-in directories are included. For the
+[npm deployment layout](npm-deployments.md), backups also retain the active release's
+`package.json` and `package-lock.json` at their resolved release paths. Reinstall code from
+that lockfile and recreate the npm `current` link during recovery; `node_modules` is excluded.
 
 This entails a maintenance interruption whose duration depends on corpus size.
 Download streams to a protected local file, is verified, and remote staging is

@@ -8,9 +8,16 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- A migration runbook for existing systemd installations using pinned public npm packages.
+
 - `npm run test:e2e:model`: environment-configured real-provider verification covering ordinary
   inference, streaming, SDK memory recall, authentication, traces and cleanup, with private reports
   and network-free regression tests.
+
+### Fixed
+
+- Full-state backups retain systemd drop-ins and the active npm runtime's manifest and lockfile,
+  so isolated recovery preserves service overrides and the inputs needed to reinstall code.
 
 ## [1.0.3] - 2026-10-31
 

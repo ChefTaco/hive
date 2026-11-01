@@ -98,6 +98,25 @@ def checked(command):
     subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
 
 
+def deployment_paths(units, root=Path('/')):
+    """Retain effective systemd overrides and reproducible npm install inputs."""
+    paths = []
+    for unit in units:
+        service = root / 'etc/systemd/system' / (unit + '.service')
+        paths.append(str(service))
+        overrides = service.with_name(service.name + '.d')
+        if overrides.exists(): paths.append(str(overrides))
+    runtime = root / 'opt/hive-npm/current/runtime'
+    if runtime.exists():
+        for name in ('package.json', 'package-lock.json'):
+            file = runtime / name
+            if not file.is_file(): raise RuntimeError('npm runtime is missing ' + name)
+            # Archive regular files at their release paths, never npm code or
+            # the mutable current symlink. Recovery reinstalls from the lock.
+            paths.append(str(file.resolve()))
+    return paths
+
+
 def inventory():
     iam = env_file('/opt/hive-iam/.env')
     memory = env_file('/opt/hivemem/.env')
@@ -122,7 +141,7 @@ def inventory():
         skills = env_file('/opt/hive-skills/shared/.env')
         paths.extend(['/opt/hive-skills/shared/.env', skills.get('HIVE_SKILLS_DATA_DIR', '/opt/hive-skills/shared/data')])
         units.insert(0, 'hive-skills')
-    for unit in units: paths.append('/etc/systemd/system/' + unit + '.service')
+    paths.extend(deployment_paths(units))
     unique = []
     for path in sorted(set(paths), key=len):
         if path == '/' or not Path(path).exists(): raise RuntimeError('Required state path is missing: ' + path)
