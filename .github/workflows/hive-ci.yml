@@ -160,12 +160,16 @@ jobs:
 
   iam-docker:
     name: Server images and Compose recovery (${{ matrix.platform }})
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        platform: [linux/amd64, linux/arm64]
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
     env:
       HIVE_IMAGE_TEST_PLATFORM: ${{ matrix.platform }}
     steps:
