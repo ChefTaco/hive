@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { backupStores, restoreStores, verifyBackup } from '../src/backup.js';
-import { hash, withLock } from '../src/files.js';
+import { hash, withLock, run } from '../src/files.js';
+import childProcess from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { autoEligible, parseVersion, releaseSchema, satisfies } from '../src/manifest.js';
 import { guardedMigration, schemaCommit, schemaPlan } from '../src/migration.js';
 import { maintenanceDate, updateStatus } from '../src/updates.js';
@@ -19,6 +22,33 @@ const manifest = () =>
     JSON.parse(readFileSync(new URL('../../hive/package.json', import.meta.url), 'utf8'))
       .hiveRelease,
   );
+test('command output is drained after exit before JSON or errors are returned', async () => {
+  const original = childProcess.spawn;
+  let code = 0;
+  childProcess.spawn = (() => {
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: () => true,
+    });
+    process.nextTick(() => {
+      child.emit('exit', code);
+      child.stdout.end(code === 0 ? '{"complete":true}' : '');
+      child.stderr.end(code === 0 ? '' : 'Synthetic drained command failure');
+      child.emit('close', code);
+    });
+    return child;
+  }) as typeof childProcess.spawn;
+  syncBuiltinESMExports();
+  try {
+    assert.deepEqual(JSON.parse(await run('synthetic-output', [])), { complete: true });
+    code = 1;
+    await assert.rejects(run('synthetic-error', []), /Synthetic drained command failure/);
+  } finally {
+    childProcess.spawn = original;
+    syncBuiltinESMExports();
+  }
+});
 test('copied release-tooling semver conformance fixtures remain stable', () => {
   const fixtures = JSON.parse(
     readFileSync(new URL('../../../release/semver-fixtures.json', import.meta.url), 'utf8'),

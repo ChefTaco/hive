@@ -157,7 +157,9 @@ export async function run(
       clearTimeout(timeout);
       no(error);
     });
-    child.once('exit', (code) => {
+    // `exit` can precede the final stdout/stderr data events. JSON-producing
+    // server commands must be completely drained before their output is read.
+    child.once('close', (code) => {
       clearTimeout(timeout);
       code === 0
         ? yes(stdout)
