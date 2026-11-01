@@ -13,6 +13,7 @@ import { IAM_VERSION } from './config/version.js'
  * (`dist/index.js`) and the `hive-iam-server` CLI.
  */
 export async function startServer(): Promise<void> {
+  (await import('./release/runtime.js')).startUpdateChecks(IAM_VERSION);
   console.log(`Hive IAM Core v${IAM_VERSION} — starting...`)
 
   // Start BullMQ audit worker
@@ -67,11 +68,14 @@ export async function startServer(): Promise<void> {
     process.exit(1)
   })
 
+  let shuttingDown = false
   const shutdown = async () => {
+    if (shuttingDown) return
+    shuttingDown = true
     console.log('\nShutting down...')
     stopAuditRetention()
+    await new Promise<void>((done) => server.close(() => done()))
     await worker.close()
-    server.close()
     process.exit(0)
   }
 

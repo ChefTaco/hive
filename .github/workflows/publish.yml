@@ -1,7 +1,7 @@
 name: Publish to npm
 
 # Publishes every @hivemagnus package whose version is not on npm yet, with provenance, then the
-# hive-iam-server Docker image (linux/amd64 and linux/arm64) to GitHub Container Registry.
+# server images (linux/amd64 and linux/arm64) to GitHub Container Registry.
 # - Push a tag vX.Y.Z (matching the launcher version) to publish.
 # - Run it by hand (Actions > Publish to npm > Run workflow) for a dry run.
 # Publishing waits for approval on the `npm-publish` environment, then authenticates to npm
@@ -60,7 +60,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          for dir in services/hive-router services/hive-iam services/hive-mem/ts-core services/hive-mem/sdks/typescript services/hive-skills packages/hive; do
+          for dir in packages/hive-release services/hive-router services/hive-iam services/hive-mem/ts-core services/hive-mem/sdks/typescript services/hive-skills packages/hive; do
             (cd "$dir" && npm ci)
           done
 
@@ -77,6 +77,7 @@ jobs:
           npm run check:packs
           npm run check:skills-install
           npm run check:npm12
+          npm run check:upgrades
 
       - name: Publish
         run: |
@@ -96,10 +97,14 @@ jobs:
             fi
           done
 
-  docker:
-    name: Publish the IAM Docker image
+  images:
+    name: Publish server image (${{ matrix.component }})
     needs: publish
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [hive-iam-server, hive-router, hivemem-server, hive-skills]
     permissions:
       contents: read
       packages: write
@@ -107,93 +112,93 @@ jobs:
       attestations: write
     env:
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
-      IMAGE: ghcr.io/cheftaco/hive-iam-server
-      CONTEXT: services/hive-iam/apps/iam-core
+      IMAGE: ghcr.io/cheftaco/${{ matrix.component }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          fetch-depth: 0
-
-      - name: Image tags
+          node-version: 24.22.1
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - name: Exact release and immutable tag
         id: meta
         run: |
-          version="$(node -p "require('./$CONTEXT/package.json').version")"
-          # A manual (non-dry) run may only publish the image of a released version, built
-          # from the same IAM sources as its tag (the Compose example and docs may differ).
-          if [ "$DRY_RUN" != "true" ] && ! git diff --quiet "v$version" HEAD -- "$CONTEXT" ":!$CONTEXT/docker" ":!$CONTEXT/*.md"; then
-            echo "::error::$CONTEXT differs from tag v$version; release a new version instead"; exit 1
-          fi
-          tags="$IMAGE:$version"
-          if [[ "$version" != *-* ]]; then
-            IFS=. read -r major minor _ <<< "$version"
-            tags+=",$IMAGE:$major.$minor,$IMAGE:$major,$IMAGE:latest"
-          fi
-          exists=false
-          if docker buildx imagetools inspect "$IMAGE:$version" >/dev/null 2>&1; then
-            echo "$IMAGE:$version is already published; skipping"
-            exists=true
-          fi
+          version="$(node -p "require('./packages/hive/package.json').version")"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          exists=false
+          if docker buildx imagetools inspect "$IMAGE:$version" >/dev/null 2>&1; then exists=true; fi
           echo "exists=$exists" >> "$GITHUB_OUTPUT"
-
-      - name: Setup QEMU
+      - name: Prepare dry-run npm artifacts
+        if: env.DRY_RUN == 'true'
+        run: |
+          npm run bootstrap
+          npm run build
+          for dir in packages/hive services/hive-router services/hive-iam/apps/iam-core services/hive-mem/ts-core services/hive-skills; do
+            (cd "$dir" && npm pack --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/docker")
+          done
+      - name: Build and execute each architecture before publication
         if: steps.meta.outputs.exists == 'false'
-        uses: docker/setup-qemu-action@v4
-
-      - name: Setup Docker Buildx
-        if: steps.meta.outputs.exists == 'false'
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build the amd64 image
-        if: steps.meta.outputs.exists == 'false'
-        uses: docker/build-push-action@v7
-        with:
-          context: ${{ env.CONTEXT }}
-          platforms: linux/amd64
-          load: true
-          tags: hive-iam-server:local
-          cache-from: type=gha,scope=hive-iam
-          cache-to: type=gha,mode=max,scope=hive-iam
-
-      - name: Run the Compose example against it
-        if: steps.meta.outputs.exists == 'false'
-        run: bash scripts/check-iam-compose.sh --no-build
-
-      - name: Log in to GitHub Container Registry
-        if: steps.meta.outputs.exists == 'false' && env.DRY_RUN != 'true'
-        uses: docker/login-action@v4
+        run: |
+          for arch in amd64 arm64; do
+            docker buildx build --load --platform "linux/$arch" -f docker/server.Dockerfile \
+              --build-arg "HIVE_PACKAGE=@hivemagnus/${{ matrix.component }}" \
+              --build-arg "HIVE_VERSION=${{ steps.meta.outputs.version }}" -t "hive-image-check:$arch" docker
+            docker run --rm --platform "linux/$arch" "hive-image-check:$arch" --version
+            docker run --rm --platform "linux/$arch" "hive-image-check:$arch" env-schema
+          done
+      - uses: docker/login-action@v4
+        if: env.DRY_RUN != 'true' && steps.meta.outputs.exists == 'false'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build linux/amd64 and linux/arm64${{ env.DRY_RUN != 'true' && ' and push' || '' }}
+      - name: Publish immutable image with provenance and SBOM
         id: build
         if: steps.meta.outputs.exists == 'false'
         uses: docker/build-push-action@v7
         with:
-          context: ${{ env.CONTEXT }}
+          context: docker
+          file: docker/server.Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ env.DRY_RUN != 'true' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}
+          build-args: |
+            HIVE_PACKAGE=@hivemagnus/${{ matrix.component }}
+            HIVE_VERSION=${{ steps.meta.outputs.version }}
           labels: |
-            org.opencontainers.image.title=hive-iam-server
-            org.opencontainers.image.description=Hive IAM server: OAuth 2.0 / OpenID Connect identity service
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.url=https://github.com/${{ github.repository }}/tree/main/${{ env.CONTEXT }}
-            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=Apache-2.0
           provenance: mode=max
           sbom: true
-          cache-from: type=gha,scope=hive-iam
-
-      - name: Attest the image
-        if: steps.meta.outputs.exists == 'false' && env.DRY_RUN != 'true'
-        uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@v4
+        if: env.DRY_RUN != 'true' && steps.meta.outputs.exists == 'false'
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+
+  promote-images:
+    name: Promote tested same-major image channels
+    needs: [publish, images]
+    if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote only after every immutable image passed
+        run: |
+          version="$(node -p "require('./packages/hive/package.json').version")"
+          IFS=. read -r major minor patch <<< "$version"
+          for name in hive-iam-server hive-router hivemem-server hive-skills; do
+            image="ghcr.io/cheftaco/$name"
+            docker buildx imagetools create --tag "$image:$major.$minor" --tag "$image:$major" "$image:$version"
+          done

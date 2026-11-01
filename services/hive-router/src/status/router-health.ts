@@ -1,3 +1,5 @@
+import { metadata } from '../release/runtime.js';
+import { packageRoot } from '../config/paths.js';
 import { prisma } from '../storage/client.js';
 import { runProviderHealthSweep } from '../providers/health.js';
 import { loadEnv } from '../config/env.js';
@@ -14,6 +16,9 @@ export interface RouterDependencyCheck {
 }
 
 export interface RouterDependencyReport {
+  version: string;
+  release: string;
+  protocol: number;
   status: RouterReadinessStatus;
   checks: RouterDependencyCheck[];
   providers: {
@@ -68,6 +73,7 @@ export async function buildRouterDependencyReport(): Promise<RouterDependencyRep
   const ready = databaseCheck.status === 'pass' && (configured === 0 || healthy > 0);
 
   return {
+    ...metadata(packageRoot),
     status: ready ? 'ready' : 'degraded',
     checks,
     providers: { configured, healthy },

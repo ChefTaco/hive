@@ -9,6 +9,7 @@ import type { Prompter } from "./prompt.js";
 import { tlsFiles } from "./tls.js";
 import { SERVICES, type ServiceName } from "./services.js";
 import { compareVersions, launcherMajor, majorOf, serverRange, satisfiesCaretRange } from "./version.js";
+import { NATIVE_POLICY, ownRelease, findPackageRoot, catalog, packageMetadata, satisfies, releaseSchema, run as runTool } from './release/runtime.js';
 
 export interface InstalledServer {
   service: ServiceName;
@@ -150,23 +151,34 @@ export interface InstallPlanEntry {
   current: string | null;
 }
 
+/** Offline installation must use the exact reviewed bundle, even beside newer tarballs. */
+function bundleTarball(directory: string, packageName: string, version: string): string {
+  const file = resolve(directory, `${tarballPrefix(packageName)}-${version}.tgz`);
+  if (!existsSync(file)) throw new CliError(`Missing ${packageName}@${version} tarball in ${directory}; pack the complete release bundle`);
+  const result = spawnSync('tar', ['-xOf', file, 'package/package.json'], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
+  if (result.status !== 0) throw new CliError(`Cannot inspect ${packageName}@${version} tarball`);
+  const pkg = JSON.parse(result.stdout) as { name: string; version: string; hiveRelease?: unknown; engines?: { node?: string } };
+  const release = ownRelease(findPackageRoot(import.meta.url, '@hivemagnus/hive'));
+  if (pkg.name !== packageName || pkg.version !== version || JSON.stringify(pkg.hiveRelease) !== JSON.stringify(release))
+    throw new CliError(`Tarball for ${packageName}@${version} differs from the launcher release bundle`);
+  if (!pkg.engines?.node || !satisfies(process.versions.node, pkg.engines.node)) throw new CliError(`Unsupported Node engine for ${packageName}@${version}`);
+  return file;
+}
+
 export function installPlan(paths: HivePaths, services: readonly ServiceName[], from: string | undefined): InstallPlanEntry[] {
   return services.map((service) => {
     const packageName = SERVICES[service].packageName;
-    let spec = `${packageName}@${serviceRange(service)}`;
+    const release = ownRelease(findPackageRoot(import.meta.url, '@hivemagnus/hive'));
+    let spec = `${packageName}@${release.components[packageName]}`;
     if (from) {
-      const tarball = findTarball(from, packageName);
-      if (!tarball) throw new CliError(`no ${tarballPrefix(packageName)}-${launcherMajor()}.x.y.tgz in ${from}; build one with \`npm pack\` in that package, or drop --from to install from npm`);
-      const version = tarball.slice(tarball.lastIndexOf(tarballPrefix(packageName)) + tarballPrefix(packageName).length + 1, -4);
-      if (!compatibleServer(service, version)) throw new CliError(`${packageName} tarball requires ${serviceRange(service)}; build a compatible package or drop --from`);
-      spec = tarball;
+      spec = bundleTarball(from, packageName, release.components[packageName]!);
     }
     return { service, packageName, spec, current: installedServer(paths, service)?.version ?? null };
   });
 }
 
 /** Every native add-on the servers need, which the runtime manifest allows to run its install script. */
-export const NATIVE_MODULES: readonly string[] = [...new Set(Object.values(SERVICES).flatMap((service) => service.nativeModules))].sort();
+export const NATIVE_MODULES: readonly string[] = Object.entries(NATIVE_POLICY).filter(([, allow]) => allow).map(([name]) => name).sort();
 
 /** Optional add-ons with a JavaScript fallback; denied explicitly so npm 12 does not warn about them. */
 export const DENIED_INSTALL_SCRIPTS: readonly string[] = ["msgpackr-extract"];
@@ -258,10 +270,22 @@ export async function installServers(paths: HivePaths, services: readonly Servic
     output.info(`    ${entry.packageName}  ${entry.spec === `${entry.packageName}@${serverRange()}` ? serverRange() : entry.spec}${note}`);
   }
   if (!(await options.prompter.confirm("Install these packages now?", true))) return false;
+  const release = ownRelease(findPackageRoot(import.meta.url, '@hivemagnus/hive'));
+  const source = await catalog(options.from);
+  const integrity: Record<string, string> = {};
+  for (const name of ['@hivemagnus/hive', ...plan.map((entry) => entry.packageName)]) {
+    const pkg = await packageMetadata(source, name, release.components[name]!, options.from);
+    if (pkg.name !== name || pkg.version !== release.components[name] || !pkg.engines?.node || !satisfies(process.versions.node, pkg.engines.node) || JSON.stringify(releaseSchema.parse(pkg.hiveRelease)) !== JSON.stringify(release)) throw new CliError(`Target ${name} is not compatible with the complete release bundle`);
+    if (!pkg.dist?.integrity) throw new CliError(`Target ${name} has no verifiable package integrity`);
+    integrity[name] = pkg.dist.integrity;
+  }
   const npmVersion = npmAvailable();
   if (!npmVersion) throw new CliError("npm was not found on PATH; it comes with Node.js. Install Node.js 24 or 26 with npm, then retry.");
   ensureRuntimeManifest(paths);
-  const args = ["install", "--prefix", paths.runtime, "--no-fund", "--no-audit", "--omit=dev", ...plan.map((entry) => entry.spec)];
+  const own = ownRelease(findPackageRoot(import.meta.url, '@hivemagnus/hive'));
+  const launcher = options.from ? bundleTarball(options.from, '@hivemagnus/hive', own.version) : `@hivemagnus/hive@${own.version}`;
+  if (!launcher) throw new CliError('The source directory must include the launcher tarball');
+  const args = ["install", "--prefix", paths.runtime, "--ignore-scripts", "--package-lock=true", "--save-exact", "--no-fund", "--no-audit", "--omit=dev", ...plan.map((entry) => entry.spec), launcher];
   output.step(`npm ${args.join(" ")}`);
   const status = await new Promise<number>((resolvePromise) => {
     const child = spawn("npm", args, { stdio: ["ignore", "inherit", "inherit"], cwd: paths.runtime });
@@ -269,9 +293,14 @@ export async function installServers(paths: HivePaths, services: readonly Servic
     child.on("close", (code) => resolvePromise(code ?? 1));
   });
   if (status !== 0) throw new CliError(`npm install failed (exit code ${status}); see the npm output above`);
+  const lock = JSON.parse(readFileSync(join(paths.runtime, 'package-lock.json'), 'utf8')) as { packages: Record<string, { integrity?: string }> };
+  for (const [name, expected] of Object.entries(integrity)) if (lock.packages[`node_modules/${name}`]?.integrity !== expected) throw new CliError(`Installed ${name} integrity differs from the selected bundle`);
+  output.step('Building the approved native modules');
+  await runTool('npm', ['rebuild', ...NATIVE_MODULES, '--prefix', paths.runtime, '--ignore-scripts=false', '--no-fund', '--no-audit'], { cwd: paths.runtime, timeout: 900_000 });
   for (const entry of plan) {
     const installed = installedServer(paths, entry.service);
     if (!installed) throw new CliError(`${entry.packageName} did not install a ${SERVICES[entry.service].bin} command in ${paths.runtime}`);
+    if (installed.version !== own.components[entry.packageName]) throw new CliError(`${entry.packageName} version differs from the selected release bundle`);
     const broken = nativeModuleProblems(paths, entry.service);
     if (broken.length > 0) throw new CliError(`${entry.packageName} installed, but ${broken.map((item) => `${item.module} does not load (${item.error})`).join("; ")}. ${nativeModuleFix(paths, broken.map((item) => item.module))}`);
     output.ok(`${entry.packageName} ${installed.version}`);

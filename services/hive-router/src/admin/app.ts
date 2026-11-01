@@ -1,3 +1,8 @@
+import { maintenanceActive } from '../release/runtime.js';
+import { metadata } from '../release/runtime.js';
+import { packageRoot as releasePackageRoot } from '../config/paths.js';
+import { compatibilityWarnings, coordinatorRequest, durableUpgradeStatus, home as upgradeHome, ownRelease, projectFile, updateStatus } from '../release/runtime.js';
+import { UpgradeApplyRequest, UpgradePlanRequest } from '../contracts/upgrades.js';
 import { HTTPException } from 'hono/http-exception';
 import { actorJournal, actorJournalWrite } from './actor-journal-runtime.js';
 import type { ActorLease, ActorStep } from './actor-journal.js';
@@ -745,6 +750,8 @@ export async function buildHiveStatus(env: ReturnType<typeof loadEnv>, requestId
     ),
   ]);
 
+  const skew = compatibilityWarnings({ iam: typeof iamStatus.details?.version === 'string' ? iamStatus.details.version : undefined, memory: typeof memoryStatus.details?.version === 'string' ? memoryStatus.details.version : undefined, router:metadata(releasePackageRoot).version }, ownRelease(releasePackageRoot));
+  for (const message of skew.filter(message => !message.startsWith('skills:'))) routerStatus.checks.push({ name:'version-compatibility',status:'warn',message });
   return {
     generatedAt: new Date().toISOString(),
     uiUrl: env.HIVE_UI_PUBLIC_URL,
@@ -948,6 +955,7 @@ export function requiredPermissionForRequest(method: string, path: string): stri
   if (verb === 'OPTIONS') return null;
   if (verb === 'GET' || verb === 'HEAD') return requiredReadPermission(path);
   if (path === '/api/auth/reauthenticate' || path === '/api/auth/logout' || path === '/api/auth/login') return null;
+  if (path.startsWith('/api/hive/upgrades/')) return 'hive:upgrades:write';
   if (path.startsWith('/api/iam/users')) return verb === 'DELETE' ? 'iam:users:delete' : 'iam:users:write';
   if (path.startsWith('/api/iam/roles')) return 'iam:roles:write';
   if (path.startsWith('/api/iam/service-accounts')) return verb === 'DELETE' ? 'iam:sa:delete' : 'iam:sa:write';
@@ -986,7 +994,7 @@ async function attachAdminSessionAndEnforcePermission(context: AdminContext, nex
   if (required && !hasAdminPermission(principal.permissions, required)) {
     return context.json({ error: 'Forbidden', requiredPermission: required }, 403);
   }
-  const sensitive = required && (pathname.startsWith('/api/iam/password-policy') || pathname.startsWith('/api/iam/clients') || pathname.startsWith('/api/iam/roles') || pathname.startsWith('/api/hive/actors') || pathname.startsWith('/api/client-keys'));
+  const sensitive = required && ((pathname.startsWith('/api/hive/upgrades') && !['GET','HEAD'].includes(context.req.method)) || pathname.startsWith('/api/iam/password-policy') || pathname.startsWith('/api/iam/clients') || pathname.startsWith('/api/iam/roles') || pathname.startsWith('/api/hive/actors') || pathname.startsWith('/api/client-keys'));
   if (sensitive && !hasRecentOperatorAuthentication(principal.authenticatedAt)) return context.json({ error: 'STEP_UP_REQUIRED', message: 'Sign in again before changing credentials or security policy.' }, 403);
   await next();
 }
@@ -1526,6 +1534,7 @@ interface AdminAppDependencies {
 export function createAdminApp(dependencies: AdminAppDependencies = {}): Hono<{ Variables: AppVariables }> {
   const env = loadEnv();
   const app = new Hono<{ Variables: AppVariables }>();
+  app.use('*', async (c,next)=>{if(maintenanceActive(new URL(c.req.url).pathname))return c.json({error:'Hive is undergoing maintenance'},503);await next();});
   const authorizeExporter = dependencies.authorizeSecurityExporterToken ?? authorizeSecurityExporterToken;
   const authorizeStaticExporter = dependencies.authorizeStaticSecurityExporterToken
     ?? ((token: string) => Boolean(
@@ -1595,8 +1604,8 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}): Hono<{ 
   app.all('/dashboard/*', proxyHiveMemRequest);
   app.all('/api/iam/*', requireAdminAuth, proxyIamRequest);
 
-  app.get('/health', (context) => context.json({ status: 'ok', plane: 'admin' }));
-  app.get('/health/live', (context) => context.json({ status: 'ok', plane: 'admin', checks: [{ name: 'process', status: 'pass', message: 'running' }] }));
+  app.get('/health', (context) => context.json({ ...metadata(releasePackageRoot), status: 'ok', plane: 'admin' }));
+  app.get('/health/live', (context) => context.json({ ...metadata(releasePackageRoot), status: 'ok', plane: 'admin', checks: [{ name: 'process', status: 'pass', message: 'running' }] }));
   app.get('/health/dependencies', async (context) => {
     const report = await buildRouterDependencyReport();
     return context.json(report, report.status === 'ready' ? 200 : 503);
@@ -1677,6 +1686,23 @@ export function createAdminApp(dependencies: AdminAppDependencies = {}): Hono<{ 
   app.get('/api/telemetry', requireAdminAuth, async () => listTelemetry());
   app.get('/api/traces', requireAdminAuth, async () => listTraces());
   app.get('/api/hive/status', requireAdminAuth, async (context) => context.json(await buildHiveStatus(env, context.get('requestId'))));
+  app.get('/api/hive/updates', requireAdminAuth, async (context) => context.json({
+    ...await updateStatus(metadata(releasePackageRoot).release, upgradeHome()),
+    canApply: process.env['HIVE_UI_UPGRADE'] === 'true' && existsSync(projectFile(upgradeHome())),
+  }));
+  app.get('/api/hive/upgrades/status', requireAdminAuth, async (context) => {
+    try { return context.json(await coordinatorRequest(upgradeHome(), 'status')); }
+    catch { return context.json({ busy: false, result: durableUpgradeStatus(upgradeHome()), coordinatorAvailable: false }); }
+  });
+  for (const action of ['plan','apply'] as const) app.post(`/api/hive/upgrades/${action}`, requireAdminAuth, async (context) => {
+    if (!hasAdminPermission(context.get('adminPermissions'), 'hive:upgrades:write')) return context.json({ error:'Forbidden' },403);
+    if (context.req.header('origin') !== new URL(env.PUBLIC_ADMIN_URL).origin) return context.json({ error:'Invalid request origin' },403);
+    if (process.env['HIVE_UI_UPGRADE'] !== 'true') return context.json({ error:'UI upgrades are disabled; enable HIVE_UI_UPGRADE for the enrolled coordinator and Router' },403);
+    const parsed = (action === 'plan' ? UpgradePlanRequest : UpgradeApplyRequest).safeParse(await context.req.json().catch(()=>null));
+    if (!parsed.success) return context.json({ error:'Invalid upgrade request' },400);
+    try { return context.json(await coordinatorRequest(upgradeHome(),action,parsed.data), action === 'apply' ? 202 : 200); }
+    catch { return context.json({ error:'Coordinator refused the request; inspect hive upgrade --dry-run locally' },409); }
+  });
   app.get('/api/hive/skills', requireAdminAuth, async (context) => {
     if (!env.HIVE_SKILLS_INTERNAL_URL) return context.json({ configured: false, reason: 'Skills is not enabled for this installation' });
     try {

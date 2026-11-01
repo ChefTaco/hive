@@ -1,10 +1,13 @@
 import { config } from './config.js';
 import { bundledSeedSource } from './paths.js';
 import { persistArchiveFromFile } from './archive.js';
-import { store } from './db.js';
+import { skillsMigration } from './upgrade.js';
 import { existsSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+
+await skillsMigration([]);
+const { store } = await import('./db.js');
 
 let archive = process.env.HIVEMEM_ARCHIVE;
 let generatedArchive: string | undefined;

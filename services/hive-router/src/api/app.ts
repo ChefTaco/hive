@@ -1,3 +1,6 @@
+import { maintenanceActive } from '../release/runtime.js';
+import { metadata } from '../release/runtime.js';
+import { packageRoot as releasePackageRoot } from '../config/paths.js';
 import { sqliteWrite } from '../storage/sqlite-write.js';
 import { observeStream } from "./observed-stream.js";
 import { TraceOutcome, type Provider as ProviderRecord } from '../generated/prisma/client.js';
@@ -787,6 +790,7 @@ async function listAggregatedModels(): Promise<Response> {
 export function createApiApp(): Hono<{ Variables: AppVariables }> {
   const env = loadEnv();
   const app = new Hono<{ Variables: AppVariables }>();
+  app.use('*', async (c,next)=>{if(maintenanceActive(new URL(c.req.url).pathname))return c.json({error:'Hive is undergoing maintenance'},503);await next();});
 
   app.use('*', requestIdMiddleware);
   app.use('*', bodyLimit({
@@ -800,8 +804,8 @@ export function createApiApp(): Hono<{ Variables: AppVariables }> {
   app.use('/version', requireApiKey);
 
   app.get('/', (context) => context.json({ service: 'hive-router-api', status: 'ok' }));
-  app.get('/health', (context) => context.json({ status: 'ok', plane: 'api' }));
-  app.get('/health/live', (context) => context.json({ status: 'ok', plane: 'api', checks: [{ name: 'process', status: 'pass', message: 'running' }] }));
+  app.get('/health', (context) => context.json({ ...metadata(releasePackageRoot), status: 'ok', plane: 'api' }));
+  app.get('/health/live', (context) => context.json({ ...metadata(releasePackageRoot), status: 'ok', plane: 'api', checks: [{ name: 'process', status: 'pass', message: 'running' }] }));
   app.get('/health/dependencies', async (context) => {
     const report = await buildRouterDependencyReport();
     return context.json(report, report.status === 'ready' ? 200 : 503);

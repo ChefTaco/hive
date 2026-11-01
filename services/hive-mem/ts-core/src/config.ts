@@ -1,3 +1,4 @@
+import { commonEnv } from './release/runtime.js';
 import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -264,7 +265,7 @@ export function envSchema(): EnvSchema {
       minTtlSeconds: ISSUE_TOKEN_MIN_TTL_SECONDS,
       maxTtlSeconds: ISSUE_TOKEN_MAX_TTL_SECONDS,
     },
-    env: [
+    env: [...commonEnv(),
       { name: "HIVEMEM_JWT_SECRET", required: true, secret: true, generate: "hex32", description: "HS256 signing secret for agent and admin bearer tokens (at least 32 bytes). Rotating it invalidates every issued token." },
       { name: "HIVEMEM_RENEWAL_SECRET", required: false, secret: true, generate: "hex32", description: "Independent secret for long-lived token renewal grants (POST /v1/auth/renew). Must differ from HIVEMEM_JWT_SECRET; unset disables renewal." },
       { name: "HIVEMEM_TS_CORE_HOST", required: false, secret: false, default: DEFAULT_HOST, description: "Interface to listen on. Use 0.0.0.0 only behind TLS or a trusted proxy." },

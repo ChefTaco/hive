@@ -1,4 +1,4 @@
-import { ensureSqliteSchema } from '../storage/schema.js';
+import { routerMigration } from '../upgrade.js';
 import { bootstrapStorage } from '../storage/bootstrap.js';
 import { prisma } from '../storage/client.js';
 import { generateOpenAiStyleApiKey, hashValue } from '../security/crypto.js';
@@ -151,7 +151,7 @@ async function createClientKey(args: ParsedArgs): Promise<GeneratedKey> {
 
 async function bootstrapRouter(): Promise<void> {
   loadEnv();
-  await ensureSqliteSchema();
+  await routerMigration([], true);
   await prisma.$connect();
   await bootstrapStorage();
 }

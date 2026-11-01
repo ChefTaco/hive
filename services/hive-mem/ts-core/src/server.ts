@@ -1,3 +1,6 @@
+import { maintenanceActive } from './release/runtime.js';
+import { metadata, findPackageRoot } from './release/runtime.js';
+const releaseMetadata = () => metadata(findPackageRoot(import.meta.url, '@hivemagnus/hivemem-server'));
 import type { JsonValue } from "./types.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
@@ -222,6 +225,7 @@ async function healthPayload(store: InMemoryHiveMemStore) {
     status: persistence.ready && worker.ready ? "ok" : "degraded",
     service: "hivemem-ts-core",
     implementation: "typescript",
+    ...releaseMetadata(),
     persistence,
     worker,
     capabilities: store.capabilities(),
@@ -239,6 +243,7 @@ function liveHealthPayload() {
     status: "ok",
     service: "hivemem-ts-core",
     implementation: "typescript",
+    ...releaseMetadata(),
     timestamp: new Date().toISOString(),
     checks: [{ name: "process", status: "pass", message: "running" }],
   };
@@ -384,6 +389,7 @@ export function createHiveMemHandler(options: HiveMemServerOptions = {}): HiveMe
 
   return async (request, response) => {
     try {
+      if(maintenanceActive(new URL(request.url || '/', 'http://localhost').pathname)){await sendJson(response,503,{error:'Hive is undergoing maintenance'});return;}
       (request as IncomingMessage & { hiveMaxBodyBytes?: number }).hiveMaxBodyBytes = maxBodyBytes;
       const host = request.headers.host ?? "localhost";
       const url = new URL(request.url ?? "/", `http://${host}`);

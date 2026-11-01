@@ -6,6 +6,39 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-01
+
+### Added
+
+- Hive 1.2 managed release bundles, versioned npm runtimes, explicit adoption, whole-stack
+  upgrade/rollback, verified native-store backups, recovery receipts and migration planning.
+- Read-only JSON checks and release/compatibility metadata across all server packages;
+  owner-only upgrade coordinator, console upgrade review/apply and update notices.
+- Public-npm-to-packed upgrade/restore CI on Node 24 and 26, including old SDKs and tokens.
+- Non-root multi-platform server images with provenance/SBOMs, exact/minor/major channels,
+  and enrolled Compose startup gates with recovery to recorded image digests.
+
+### New environment variables
+
+- Optional, default off outside managed setup: `HIVE_AUTO_MIGRATE`, `HIVE_UPDATE_CHECK`,
+  `HIVE_AUTO_UPGRADE`, `HIVE_UI_UPGRADE`, `HIVE_COMPOSE_UPGRADE_SUPERVISOR`.
+- Optional coordinator policy: `HIVE_AUTO_UPGRADE_POLICY`, `HIVE_AUTO_UPGRADE_WINDOW`,
+  `HIVE_AUTO_UPGRADE_TIMEZONE`, `HIVE_BACKUP_DIR`, `HIVE_UPDATE_REGISTRY`.
+- Internal managed wiring: `HIVE_MANAGED_PROJECT`, `HIVE_COORDINATOR_SOCKET`.
+- No new required secrets and no removed environment names. Managed initialization explicitly
+  enables migrations/checks; unattended application stays off. Images enable backed-up migrations.
+
+### Migration impact and compatibility
+
+- Minimum tested adoption: launcher/Skills 1.1.0 and IAM/Router/HiveMem 1.0.3. Existing IAM
+  SQL/checksums are preserved; format adoption is fast and does not destructively convert data.
+- Startup no longer silently applies pending migrations without explicit opt-in. Explicit IAM
+  migration does not provision signing keys, users or clients. Edited migration history fails closed.
+- Wire formats remain compatible with existing 1.x consumers and SDK 1.0.3. Unknown peer versions
+  warn. Old IAM code cannot accept unknown future migrations; incompatible rollback requires an
+  explicitly reviewed data restore. No secret/signing-key rotation or regeneration is required.
+- Launcher and all four servers move to 1.2.0; unchanged SDKs remain 1.0.3.
+
 ## [1.1.0] - 2026-11-01
 
 ### Added

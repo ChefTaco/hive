@@ -12,6 +12,10 @@ Usage:
   hive-router check [--json] [--env-file <path>]
                                              Validate configuration without starting
   hive-router env-schema                     Print the configuration schema as JSON
+  hive-router migrate --plan [--json]         Inspect pending migrations without writing
+  hive-router migrate [--backup-dir DIR]      Back up and apply pending migrations
+  hive-router upgrade [Hive options]         Upgrade the complete managed bundle
+  hive-router rollback [Hive options]        Delegate rollback to the managed engine
   hive-router create-key --name <name> [...] Create a client API key (see create-key --help)
   hive-router --help | --version
 
@@ -129,6 +133,16 @@ export async function main(argv: string[]): Promise<number | null> {
 
 async function runCommand(cli: ParsedCli): Promise<number | null> {
   switch (cli.command) {
+    case 'upgrade':
+    case 'rollback': {
+      const { delegate } = await import('./release/runtime.js');
+      return delegate([cli.command, ...cli.rest]);
+    }
+    case 'migrate': {
+      const { routerMigration } = await import('./upgrade.js');
+      await routerMigration(cli.rest);
+      return 0;
+    }
     case 'start':
       return start(cli.rest);
     case 'env-schema': {
@@ -138,11 +152,12 @@ async function runCommand(cli: ParsedCli): Promise<number | null> {
     }
     case 'check': {
       const json = cli.rest.includes('--json');
-      const unknown = cli.rest.find((arg) => arg !== '--json');
+      const unknown = cli.rest.find((arg) => arg !== '--json' && arg !== '--offline');
       if (unknown) return fail(`unexpected argument for check: ${unknown}`);
       const { runChecks, formatReport } = await import('./commands/check.js');
-      const report = await runChecks();
-      console.log(json ? JSON.stringify(report, null, 2) : formatReport(report));
+      const report = await runChecks({ offline:cli.rest.includes('--offline') });
+      if (!json) await (await import('./release/runtime.js')).printUpdateNotice(packageInfo().version);
+      console.log(json ? JSON.stringify({...report,updates:await (await import('./release/runtime.js')).updateStatus(packageInfo().version)}, null, 2) : formatReport(report));
       return report.ok ? 0 : 1;
     }
     case 'create-key': {

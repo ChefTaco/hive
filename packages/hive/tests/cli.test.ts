@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { EnvDocument, writePrivateFile } from "../src/envfile.js";
@@ -17,6 +18,29 @@ function run(args: string[], env: NodeJS.ProcessEnv = {}) {
 }
 
 describe("hive command", () => {
+  it("forwards termination to a delegated managed coordinator", async () => {
+    const { paths, cleanup } = tempHome();
+    const managed = join(paths.home, 'current/node_modules/@hivemagnus/hive');
+    mkdirSync(join(managed, 'dist/src'), { recursive: true });
+    mkdirSync(paths.config, { recursive: true });
+    writeFileSync(join(paths.config, 'project.json'), '{}');
+    writeFileSync(join(managed, 'package.json'), JSON.stringify({ type: 'module', hiveRelease: {} }));
+    const marker = join(paths.home, 'stopped');
+    const pidFile = join(paths.home, 'delegated.pid');
+    writeFileSync(join(managed, 'dist/src/cli.js'), `import fs from 'node:fs';fs.writeFileSync(${JSON.stringify(pidFile)},String(process.pid));process.once('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(marker)},'stopped');process.exit(0)});console.log('delegated-ready');setInterval(()=>{},1000);`);
+    const child = spawn(process.execPath, [cli, 'coordinator'], { env: { PATH: process.env.PATH, HIVE_HOME: paths.home }, stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      await new Promise<void>((yes, no) => { child.stdout.once('data', () => yes()); child.once('error', no); child.once('exit', () => no(new Error('Delegated coordinator exited before readiness'))); });
+      child.kill('SIGTERM');
+      await new Promise<void>((yes, no) => { const timer = setTimeout(() => no(new Error('Delegated coordinator did not stop')), 5000); child.once('exit', () => { clearTimeout(timer); yes(); }); });
+      assert.equal(readFileSync(marker, 'utf8'), 'stopped');
+      assert.throws(() => process.kill(Number(readFileSync(pidFile, 'utf8')), 0));
+    } finally {
+      if (child.exitCode === null) child.kill('SIGKILL');
+      if (existsSync(pidFile)) { try { process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL'); } catch {} }
+      cleanup();
+    }
+  });
   it("prints its version and help", () => {
     assert.equal(packageJson.bin.hive, "dist/src/cli.js");
     assert.match(readFileSync(cli, "utf8"), /^#!\/usr\/bin\/env node\n/);

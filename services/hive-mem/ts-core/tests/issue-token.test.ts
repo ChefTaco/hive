@@ -149,7 +149,7 @@ describe("hivemem-server issue-token", () => {
     const directory = await mkdtemp(join(tmpdir(), "hivemem-token-"));
     const key = secret();
     const port = await freePort();
-    const env = { PATH: process.env.PATH, HOME: directory, HIVE_HOME: directory, HIVEMEM_JWT_SECRET: key, HIVEMEM_TS_PERSISTENCE: "memory", HIVEMEM_WEB_PORT: String(port), HIVEMEM_WORKER_ENABLED: "false" };
+    const env = { PATH: process.env.PATH, HOME: directory, HIVE_HOME: directory, HIVEMEM_JWT_SECRET: key, HIVEMEM_TS_PERSISTENCE: "memory", HIVE_AUTO_MIGRATE: "true", HIVEMEM_WEB_PORT: String(port), HIVEMEM_WORKER_ENABLED: "false" };
     const child = spawn(process.execPath, [cli], { env, stdio: ["ignore", "pipe", "pipe"] });
     const exited = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
     try {

@@ -9,6 +9,8 @@ import { issueToken, ISSUE_TOKEN_MAX_TTL_SECONDS, resolveIssueTokenRequest, sign
 import { createHiveMemHandler } from "./server.js";
 import { InMemoryHiveMemStore } from "./store.js";
 import { acquireWriterLock } from "./writer-lock.js";
+import { memoryMigration } from './upgrade.js';
+import { captureCheck, delegate, extraArguments } from './release/runtime.js';
 
 const BIN = "hivemem-server";
 
@@ -23,6 +25,9 @@ Commands:
   start        Start the server (default)
   check        Validate configuration and check that Qdrant is reachable; exits 0 or 1
   env-schema   Print the supported environment variables as JSON
+  migrate      --plan [--json] inspects; otherwise back up and migrate (--backup-dir DIR)
+  upgrade      Delegate a complete managed bundle upgrade to the Hive launcher
+  rollback     Delegate managed code rollback or explicitly confirmed data restore
   issue-token  Sign an access token with HIVEMEM_JWT_SECRET and print only the token
 
 Options:
@@ -159,10 +164,12 @@ async function runCheck(): Promise<number> {
   console.log(`${PACKAGE_NAME} ${packageVersion()} configuration check`);
   for (const [ok, text] of lines) console.log(`  ${ok === true ? "ok  " : ok === false ? "FAIL" : "info"}  ${text}`);
   console.log(failures === 0 ? "Result: ready to start" : `Result: ${failures} problem${failures === 1 ? "" : "s"} found`);
+  await (await import('./release/runtime.js')).printUpdateNotice(packageVersion());
   return failures === 0 ? 0 : 1;
 }
 
 async function runStart(): Promise<void> {
+  (await import('./release/runtime.js')).startUpdateChecks(packageVersion());
   const { config, problems } = resolveConfig();
   if (problems.length > 0) throw new CliError(problems.join(`\n${BIN}: `));
 
@@ -189,6 +196,7 @@ async function runStart(): Promise<void> {
   } else {
     console.warn(`${BIN}: HIVEMEM_TS_PERSISTENCE=memory: data is kept in memory only and is lost when the server stops`);
   }
+  await memoryMigration([], true);
   let snapshot = null;
   try {
     snapshot = persistence ? await persistence.load() : null;
@@ -236,6 +244,10 @@ async function runStart(): Promise<void> {
 }
 
 async function main(argv: readonly string[]): Promise<void> {
+  const extra = extraArguments(argv);
+  if (extra) { loadEnvFiles(extra.envFiles); if (extra.command === 'migrate') await memoryMigration(extra.rest); else process.exitCode = await delegate([extra.command, ...extra.rest]); return; }
+  const jsonCheck = argv.includes('check') && argv.includes('--json');
+  if (jsonCheck) argv = argv.filter(arg => arg !== '--json');
   const args = parseArgs(argv);
   if (args.command === "help") {
     console.log(USAGE);
@@ -255,7 +267,7 @@ async function main(argv: readonly string[]): Promise<void> {
     return;
   }
   if (args.command === "check") {
-    process.exitCode = await runCheck();
+    process.exitCode = jsonCheck ? await captureCheck(runCheck) : await runCheck();
     return;
   }
   await runStart();

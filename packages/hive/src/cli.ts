@@ -12,6 +12,12 @@ import { parseServiceList, DEFAULT_SERVICES, type ServiceName } from "./services
 import { collectStatus, configuredServices, printStatus } from "./status.js";
 import { runSupervisor } from "./supervisor.js";
 import { launcherVersion, PACKAGE_NAME, serverRange } from "./version.js";
+import { adopt, upgrade, rollback, projectFile, readProject, run, serveCoordinator, NODE_RANGE, satisfies, type Project } from './release/runtime.js';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
+import { join } from 'node:path';
+import { enroll } from './managed.js';
 
 const COMMON: Record<string, FlagKind> = { "--help": "boolean" };
 
@@ -26,12 +32,19 @@ Commands:
   status    Show the health of each configured service
   doctor    Check this machine and each server's configuration
   install   Install or upgrade the server packages
+  upgrade   Upgrade the managed release with backups and recovery
+  rollback  Return to a recorded release
+  adopt     Inspect or enroll an existing launcher installation
 
 Options:
   -h, --help      Show help (also: hive <command> --help)
   -v, --version   Print the version
 
 Everything lives in $HIVE_HOME (default ~/.hive). Start with: hive init`,
+  upgrade: `Usage: hive upgrade [--to X.Y.Z] [--dry-run] [--from DIR] [--allow-major --confirm-plan HASH]\n\nUpgrade the complete managed installation. Slow, one-way and major changes require the hash from --dry-run.`,
+  rollback: `Usage: hive rollback [--to RELEASE] [--transaction ID] [--restore-data --confirm-restore HASH --containment-reviewed HASH]`,
+  adopt: `Usage: hive adopt --dry-run | --apply\n\nInspect or enroll an existing launcher installation without moving data or changing configuration. Stop the old launcher before --apply.`,
+  coordinator: `Usage: hive coordinator\n\nRun the local upgrade coordinator. Configure config/upgrade.env to enable UI or scheduled upgrades.`,
   init: `Usage: hive init [options]
 
 Sets up Hive in $HIVE_HOME: installs the server packages (after asking), writes
@@ -129,11 +142,54 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   if (!(first in HELP) || first === "main") throw new UsageError(`unknown command ${first}; run \`hive --help\``);
   const command = first;
+  if (['init','install','upgrade','rollback','adopt','start','coordinator'].includes(command) && !satisfies(process.versions.node, NODE_RANGE)) throw new UsageError(`Node ${NODE_RANGE} is required; running ${process.versions.node}`);
   const paths = hivePaths();
+  if (['upgrade', 'rollback', 'install', 'coordinator'].includes(command) && existsSync(projectFile(paths.home))) {
+    const managed = join(paths.home, 'current/node_modules/@hivemagnus/hive');
+    const bin = join(managed, 'dist/src/cli.js');
+    if (existsSync(bin) && realpathSync(bin) !== realpathSync(fileURLToPath(import.meta.url)) && JSON.parse(readFileSync(join(managed, 'package.json'), 'utf8')).hiveRelease) {
+      return new Promise<number>((done, fail) => {
+        const child = spawn(process.execPath, [bin, ...argv], { stdio: 'inherit', env: process.env });
+        const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
+        const forward = new Map(signals.map((signal) => [signal, () => child.kill(signal)]));
+        for (const [signal, handler] of forward) process.on(signal, handler);
+        const cleanup = () => { for (const [signal, handler] of forward) process.removeListener(signal, handler); };
+        child.once('error', (error) => { cleanup(); fail(error); });
+        child.once('exit', (code) => { cleanup(); done(code ?? 1); });
+      });
+    }
+  }
+  const automation = join(paths.config,'upgrade.env');
+  if (existsSync(projectFile(paths.home)) && existsSync(automation)) process.loadEnvFile(automation);
 
   switch (command) {
+    case 'upgrade': {
+      const flags = parseFlags(rest, { ...COMMON, '--to':'string','--dry-run':'boolean','--from':'string','--allow-major':'boolean','--confirm-plan':'string' },command);
+      if (flags.booleans.has('--help')) return printHelp(command);
+      if (flags.positionals.length) throw new UsageError('upgrade does not accept service names; it upgrades the tested release bundle');
+      const result = await upgrade(paths.home,{ ...(flags.strings.get('--to') ? { to:flags.strings.get('--to')! } : {}), ...(fromDirectory(flags) ? { from:fromDirectory(flags)! } : {}), dryRun:flags.booleans.has('--dry-run'), allowMajor:flags.booleans.has('--allow-major'), ...(flags.strings.get('--confirm-plan') ? { confirmPlan:flags.strings.get('--confirm-plan')! } : {}) });
+      output.info(JSON.stringify(result,null,2)); return 0;
+    }
+    case 'rollback': {
+      const flags = parseFlags(rest,{ ...COMMON,'--to':'string','--transaction':'string','--restore-data':'boolean','--confirm-restore':'string','--containment-reviewed':'string' },command);
+      if (flags.booleans.has('--help')) return printHelp(command);
+      if (flags.positionals.length) throw new UsageError('Unexpected rollback argument');
+      output.info(JSON.stringify(await rollback(paths.home,{ ...(flags.strings.get('--to') ? { to:flags.strings.get('--to')! } : {}), ...(flags.strings.get('--transaction') ? { transaction:flags.strings.get('--transaction')! } : {}), restoreData:flags.booleans.has('--restore-data'), ...(flags.strings.get('--confirm-restore') ? { confirmRestore:flags.strings.get('--confirm-restore')! } : {}), ...(flags.strings.get('--containment-reviewed') ? { containmentReviewed:flags.strings.get('--containment-reviewed')! } : {}) }),null,2)); return 0;
+    }
+    case 'adopt': {
+      const flags = parseFlags(rest,{ ...COMMON,'--dry-run':'boolean','--apply':'boolean' },command);
+      if (flags.booleans.has('--help')) return printHelp(command);
+      if (flags.positionals.length || flags.booleans.has('--apply') && flags.booleans.has('--dry-run')) throw new UsageError('Use adopt --dry-run or --apply');
+      output.info(JSON.stringify(await adopt(paths.home,flags.booleans.has('--apply')),null,2)); return 0;
+    }
+    case 'coordinator': {
+      const flags = parseFlags(rest,COMMON,command); if(flags.booleans.has('--help')) return printHelp(command);
+      if (flags.positionals.length) throw new UsageError('Unexpected coordinator argument');
+      const config = join(paths.config,'upgrade.env'); if (existsSync(config)) process.loadEnvFile(config);
+      await serveCoordinator(paths.home); return 0;
+    }
     case "init": {
-      const flags = parseFlags(rest, { ...COMMON, "--yes": "boolean", "--services": "string", "--hostname": "string", "--no-tls": "boolean", "--port": "repeat", "--qdrant-url": "string", "--redis-url": "string", "--docker-prefix": "string", "--from": "string" }, command);
+      const flags = parseFlags(rest, { ...COMMON, "--yes": "boolean", "--services": "string", "--hostname": "string", "--no-tls": "boolean", "--port": "repeat", "--qdrant-url": "string", "--redis-url": "string", "--docker-prefix": "string", "--from": "string", '--manager':'string' }, command);
       if (flags.booleans.has("--help")) return printHelp(command);
       if (flags.positionals.length > 0) throw new UsageError(`unexpected argument ${flags.positionals[0]}; use --services ${flags.positionals.join(",")}`);
       let services: ServiceName[] | undefined;
@@ -157,7 +213,14 @@ async function main(argv: readonly string[]): Promise<number> {
       };
       const prompter = createPrompter({ yes: flags.booleans.has("--yes"), output });
       try {
+        const wasConfigured = configuredServices(paths).length > 0;
+        const manager = flags.strings.get('--manager') || 'foreground';
+        if (!['foreground','systemd','compose'].includes(manager)) throw new UsageError('--manager must be foreground, systemd or compose');
+        if (flags.strings.has('--manager') && existsSync(projectFile(paths.home)) && readProject(paths.home).manager !== manager)
+          throw new UsageError('An existing installation cannot change managers through init; its current manager and release path are preserved');
         await runInit({ paths, output, prompter, options });
+        if (!wasConfigured) await enroll(paths,manager as Project['manager']);
+        else if (!existsSync(projectFile(paths.home))) output.warn('Existing release path preserved. Review hive adopt --dry-run before explicitly enrolling this installation.');
       } finally {
         prompter.close();
       }
@@ -166,8 +229,10 @@ async function main(argv: readonly string[]): Promise<number> {
     case "install": {
       const flags = parseFlags(rest, { ...COMMON, "--yes": "boolean", "--from": "string" }, command);
       if (flags.booleans.has("--help")) return printHelp(command);
+      if (existsSync(projectFile(paths.home))) { if(flags.positionals.length) throw new UsageError('Managed installs upgrade as a bundle; use hive upgrade'); output.info(JSON.stringify(await upgrade(paths.home,{ ...(fromDirectory(flags) ? { from:fromDirectory(flags)! } : {}) }),null,2)); return 0; }
       const chosen = servicesFrom(flags);
       const configured = configuredServices(paths);
+      if (configured.length) throw new UsageError('Existing unmanaged installation: stop the stack and review hive adopt --dry-run before upgrading; install cannot replace an active legacy runtime');
       const services = chosen.length > 0 ? chosen : configured.length > 0 ? configured : [...DEFAULT_SERVICES];
       const prompter = createPrompter({ yes: flags.booleans.has("--yes"), output });
       try {
@@ -185,6 +250,10 @@ async function main(argv: readonly string[]): Promise<number> {
     case "start": {
       const flags = parseFlags(rest, { ...COMMON, "--timeout": "string" }, command);
       if (flags.booleans.has("--help")) return printHelp(command);
+      if(existsSync(projectFile(paths.home))&&readProject(paths.home).manager==='compose'){
+        if(flags.positionals.length)throw new UsageError('Managed Compose starts the enrolled stack together');
+        await run('docker',['compose','--project-directory',paths.home,'-f',join(paths.home,'compose.yaml'),'up','-d'],{timeout:900_000});output.info('Compose started. Run hive status to check the coordinator outcome.');return 0;
+      }
       const configured = configuredServices(paths);
       const chosen = servicesFrom(flags);
       const missing = chosen.filter((service) => !configured.includes(service));

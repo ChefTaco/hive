@@ -1,3 +1,4 @@
+import { commonEnv } from '../release/runtime.js';
 import { DEFAULT_ADMIN_PORT, DEFAULT_API_PORT } from './defaults.js';
 import { packageInfo } from './paths.js';
 
@@ -141,6 +142,6 @@ export function buildEnvSchemaDocument(): EnvSchemaDocument {
         description: 'Memory service behind the console Memory pages.',
       },
     ],
-    env: routerEnvCatalog,
+    env: [...commonEnv(), ...routerEnvCatalog],
   };
 }

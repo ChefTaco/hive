@@ -1,14 +1,20 @@
 services:
   hive-router:
     build:
-      context: ../..
-      dockerfile: services/hive-router/Dockerfile
-    image: hive-router:local
+      context: ../../docker
+      dockerfile: server.Dockerfile
+      args:
+        HIVE_PACKAGE: "@hivemagnus/hive-router"
+        HIVE_VERSION: "1.2.0"
+    image: ${HIVE_ROUTER_IMAGE:-ghcr.io/cheftaco/hive-router:1.2.0}
     ports:
       - "127.0.0.1:${HIVE_ROUTER_API_PORT:-4020}:4020"
       - "127.0.0.1:${HIVE_ROUTER_ADMIN_PORT:-9443}:9443"
     environment:
       NODE_ENV: production
+      HIVE_AUTO_MIGRATE: ${HIVE_AUTO_MIGRATE:-true}
+      HIVE_UPDATE_CHECK: ${HIVE_UPDATE_CHECK:-false}
+      HIVE_AUTO_UPGRADE: "false"
       API_HOST: 0.0.0.0
       ADMIN_HOST: 0.0.0.0
       API_PORT: 4020

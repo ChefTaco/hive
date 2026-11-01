@@ -22,8 +22,12 @@ services:
 
   hivemem-api:
     build:
-      context: ..
-      dockerfile: docker/Dockerfile
+      context: ../../../docker
+      dockerfile: server.Dockerfile
+      args:
+        HIVE_PACKAGE: "@hivemagnus/hivemem-server"
+        HIVE_VERSION: "1.2.0"
+    image: ${HIVEMEM_IMAGE:-ghcr.io/cheftaco/hivemem-server:1.2.0}
     container_name: hivemem-api
     restart: unless-stopped
     ports:
@@ -34,6 +38,9 @@ services:
       - ../.env
     environment:
       - HIVEMEM_QDRANT_HOST=qdrant
+      - HIVE_AUTO_MIGRATE=${HIVE_AUTO_MIGRATE:-true}
+      - HIVE_UPDATE_CHECK=${HIVE_UPDATE_CHECK:-false}
+      - HIVE_AUTO_UPGRADE=false
     depends_on:
       - qdrant
     profiles:

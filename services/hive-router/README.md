@@ -407,7 +407,7 @@ recovers `HIVE_ROUTER_IAM_CLIENT_SECRET` from `/opt/hive-iam/.env` and
 Build the image from the repository root:
 
 ```bash
-docker build -f services/hive-router/Dockerfile -t hive-router:local .
+docker build -f services/hive-router/Dockerfile -t hive-router:local docker
 ```
 
 `docker-compose.example.yml` publishes both listeners on loopback only. It will
@@ -415,15 +415,13 @@ not start unless you supply a strong `HIVE_ROUTER_SECRET`, an explicit
 `HIVE_ROUTER_ADMIN_USERS`, and TLS certificate and key paths
 (`HIVE_ROUTER_TLS_CERT_PATH`, `HIVE_ROUTER_TLS_KEY_PATH`). The container runs
 as the unprivileged `node` user, so the mounted `./data` directory must be
-writable by that user. The image does not include PAM, so in a container use
+writable by that user. The image includes the PAM helper but no operator accounts; use
 `HIVE_ROUTER_AUTH_MODE=iam-oidc` or provide your own
 `HIVE_ROUTER_OS_AUTH_COMMAND`.
 
-The image keeps its historical defaults, which differ from the npm package:
-`API_PORT=443`, `ADMIN_PORT=9443`, `PUBLIC_API_URL=https://localhost:443`,
-`PUBLIC_ADMIN_URL=https://localhost:9443`, and data under
-`/repo/services/hive-router/data`. `docker-compose.example.yml` overrides the
-ports and data paths.
+Images install the exact npm release, use API port 4020 and admin port 9443 by default,
+and persist state under `/data/router`. `docker-compose.example.yml` sets explicit ports
+and data paths. Startup migrations require verified backups.
 
 ### Production checklist
 
@@ -486,3 +484,13 @@ The evaluation reads credentials from the repository-root `.env` (override with
 | `prisma` | Prisma schema |
 | `scripts` | Deploy, smoke, evaluation and code-generation scripts |
 | `tests` | Vitest suites, Playwright console tests and fixtures |
+
+## Managed upgrades
+
+Use `hive upgrade --dry-run`, then `hive upgrade` for the enrolled release bundle. This server's
+`upgrade` and `rollback` commands delegate to the same owner-run launcher. `migrate --plan --json`
+is read-only; migration requires a verified backup. Set `HIVE_AUTO_MIGRATE=true` explicitly for
+startup migrations outside a managed install. Slow or one-way automatic migrations are refused.
+`check --json` reports configuration without initializing state. No upgrade rotates signing keys
+or reseeds existing accounts. See [UPGRADING.md](https://github.com/ChefTaco/hive/blob/main/UPGRADING.md)
+for adoption, compatibility, recovery, update notices and container controls.

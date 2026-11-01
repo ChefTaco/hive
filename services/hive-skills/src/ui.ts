@@ -217,6 +217,20 @@ async function state() {
 
 async function operations() {
   if (!me?.isAdmin) return;
+  try {
+    const update = await api('/admin/updates');
+    const panel = document.querySelector('#upgrade-notice');
+    if (panel) {
+      panel.textContent = update.error || (update.available ? 'Hive ' + update.available + ' available. Run hive upgrade --to ' + update.available + '. ' + (update.summary || '') : (update.enabled ? 'No newer supported bundle in the update cache.' : 'Update checks are disabled.'));
+      if (update.notesUrl && new URL(update.notesUrl).protocol === 'https:') {
+        const link = document.createElement('a'); link.href = update.notesUrl; link.textContent = ' Release notes'; link.target = '_blank'; link.rel = 'noreferrer noopener'; panel.append(link);
+      }
+      if (update.newRequiredEnv?.length) panel.append(document.createTextNode(' Required settings: ' + update.newRequiredEnv.map((entry) => entry.name).join(', ') + '.'));
+      if (update.migrations?.some((entry) => entry.impact !== 'fast')) panel.append(document.createTextNode(' Review migration impact: ' + [...new Set(update.migrations.map((entry) => entry.impact))].join(', ') + '.'));
+    }
+  } catch {}
+
+
   for (const [path, id] of [['deployments', 'jobs'], ['channels', 'channels'], ['receipts', 'receipts']]) {
     try {
       q('#' + id).textContent = JSON.stringify(await api('/admin/' + path), null, 2);
@@ -301,6 +315,7 @@ export const page = `<!doctype html>
 <style>${styles}</style>
 </head>
 <body>
+<p id="upgrade-notice" role="status"></p>
 ${body}
 <script>${script}</script>
 </body>

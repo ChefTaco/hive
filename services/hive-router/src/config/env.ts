@@ -62,6 +62,11 @@ const defaultIamProxyScopes = [
 ].join(' ');
 
 export const envSchema = z.object({
+  HIVE_AUTO_MIGRATE: z.string().default('false'),
+  HIVE_UPDATE_CHECK: z.string().default('false'),
+  HIVE_AUTO_UPGRADE: z.string().default('false'),
+  HIVE_UI_UPGRADE: z.string().default('false'),
+  HIVE_COMPOSE_UPGRADE_SUPERVISOR: z.string().default('false'),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   HOST: z.string().default('127.0.0.1'),

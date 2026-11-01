@@ -38,7 +38,8 @@ own.
   this up for you.
 
 No Prisma CLI, database server or post-install step is needed; the database
-schema is created and upgraded automatically on start.
+schema migrations require a verified backup. Set `HIVE_AUTO_MIGRATE=true` for explicit
+first provisioning or managed startup; otherwise run migrations manually.
 
 ## Quick start
 
@@ -48,6 +49,7 @@ docker run -d --name hive-redis -p 127.0.0.1:6379:6379 redis:7.4.7-alpine
 
 # 2. Secrets
 cat > iam.env <<EOF
+HIVE_AUTO_MIGRATE=true
 COOKIE_SECRET=$(openssl rand -hex 32)
 IAM_AGENT_SECRET=$(openssl rand -hex 32)
 SEED_ADMIN_PASSWORD=$(openssl rand -base64 24)
@@ -77,13 +79,14 @@ On the first start the server:
 4. creates the built-in roles, the initial `SUPER_ADMIN` account and the
    built-in `hive` and `hive-router` OIDC clients.
 
-Later starts apply any pending migrations from a newer release, after copying
-the database to `iam.db.pre-migrate-<timestamp>.bak`.
+Later starts refuse pending migrations unless `HIVE_AUTO_MIGRATE=true`. Explicit migration
+never provisions accounts or signing keys. Backups include SQLite, scoped Redis and protected
+files; missing existing databases or signing keys must be restored rather than regenerated.
 
 ## First admin account
 
-The initial administrator is created on the first start, when the database has
-no users:
+The initial administrator is provisioned only for a new database. An existing empty database
+is never reseeded automatically:
 
 | Variable | Default | Notes |
 | --- | --- | --- |
@@ -162,8 +165,8 @@ HOST=0.0.0.0
 ## Commands
 
 ```text
-hive-iam-server [start]   Start the server (default); applies pending migrations first
-hive-iam-server migrate   Apply migrations and the first-start bootstrap, then exit
+hive-iam-server [start]   Start the server; startup migration requires explicit opt-in
+hive-iam-server migrate   Back up and apply schema migrations; --plan is read-only
 hive-iam-server check     Validate config, TLS, data directory, signing keys and Redis
 hive-iam-server env-schema  Print the environment variables as JSON
 hive-iam-server reset-admin Reset the admin password from IAM_RESET_PASSWORD
@@ -178,8 +181,9 @@ separate step.
 ## Docker
 
 Each release is published as `ghcr.io/cheftaco/hive-iam-server` for
-`linux/amd64` and `linux/arm64`, tagged with its version (`1.0.0`, `1.0`, `1`
-and `latest`) and carrying build provenance and an SBOM. The image runs the
+`linux/amd64` and `linux/arm64`, tagged with its exact version, minor and major
+(`1.2.0`, `1.2`, `1`) and carrying build provenance and an SBOM. New releases do not
+publish `latest`; the existing historical tag is retained. The image runs the
 same `hive-iam-server` entry point as an unprivileged user, keeps all state in
 the `/data` volume, listens on `0.0.0.0:4200` inside the container and has a
 readiness health check.
@@ -192,7 +196,8 @@ docker run -d --name hive-iam -p 127.0.0.1:4200:4200 -v hive-iam-data:/data \
 
 To build it yourself from a clone, use the
 [`Dockerfile`](https://github.com/ChefTaco/hive/blob/main/services/hive-iam/apps/iam-core/Dockerfile):
-`docker build -t hive-iam-server:local services/hive-iam/apps/iam-core`.
+`docker build -f services/hive-iam/apps/iam-core/Dockerfile -t hive-iam-server:local docker`
+from the repository root. This installs the exact released npm package.
 
 [`docker/compose.yml`](https://github.com/ChefTaco/hive/blob/main/services/hive-iam/apps/iam-core/docker/compose.yml)
 runs IAM with a password-protected Redis, named volumes and loopback-only
@@ -273,3 +278,13 @@ least 32 characters.
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
+
+## Managed upgrades
+
+Use `hive upgrade --dry-run`, then `hive upgrade` for the enrolled release bundle. This server's
+`upgrade` and `rollback` commands delegate to the same owner-run launcher. `migrate --plan --json`
+is read-only; migration requires a verified backup. Set `HIVE_AUTO_MIGRATE=true` explicitly for
+startup migrations outside a managed install. Slow or one-way automatic migrations are refused.
+`check --json` reports configuration without initializing state. No upgrade rotates signing keys
+or reseeds existing accounts. See [UPGRADING.md](https://github.com/ChefTaco/hive/blob/main/UPGRADING.md)
+for adoption, compatibility, recovery, update notices and container controls.

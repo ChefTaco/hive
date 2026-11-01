@@ -43,3 +43,6 @@ AGENTS.local.md
 CLAUDE.local.md
 **/CLAUDE.local.md
 .private-terms
+
+# Generated bundles from the private release workspace (included in npm dist).
+**/src/release/
