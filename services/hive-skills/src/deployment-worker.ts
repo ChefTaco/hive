@@ -1,13 +1,15 @@
 import { spawn } from 'node:child_process';
 import { config } from './config.js';
 import { store } from './db.js';
+import { maintenanceActive } from './release/runtime.js';
 
 /** One local deployment at a time. Output may contain credentials: retain only exit codes. */
-export function startDeploymentWorker(): () => void {
+export function startDeploymentWorker(): () => Promise<void> {
   let busy = false;
+  let active = Promise.resolve();
   store.recoverDeployments();
   const timer = setInterval(() => {
-    if (busy) return;
+    if (busy || maintenanceActive('/worker')) return;
     const job = store.claimDeployment();
     if (!job) return;
     busy = true;
@@ -21,11 +23,13 @@ export function startDeploymentWorker(): () => void {
           HIVE_SKILLS_TARGET_USER: target.username, HIVE_SKILLS_KEY_ONLY: 'true' },
       });
       let finished = false;
-      const finish = (ok: boolean, code: string) => { if (finished) return; finished = true; store.finishDeployment(job.id, ok, code); busy = false; };
+      let complete: () => void = () => {};
+      active = new Promise<void>((done) => { complete = done; });
+      const finish = (ok: boolean, code: string) => { if (finished) return; finished = true; store.finishDeployment(job.id, ok, code); busy = false; complete(); };
       child.once('error', () => finish(false, 'launch_failed'));
       child.once('close', (code) => finish(code === 0, code === 0 ? 'timer_installed' : `exit_${code ?? 'signal'}`));
     } catch { store.finishDeployment(job.id, false, 'launch_failed'); busy = false; }
   }, 1000);
   timer.unref();
-  return () => clearInterval(timer);
+  return async () => { clearInterval(timer); await active; };
 }

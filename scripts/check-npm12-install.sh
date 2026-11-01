@@ -34,9 +34,11 @@ node -e 'const m=require(process.argv[1]); if (!m.allowScripts || m.allowScripts
 
 echo ">>> 2. A project that allows the add-ons in package.json"
 mkdir -p "$WORK/project"
-cat > "$WORK/project/package.json" <<'EOF'
-{ "name": "npm12-check", "private": true, "allowScripts": { "better-sqlite3": true, "argon2": true } }
-EOF
+node --input-type=module - "$ROOT" "$WORK/project/package.json" <<'NODE'
+import {writeFileSync} from 'node:fs';
+const {NATIVE_POLICY}=await import(process.argv[2]+'/packages/hive/src/release/runtime.js');
+writeFileSync(process.argv[3],JSON.stringify({name:'npm12-check',private:true,allowScripts:NATIVE_POLICY}));
+NODE
 (cd "$WORK/project" && npm install --silent --no-fund --no-audit "$WORK"/tgz/hivemagnus-hive-router-1.*.tgz "$WORK"/tgz/hivemagnus-hive-iam-server-1.*.tgz "$WORK"/tgz/hivemagnus-hive-skills-1.*.tgz >/dev/null)
 (cd "$WORK/project" && node -e '
   new (require("better-sqlite3"))(":memory:").close();

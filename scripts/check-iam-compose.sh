@@ -6,7 +6,7 @@
 #   3. the seeded admin can sign in;
 #   4. after `down` and `up`, the data is kept and nothing is seeded again.
 # Usage: bash scripts/check-iam-compose.sh [--no-build]
-#   --no-build  run the image named by IAM_IMAGE (default hive-iam-server:local) as is
+#   --no-build  run the image named by IAM_IMAGE (default hive-iam-server:local-amd64) as is
 # DOCKER_COMPOSE overrides the Compose command (default "docker compose"), and
 # IAM_CHECK_PORT the loopback port (default 4290).
 set -euo pipefail
@@ -19,7 +19,7 @@ BASE="http://127.0.0.1:$PORT"
 read -r -a DC <<< "${DOCKER_COMPOSE:-docker compose}"
 
 case "${1:-}" in
-  "") BUILD=--build ;;
+  "") node "$ROOT/scripts/check-images.mjs" --component iam; BUILD=--no-build ;;
   --no-build) BUILD=--no-build ;;
   *) echo "usage: $0 [--no-build]" >&2; exit 2 ;;
 esac
@@ -43,6 +43,7 @@ IAM_AGENT_SECRET=$(openssl rand -hex 32)
 REDIS_PASSWORD=$(openssl rand -hex 32)
 SEED_ADMIN_PASSWORD=$ADMIN_PASSWORD
 IAM_PORT=$PORT
+IAM_IMAGE=${IAM_IMAGE:-hive-iam-server:local-amd64}
 EOF
 )
 

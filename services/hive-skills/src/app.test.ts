@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
+process.env.HIVE_AUTO_MIGRATE = 'true';
 process.env.HIVE_SKILLS_DATA_DIR = mkdtempSync(join(tmpdir(), 'hive-skills-app-test-'));
 process.env.HIVE_SKILLS_SESSION_SECRET = 'app-test-session-secret-0123456789abcdef';
 process.env.HIVE_SKILLS_PUBLIC_URL = 'https://registry.test:4030';
 process.env.HIVE_SKILLS_TARGETS = 'agent-1=deploy@agent-host.test';
 
+await (await import('./upgrade.js')).skillsMigration([], true);
 const { store } = await import('./db.js');
 const app = (await import('./app.js')).default;
 

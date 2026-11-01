@@ -36,7 +36,7 @@ export const builtinApiDocs: BuiltinApiDocEntry[] = [
 ];
 
 export function buildRouterOpenApiDocument(adminBaseUrl: string): Record<string, unknown> {
-  const paths = Object.fromEntries(
+  const paths: Record<string, unknown> = Object.fromEntries(
     builtinApiDocs.map((entry) => [
       entry.route,
       {
@@ -53,6 +53,12 @@ export function buildRouterOpenApiDocument(adminBaseUrl: string): Record<string,
     ]),
   );
 
+  for (const [path,method,summary] of [
+    ['/api/hive/updates','get','Available same-major Hive release and configuration changes'],
+    ['/api/hive/upgrades/status','get','Durable upgrade coordinator outcome'],
+    ['/api/hive/upgrades/plan','post','Prepare a reviewed release upgrade plan'],
+    ['/api/hive/upgrades/apply','post','Apply the exact reviewed plan with recent operator authentication'],
+  ]) paths[path!] = {[method!]:{summary,security:[{adminSession:[]}],responses:{'200':{description:'Success'},...(path?.endsWith('/apply')?{'202':{description:'Upgrade accepted'}}:{}),'401':{description:'Authentication required'},'403':{description:'Permission, recent authentication or origin check failed'},'409':{description:'Upgrade plan changed or coordinator is unavailable'}}}};
   return {
     openapi: '3.1.0',
     info: {
@@ -62,5 +68,6 @@ export function buildRouterOpenApiDocument(adminBaseUrl: string): Record<string,
     },
     servers: [{ url: adminBaseUrl }],
     paths,
+    components:{securitySchemes:{adminSession:{type:'apiKey',in:'cookie',name:'hive_router_admin'}}},
   };
 }

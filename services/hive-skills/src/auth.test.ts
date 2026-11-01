@@ -6,8 +6,10 @@ import { join } from 'node:path';
 import test from 'node:test';
 import type { ChildProcess, spawn } from 'node:child_process';
 
+process.env.HIVE_AUTO_MIGRATE = 'true';
 process.env.HIVE_SKILLS_DATA_DIR = mkdtempSync(join(tmpdir(), 'hive-skills-auth-test-'));
 process.env.HIVE_SKILLS_SESSION_SECRET = 'auth-test-session-secret-0123456789abcdef';
+await (await import('./upgrade.js')).skillsMigration([], true);
 const { createOsAuthenticator, createSession, readAuth } = await import('./auth.js');
 const { default: app } = await import('./app.js');
 

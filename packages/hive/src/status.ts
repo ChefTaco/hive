@@ -10,12 +10,15 @@ import { probeStore, STORES, type StoreProbe } from "./stores.js";
 import { MEMORY_TOKEN_VAR, tokenExpiry } from "./token.js";
 import { displayUrl } from "./privacy.js";
 import { probeCa, processAlive, readPidFile } from "./supervisor.js";
+import { durableUpgradeStatus, projectFile, compatibilityWarnings, ownRelease, findPackageRoot, activeDirectory, installedPackage, type DurableUpgradeStatus } from './release/runtime.js';
+import { join } from 'node:path';
 
 export interface ListenerStatus {
   plane: Listener["plane"];
   url: string;
   healthy: boolean;
   detail: string;
+  version?: string;
 }
 
 export interface ServiceStatus {
@@ -32,6 +35,8 @@ export interface StatusReport {
   consoleUrl: string | null;
   memoryTokenExpires: string | null;
   ok: boolean;
+  upgrade?: DurableUpgradeStatus;
+  compatibility?: string[];
 }
 
 export function configuredServices(paths: HivePaths): ServiceName[] {
@@ -44,11 +49,15 @@ export async function collectStatus(paths: HivePaths): Promise<StatusReport> {
   const pid = readPidFile(paths);
   const services = await Promise.all(configuredServices(paths).map(async (service): Promise<ServiceStatus> => {
     const doc = EnvDocument.load(paths.envFile(service));
+    const installed = installedServer(paths, service)?.version ?? null;
     const probes = await Promise.all(listeners(service, doc).map(async (entry): Promise<ListenerStatus> => {
       const probe = await probeHttp(entry.healthUrl, { ca, timeoutMs: 3000 });
-      return { plane: entry.plane, url: displayUrl(entry.url), healthy: probe.ok, detail: probe.ok ? "healthy" : probe.error ?? `HTTP ${probe.status}` };
+      let version: string | undefined;
+      try { const value = JSON.parse(probe.body); if (typeof value.version === 'string') version = value.version; } catch { /* legacy endpoints may omit metadata */ }
+      const matches = !version || !installed || version === installed;
+      return { plane: entry.plane, url: displayUrl(entry.url), healthy: probe.ok && matches, detail: !matches ? `running ${version}; selected ${installed}` : probe.ok ? `healthy${version ? ` (${version})` : ''}` : probe.error ?? `HTTP ${probe.status}`, ...(version ? { version } : {}) };
     }));
-    const status: ServiceStatus = { service, installed: installedServer(paths, service)?.version ?? null, listeners: probes };
+    const status: ServiceStatus = { service, installed, listeners: probes };
     if (service === "memory" && doc.get("HIVEMEM_TS_PERSISTENCE") !== "memory") {
       const url = doc.get("HIVEMEM_QDRANT_URL") ?? STORES.qdrant.url(STORES.qdrant.defaultPort);
       status.store = { name: "qdrant", url: displayUrl(url), state: await probeStore("qdrant", url) };
@@ -63,6 +72,10 @@ export async function collectStatus(paths: HivePaths): Promise<StatusReport> {
   const router = existsSync(routerFile) ? EnvDocument.load(routerFile) : null;
   const token = router?.get(MEMORY_TOKEN_VAR);
   const exp = token ? tokenExpiry(token) : null;
+  const managed = existsSync(projectFile(paths.home));
+  const current = managed ? activeDirectory(paths.home) : undefined;
+  const releaseRoot = current && installedPackage(current, '@hivemagnus/hive').hiveRelease ? join(current, 'node_modules/@hivemagnus/hive') : findPackageRoot(import.meta.url, '@hivemagnus/hive');
+  const release = ownRelease(releaseRoot);
   return {
     home: paths.home,
     launcher: pid && processAlive(pid.pid) ? { running: true, pid: pid.pid } : { running: false },
@@ -70,6 +83,10 @@ export async function collectStatus(paths: HivePaths): Promise<StatusReport> {
     consoleUrl: router ? displayUrl(consoleUrl(router)) : null,
     memoryTokenExpires: exp ? new Date(exp * 1000).toISOString() : null,
     ok: services.length > 0 && services.every((service) => service.listeners.every((entry) => entry.healthy)),
+    ...(managed ? {
+      upgrade: durableUpgradeStatus(paths.home),
+      compatibility: compatibilityWarnings(Object.fromEntries(services.map((s) => [s.service, s.listeners[0]?.version])), { ...release, wireCompatibility: Object.fromEntries(Object.entries(release.wireCompatibility).filter(([name]) => services.some((s) => s.service === name))) }),
+    } : {}),
   };
 }
 
@@ -94,4 +111,6 @@ export function printStatus(report: StatusReport, output: Output): void {
   }
   if (report.consoleUrl) output.info(`  Console: ${report.consoleUrl}`);
   if (report.memoryTokenExpires) output.info(`  Router's HiveMem token valid until ${report.memoryTokenExpires}`);
+  if (report.upgrade) { output.info(`  Upgrade: ${report.upgrade.state}${report.upgrade.busy ? ' (held or running; inspect the receipt)' : ''}`); if (report.upgrade.error) output.warn(report.upgrade.error); if (report.upgrade.restoreCommand) output.info(`  Recovery: ${report.upgrade.restoreCommand}`); }
+  for (const warning of report.compatibility || []) output.warn(warning);
 }

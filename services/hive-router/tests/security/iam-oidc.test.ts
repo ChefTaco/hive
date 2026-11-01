@@ -24,6 +24,7 @@ function json(response: ServerResponse, status: number, body: unknown): void {
 function testEnv(): Env {
   return {
     NODE_ENV: 'test',
+    HIVE_AUTO_MIGRATE:'false', HIVE_UPDATE_CHECK:'false', HIVE_AUTO_UPGRADE:'false', HIVE_UI_UPGRADE:'false', HIVE_COMPOSE_UPGRADE_SUPERVISOR:'false',
     LOG_LEVEL: 'error',
     HOST: '127.0.0.1',
     API_HOST: '127.0.0.1',

@@ -15,7 +15,7 @@ import { describeTokenProblem, MEMORY_TOKEN_VAR, memoryTokenProblem, mintMemoryT
 
 const COLORS: Record<ServiceName, Color> = { iam: "magenta", memory: "yellow", router: "cyan", skills: "green" };
 const STARTUP_TIMEOUT_MS: Record<ServiceName, number> = { iam: 180_000, memory: 90_000, router: 90_000, skills: 90_000 };
-const STOP_TIMEOUT_MS = 20_000;
+const STOP_TIMEOUT_MS = 150_000;
 const TOKEN_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
 export interface StartOptions {
@@ -117,6 +117,7 @@ export function refreshRouterToken(paths: HivePaths, output: Output): boolean {
  * when one exits unexpectedly. Resolves with the launcher's exit code.
  */
 export async function runSupervisor(paths: HivePaths, output: Output, options: StartOptions): Promise<number> {
+  const stopUpdateChecks = (await import('./release/runtime.js')).startUpdateChecks((await import('./version.js')).launcherVersion(),paths.home,true);
   const services = sortServices(options.services);
   if (services.length === 0) throw new CliError("no services are configured; run `hive init` first");
   const previous = readPidFile(paths);
@@ -139,7 +140,7 @@ export async function runSupervisor(paths: HivePaths, output: Output, options: S
       throw new CliError((error as Error).message);
     }
   }
-  if (services.includes("router") && existsSync(paths.envFile("memory"))) {
+  if (process.env.HIVE_UPGRADE_START !== "true" && services.includes("router") && existsSync(paths.envFile("memory"))) {
     try {
       refreshRouterToken(paths, output);
     } catch (error) {
@@ -177,6 +178,7 @@ export async function runSupervisor(paths: HivePaths, output: Output, options: S
   const stopAll = async (code: number): Promise<void> => {
     if (stopping) return;
     stopping = true;
+    stopUpdateChecks();
     exitCode = code;
     clearInterval(tokenTimer);
     for (const service of [...services].reverse()) {
@@ -193,7 +195,7 @@ export async function runSupervisor(paths: HivePaths, output: Output, options: S
     // which then stops the servers one by one in reverse dependency order.
     const child = spawn(process.execPath, [server.binPath, "start", ...envFileArgs(paths, service)], {
       cwd: paths.home,
-      env: serverEnvironment(paths),
+      env: { ...serverEnvironment(paths), HIVE_MANAGED_PROJECT: paths.home },
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     });

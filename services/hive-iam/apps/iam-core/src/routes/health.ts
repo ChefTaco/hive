@@ -1,3 +1,5 @@
+import { metadata } from '../release/runtime.js'
+import { PACKAGE_ROOT } from '../cli/paths.js'
 import { auditEnqueueHealth } from '../services/audit-service.js'
 import { Hono } from 'hono'
 import { prisma } from '../db/client.js'
@@ -83,6 +85,7 @@ export async function buildIamDependencyReport(clients: IamHealthClients = { dat
 
   return {
     status: allPass ? 'healthy' : 'degraded',
+    ...metadata(PACKAGE_ROOT),
     version: IAM_VERSION,
     uptime: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
@@ -100,6 +103,7 @@ healthRouter.get('/', async (c) => {
 })
 
 healthRouter.get('/live', (c) => c.json({
+  ...metadata(PACKAGE_ROOT),
   status: 'ok',
   version: IAM_VERSION,
   uptime: Math.floor(process.uptime()),

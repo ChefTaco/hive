@@ -12,6 +12,41 @@ async function signIn(page: Page, username: string, password: string): Promise<v
   if ((await response).ok()) await expect(page.getByRole('heading', { name: 'Hive Control Surface' })).toBeVisible();
 }
 
+test('shows disabled upgrade automation and rejects unauthenticated or cross-origin application', async ({ page }) => {
+  expect((await page.request.post('/api/hive/upgrades/apply', { data: { planHash: 'a'.repeat(64) } })).status()).toBe(401);
+  await page.goto('/');
+  await signIn(page, allowedUsername, allowedPassword);
+  await page.getByRole('navigation').getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Hive updates' })).toBeVisible();
+  await expect(page.getByText('Automatic update checks are disabled.', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Review upgrade' })).toHaveCount(0);
+  const denied = await page.request.post('/api/hive/upgrades/apply', {
+    headers: { origin: 'https://example.com' }, data: { planHash: 'a'.repeat(64) },
+  });
+  expect([401, 403]).toContain(denied.status());
+});
+
+test('upgrade review reauthenticates and submits only the confirmed plan hash', async ({ page }) => {
+  const planHash = 'a'.repeat(64);
+  let requests = 0;
+  await page.route('**/api/hive/updates', (route) => route.fulfill({ json: { installed: '1.2.0', available: '1.2.1', enabled: true, canApply: true } }));
+  await page.route('**/api/hive/upgrades/plan', (route) => ++requests === 1
+    ? route.fulfill({ status: 403, json: { error: 'STEP_UP_REQUIRED' } })
+    : route.fulfill({ json: { hash: planHash, packages: { '@hivemagnus/hive': { from: '1.2.0', to: '1.2.1' } }, target: { version: '1.2.1' }, changes: { newRequiredEnv: [], removedEnv: [], migrations: [] }, attention: [] } }));
+  let submitted: unknown;
+  await page.route('**/api/hive/upgrades/apply', (route) => { submitted = route.request().postDataJSON(); return route.fulfill({ status: 202, json: { state: 'running' } }); });
+  await page.goto('/'); await signIn(page, allowedUsername, allowedPassword);
+  await page.getByRole('navigation').getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Review upgrade', exact: true }).click();
+  await page.getByLabel('Confirm your password').fill(allowedPassword);
+  await page.getByRole('button', { name: 'Confirm authentication', exact: true }).click();
+  await expect(page.getByText('Authentication refreshed. Review the upgrade again.')).toBeVisible();
+  await page.getByRole('button', { name: 'Review upgrade', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm upgrade to 1.2.1', exact: true }).click();
+  await expect(page.getByText('Upgrade started.', { exact: false })).toBeVisible();
+  expect(submitted).toEqual({ planHash });
+});
+
 test.describe('Hive unified console', () => {
   test('rejects an account outside the operator allowlist', async ({ page }) => {
     await page.goto('/');

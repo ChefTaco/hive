@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, statSync } from "node:fs";
+import { randomUUID } from 'node:crypto';
+import { projectFile, writeJson } from '../src/release/runtime.js';
 import { after, before, describe, it } from "node:test";
 import { EnvDocument } from "../src/envfile.js";
 import { CliError } from "../src/errors.js";
@@ -35,6 +37,16 @@ async function init(paths: HivePaths, initOptions: InitOptions, answers: string[
 const env = (paths: HivePaths, service: "memory" | "router" | "iam" | "skills") => EnvDocument.load(paths.envFile(service));
 
 describe("hive init", () => {
+  it('refuses additions to a managed service inventory before writing configuration', async () => {
+    const { paths, cleanup } = tempHome();
+    try {
+      installFakeServers(paths);
+      writeJson(projectFile(paths.home), { schema: 1, id: randomUUID(), manager: 'foreground', services: ['router'], launcher: '@hivemagnus/hive', createdAt: new Date().toISOString() });
+      const before = readFileSync(projectFile(paths.home), 'utf8');
+      await assert.rejects(init(paths, options({ services: ['iam'] })), /service selection is fixed/);
+      assert.equal(readFileSync(projectFile(paths.home), 'utf8'), before);
+    } finally { cleanup(); }
+  });
   it("writes private env files for all three services with consistent wiring", { skip: opensslVersion() ? false : "openssl is not installed" }, async () => {
     const { paths, cleanup } = tempHome();
     try {

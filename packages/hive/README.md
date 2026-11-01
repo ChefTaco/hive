@@ -54,8 +54,10 @@ hive init --services all --yes
 hive start
 ```
 
-Use `hive init --services skills` for Skills alone, or to add it to an existing setup.
-`hive install skills`, `hive start skills`, `hive status` and `hive doctor` support it too.
+Use `hive init --services skills` for a new Skills-only installation. Choose the complete
+service set at enrollment: an enrolled inventory is fixed, and `init` will not modify an
+active release to add components. Use a separate `HIVE_HOME` for additional services.
+`hive start skills`, `hive status` and `hive doctor` support configured Skills services.
 `--port skills=4030` chooses its port. Skills requires TLS, so a new Skills setup rejects
 `--no-tls` before installing packages or writing configuration.
 
@@ -80,8 +82,8 @@ The registry starts empty. Explicitly seed the bundled HiveMem skill only on a n
 ```
 
 The launcher does not seed, configure agent targets or change any Hermes profile automatically.
-Existing Skills configuration and secrets are kept on reruns. Stop and restart `hive start`
-after adding Skills so the Router reads its new registry configuration.
+Existing Skills configuration and secrets are kept on reruns. Restart the configured stack
+after explicitly changing its configuration.
 
 ## Signing in the first time
 
@@ -134,8 +136,7 @@ IAM_RESET_PASSWORD='a new long password' \
 
 ## What `hive init` sets up
 
-The server packages are installed on demand into `$HIVE_HOME/runtime`, pinned to the launcher's
-major version (for example `@hivemagnus/hive-router@^1.0.0`). Skills requires `^1.1.0`, which
+The server packages are installed on demand into `$HIVE_HOME/runtime`, pinned to an exact tested release bundle (for example `@hivemagnus/hive-router@1.2.0`). Skills requires `^1.1.0`, which
 adds the launcher configuration/preflight protocol; older Skills packages are upgraded or rejected. The launcher itself has no runtime
 dependencies.
 
@@ -160,9 +161,10 @@ required secrets with 32 random bytes and wires the services together:
   using the command each server documents. `hive start` restarts those containers if they are
   stopped, for example after a reboot.
 
-Running `init` again keeps every existing value and secret. It only adds what a newly chosen
-service needs. If an existing file needs a change, for example when you add IAM to a Router that
-used OS sign-in, `init` shows each change, with secrets masked, and asks first.
+Running `init` again keeps existing values and secrets and preserves the enrolled service
+selection. Configuration reconciliation shows each proposed change with secrets masked
+and asks first. Existing unmanaged installations require explicit adoption before package
+replacement and retain their current release path until then.
 
 ## Files
 
@@ -208,12 +210,23 @@ service manager (for example a systemd user unit with `ExecStart=hive start`), o
 ## Upgrading
 
 ```bash
-npm install -g @hivemagnus/hive@latest   # the launcher
-hive install                             # the servers, within the launcher's major version
-hive start                               # restart to run the new versions
+npx @hivemagnus/hive@latest upgrade --dry-run
+npx @hivemagnus/hive@latest upgrade
+hive rollback
 ```
 
-IAM migrates its database on start, after it copies the database to a backup file next to it.
+Managed installations use exact release bundles and immutable versioned runtimes. Existing
+launcher installations first use `hive adopt --dry-run`, stop the old launcher, then
+`hive adopt --apply`. Backups must succeed before migration. Existing secrets, data and keys
+stay in place; incompatible data changes require an explicitly reviewed restore.
+Use the explicit `@latest` bootstrap for a pre-1.2 launcher; already published older launchers
+cannot delegate to the managed upgrade engine and must not run `install` after adoption.
+
+`hive init --manager systemd` registers user units; `--manager compose` generates a managed
+Linux Compose project. `hive coordinator` runs the owner-only UI/update coordinator.
+Automation switches default off outside managed installs; unattended upgrades remain off.
+See [UPGRADING.md](https://github.com/ChefTaco/hive/blob/main/UPGRADING.md) for all controls,
+backup/restore, compatibility and image recovery.
 
 ## Uninstalling
 

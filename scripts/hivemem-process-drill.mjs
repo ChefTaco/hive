@@ -66,7 +66,7 @@ async function startApi(worker = false) {
   child = spawn(process.execPath, ['--max-old-space-size=768', 'services/hive-mem/ts-core/dist/src/cli.js'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
     PATH: process.env.PATH, NODE_ENV: 'test', HIVEMEM_JWT_SECRET: secret,
     HIVEMEM_TS_CORE_HOST: '127.0.0.1', HIVEMEM_TS_CORE_PORT: String(port),
-    HIVEMEM_STORAGE_PATH: directory, HIVEMEM_TS_PERSISTENCE: 'qdrant',
+    HIVEMEM_STORAGE_PATH: directory, HIVEMEM_TS_PERSISTENCE: 'qdrant', HIVE_AUTO_MIGRATE: 'true',
     HIVEMEM_QDRANT_URL: 'http://127.0.0.1:' + proxy.address().port,
     HIVEMEM_WORKER_ENABLED: String(worker), HIVEMEM_CONSOLIDATION_INTERVAL_SECONDS: '0',
   } });

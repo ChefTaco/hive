@@ -155,6 +155,17 @@ vulnerabilities privately; see [SECURITY.md](SECURITY.md).
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Upgrading
+
+For a managed installation, run `npx @hivemagnus/hive@latest upgrade --dry-run`, then
+`npx @hivemagnus/hive@latest upgrade`. The command upgrades the launcher and every enrolled server
+from an exact release bundle, verifies datastore backups before migration, checks live health,
+and records recovery instructions. Optional Skills is upgraded only when installed.
+
+See [UPGRADING.md](UPGRADING.md) for adoption, rollback, automation switches, compatibility,
+systemd/Compose management and image channels. Existing independent deployments keep their
+operator-owned release process; never run fresh-install initialization over their data.
+
 ## License
 
 [Apache License 2.0](LICENSE) © ChefTaco and contributors.

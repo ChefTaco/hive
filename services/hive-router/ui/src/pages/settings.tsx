@@ -6,6 +6,7 @@ import { Button, EmptyState, Field, JsonBlock, Panel, TextArea } from '../compon
 import { can } from '../lib/permissions';
 import type { AdminUser, ConfigImportRequest, RoutingGoal, RoutingObjectiveConfig } from '../lib/types';
 import { Icon } from '../components/icons';
+import { UpgradesPanel } from '../components/upgrades';
 
 const ROUTING_GOALS: Array<{ value: RoutingGoal; label: string; copy: string }> = [
   { value: 'balanced', label: 'Balanced', copy: 'Use quality, throughput, and cost together.' },
@@ -102,6 +103,7 @@ export function SettingsPage({ currentUser }: { currentUser: AdminUser | null })
         </div>
       </div>
 
+      <UpgradesPanel canUpgrade={can(currentUser, 'hive:upgrades:write')} />
       <div className="grid-2">
         <Panel title="Routing Objective" eyebrow="Provider scoring">
           <div className="segmented-grid">

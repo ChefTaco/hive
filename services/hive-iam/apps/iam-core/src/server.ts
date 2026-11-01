@@ -1,3 +1,4 @@
+import { maintenanceActive } from './release/runtime.js'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { bodyLimit } from 'hono/body-limit'
@@ -24,6 +25,7 @@ import { devicesRouter } from './routes/devices.js'
 
 export function createApp(): Hono {
   const app = new Hono()
+  app.use('*',async(c,next)=>{if(maintenanceActive(new URL(c.req.url).pathname))return c.json({error:'Hive is undergoing maintenance'},503);await next();return undefined})
 
   app.use('*', bodyLimit({
     maxSize: env.MAX_REQUEST_BODY_BYTES,

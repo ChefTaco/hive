@@ -1,8 +1,17 @@
 {
+  "components": {
+    "securitySchemes": {
+      "adminSession": {
+        "in": "cookie",
+        "name": "hive_router_admin",
+        "type": "apiKey"
+      }
+    }
+  },
   "info": {
     "description": "Administrative and enumerated API surface for Hive Router",
     "title": "Hive Router Admin API",
-    "version": "1.0.3"
+    "version": "1.2.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -37,6 +46,105 @@
           }
         },
         "summary": "Native Ollama completion route"
+      }
+    },
+    "/api/hive/updates": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission, recent authentication or origin check failed"
+          },
+          "409": {
+            "description": "Upgrade plan changed or coordinator is unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": []
+          }
+        ],
+        "summary": "Available same-major Hive release and configuration changes"
+      }
+    },
+    "/api/hive/upgrades/apply": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "202": {
+            "description": "Upgrade accepted"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission, recent authentication or origin check failed"
+          },
+          "409": {
+            "description": "Upgrade plan changed or coordinator is unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": []
+          }
+        ],
+        "summary": "Apply the exact reviewed plan with recent operator authentication"
+      }
+    },
+    "/api/hive/upgrades/plan": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission, recent authentication or origin check failed"
+          },
+          "409": {
+            "description": "Upgrade plan changed or coordinator is unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": []
+          }
+        ],
+        "summary": "Prepare a reviewed release upgrade plan"
+      }
+    },
+    "/api/hive/upgrades/status": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Permission, recent authentication or origin check failed"
+          },
+          "409": {
+            "description": "Upgrade plan changed or coordinator is unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": []
+          }
+        ],
+        "summary": "Durable upgrade coordinator outcome"
       }
     },
     "/api/ps": {

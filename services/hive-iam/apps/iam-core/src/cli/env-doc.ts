@@ -1,3 +1,4 @@
+import { commonEnv } from '../release/runtime.js';
 import { IAM_VERSION } from '../config/version.js'
 import { DEFAULT_PORT, HEALTH_PATH, PACKAGE_NAME, REDIS_DOCKER_COMMAND } from './constants.js'
 
@@ -59,6 +60,6 @@ export function buildEnvSchemaDocument() {
         docker: REDIS_DOCKER_COMMAND,
       },
     ],
-    env: ENV_VARS,
+    env: [...commonEnv(), ...ENV_VARS],
   }
 }

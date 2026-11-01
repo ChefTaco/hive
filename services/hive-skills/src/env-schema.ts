@@ -1,3 +1,4 @@
+import { commonEnv } from './release/runtime.js';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { packageRoot } from './paths.js';
@@ -8,7 +9,7 @@ export function envSchemaDocument(): unknown {
   return {
     service: 'skills', package: '@hivemagnus/hive-skills', version, defaultPort: 4030,
     healthPath: '/healthz', consolePath: '/', dependencies: [],
-    env: [
+    env: [...commonEnv(),
       { name: 'NODE_ENV', default: 'production', description: 'Runtime environment.' },
       { name: 'HIVE_SKILLS_HOST', default: '127.0.0.1', description: 'Listener bind address.' },
       { name: 'HIVE_SKILLS_PORT', default: '4030', description: 'HTTPS listener port.' },

@@ -18,6 +18,7 @@ import { resolveStore } from "./stores.js";
 import { certificateNames, createCertificates, inspectServerCertificate, namesOnCertificate, OPENSSL_MISSING, opensslVersion, tlsFiles, type TlsFiles } from "./tls.js";
 import { describeTokenProblem, MEMORY_TOKEN_VAR, memoryTokenProblem, mintMemoryToken, tokenExpiry } from "./token.js";
 import { displayUrl } from "./privacy.js";
+import { projectFile, readProject } from './release/runtime.js';
 
 export const PORT_KEYS = ["memory", "iam", "router", "router-admin", "skills", "qdrant", "redis"] as const;
 export type PortKey = (typeof PORT_KEYS)[number];
@@ -140,6 +141,7 @@ async function ensureInstalled(context: InitContext, services: ServiceName[]): P
   for (const service of mismatched) output.warn(`${SERVICES[service].packageName} ${installedServer(paths, service)?.version} requires ${serviceRange(service)} for this launcher.`);
   const toInstall = sortServices([...missing, ...mismatched]);
   if (toInstall.length === 0) return;
+  if (SERVICE_NAMES.some((service) => existsSync(paths.envFile(service)))) throw new CliError('An existing unmanaged runtime needs adoption before package changes; stop the stack and run hive adopt --dry-run');
   const installed = await installServers(paths, toInstall, { from: options.from, prompter, output, reason: "Hive needs these server packages" });
   if (!installed && missing.length > 0) {
     throw new CliError(`init cannot continue without ${missing.map((service) => SERVICES[service].packageName).join(", ")}; run \`hive install\` when you are ready, then \`hive init\` again`);
@@ -329,6 +331,13 @@ export async function runInit(context: InitContext): Promise<InitResult> {
   const configured = SERVICE_NAMES.filter((service) => existsSync(paths.envFile(service)));
   const services = await chooseServices(context, configured);
   const newServices = services.filter((service) => !configured.includes(service));
+  if (existsSync(projectFile(paths.home))) {
+    const managed = readProject(paths.home);
+    if (newServices.length || services.some((s) => !managed.services.includes(s)))
+      throw new CliError('Managed service selection is fixed at enrollment. Use a separate HIVE_HOME for additional services; init cannot edit an active release. Existing configuration has not been changed.');
+    if (services.some((s) => !installedServer(paths, s) || !compatibleServer(s, installedServer(paths, s)!.version)))
+      throw new CliError('Managed packages need repair or upgrade; use hive upgrade instead of modifying the active runtime');
+  }
   if (newServices.includes("skills") && !options.tls) throw new UsageError("Skills requires TLS; omit --no-tls or select only memory,router,iam");
   if (services.includes("skills")) output.info("  Skills administration uses your OS account through PAM (Linux with pamtester), independently of IAM sign-in.");
   if (services.includes("router") && !services.includes("iam")) {
@@ -387,6 +396,11 @@ export async function runInit(context: InitContext): Promise<InitResult> {
     const schema = schemas.get(service) as ServerSchema;
     const doc = new EnvDocument();
     doc.append(...header(service, paths));
+    doc.set('HIVE_AUTO_MIGRATE', 'true');
+    doc.set('HIVE_UPDATE_CHECK', 'true');
+    doc.set('HIVE_AUTO_UPGRADE', 'false');
+    doc.set('HIVE_UI_UPGRADE', 'false');
+    doc.set('HIVE_COMPOSE_UPGRADE_SUPERVISOR', 'false');
     const storeUrl = storeUrls[service];
     setAll(doc, baseEntries(service, context, schema, { ports, tls, ...(storeUrl ? { storeUrl } : {}), routerClientSecret, osUser: context.username ?? userInfo().username, publicHost }));
     docs.set(service, doc);

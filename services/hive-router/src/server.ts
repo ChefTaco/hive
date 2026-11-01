@@ -3,7 +3,7 @@ import { createServer } from 'node:https';
 import { serve, type ServerType } from '@hono/node-server';
 import { loadEnv } from './config/env.js';
 import { prisma } from './storage/client.js';
-import { ensureSqliteSchema } from './storage/schema.js';
+import { routerMigration } from './upgrade.js';
 import { bootstrapStorage } from './storage/bootstrap.js';
 import { syncBuiltinApiDocs } from './storage/api-docs.js';
 import { createApiApp } from './api/app.js';
@@ -53,9 +53,10 @@ function listen(
 }
 
 export async function startServer(): Promise<void> {
+  (await import('./release/runtime.js')).startUpdateChecks((await import('./config/paths.js')).packageInfo().version);
   const env = loadEnv();
 
-  await ensureSqliteSchema();
+  await routerMigration([], true);
   await prisma.$connect();
   await bootstrapStorage();
   await syncBuiltinApiDocs(env.PUBLIC_ADMIN_URL);
@@ -115,13 +116,15 @@ export async function startServer(): Promise<void> {
   }, 30_000);
   const traceRetentionInterval = startTraceRetention();
 
+  let shuttingDown = false;
   async function shutdown(signal: string): Promise<void> {
+    if (shuttingDown) return;
+    shuttingDown = true;
     clearInterval(healthInterval);
     clearInterval(traceRetentionInterval);
     log('info', 'Shutting down hive-router', { signal });
+    await Promise.all([apiServer, adminServer].map((server) => new Promise<void>((done) => server.close(() => done()))));
     await prisma.$disconnect();
-    apiServer.close();
-    adminServer.close();
     process.exit(0);
   }
 

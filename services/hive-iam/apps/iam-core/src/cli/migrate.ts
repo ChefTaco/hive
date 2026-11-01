@@ -105,7 +105,7 @@ function analyse(db: Database.Database, local: LocalMigration[]): { applied: str
       throw new MigrationError(`The database was migrated by a newer IAM release (unknown migration ${row.migration_name}). Upgrade @hivemagnus/hive-iam-server before starting.`)
     }
     if (migration.checksum !== row.checksum) {
-      warnings.push(`Migration ${row.migration_name} was modified after it was applied (checksum differs).`)
+      throw new MigrationError(`Migration ${row.migration_name} was modified after it was applied (checksum differs); restore the original immutable migration file.`)
     }
   }
   const appliedNames = new Set(rows.map((row) => row.migration_name))

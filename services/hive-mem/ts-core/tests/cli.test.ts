@@ -178,7 +178,7 @@ describe("hivemem-server command", () => {
   it("starts with the explicit volatile opt-in, creates a private storage directory, serves health, and stops on SIGTERM", async () => {
     await withTempDir(async (directory) => {
       const port = await closedPort();
-      const child = spawn(process.execPath, [cli], { env: { PATH: process.env.PATH, HOME: directory, HIVE_HOME: directory, HIVEMEM_JWT_SECRET: secret(), HIVEMEM_TS_PERSISTENCE: "memory", HIVEMEM_WEB_PORT: String(port), HIVEMEM_WORKER_ENABLED: "false" }, stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn(process.execPath, [cli], { env: { PATH: process.env.PATH, HOME: directory, HIVE_HOME: directory, HIVEMEM_JWT_SECRET: secret(), HIVEMEM_TS_PERSISTENCE: "memory", HIVE_AUTO_MIGRATE: "true", HIVEMEM_WEB_PORT: String(port), HIVEMEM_WORKER_ENABLED: "false" }, stdio: ["ignore", "pipe", "pipe"] });
       let output = "";
       child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
       child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });

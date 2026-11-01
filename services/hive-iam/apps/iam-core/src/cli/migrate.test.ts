@@ -119,6 +119,6 @@ describe('bundled migrator', () => {
     await applyMigrations(path, dir)
     const first = local[0]!.name
     writeFileSync(join(dir, first, 'migration.sql'), `${local[0]!.sql}\n-- edited\n`)
-    expect(planMigrations(path, dir).warnings).toEqual([`Migration ${first} was modified after it was applied (checksum differs).`])
+    expect(() => planMigrations(path, dir)).toThrow(/modified after it was applied/)
   })
 })

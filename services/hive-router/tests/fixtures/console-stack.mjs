@@ -85,7 +85,7 @@ await new Promise((resolve) => memory.listen(0, '127.0.0.1', resolve));
 const memoryUrl = `http://127.0.0.1:${memory.address().port}`;
 const token = signToken(secret, { sub: 'console-fixture', role: 'admin', scope: '*', exp: Math.floor(Date.now() / 1000) + 600 });
 const child = spawn(process.execPath, ['dist/src/index.js'], { stdio: ['ignore', 'inherit', 'inherit'], env: {
-  ...process.env, NODE_ENV: 'test', API_HOST: '127.0.0.1', ADMIN_HOST: '127.0.0.1', API_PORT: '15020', ADMIN_PORT: '19443',
+  ...process.env, HIVE_AUTO_MIGRATE:'true',HIVE_UPDATE_CHECK:'false', NODE_ENV: 'test', API_HOST: '127.0.0.1', ADMIN_HOST: '127.0.0.1', API_PORT: '15020', ADMIN_PORT: '19443',
   PUBLIC_API_URL: 'http://127.0.0.1:15020', PUBLIC_ADMIN_URL: 'http://127.0.0.1:19443', DATABASE_URL: `file:${state}/router.db`, DATA_DIR: state, TRACE_DIR: join(state, 'traces'),
   HIVE_ROUTER_SECRET: randomBytes(32).toString('hex'), HIVE_ROUTER_AUTH_MODE: 'os', HIVE_ROUTER_ADMIN_USERS: 'admin', HIVE_ROUTER_OS_AUTH_COMMAND: './tests/fixtures/os-auth.mjs',
   HIVEMEM_INTERNAL_URL: memoryUrl, HIVEMEM_PUBLIC_URL: memoryUrl, HIVE_ROUTER_MEMORY_PROXY_TOKEN: token, HIVE_IAM_INTERNAL_URL: `http://127.0.0.1:${iam.address().port}`, HIVE_ROUTER_IAM_CLIENT_SECRET: randomBytes(32).toString('hex'), HIVE_ROUTER_SECURITY_EXPORT_STATIC_FALLBACK_ENABLED: 'false',

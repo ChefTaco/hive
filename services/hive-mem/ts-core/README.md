@@ -178,3 +178,13 @@ harness against a local server.
 ## License
 
 Apache-2.0
+
+## Managed upgrades
+
+Use `hive upgrade --dry-run`, then `hive upgrade` for the enrolled release bundle. This server's
+`upgrade` and `rollback` commands delegate to the same owner-run launcher. `migrate --plan --json`
+is read-only; migration requires a verified backup. Set `HIVE_AUTO_MIGRATE=true` explicitly for
+startup migrations outside a managed install. Slow or one-way automatic migrations are refused.
+`check --json` reports configuration without initializing state. No upgrade rotates signing keys
+or reseeds existing accounts. See [UPGRADING.md](https://github.com/ChefTaco/hive/blob/main/UPGRADING.md)
+for adoption, compatibility, recovery, update notices and container controls.

@@ -12,6 +12,8 @@ import { collectStatus, configuredServices } from "./status.js";
 import { opensslVersion } from "./tls.js";
 import { describeTokenProblem, memoryTokenProblem } from "./token.js";
 import { satisfiesCaretRange, supportedNodeRange } from "./version.js";
+import { updateStatus } from './release/runtime.js';
+import { launcherVersion } from './version.js';
 
 export type CheckLevel = "ok" | "warn" | "fail" | "info";
 
@@ -79,6 +81,11 @@ export async function runDoctor(paths: HivePaths): Promise<DoctorCheck[]> {
   }
 
   const status = await collectStatus(paths);
+  const updates = await updateStatus(launcherVersion(), paths.home);
+  add('Updates', updates.error ? 'warn' : 'info', updates.available ? `${updates.available} available: ${updates.notesUrl}; run hive upgrade --to ${updates.available}` : updates.error || (updates.enabled ? 'No newer supported bundle in the shared cache' : 'Update checks disabled'));
+  if (updates.newRequiredEnv?.length) add('Updates', 'warn', `New required settings: ${updates.newRequiredEnv.map((e) => e.name).join(', ')}`);
+  if (updates.migrations?.some((m) => m.impact !== 'fast')) add('Updates', 'warn', `Migration review required: ${[...new Set(updates.migrations.map((m) => m.impact))].join(', ')}`);
+  for (const warning of status.compatibility || []) add('Compatibility', 'warn', warning);
   const running = new Set<ServiceName>(status.services.filter((service) => service.listeners.every((entry) => entry.healthy)).map((service) => service.service));
   for (const [service, doc] of docs) {
     for (const entry of listeners(service, doc)) {

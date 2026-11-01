@@ -8,8 +8,10 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const ts = createRequire(join(root, 'packages/hive-release/package.json'))('typescript');
 
 export const PUBLISHABLE = [
   'services/hive-mem/sdks/typescript',
@@ -60,6 +62,20 @@ for (const directory of PUBLISHABLE) {
   if (files.length > 0) {
     for (const file of requiredFiles(manifest)) if (!listed.has(file)) problems.push(`missing ${file} (run npm run build first)`);
     for (const file of files) if (FORBIDDEN.test(file)) problems.push(`must not publish ${file}`);
+    for (const file of files.filter((path) => /\.[cm]?js$/.test(path))) {
+      const source = ts.createSourceFile(file, readFileSync(join(cwd, file), 'utf8'), ts.ScriptTarget.Latest, true);
+      const inspect = (node) => {
+        let specifier;
+        if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) specifier = node.moduleSpecifier;
+        else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) specifier = node.arguments[0];
+        if (specifier && ts.isStringLiteral(specifier) && specifier.text.startsWith('.')) {
+          const target = normalize(join(dirname(file), specifier.text.split(/[?#]/u)[0]));
+          if (!listed.has(target)) problems.push(`missing relative import ${target} required by ${file}`);
+        }
+        ts.forEachChild(node, inspect);
+      };
+      inspect(source);
+    }
   }
   if (problems.length === 0) {
     console.log(`ok    ${manifest.name}@${manifest.version} (${directory}, ${files.length} files)`);

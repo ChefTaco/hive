@@ -22,6 +22,7 @@ export interface CheckReport {
 }
 
 export interface CheckOptions {
+  offline?: boolean;
   source?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   isRoot?: boolean;
@@ -224,14 +225,16 @@ export async function runChecks(options: CheckOptions = {}): Promise<CheckReport
   const iamRequired = env.HIVE_ROUTER_AUTH_MODE === 'iam-oidc';
   if (iamRequired || source['HIVE_IAM_INTERNAL_URL'] || source['HIVE_ROUTER_IAM_CLIENT_SECRET']) {
     const url = `${env.HIVE_IAM_INTERNAL_URL.replace(/\/$/u, '')}/api/v1/health/ready`;
-    await checkDependency('iam', url, iamRequired, () => iamTlsOptions(new URL(url), env) as Record<string, unknown>, probe, results);
+    if (options.offline) results.push({ name:'iam',status:'warn',message:'Not probed during offline configuration check; live upgrade health must verify IAM' });
+    else await checkDependency('iam', url, iamRequired, () => iamTlsOptions(new URL(url), env) as Record<string, unknown>, probe, results);
   } else {
     results.push({ name: 'iam', status: 'ok', message: 'not configured (optional)' });
   }
 
   if (source['HIVEMEM_INTERNAL_URL'] || env.HIVE_ROUTER_MEMORY_PROXY_TOKEN) {
     const url = `${env.HIVEMEM_INTERNAL_URL.replace(/\/$/u, '')}/v1/health/ready`;
-    await checkDependency('memory', url, false, () => hiveMemTlsOptions(new URL(url), env) as Record<string, unknown>, probe, results);
+    if (options.offline) results.push({ name:'memory',status:'warn',message:'Not probed during offline configuration check; live upgrade health must verify Memory' });
+    else await checkDependency('memory', url, false, () => hiveMemTlsOptions(new URL(url), env) as Record<string, unknown>, probe, results);
     if (!env.HIVE_ROUTER_MEMORY_PROXY_TOKEN) {
       results.push({ name: 'memory-token', status: 'warn', message: 'HIVE_ROUTER_MEMORY_PROXY_TOKEN is not set, so the console Memory pages cannot call HiveMem. Set it to the HiveMem admin token.' });
     }

@@ -1,1 +1,2 @@
-export const IAM_VERSION = '1.0.3'
+import {findPackageRoot,metadata} from '../release/runtime.js'
+export const IAM_VERSION = metadata(findPackageRoot(import.meta.url,'@hivemagnus/hive-iam-server')).version

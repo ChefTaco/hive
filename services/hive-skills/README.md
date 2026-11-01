@@ -19,17 +19,18 @@ OS-backed sign-in. SQLite is provided by Node; there are no native npm add-ons.
 Agent deployment also needs Bash, OpenSSH, and permission to enable the target's user timer.
 
 ```bash
-npm install --prefix /opt/hive-skills/runtime @hivemagnus/hive-skills@1.1.0
+npm install --prefix /opt/hive-skills/runtime @hivemagnus/hive-skills@1.2.0
 /opt/hive-skills/runtime/node_modules/.bin/hive-skills --env-file /opt/hive-skills/skills.env
 ```
 
 Or run `npx @hivemagnus/hive-skills --env-file skills.env`. The CLI accepts `start`
-(the default), `seed`, `check`, `env-schema`, `--help` and `--version`. `check` validates TLS,
+(the default), `seed`, `check`, `env-schema`, `migrate`, `upgrade`, `rollback`, `--help` and `--version`. `check` validates TLS,
 configuration and an existing database without creating or migrating state. `env-schema` prints
 configuration metadata without loading runtime configuration. Environment-file paths may be absolute;
 existing environment variables win. Without `--env-file`, the historical `./.env` lookup
 is retained. Help/version do not initialize storage. A fresh install starts with an empty
-catalog; startup never seeds or replaces existing records.
+catalog; startup never seeds or replaces existing records. Run `hive-skills migrate`
+explicitly before first startup, or enable `HIVE_AUTO_MIGRATE=true` with backup access.
 
 Configure these values in a private environment file (mode 0600):
 
@@ -155,3 +156,13 @@ version in `package.json`. CI also checks the package allowlist and npm 12 insta
 The package publishes from `.github/workflows/publish.yml` alongside the other packages;
 configure its npm trusted publisher for that workflow and the `npm-publish` environment after
 the initial authenticated publication.
+
+## Managed upgrades
+
+Use `hive upgrade --dry-run`, then `hive upgrade` for the enrolled release bundle. This server's
+`upgrade` and `rollback` commands delegate to the same owner-run launcher. `migrate --plan --json`
+is read-only; migration requires a verified backup. Set `HIVE_AUTO_MIGRATE=true` explicitly for
+startup migrations outside a managed install. Slow or one-way automatic migrations are refused.
+`check --json` reports configuration without initializing state. No upgrade rotates signing keys
+or reseeds existing accounts. See [UPGRADING.md](https://github.com/ChefTaco/hive/blob/main/UPGRADING.md)
+for adoption, compatibility, recovery, update notices and container controls.

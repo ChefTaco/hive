@@ -1,3 +1,7 @@
+import { maintenanceActive } from './release/runtime.js';
+import { metadata } from './release/runtime.js';
+import { packageRoot as releasePackageRoot } from './paths.js';
+import { home as upgradeHome, updateStatus } from './release/runtime.js';
 import { bodyLimit } from 'hono/body-limit';
 import { existsSync, readFileSync } from 'node:fs';
 import { Hono } from 'hono';
@@ -64,6 +68,7 @@ const archiveUrl = (skillSlug: string, release: Release, channel: string): strin
   return channel === 'stable' ? base : `${base}?channel=${channel}`;
 };
 
+app.use('*', async (c,next)=>{if(maintenanceActive(new URL(c.req.url).pathname))return c.json({error:'Hive is undergoing maintenance'},503);await next();});
 app.use('*', bodyLimit({ maxSize: 70 * 1024 * 1024 }));
 
 for (const target of config.targets) store.seedTarget(target);
@@ -76,11 +81,11 @@ app.use('*', async (c, next) => {
 });
 
 app.get('/', (c) => c.html(page));
-app.get('/health/live', (c) => c.json({ status: 'ok', service: 'hive-skills' }));
+app.get('/health/live', (c) => c.json({ ...metadata(releasePackageRoot), status: 'ok', service: 'hive-skills' }));
 app.get('/healthz', (c) => {
   try {
     const health = store.readiness();
-    return c.json({ status: health.ready ? 'ok' : 'degraded', service: 'hive-skills', ...health }, health.ready ? 200 : 503);
+    return c.json({ ...metadata(releasePackageRoot), status: health.ready ? 'ok' : 'degraded', service: 'hive-skills', ...health }, health.ready ? 200 : 503);
   } catch {
     return c.json({ status: 'degraded', service: 'hive-skills', reason: 'database_unavailable' }, 503);
   }
@@ -194,6 +199,7 @@ app.post('/auth/logout', (c) => {
 app.get('/auth/me', requireAuth(), (c) => c.json(c.get('auth')));
 
 app.get('/admin/skills', requireAuth(true), (c) => c.json(store.listAllSkills()));
+app.get('/admin/updates', requireAuth(true), async (c) => c.json(await updateStatus(metadata(releasePackageRoot).release, upgradeHome())));
 
 app.post('/admin/skills', requireAuth(true), async (c) => {
   const body = await requestJson(c);

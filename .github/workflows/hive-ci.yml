@@ -32,11 +32,16 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
           cache-dependency-path: |
+            packages/hive-release/package-lock.json
             services/hive-router/package-lock.json
             services/hive-iam/package-lock.json
             services/hive-mem/ts-core/package-lock.json
             services/hive-skills/package-lock.json
             packages/hive/package-lock.json
+
+      - name: Install bundled upgrade runtime build dependencies
+        run: npm ci
+        working-directory: packages/hive-release
 
       - name: Install router dependencies
         run: npm ci
@@ -154,23 +159,50 @@ jobs:
           path: services/hive-router/test-results
 
   iam-docker:
-    name: IAM Docker image and Compose example
+    name: Server images and Compose recovery (${{ matrix.platform }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+    env:
+      HIVE_IMAGE_TEST_PLATFORM: ${{ matrix.platform }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build the IAM image
-        uses: docker/build-push-action@v7
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          context: services/hive-iam/apps/iam-core
-          load: true
-          tags: hive-iam-server:local
-          cache-from: type=gha,scope=hive-iam
-          cache-to: type=gha,mode=max,scope=hive-iam
-
-      - name: Run the Compose example
+          node-version: 24.22.1
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y ripgrep redis-server util-linux openssl
+      - run: npm run bootstrap
+      - run: npm run build
+      - run: node scripts/check-images.mjs
+      - name: Existing IAM Compose example
+        if: matrix.platform == 'linux/amd64'
         run: bash scripts/check-iam-compose.sh --no-build
+      - name: Raw Compose pull/up, mixed images, missing supervisor and unhealthy recovery
+        env:
+          HIVE_UPGRADE_DRILL_COMPOSE: 'true'
+        run: npm run check:upgrades
+
+  upgrade-install:
+    name: Public npm upgrade and restore (Node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['24.22.1', '26.13.0']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install verification tools
+        run: sudo apt-get update -qq && sudo apt-get install -y ripgrep redis-server util-linux openssl
+      - run: npm run bootstrap
+      - run: npm run build
+      - name: Upgrade the current npm release to packed working tree and restore every store
+        timeout-minutes: 20
+        run: npm run check:upgrades

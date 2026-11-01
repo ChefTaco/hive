@@ -14,12 +14,15 @@ export const USAGE = `Usage: hive-iam-server [command] [options]
 Hive IAM: OAuth 2.0 / OpenID Connect identity service.
 
 Commands:
-  start         Start the server (default). Applies pending database migrations
-                and, on an empty database, creates the initial admin account.
-  migrate       Apply pending migrations (and the first-start bootstrap), then exit.
+  start         Start the server (default). HIVE_AUTO_MIGRATE=true permits fast
+                migrations with verified backups. First install provisions explicitly.
+  migrate       Back up and apply pending schema migrations; never seed or rotate keys.
+                --plan [--json] inspects without writing; --backup-dir DIR sets backup storage.
+  upgrade       Delegate a complete managed bundle upgrade to the Hive launcher.
+  rollback      Delegate managed code rollback or explicitly confirmed data restore.
   check         Validate configuration, TLS files, data directory, signing keys
                 and Redis. Prints a report and exits 0 (ok) or 1 (problems).
-                Starts no listeners and writes nothing.
+                Starts no listeners and writes nothing. --json prints a JSON report.
   env-schema    Print the supported environment variables as JSON.
   reset-admin   Set the admin password from IAM_RESET_PASSWORD (and optionally
                 IAM_RESET_USERNAME / IAM_RESET_EMAIL), then exit.
