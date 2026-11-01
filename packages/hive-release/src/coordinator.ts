@@ -162,6 +162,10 @@ export async function serveCoordinator(root: string): Promise<void> {
             ? {
                 state: unfinished.phase,
                 transaction: unfinished.id,
+                version: unfinished.to,
+                from: unfinished.from,
+                to: unfinished.to,
+                error: unfinished.error,
                 restoreCommand: unfinished.restoreCommand,
               }
             : compose?.busy()

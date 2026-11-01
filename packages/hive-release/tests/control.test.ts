@@ -227,6 +227,24 @@ test('owner-only coordinator rejects unknown plans and arbitrary apply propertie
     };
     assert.equal(status.busy, false);
     assert.equal(status.updates.enabled, false);
+    const pendingId = randomUUID();
+    writeJson(join(root, 'run', `transaction-${pendingId}.json`), {
+      schema: 1,
+      id: pendingId,
+      installation: JSON.parse(readFileSync(join(root, 'config/project.json'), 'utf8')).id,
+      action: 'upgrade',
+      from: '1.2.0',
+      to: '1.2.1',
+      oldDirectory: join(root, 'versions/baseline'),
+      phase: 'held-for-restore',
+      error: 'Synthetic recovery failure',
+    });
+    const held = (await coordinatorRequest(root, 'status')) as {
+      result: { version: string; state: string; error: string };
+    };
+    assert.equal(held.result.version, '1.2.1');
+    assert.equal(held.result.state, 'held-for-restore');
+    assert.equal(held.result.error, 'Synthetic recovery failure');
   } finally {
     child.kill('SIGTERM');
     await new Promise<void>((r) => {
