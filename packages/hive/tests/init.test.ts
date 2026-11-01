@@ -32,7 +32,7 @@ async function init(paths: HivePaths, initOptions: InitOptions, answers: string[
   return { result, output, asked };
 }
 
-const env = (paths: HivePaths, service: "memory" | "router" | "iam") => EnvDocument.load(paths.envFile(service));
+const env = (paths: HivePaths, service: "memory" | "router" | "iam" | "skills") => EnvDocument.load(paths.envFile(service));
 
 describe("hive init", () => {
   it("writes private env files for all three services with consistent wiring", { skip: opensslVersion() ? false : "openssl is not installed" }, async () => {
@@ -83,7 +83,7 @@ describe("hive init", () => {
       // Re-running asks nothing and changes nothing.
       const before = ["memory", "router", "iam"].map((service) => readFileSync(paths.envFile(service as "memory"), "utf8"));
       const tlsBefore = readFileSync(`${paths.tls}/server.crt`, "utf8");
-      const again = await init(paths, options({ tls: true }));
+      const again = await init(paths, options({ tls: true, services: ["memory", "router", "iam"] }));
       assert.deepEqual(again.asked, []);
       assert.deepEqual(again.result.written, []);
       assert.deepEqual(["memory", "router", "iam"].map((service) => readFileSync(paths.envFile(service as "memory"), "utf8")), before);
@@ -110,11 +110,11 @@ describe("hive init", () => {
       const secret = router.get("HIVE_ROUTER_SECRET");
 
       // Declining the "also set up" questions keeps everything as it is.
-      const unchanged = await init(paths, options(), ["n", "n"]);
-      assert.deepEqual(unchanged.asked, ["Also set up memory (HiveMem)?", "Also set up iam (Hive IAM)?"]);
+      const unchanged = await init(paths, options(), ["n", "n", "n"]);
+      assert.deepEqual(unchanged.asked, ["Also set up memory (HiveMem)?", "Also set up iam (Hive IAM)?", "Also set up skills (Hive Skills)?"]);
       assert.deepEqual(unchanged.result.services, ["router"]);
 
-      const added = await init(paths, options(), ["n", "y", "y"]);
+      const added = await init(paths, options(), ["n", "y", "n", "y"]);
       assert.equal(added.asked.at(-1), "Update router.env?");
       assert.match(added.output.text(), /HIVE_ROUTER_AUTH_MODE: os -> iam-oidc/);
       assert.match(added.output.text(), /add HIVE_ROUTER_IAM_CLIENT_SECRET=[0-9a-f]{4}••••/);
@@ -139,13 +139,13 @@ describe("hive init", () => {
       router.set("HIVE_ROUTER_IAM_CLIENT_SECRET", "f".repeat(64));
       const { writePrivateFile } = await import("../src/envfile.js");
       writePrivateFile(paths.envFile("router"), router.toString());
-      const declined = await init(paths, options(), ["n", "n"]);
+      const declined = await init(paths, options(), ["n", "n", "n"]);
       assert.equal(declined.asked.at(-1), "Update router.env?");
       assert.match(declined.output.text(), /HIVE_ROUTER_IAM_CLIENT_SECRET: ffff•••• -> [0-9a-f]{4}••••/);
       assert.doesNotMatch(declined.output.text(), /f{64}/, "secrets are never printed in full");
       assert.equal(env(paths, "router").get("HIVE_ROUTER_IAM_CLIENT_SECRET"), "f".repeat(64));
       assert.match(declined.output.text(), /Left .*router\.env unchanged/);
-      await init(paths, options(), ["n", "y"]);
+      await init(paths, options(), ["n", "n", "y"]);
       assert.equal(env(paths, "router").get("HIVE_ROUTER_IAM_CLIENT_SECRET"), env(paths, "iam").get("SEED_HIVE_ROUTER_CLIENT_SECRET"));
     } finally {
       cleanup();
@@ -180,5 +180,68 @@ describe("hive init", () => {
     } finally {
       cleanup();
     }
+  });
+});
+
+describe("optional Skills setup", () => {
+  it("sets up Skills alone with a public hostname and no external stores", async () => {
+    const { paths, cleanup } = tempHome();
+    try {
+      installFakeServers(paths, ["skills"]);
+      const result = await init(paths, options({ tls: true, services: ["skills"], hostname: "hive.example.com", qdrantUrl: undefined, redisUrl: undefined }));
+      assert.deepEqual(result.result.services, ["skills"]);
+      assert.deepEqual(result.result.written, ["skills"]);
+      assert.equal(env(paths, "skills").get("HIVE_SKILLS_HOST"), "0.0.0.0");
+      assert.equal(env(paths, "skills").get("HIVE_SKILLS_PUBLIC_URL"), "https://hive.example.com:4030");
+      assert.equal(result.result.consoleUrl, null);
+    } finally { cleanup(); }
+  });
+
+  it("adds Skills to an existing core setup while keeping credentials and data paths", async () => {
+    const { paths, cleanup } = tempHome();
+    try {
+      installFakeServers(paths, ["memory", "router", "iam", "skills"]);
+      await init(paths, options({ tls: true, services: ["memory", "router", "iam"] }));
+      const iamBefore = readFileSync(paths.envFile("iam"), "utf8");
+      const memoryBefore = readFileSync(paths.envFile("memory"), "utf8");
+      const routerSecret = env(paths, "router").get("HIVE_ROUTER_SECRET");
+      const added = await init(paths, options({ tls: true, services: ["skills"] }), ["y"]);
+      assert.deepEqual(added.result.services, ["iam", "memory", "skills", "router"]);
+      assert.equal(readFileSync(paths.envFile("iam"), "utf8"), iamBefore);
+      assert.equal(readFileSync(paths.envFile("memory"), "utf8"), memoryBefore);
+      assert.equal(env(paths, "router").get("HIVE_ROUTER_SECRET"), routerSecret);
+      assert.equal(env(paths, "router").get("HIVE_SKILLS_INTERNAL_URL"), "https://127.0.0.1:4030");
+    } finally { cleanup(); }
+  });
+
+  it("configures all four services with private state, TLS and independent OS administration", async () => {
+    const { paths, cleanup } = tempHome();
+    try {
+      installFakeServers(paths, ["memory", "router", "iam", "skills"]);
+      await init(paths, options({ tls: true, services: ["iam", "memory", "skills", "router"] }), [], async (port) => port !== 4030);
+      const skills = env(paths, "skills");
+      assert.equal(skills.get("HIVE_SKILLS_PORT"), "4031");
+      assert.equal(skills.get("HIVE_SKILLS_DATA_DIR"), `${paths.home}/skills`);
+      assert.equal(skills.get("HIVE_SKILLS_ADMIN_USERS"), "alice");
+      assert.equal(skills.get("HIVE_SKILLS_PAM_SERVICE"), "login");
+      assert.equal(skills.get("HIVE_SKILLS_SESSION_SECRET")?.length, 64);
+      assert.equal(skills.get("HIVE_SKILLS_TLS_CERT_FILE"), `${paths.tls}/server.crt`);
+      assert.equal(env(paths, "router").get("HIVE_SKILLS_INTERNAL_URL"), "https://127.0.0.1:4031");
+      assert.equal(env(paths, "router").get("HIVE_SKILLS_PUBLIC_URL"), "https://localhost:4031");
+      assert.equal(statSync(paths.envFile("skills")).mode & 0o777, 0o600);
+      const before = ["memory", "router", "iam", "skills"].map((s) => readFileSync(paths.envFile(s as "skills"), "utf8"));
+      const again = await init(paths, options({ tls: true }));
+      assert.deepEqual(again.asked, []); assert.deepEqual(again.result.written, []);
+      assert.deepEqual(["memory", "router", "iam", "skills"].map((s) => readFileSync(paths.envFile(s as "skills"), "utf8")), before);
+    } finally { cleanup(); }
+  });
+
+  it("rejects new Skills setup without TLS before installing packages or writing env files", async () => {
+    const { paths, cleanup } = tempHome();
+    try {
+      await assert.rejects(init(paths, options({ services: ["skills"] })), /Skills requires TLS/);
+      assert.equal((await import("node:fs")).existsSync(paths.envFile("skills")), false);
+      assert.equal((await import("node:fs")).existsSync(paths.runtime), false);
+    } finally { cleanup(); }
   });
 });

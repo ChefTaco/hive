@@ -11,7 +11,7 @@ import { CliError, UsageError } from "../src/errors.js";
 import { mask } from "../src/output.js";
 import { hivePaths } from "../src/paths.js";
 import { createPrompter } from "../src/prompt.js";
-import { envFileArgs, findTarball, serverEnvironment, tarballPrefix } from "../src/runtime.js";
+import { compatibleServer, envFileArgs, findTarball, installPlan, serviceRange, serverEnvironment, tarballPrefix } from "../src/runtime.js";
 import { parseServerSchema } from "../src/schema.js";
 import { parseServiceList } from "../src/services.js";
 import { compareVersions, launcherVersion, satisfiesCaretRange, serverRange } from "../src/version.js";
@@ -65,7 +65,7 @@ describe("arguments and names", () => {
 
   it("parses service lists into start order", () => {
     assert.deepEqual(parseServiceList(["router,memory"]), ["memory", "router"]);
-    assert.deepEqual(parseServiceList(["all"]), ["iam", "memory", "router"]);
+    assert.deepEqual(parseServiceList(["all"]), ["iam", "memory", "skills", "router"]);
     assert.deepEqual(parseServiceList(["router", "iam"]), ["iam", "router"]);
     assert.throws(() => parseServiceList(["mem"]), /unknown service "mem"/);
   });
@@ -102,6 +102,17 @@ describe("docker one-liners", () => {
 });
 
 describe("server packages", () => {
+  it("requires Skills with the launcher protocol and refuses older offline tarballs", () => {
+    const { paths, cleanup } = tempHome();
+    try {
+      assert.equal(serviceRange("skills"), "^1.1.0");
+      assert.equal(compatibleServer("skills", "1.0.3"), false);
+      assert.equal(compatibleServer("skills", "1.1.0"), true);
+      assert.equal(installPlan(paths, ["skills"], undefined)[0]?.spec, "@hivemagnus/hive-skills@^1.1.0");
+      writeFileSync(join(paths.home, "hivemagnus-hive-skills-1.0.3.tgz"), "");
+      assert.throws(() => installPlan(paths, ["skills"], paths.home), /requires \^1.1.0/);
+    } finally { cleanup(); }
+  });
   it("finds the newest tarball of the launcher's major version", () => {
     const { paths, cleanup } = tempHome();
     try {

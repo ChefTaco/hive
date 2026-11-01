@@ -29,7 +29,7 @@ echo ">>> 1. hive install, with npm 12 on PATH"
 mkdir -p "$WORK/app"
 (cd "$WORK/app" && npm init -y >/dev/null && npm install --silent --no-fund --no-audit "$WORK"/tgz/hivemagnus-hive-1.*.tgz >/dev/null)
 # `hive install` fails if a server's native add-ons do not load after npm finishes.
-HIVE_HOME="$WORK/home" "$WORK/app/node_modules/.bin/hive" install memory router iam --from "$WORK/tgz" --yes
+HIVE_HOME="$WORK/home" "$WORK/app/node_modules/.bin/hive" install memory router iam skills --from "$WORK/tgz" --yes
 node -e 'const m=require(process.argv[1]); if (!m.allowScripts || m.allowScripts["better-sqlite3"] !== true || m.allowScripts.argon2 !== true) { console.error("runtime package.json lacks allowScripts"); process.exit(1) }' "$WORK/home/runtime/package.json"
 
 echo ">>> 2. A project that allows the add-ons in package.json"

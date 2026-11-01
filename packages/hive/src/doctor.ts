@@ -6,12 +6,12 @@ import { EnvDocument } from "./envfile.js";
 import { isPortFree } from "./net.js";
 import { paint, type Output } from "./output.js";
 import type { HivePaths } from "./paths.js";
-import { envFileArgs, installedServer, nativeModuleFix, nativeModuleProblems, npmAvailable, runServerCommandAsync, type CommandResult } from "./runtime.js";
+import { compatibleServer, envFileArgs, installedServer, nativeModuleFix, nativeModuleProblems, npmAvailable, runServerCommandAsync, serviceRange, type CommandResult } from "./runtime.js";
 import { SERVICES, type ServiceName } from "./services.js";
 import { collectStatus, configuredServices } from "./status.js";
 import { opensslVersion } from "./tls.js";
 import { describeTokenProblem, memoryTokenProblem } from "./token.js";
-import { launcherMajor, majorOf, satisfiesCaretRange, supportedNodeRange } from "./version.js";
+import { satisfiesCaretRange, supportedNodeRange } from "./version.js";
 
 export type CheckLevel = "ok" | "warn" | "fail" | "info";
 
@@ -73,9 +73,9 @@ export async function runDoctor(paths: HivePaths): Promise<DoctorCheck[]> {
     add(launcher, flock !== null ? "ok" : "fail", flock !== null ? "flock is available (HiveMem single-writer lock)" : process.platform === "darwin" ? "flock is missing; HiveMem needs it. Install it with `brew install flock`." : "flock is missing; HiveMem needs it. Install util-linux.");
   }
   const router = docs.get("router");
-  if (router && (router.get("HIVE_ROUTER_AUTH_MODE") ?? "os") === "os" && !router.get("HIVE_ROUTER_OS_AUTH_COMMAND")) {
+  if (services.includes("skills") || (router && (router.get("HIVE_ROUTER_AUTH_MODE") ?? "os") === "os" && !router.get("HIVE_ROUTER_OS_AUTH_COMMAND"))) {
     const pamtester = spawnSync("sh", ["-c", "command -v pamtester"], { encoding: "utf8" }).stdout.trim();
-    add(launcher, pamtester ? "ok" : "fail", pamtester ? `pamtester ${pamtester} (console OS sign-in)` : "the Router signs in with OS accounts (HIVE_ROUTER_AUTH_MODE=os) but pamtester is not installed (for example: sudo apt install pamtester)");
+    add(launcher, pamtester ? "ok" : "fail", pamtester ? `pamtester ${pamtester} (console OS sign-in)` : "OS sign-in for Skills or the Router needs pamtester, which is not installed (for example: sudo apt install pamtester)");
   }
 
   const status = await collectStatus(paths);
@@ -94,7 +94,7 @@ export async function runDoctor(paths: HivePaths): Promise<DoctorCheck[]> {
   for (const service of services) {
     const installed = installedServer(paths, service);
     if (!installed) add("Packages", "fail", `${SERVICES[service].packageName} is not installed; run \`hive install ${service}\``);
-    else if (majorOf(installed.version) !== launcherMajor()) add("Packages", "warn", `${SERVICES[service].packageName} ${installed.version} does not match the launcher's major version ${launcherMajor()}; run \`hive install ${service}\``);
+    else if (!compatibleServer(service, installed.version)) add("Packages", "warn", `${SERVICES[service].packageName} ${installed.version} does not satisfy ${serviceRange(service)}; run \`hive install ${service}\``);
     else add("Packages", "ok", `${SERVICES[service].packageName} ${installed.version}`);
     if (installed) {
       const broken = nativeModuleProblems(paths, service);

@@ -56,7 +56,12 @@ try {
   writeFileSync(envFile, Object.entries(settings).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join('\n'), { mode: 0o600 });
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('HIVE_SKILLS_')));
   env.NODE_EXTRA_CA_CERTS = cert;
+  run(cli, ['env-schema'], { env });
+  assert.equal(existsSync(settings.HIVE_SKILLS_DATA_DIR), false);
+  run(cli, ['check', '--env-file', envFile], { env });
+  assert.equal(existsSync(settings.HIVE_SKILLS_DATA_DIR), false, 'check must not create storage');
   run(cli, ['seed', '--env-file', envFile], { env });
+  run(cli, ['check', '--env-file', envFile], { env });
   const helper = run(process.execPath, ['--env-file', envFile, '--input-type=module', '-e',
     `const {config}=await import(${JSON.stringify(pathToFileURL(join(installed, 'dist/config.js')).href)});console.log(config.deployScript)`], { env }).trim();
   assert.equal(helper, join(installed, 'scripts/deploy-hermes-agent.sh'));

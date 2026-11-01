@@ -47,3 +47,24 @@ test('explicit seed finds bundled assets from outside the package and refuses re
     assert.equal(existsSync(resolve(cwd, 'data')), false);
   } finally { rmSync(cwd, { recursive: true, force: true }); }
 });
+
+test('env-schema is configuration-free and check never initializes missing storage or reveals secrets', () => {
+  const cwd = mkdtempSync(resolve(tmpdir(), 'skills-preflight-'));
+  try {
+    const schema = run(['env-schema'], cwd);
+    assert.equal(schema.status, 0, schema.stderr);
+    const document = JSON.parse(schema.stdout);
+    assert.equal(document.service, 'skills');
+    assert.equal(document.healthPath, '/healthz');
+    assert.equal(document.env.find((v: { name: string }) => v.name === 'HIVE_SKILLS_SESSION_SECRET').generate, 'hex32');
+    assert.equal(existsSync(resolve(cwd, 'data')), false);
+    const secret = 'fixture-private-value';
+    const envFile = resolve(cwd, 'check.env');
+    writeFileSync(envFile, `HIVE_SKILLS_SESSION_SECRET=${secret}\nHIVE_SKILLS_DATA_DIR=${JSON.stringify(resolve(cwd, 'state'))}\n`);
+    const checked = run(['check', '--env-file', envFile], cwd);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stdout, /FAIL/);
+    assert.ok(!checked.stdout.includes(secret) && !checked.stderr.includes(secret));
+    assert.equal(existsSync(resolve(cwd, 'state')), false);
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
+});

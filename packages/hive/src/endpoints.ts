@@ -6,6 +6,7 @@ import { tlsFiles } from "./tls.js";
 
 /** Default ports and health paths; they match each server's env-schema. */
 export const DEFAULTS = {
+  skills: { port: 4030, health: "/healthz" },
   memory: { port: 18790, health: "/v1/health/ready" },
   iam: { port: 4200, health: "/api/v1/health/ready" },
   router: { apiPort: 4020, adminPort: 9443, health: "/health", ready: "/health/ready" },
@@ -42,6 +43,7 @@ function listener(service: ServiceName, plane: Listener["plane"], tls: boolean, 
 }
 
 export function usesTls(service: ServiceName, env: EnvDocument): boolean {
+  if (service === "skills") return Boolean(env.get("HIVE_SKILLS_TLS_CERT_FILE") && env.get("HIVE_SKILLS_TLS_KEY_FILE"));
   if (service === "memory") return Boolean((env.get("HIVEMEM_TS_TLS_CERT_FILE") ?? env.get("HIVEMEM_TLS_CERT_FILE")) && (env.get("HIVEMEM_TS_TLS_KEY_FILE") ?? env.get("HIVEMEM_TLS_KEY_FILE")));
   return Boolean(env.get("TLS_CERT_PATH") && env.get("TLS_KEY_PATH"));
 }
@@ -49,6 +51,7 @@ export function usesTls(service: ServiceName, env: EnvDocument): boolean {
 /** Where a configured service listens, read from its env file. */
 export function listeners(service: ServiceName, env: EnvDocument): Listener[] {
   const tls = usesTls(service, env);
+  if (service === "skills") return [listener(service, "main", tls, connectHost(env.get("HIVE_SKILLS_HOST")), port(env, ["HIVE_SKILLS_PORT"], DEFAULTS.skills.port), DEFAULTS.skills.health)];
   if (service === "memory") {
     return [listener(service, "main", tls, connectHost(env.get("HIVEMEM_TS_CORE_HOST")), port(env, ["HIVEMEM_TS_CORE_PORT", "HIVEMEM_WEB_PORT", "PORT"], DEFAULTS.memory.port), DEFAULTS.memory.health)];
   }

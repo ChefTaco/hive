@@ -6,8 +6,9 @@ import { ensurePrivateDir, writePrivateFile } from "./envfile.js";
 import type { Output } from "./output.js";
 import type { HivePaths } from "./paths.js";
 import type { Prompter } from "./prompt.js";
+import { tlsFiles } from "./tls.js";
 import { SERVICES, type ServiceName } from "./services.js";
-import { compareVersions, launcherMajor, majorOf, serverRange } from "./version.js";
+import { compareVersions, launcherMajor, majorOf, serverRange, satisfiesCaretRange } from "./version.js";
 
 export interface InstalledServer {
   service: ServiceName;
@@ -37,9 +38,18 @@ export function installedServer(paths: HivePaths, service: ServiceName): Install
   return existsSync(binPath) ? { service, version: manifest.version, binPath } : null;
 }
 
+export function serviceRange(service: ServiceName): string {
+  return SERVICES[service].minimumVersion ? `^${SERVICES[service].minimumVersion}` : serverRange();
+}
+
+export function compatibleServer(service: ServiceName, version: string): boolean {
+  return satisfiesCaretRange(version, serviceRange(service));
+}
+
 export function requireInstalled(paths: HivePaths, service: ServiceName): InstalledServer {
   const installed = installedServer(paths, service);
   if (!installed) throw new CliError(`${SERVICES[service].packageName} is not installed in ${paths.runtime}; run \`hive install ${service}\``);
+  if (!compatibleServer(service, installed.version)) throw new CliError(`${SERVICES[service].packageName} ${installed.version} is incompatible; run \`hive install ${service}\` (requires ${serviceRange(service)})`);
   return installed;
 }
 
@@ -55,6 +65,7 @@ export function serverEnvironment(paths: HivePaths, source: NodeJS.ProcessEnv = 
   for (const [name, value] of Object.entries(source)) {
     if (value !== undefined && (PASSED_THROUGH.includes(name) || name.startsWith("LC_"))) env[name] = value;
   }
+  if (!env.NODE_EXTRA_CA_CERTS && existsSync(tlsFiles(paths).caCert)) env.NODE_EXTRA_CA_CERTS = tlsFiles(paths).caCert;
   env.HIVE_HOME = paths.home;
   return env;
 }
@@ -142,10 +153,12 @@ export interface InstallPlanEntry {
 export function installPlan(paths: HivePaths, services: readonly ServiceName[], from: string | undefined): InstallPlanEntry[] {
   return services.map((service) => {
     const packageName = SERVICES[service].packageName;
-    let spec = `${packageName}@${serverRange()}`;
+    let spec = `${packageName}@${serviceRange(service)}`;
     if (from) {
       const tarball = findTarball(from, packageName);
       if (!tarball) throw new CliError(`no ${tarballPrefix(packageName)}-${launcherMajor()}.x.y.tgz in ${from}; build one with \`npm pack\` in that package, or drop --from to install from npm`);
+      const version = tarball.slice(tarball.lastIndexOf(tarballPrefix(packageName)) + tarballPrefix(packageName).length + 1, -4);
+      if (!compatibleServer(service, version)) throw new CliError(`${packageName} tarball requires ${serviceRange(service)}; build a compatible package or drop --from`);
       spec = tarball;
     }
     return { service, packageName, spec, current: installedServer(paths, service)?.version ?? null };

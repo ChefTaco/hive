@@ -29,11 +29,15 @@ Then open the console at `https://localhost:9443/` and sign in as `admin` with t
 writes to `~/.hive/iam/initial-credentials.env` on its first start. Everything lives in `~/.hive`.
 See the [launcher README](packages/hive) for options, upgrading and uninstalling.
 
+Include the Skills registry with `npx @hivemagnus/hive init --services all`.
+Skills uses your OS/PAM login independently of IAM; see the
+[launcher Skills setup](packages/hive/README.md#include-hive-skills).
+
 ## Packages on npm
 
 | Package | Description |
 |---|---|
-| [`@hivemagnus/hive`](packages/hive) | The `hive` launcher: installs, configures and runs the three servers below (`npx @hivemagnus/hive init`) |
+| [`@hivemagnus/hive`](packages/hive) | The `hive` launcher: installs, configures and runs the core servers plus optional Skills (`--services all`) (`npx @hivemagnus/hive init`) |
 | [`@hivemagnus/hivemem-sdk`](services/hive-mem/sdks/typescript) | TypeScript client for the HiveMem REST API |
 | [`@hivemagnus/hive-iam-sdk`](services/hive-iam/packages/iam-sdk) | JWT verification and auth middleware for Hono and Express services that trust Hive IAM |
 | [`@hivemagnus/hivemem-server`](services/hive-mem/ts-core) | The HiveMem memory server (`npx @hivemagnus/hivemem-server --env-file hivemem.env`); `issue-token` mints access tokens |

@@ -4,6 +4,14 @@
 
 The registry is intentionally small and local-first. SQLite records skills, releases, sessions, audit events, and deployment targets; archives live under the configured data directory. The initial catalog entry is **HiveMem**, based on the existing HiveMem Hermes plugin/skill source supplied at seed time.
 
+## Install with the Hive launcher
+
+Run `npx @hivemagnus/hive@^1.1.0 init --services all` to configure all four services,
+or select `--services skills` for this registry alone. The launcher generates private
+configuration, a strong session secret and TLS, and wires the Router's Skills panel.
+Skills OS/PAM administration remains separate from IAM sign-in. See the
+[launcher guide](../../packages/hive/README.md#include-hive-skills).
+
 ## Install from npm
 
 Requires Linux, Node.js 24.22.1+ or 26.13.0+, TLS certificates, and `pamtester` for
@@ -11,12 +19,14 @@ OS-backed sign-in. SQLite is provided by Node; there are no native npm add-ons.
 Agent deployment also needs Bash, OpenSSH, and permission to enable the target's user timer.
 
 ```bash
-npm install --prefix /opt/hive-skills/runtime @hivemagnus/hive-skills@1.0.3
+npm install --prefix /opt/hive-skills/runtime @hivemagnus/hive-skills@1.1.0
 /opt/hive-skills/runtime/node_modules/.bin/hive-skills --env-file /opt/hive-skills/skills.env
 ```
 
 Or run `npx @hivemagnus/hive-skills --env-file skills.env`. The CLI accepts `start`
-(the default), `seed`, `--help` and `--version`. Environment-file paths may be absolute;
+(the default), `seed`, `check`, `env-schema`, `--help` and `--version`. `check` validates TLS,
+configuration and an existing database without creating or migrating state. `env-schema` prints
+configuration metadata without loading runtime configuration. Environment-file paths may be absolute;
 existing environment variables win. Without `--env-file`, the historical `./.env` lookup
 is retained. Help/version do not initialize storage. A fresh install starts with an empty
 catalog; startup never seeds or replaces existing records.

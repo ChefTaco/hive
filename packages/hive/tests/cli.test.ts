@@ -83,11 +83,11 @@ describe("hive start, status and doctor", () => {
     await redis.close();
   });
 
-  async function configured(): Promise<{ paths: HivePaths; cleanup: () => void }> {
+  async function configured(withSkills = false): Promise<{ paths: HivePaths; cleanup: () => void }> {
     const home = tempHome();
-    installFakeServers(home.paths);
-    const ports = { memory: await freePort(), iam: await freePort(), router: await freePort(), "router-admin": await freePort() };
-    await runInit({ paths: home.paths, output: recordingOutput(), prompter: scriptedPrompter([]), options: { services: ["memory", "router", "iam"], tls: false, ports, dockerPrefix: "hive-test", qdrantUrl: qdrant.url, redisUrl: redis.url }, platform: "linux", username: "alice" });
+    installFakeServers(home.paths, ["memory", "router", "iam", "skills"]);
+    const ports = { memory: await freePort(), iam: await freePort(), router: await freePort(), "router-admin": await freePort(), skills: await freePort() };
+    await runInit({ paths: home.paths, output: recordingOutput(), prompter: scriptedPrompter([]), options: { services: withSkills ? ["memory", "router", "iam", "skills"] : ["memory", "router", "iam"], tls: withSkills, ports, dockerPrefix: "hive-test", qdrantUrl: qdrant.url, redisUrl: redis.url }, platform: "linux", username: "alice" });
     rmSync(`${home.paths.home}/events.log`, { force: true });
     return home;
   }
@@ -183,4 +183,20 @@ describe("hive start, status and doctor", () => {
       cleanup();
     }
   });
+  it("supervises Skills over TLS, reports it, and stops all four services in reverse order", async () => {
+    const { paths, cleanup } = await configured(true);
+    const launcher = startLauncher(paths);
+    try {
+      await waitFor(() => launcher.output().includes("Hive is running"), "four services");
+      assert.deepEqual(events(paths).filter((line) => line.startsWith("start ")), ["start iam token=no", "start memory token=no", "start skills token=no", "start router token=yes"]);
+      const status = run(["status", "--json"], { HIVE_HOME: paths.home });
+      assert.equal(status.status, 0, status.stdout + status.stderr);
+      assert.equal(JSON.parse(status.stdout).services.find((s: { service: string }) => s.service === "skills").listeners[0].healthy, true);
+      launcher.child.kill("SIGTERM");
+      assert.equal(await launcher.exited, 0, launcher.output());
+      assert.deepEqual(events(paths).filter((line) => line.startsWith("stop ")), ["stop router SIGTERM", "stop skills SIGTERM", "stop memory SIGTERM", "stop iam SIGTERM"]);
+      assert.equal(existsSync(paths.pidFile), false);
+    } finally { launcher.child.kill("SIGTERM"); await launcher.exited; cleanup(); }
+  });
+
 });

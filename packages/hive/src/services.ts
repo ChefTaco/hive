@@ -1,8 +1,9 @@
-export const SERVICE_NAMES = ["memory", "router", "iam"] as const;
+export const SERVICE_NAMES = ["memory", "router", "iam", "skills"] as const;
+export const DEFAULT_SERVICES = ["memory", "router", "iam"] as const;
 export type ServiceName = (typeof SERVICE_NAMES)[number];
 
 /** Dependencies first: IAM and HiveMem must be healthy before the Router starts. */
-export const START_ORDER: readonly ServiceName[] = ["iam", "memory", "router"];
+export const START_ORDER: readonly ServiceName[] = ["iam", "memory", "skills", "router"];
 
 export interface ServiceDef {
   name: ServiceName;
@@ -14,9 +15,15 @@ export interface ServiceDef {
   store: "qdrant" | "redis" | null;
   /** Native add-ons whose install scripts must run (npm 12 blocks them unless allowed). */
   nativeModules: readonly string[];
+  minimumVersion?: string;
 }
 
 export const SERVICES: Record<ServiceName, ServiceDef> = {
+  skills: {
+    name: "skills", title: "Hive Skills", packageName: "@hivemagnus/hive-skills", bin: "hive-skills",
+    summary: "optional HTTPS registry for Hermes skills (OS/PAM sign-in, even with IAM)",
+    store: null, nativeModules: [], minimumVersion: "1.1.0",
+  },
   memory: {
     name: "memory",
     title: "HiveMem",

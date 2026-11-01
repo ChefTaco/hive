@@ -5,10 +5,12 @@ import { packageRoot } from './paths.js';
 
 const usage = `Hive Skills: HTTPS skill registry and Hermes distribution bridge.
 
-Usage: hive-skills [start|seed] [--env-file FILE]
+Usage: hive-skills [start|seed|check|env-schema] [--env-file FILE]
        hive-skills --help | --version
 
 start         Start the registry (default); requires TLS key and certificate.
+check         Validate configuration, TLS and existing storage without writing.
+env-schema    Print configuration metadata as JSON without loading configuration.
 seed          Explicitly seed the bundled HiveMem skill; never runs on start.
 --env-file    Load a dotenv file; existing environment values win.
 
@@ -23,6 +25,10 @@ export async function main(args: readonly string[]): Promise<number> {
       const manifest = JSON.parse(readFileSync(resolve(packageRoot, 'package.json'), 'utf8')) as { version: string };
       console.log(manifest.version); return 0;
     }
+    if (args.length === 1 && args[0] === 'env-schema') {
+      const { envSchemaDocument } = await import('./env-schema.js');
+      console.log(JSON.stringify(envSchemaDocument())); return 0;
+    }
     let command: string | undefined;
     const files: string[] = [];
     for (let index = 0; index < args.length; index++) {
@@ -31,10 +37,16 @@ export async function main(args: readonly string[]): Promise<number> {
         const file = arg === '--env-file' ? args[++index] : arg.slice('--env-file='.length);
         if (!file || file.startsWith('--')) throw new Error('--env-file requires a file path');
         files.push(file);
-      } else if (!command && (arg === 'start' || arg === 'seed')) command = arg;
+      } else if (!command && (arg === 'start' || arg === 'seed' || arg === 'check')) command = arg;
       else throw new Error('Invalid arguments. Run hive-skills --help.');
     }
     for (const file of files) process.loadEnvFile(resolve(file));
+    if (command === 'check') {
+      const { checkConfiguration } = await import('./check.js');
+      // Preserve the historical cwd env lookup without importing the writable config module.
+      if (files.length === 0) { const { existsSync } = await import('node:fs'); if (existsSync('.env')) process.loadEnvFile('.env'); }
+      return checkConfiguration(process.env);
+    }
     if (command === 'seed') await import('./seed.js');
     else await import('./server.js');
     return 0;

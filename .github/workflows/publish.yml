@@ -2,7 +2,7 @@ name: Publish to npm
 
 # Publishes every @hivemagnus package whose version is not on npm yet, with provenance, then the
 # hive-iam-server Docker image (linux/amd64 and linux/arm64) to GitHub Container Registry.
-# - Push a tag vX.Y.Z (matching every package version) to publish.
+# - Push a tag vX.Y.Z (matching the launcher version) to publish.
 # - Run it by hand (Actions > Publish to npm > Run workflow) for a dry run.
 # Publishing waits for approval on the `npm-publish` environment, then authenticates to npm
 # through trusted publishing (OIDC). No npm token is stored.
@@ -51,14 +51,12 @@ jobs:
           npm --version
           node -e 'const [a,b]=process.argv[1].split(".").map(Number); if (a<11||(a===11&&b<5)) { console.error("npm >= 11.5.1 is required"); process.exit(1) }' "$(npm --version)"
 
-      - name: Check the tag matches every package version
+      - name: Check the tag matches the launcher version
         if: github.event_name == 'push'
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          for dir in services/hive-mem/sdks/typescript services/hive-iam/packages/iam-sdk services/hive-mem/ts-core services/hive-router services/hive-iam/apps/iam-core services/hive-skills packages/hive; do
-            version="$(node -p "require('./$dir/package.json').version")"
-            if [ "$version" != "$tag" ]; then echo "::error::$dir is $version, tag is v$tag"; exit 1; fi
-          done
+          version="$(node -p "require('./packages/hive/package.json').version")"
+          if [ "$version" != "$tag" ]; then echo "::error::launcher is $version, tag is v$tag"; exit 1; fi
 
       - name: Install dependencies
         run: |

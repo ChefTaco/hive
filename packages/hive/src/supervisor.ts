@@ -13,8 +13,8 @@ import { readState } from "./state.js";
 import { ensureStoreRunning } from "./stores.js";
 import { describeTokenProblem, MEMORY_TOKEN_VAR, memoryTokenProblem, mintMemoryToken, tokenExpiry } from "./token.js";
 
-const COLORS: Record<ServiceName, Color> = { iam: "magenta", memory: "yellow", router: "cyan" };
-const STARTUP_TIMEOUT_MS: Record<ServiceName, number> = { iam: 180_000, memory: 90_000, router: 90_000 };
+const COLORS: Record<ServiceName, Color> = { iam: "magenta", memory: "yellow", router: "cyan", skills: "green" };
+const STARTUP_TIMEOUT_MS: Record<ServiceName, number> = { iam: 180_000, memory: 90_000, router: 90_000, skills: 90_000 };
 const STOP_TIMEOUT_MS = 20_000;
 const TOKEN_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 

@@ -40,7 +40,8 @@ by the service users, with no secrets stored in the runtime directory.
 
 The optional Skills registry is published separately as `@hivemagnus/hive-skills`.
 It has its own runtime and data; see [its migration procedure](#optional-skills-registry).
-The launcher continues to manage the three core servers.
+The launcher supports Skills from 1.1.0 for its own `$HIVE_HOME` layout. Existing systemd
+installations below retain their independent layout.
 
 ## Preservation and rehearsal
 

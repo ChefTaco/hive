@@ -29,6 +29,10 @@ export function recordingOutput(): Output & { lines: string[]; text: () => strin
 }
 
 const SCHEMAS: Record<ServiceName, unknown> = {
+  skills: {
+    service: "skills", package: "@hivemagnus/hive-skills", version: "1.1.0", defaultPort: 4030, healthPath: "/healthz", dependencies: [],
+    env: [{ name: "HIVE_SKILLS_SESSION_SECRET", required: true, secret: true, generate: "hex32", description: "Session secret." }],
+  },
   memory: {
     service: "memory", package: "@hivemagnus/hivemem-server", version: "1.0.0", defaultPort: 18790, healthPath: "/v1/health/ready",
     dependencies: [{ name: "qdrant", envVar: "HIVEMEM_QDRANT_URL", default: "http://127.0.0.1:6333", docker: "docker run -d --name hive-qdrant -p 127.0.0.1:6333:6333 -v hive-qdrant:/qdrant/storage qdrant/qdrant:v1.18.1" }],
@@ -72,6 +76,8 @@ function fakeBin(service: ServiceName): string {
 import { appendFileSync, existsSync } from "node:fs";
 import { createHmac, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
+import { createServer as createTlsServer } from "node:https";
+import { readFileSync } from "node:fs";
 const service = ${JSON.stringify(service)};
 const schema = ${JSON.stringify(SCHEMAS[service])};
 const args = process.argv.slice(2);
@@ -92,8 +98,11 @@ if (command === "issue-token") {
   process.exit(0);
 }
 if (process.env.PORT_LEAK_CHECK) log("leaked " + process.env.PORT_LEAK_CHECK);
-const ports = service === "router" ? [process.env.API_PORT, process.env.ADMIN_PORT] : [service === "memory" ? process.env.HIVEMEM_WEB_PORT : process.env.PORT];
-const servers = ports.map((port) => createServer((request, response) => { response.writeHead(200, { "content-type": "application/json" }); response.end("{\\"status\\":\\"ok\\"}"); }).listen(Number(port), "127.0.0.1"));
+const ports = service === "router" ? [process.env.API_PORT, process.env.ADMIN_PORT] : [service === "memory" ? process.env.HIVEMEM_WEB_PORT : service === "skills" ? process.env.HIVE_SKILLS_PORT : process.env.PORT];
+const cert = service === "skills" ? process.env.HIVE_SKILLS_TLS_CERT_FILE : service === "memory" ? process.env.HIVEMEM_TLS_CERT_FILE : process.env.TLS_CERT_PATH;
+const key = service === "skills" ? process.env.HIVE_SKILLS_TLS_KEY_FILE : service === "memory" ? process.env.HIVEMEM_TLS_KEY_FILE : process.env.TLS_KEY_PATH;
+const makeServer = cert ? (handler) => createTlsServer({cert:readFileSync(cert),key:readFileSync(key)},handler) : createServer;
+const servers = ports.map((port) => makeServer((request, response) => { response.writeHead(200, { "content-type": "application/json" }); response.end("{\\"status\\":\\"ok\\"}"); }).listen(Number(port), "127.0.0.1"));
 log("start " + service + " token=" + (process.env.HIVE_ROUTER_MEMORY_PROXY_TOKEN ? "yes" : "no"));
 console.log(service + " listening on " + ports.join(","));
 if (existsSync(process.env.HIVE_HOME + "/crash-" + service)) setTimeout(() => { log("crash " + service); process.exit(3); }, 700);
@@ -106,7 +115,7 @@ export function installFakeServers(paths: HivePaths, services: readonly ServiceN
     const definition = SERVICES[service];
     const root = join(paths.runtime, "node_modules", ...definition.packageName.split("/"));
     mkdirSync(join(root, "bin"), { recursive: true });
-    writeFileSync(join(root, "package.json"), JSON.stringify({ name: definition.packageName, version: "1.0.0", type: "module", bin: { [definition.bin]: "bin/cli.js" } }));
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: definition.packageName, version: service === "skills" ? "1.1.0" : "1.0.0", type: "module", bin: { [definition.bin]: "bin/cli.js" } }));
     writeFileSync(join(root, "bin", "cli.js"), fakeBin(service), { mode: 0o755 });
   }
 }

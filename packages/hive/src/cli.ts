@@ -8,7 +8,7 @@ import { createOutput } from "./output.js";
 import { hivePaths } from "./paths.js";
 import { createPrompter } from "./prompt.js";
 import { installServers } from "./runtime.js";
-import { parseServiceList, SERVICE_NAMES, type ServiceName } from "./services.js";
+import { parseServiceList, DEFAULT_SERVICES, type ServiceName } from "./services.js";
 import { collectStatus, configuredServices, printStatus } from "./status.js";
 import { runSupervisor } from "./supervisor.js";
 import { launcherVersion, PACKAGE_NAME, serverRange } from "./version.js";
@@ -41,10 +41,10 @@ Running it again is safe: existing settings and secrets are kept, and changes
 to existing files are shown and confirmed first.
 
 Options:
-  --services <list>       memory,router,iam (default: all three, or ask)
+  --services <list>       memory,router,iam,skills or all (default: core three, or ask)
   --hostname <name>       Also serve the console under this name (adds it to the
                           certificate and listens on all interfaces)
-  --no-tls                Plain HTTP on 127.0.0.1 (no openssl needed)
+  --no-tls                Plain HTTP on 127.0.0.1; incompatible with new Skills setup
   --port <name>=<port>    Use a specific port; names: ${PORT_KEYS.join(", ")} (repeatable)
   --qdrant-url <url>      Use this Qdrant instead of finding or starting one
   --redis-url <url>       Use this Redis instead of finding or starting one
@@ -55,7 +55,7 @@ Options:
   start: `Usage: hive start [service...] [options]
 
 Runs the configured servers (default: all) in the foreground in dependency
-order (iam, memory, router). Each must pass its health check before the next
+order (iam, memory, skills, router). Each must pass its health check before the next
 starts. Log lines are prefixed with the service name. Ctrl-C or SIGTERM stops
 them in reverse order. If one exits unexpectedly, the others are stopped and
 hive exits with code 1. The Router's HiveMem token is renewed when it is
@@ -168,7 +168,7 @@ async function main(argv: readonly string[]): Promise<number> {
       if (flags.booleans.has("--help")) return printHelp(command);
       const chosen = servicesFrom(flags);
       const configured = configuredServices(paths);
-      const services = chosen.length > 0 ? chosen : configured.length > 0 ? configured : [...SERVICE_NAMES];
+      const services = chosen.length > 0 ? chosen : configured.length > 0 ? configured : [...DEFAULT_SERVICES];
       const prompter = createPrompter({ yes: flags.booleans.has("--yes"), output });
       try {
         const done = await installServers(paths, services, { from: fromDirectory(flags), prompter, output });

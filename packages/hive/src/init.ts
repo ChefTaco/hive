@@ -10,17 +10,16 @@ import { isPortFree, nextFreePort } from "./net.js";
 import { mask, type Output } from "./output.js";
 import type { HivePaths } from "./paths.js";
 import type { Prompter } from "./prompt.js";
-import { installedServer, installServers, requireInstalled } from "./runtime.js";
+import { compatibleServer, installedServer, installServers, requireInstalled, serviceRange } from "./runtime.js";
 import { readServerSchema, type ServerSchema } from "./schema.js";
 import { parseServiceList, SERVICE_NAMES, SERVICES, sortServices, type ServiceName } from "./services.js";
 import { readState, writeState, type LauncherState } from "./state.js";
 import { resolveStore } from "./stores.js";
 import { certificateNames, createCertificates, inspectServerCertificate, namesOnCertificate, OPENSSL_MISSING, opensslVersion, tlsFiles, type TlsFiles } from "./tls.js";
 import { describeTokenProblem, MEMORY_TOKEN_VAR, memoryTokenProblem, mintMemoryToken, tokenExpiry } from "./token.js";
-import { launcherMajor, majorOf } from "./version.js";
 import { displayUrl } from "./privacy.js";
 
-export const PORT_KEYS = ["memory", "iam", "router", "router-admin", "qdrant", "redis"] as const;
+export const PORT_KEYS = ["memory", "iam", "router", "router-admin", "skills", "qdrant", "redis"] as const;
 export type PortKey = (typeof PORT_KEYS)[number];
 
 export interface InitOptions {
@@ -136,9 +135,9 @@ async function ensureInstalled(context: InitContext, services: ServiceName[]): P
   const missing = services.filter((service) => !installedServer(paths, service));
   const mismatched = services.filter((service) => {
     const installed = installedServer(paths, service);
-    return installed !== null && majorOf(installed.version) !== launcherMajor();
+    return installed !== null && !compatibleServer(service, installed.version);
   });
-  for (const service of mismatched) output.warn(`${SERVICES[service].packageName} ${installedServer(paths, service)?.version} does not match this launcher (major ${launcherMajor()}).`);
+  for (const service of mismatched) output.warn(`${SERVICES[service].packageName} ${installedServer(paths, service)?.version} requires ${serviceRange(service)} for this launcher.`);
   const toInstall = sortServices([...missing, ...mismatched]);
   if (toInstall.length === 0) return;
   const installed = await installServers(paths, toInstall, { from: options.from, prompter, output, reason: "Hive needs these server packages" });
@@ -190,7 +189,7 @@ async function allocatePorts(context: InitContext, newServices: ServiceName[], s
     if (service === "router") {
       wanted.push(["router", schema?.defaultPort ?? DEFAULTS.router.apiPort], ["router-admin", schema?.adminPort ?? DEFAULTS.router.adminPort]);
     } else {
-      wanted.push([service, schema?.defaultPort ?? (service === "memory" ? DEFAULTS.memory.port : DEFAULTS.iam.port)]);
+      wanted.push([service, schema?.defaultPort ?? (service === "memory" ? DEFAULTS.memory.port : service === "skills" ? DEFAULTS.skills.port : DEFAULTS.iam.port)]);
     }
   }
   const ports: Partial<Record<PortKey, number>> = {};
@@ -223,6 +222,17 @@ function baseEntries(service: ServiceName, context: InitContext, schema: ServerS
     entries.push(...secrets, { key: "HIVEMEM_TS_CORE_HOST", value: "127.0.0.1" }, { key: "HIVEMEM_WEB_PORT", value: String(values.ports.memory) });
     if (values.storeUrl) entries.push({ key: "HIVEMEM_QDRANT_URL", value: values.storeUrl });
     if (values.tls) entries.push({ key: "HIVEMEM_TLS_CERT_FILE", value: values.tls.cert }, { key: "HIVEMEM_TLS_KEY_FILE", value: values.tls.key });
+  } else if (service === "skills") {
+    entries.push(...secrets,
+      { key: "NODE_ENV", value: "production" },
+      { key: "HIVE_SKILLS_HOST", value: options.hostname ? "0.0.0.0" : "127.0.0.1" },
+      { key: "HIVE_SKILLS_PORT", value: String(values.ports.skills) },
+      { key: "HIVE_SKILLS_PUBLIC_URL", value: `https://${values.publicHost}:${values.ports.skills}` },
+      { key: "HIVE_SKILLS_DATA_DIR", value: join(paths.home, "skills") },
+      { key: "HIVE_SKILLS_ADMIN_USERS", value: values.osUser },
+      { key: "HIVE_SKILLS_PAM_SERVICE", value: "login" },
+    );
+    if (values.tls) entries.push({ key: "HIVE_SKILLS_TLS_CERT_FILE", value: values.tls.cert }, { key: "HIVE_SKILLS_TLS_KEY_FILE", value: values.tls.key });
   } else if (service === "iam") {
     entries.push({ key: "NODE_ENV", value: "production" }, { key: "HOST", value: "127.0.0.1" }, { key: "PORT", value: String(values.ports.iam) }, ...secrets);
     if (values.storeUrl) entries.push({ key: "REDIS_URL", value: values.storeUrl });
@@ -253,6 +263,7 @@ function wiringEntries(service: ServiceName, docs: Map<ServiceName, EnvDocument>
   const router = docs.get("router");
   const iam = docs.get("iam");
   const memory = docs.get("memory");
+  const skills = docs.get("skills");
   const entries: Entry[] = [];
   if (service === "router" && router) {
     const admin = consoleUrl(router).replace(/\/$/u, "");
@@ -270,6 +281,10 @@ function wiringEntries(service: ServiceName, docs: Map<ServiceName, EnvDocument>
         { key: "HIVE_ROUTER_IAM_AUDIENCE", value: "hive-router" },
       );
       if (iamListener.tls && tls) entries.push({ key: "HIVE_ROUTER_IAM_CA_CERT_PATH", value: tls.caCert });
+    }
+    if (skills) {
+      entries.push({ key: "HIVE_SKILLS_INTERNAL_URL", value: mainListener("skills", skills).url },
+        { key: "HIVE_SKILLS_PUBLIC_URL", value: skills.get("HIVE_SKILLS_PUBLIC_URL") ?? mainListener("skills", skills).url });
     }
     if (memory) {
       const memoryListener = mainListener("memory", memory);
@@ -314,6 +329,8 @@ export async function runInit(context: InitContext): Promise<InitResult> {
   const configured = SERVICE_NAMES.filter((service) => existsSync(paths.envFile(service)));
   const services = await chooseServices(context, configured);
   const newServices = services.filter((service) => !configured.includes(service));
+  if (newServices.includes("skills") && !options.tls) throw new UsageError("Skills requires TLS; omit --no-tls or select only memory,router,iam");
+  if (services.includes("skills")) output.info("  Skills administration uses your OS account through PAM (Linux with pamtester), independently of IAM sign-in.");
   if (services.includes("router") && !services.includes("iam")) {
     output.info(platform === "linux"
       ? `  Note: without IAM the console signs you in with your OS account (${context.username ?? userInfo().username}) through PAM; install pamtester (for example sudo apt install pamtester).`
@@ -453,6 +470,11 @@ function summarize(context: InitContext, services: ServiceName[], docs: Map<Serv
   output.info(`  Servers    ${paths.runtime}`);
   const dataDirs = services.map((service) => join(paths.home, service));
   output.info(`  Data       ${dataDirs.join(", ")}${dataDirs.some((dir) => !existsSync(dir)) ? " (created on first start)" : ""}`);
+  const skills = docs.get("skills");
+  if (skills) {
+    output.info(`  Skills     ${displayUrl(skills.get("HIVE_SKILLS_PUBLIC_URL") ?? mainListener("skills", skills).url)}`);
+    output.info(`             Sign in with your OS account (${skills.get("HIVE_SKILLS_ADMIN_USERS") ?? "see HIVE_SKILLS_ADMIN_USERS"}); install pamtester on Linux.`);
+  }
   if (tls) output.info(`  TLS        ${paths.tls} (local CA: ${tls.caCert})`);
   const router = docs.get("router");
   if (router) {

@@ -1,7 +1,7 @@
 {
   "name": "@hivemagnus/hive",
-  "version": "1.0.3",
-  "description": "Hive launcher: installs, configures and runs the Hive Router, Hive IAM and HiveMem servers, with generated secrets, local TLS and cross-service wiring",
+  "version": "1.1.0",
+  "description": "Hive launcher: installs, configures and runs Hive Router, Hive IAM, HiveMem and optional Hive Skills, with generated secrets, local TLS and cross-service wiring",
   "keywords": [
     "hive",
     "launcher",

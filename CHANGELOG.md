@@ -6,15 +6,26 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-01
+
 ### Added
 
+- Launcher support for optional Hive Skills: install/configure/start, TLS and private state,
+  Router integration, OS/PAM administration, status/doctor, and dependency-ordered shutdown.
+  `--services all` includes Skills; the default three-service setup remains compatible.
+- Skills `env-schema` and read-only `check` commands for launcher integration.
 - Public `@hivemagnus/hive-skills` server package with a CLI, explicit environment-file loading,
   Hermes distribution scripts, bundled seed source, and fresh-install CI coverage.
 - A migration runbook for existing systemd installations using pinned public npm packages.
-
 - `npm run test:e2e:model`: environment-configured real-provider verification covering ordinary
   inference, streaming, SDK memory recall, authentication, traces and cleanup, with private reports
   and network-free regression tests.
+
+### Changed
+
+- Launcher and Skills packages are 1.1.0; unchanged servers/SDKs retain their versions.
+  Release tags match the launcher, and publishing skips versions already on npm.
+- Launcher-managed servers trust the generated local CA unless the user supplies a CA override.
 
 ### Fixed
 
