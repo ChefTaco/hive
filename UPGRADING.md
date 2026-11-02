@@ -27,7 +27,7 @@ Upgrade every enrolled component, including the managed launcher, together:
 ```bash
 npx @hivemagnus/hive@latest upgrade --dry-run
 npx @hivemagnus/hive@latest upgrade
-npx @hivemagnus/hive@latest upgrade --to 1.2.0
+npx @hivemagnus/hive@latest upgrade --to 1.2.1
 ```
 
 The explicit version is the **bundle version**, not a request to independently resolve each
@@ -55,6 +55,29 @@ are in `$HIVE_HOME/run/upgrade-services.log`.
 `--dry-run` does not install packages, write configuration/cache files, migrate or restart.
 For offline testing, `--from DIR` selects complete `npm pack` artifacts instead of registry
 packages. Keep the source directory private if it contains local evidence.
+
+### Recovering a 1.2.0 launcher
+
+Version 1.2.0 incorrectly compares registry JSON object key ordering. For a fresh setup, use
+`npx @hivemagnus/hive@1.2.1 init`; existing configuration and secrets are preserved. An enrolled
+1.2.0 installation must make its first upgrade from the complete public tarball bundle so its old
+engine does not compare reordered registry metadata:
+
+```bash
+bundle_dir="$(mktemp -d)"
+npm pack --ignore-scripts --pack-destination "$bundle_dir" \
+  @hivemagnus/hive@1.2.1 @hivemagnus/hive-iam-server@1.2.1 \
+  @hivemagnus/hive-router@1.2.1 @hivemagnus/hivemem-server@1.2.1 \
+  @hivemagnus/hive-skills@1.2.1
+npx @hivemagnus/hive@1.2.1 upgrade --to 1.2.1 --from "$bundle_dir" --dry-run
+npx @hivemagnus/hive@1.2.1 upgrade --to 1.2.1 --from "$bundle_dir"
+```
+
+npm verifies the downloaded tarballs, and Hive verifies their exact bundle, lockfile integrity
+and backups before migration. The selected service inventory stays unchanged. Retain the tarballs
+until the upgrade receipt reports success; subsequent upgrades can use the registry normally.
+To reproduce a 1.2.0 bootstrap, download that version of all five packages and run its launcher
+with `init --from DIR`; this uses the published code and tarballs without modifying either.
 
 ## Existing installations and recovery
 

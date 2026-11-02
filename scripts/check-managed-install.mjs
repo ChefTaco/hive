@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdirSync, openSync, closeSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { candidateRegistry } from './candidate-registry.mjs';
 
 /** Fresh packed launcher installation, using separate stores and no adopted state. */
 export async function freshManagedInstall({ work, packs, cli, env, runtime, run, port, version }) {
@@ -11,6 +12,9 @@ export async function freshManagedInstall({ work, packs, cli, env, runtime, run,
   const qp = await port(),
     rp = await port();
   let child;
+  const registry = await candidateRegistry(packs, run);
+  isolated.HIVE_UPDATE_REGISTRY = registry.registry;
+  isolated.npm_config_registry = registry.registry;
   try {
     await run('docker', [
       'run',
@@ -52,8 +56,6 @@ export async function freshManagedInstall({ work, packs, cli, env, runtime, run,
         '--services',
         'all',
         '--yes',
-        '--from',
-        packs,
         '--qdrant-url',
         `http://127.0.0.1:${qp}`,
         '--redis-url',
@@ -96,8 +98,14 @@ export async function freshManagedInstall({ work, packs, cli, env, runtime, run,
     await control.stop();
     await new Promise((r) => (child.exitCode !== null ? r() : child.once('exit', r)));
     child = undefined;
-    return { freshManagedInstall: true, version, services: projectState.services };
+    return {
+      freshManagedInstall: true,
+      reorderedRegistryMetadata: true,
+      version,
+      services: projectState.services,
+    };
   } finally {
+    await registry.close();
     if (child?.exitCode === null) {
       child.kill('SIGTERM');
       await new Promise((r) => child.once('exit', r));

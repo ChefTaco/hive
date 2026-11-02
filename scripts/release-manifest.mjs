@@ -92,7 +92,7 @@ const base = {
   },
   requiredIntermediates: policy.requiredIntermediates || [],
   newRequiredEnv: policy.newRequiredEnv || [],
-  newOptionalEnv: [
+  newOptionalEnv: (policy.newOptionalEnv ?? [
     'HIVE_AUTO_MIGRATE',
     'HIVE_UPDATE_CHECK',
     'HIVE_AUTO_UPGRADE',
@@ -105,7 +105,7 @@ const base = {
     'HIVE_UPDATE_REGISTRY',
     'HIVE_MANAGED_PROJECT',
     'HIVE_COORDINATOR_SOCKET',
-  ].map((name) => ({
+  ]).map((name) => ({
     name,
     component:
       name.startsWith('HIVE_AUTO_UPGRADE') ||

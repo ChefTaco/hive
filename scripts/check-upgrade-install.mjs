@@ -168,6 +168,23 @@ try {
     `@hivemagnus/hive@${current.version}`,
   ]);
   const oldCli = join(baselineDir, 'node_modules/@hivemagnus/hive/dist/src/cli.js');
+  // Release 1.2.0 compares registry JSON key order. Its documented bootstrap
+  // workaround uses unmodified public tarballs; the old installed code stays intact.
+  const baselineArgs = [];
+  if (current.version === '1.2.0') {
+    const published = join(work, 'public-baseline-packs');
+    mkdirSync(published);
+    for (const [name, version] of Object.entries(current.hiveRelease.components))
+      await run('npm', [
+        'pack',
+        `${name}@${version}`,
+        '--ignore-scripts',
+        '--silent',
+        '--pack-destination',
+        published,
+      ]);
+    baselineArgs.push('--from', published);
+  }
   await run(
     process.execPath,
     [
@@ -176,6 +193,7 @@ try {
       '--services',
       'all',
       '--yes',
+      ...baselineArgs,
       '--qdrant-url',
       `http://127.0.0.1:${qp}`,
       '--redis-url',

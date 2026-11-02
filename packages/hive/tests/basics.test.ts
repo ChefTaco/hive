@@ -108,9 +108,9 @@ describe("server packages", () => {
       assert.equal(serviceRange("skills"), "^1.1.0");
       assert.equal(compatibleServer("skills", "1.0.3"), false);
       assert.equal(compatibleServer("skills", "1.1.0"), true);
-      assert.equal(installPlan(paths, ["skills"], undefined)[0]?.spec, "@hivemagnus/hive-skills@1.2.0");
+      assert.equal(installPlan(paths, ["skills"], undefined)[0]?.spec, `@hivemagnus/hive-skills@${launcherVersion()}`);
       writeFileSync(join(paths.home, "hivemagnus-hive-skills-1.0.3.tgz"), "");
-      assert.throws(() => installPlan(paths, ["skills"], paths.home), /Missing .*1.2.0.*complete release bundle/);
+      assert.throws(() => installPlan(paths, ["skills"], paths.home), /Missing .*complete release bundle/);
     } finally { cleanup(); }
   });
   it("finds the newest tarball of the launcher's major version", () => {

@@ -95,6 +95,17 @@ export interface Release {
   breaking: boolean;
 }
 
+/** Registry storage may reorder object keys. Arrays retain their semantic order. */
+export function canonicalJson(value: unknown): string {
+  const json = JSON.stringify(value, (_key, item: unknown) =>
+    item && typeof item === 'object' && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : item,
+  );
+  if (json === undefined) throw new Error('Expected a JSON value');
+  return json;
+}
+
 export function parseVersion(value: string): [number, number, number] {
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value))
     throw new Error(`Expected a stable exact version, got ${value}`);

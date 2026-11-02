@@ -1,3 +1,4 @@
+import { canonicalJson } from './manifest.js';
 import {
   existsSync,
   mkdirSync,
@@ -218,7 +219,7 @@ export async function planUpgrade(root: string, rawOptions: UpgradeOptions): Pro
       !satisfies(process.versions.node, pkg.engines.node)
     )
       throw new Error(`Target ${name}@${to} requires a supported Node engine before installation`);
-    if (hash(JSON.stringify(releaseSchema.parse(pkg.hiveRelease))) !== hash(JSON.stringify(target)))
+    if (canonicalJson(releaseSchema.parse(pkg.hiveRelease)) !== canonicalJson(target))
       throw new Error(`Target ${name}@${to} is outside the complete release bundle`);
     if (!pkg.dist?.integrity || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(pkg.dist.integrity))
       throw new Error(`Target ${name}@${to} has no verifiable integrity`);
@@ -380,7 +381,7 @@ async function stage(root: string, plan: UpgradePlan, from?: string): Promise<st
     const manifest = releaseSchema.parse(pkg.hiveRelease);
     if (
       manifest.version !== plan.target.version ||
-      hash(JSON.stringify(manifest)) !== hash(JSON.stringify(plan.target))
+      canonicalJson(manifest) !== canonicalJson(plan.target)
     )
       throw new Error('Staged release manifests differ from the approved bundle');
   }

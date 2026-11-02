@@ -1,6 +1,6 @@
 {
   "name": "hive-monorepo",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "Self-hosted AI infrastructure: IAM, HiveMem memory service, model router, and the unified Hive console.",
   "license": "Apache-2.0",
@@ -28,7 +28,7 @@
     "test": "npm run test:router && npm run test:iam && npm run test:audit && npm run check:openapi && npm run test:memory-ts && npm run test:skills && npm run test:release-manager && npm run test:launcher && npm run test:upgrades && npm run release:manifest:check",
     "test:router": "npm --prefix services/hive-router test",
     "test:iam": "npm --prefix services/hive-iam test",
-    "test:audit": "node --experimental-strip-types --test scripts/audit-deployments.test.ts scripts/service-manifest.test.ts scripts/hive-doctor.test.ts scripts/hive-backup.test.ts scripts/dev-hive.test.ts scripts/hive-deploy.test.ts scripts/hivemem-token.test.ts scripts/architecture-boundaries.test.ts scripts/release-config-hardening.test.ts scripts/model-e2e.test.ts",
+    "test:audit": "node --experimental-strip-types --test scripts/audit-deployments.test.ts scripts/service-manifest.test.ts scripts/hive-doctor.test.ts scripts/hive-backup.test.ts scripts/dev-hive.test.ts scripts/hive-deploy.test.ts scripts/hivemem-token.test.ts scripts/architecture-boundaries.test.ts scripts/release-config-hardening.test.ts scripts/model-e2e.test.ts scripts/published-release.test.mjs",
     "test:release-manager": "bash scripts/lib/release-manager.test.sh",
     "scan:secrets": "bash scripts/scan-secrets.sh",
     "generate:openapi": "services/hive-router/node_modules/.bin/tsx scripts/check-openapi.ts --write",

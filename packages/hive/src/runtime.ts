@@ -9,7 +9,7 @@ import type { Prompter } from "./prompt.js";
 import { tlsFiles } from "./tls.js";
 import { SERVICES, type ServiceName } from "./services.js";
 import { compareVersions, launcherMajor, majorOf, serverRange, satisfiesCaretRange } from "./version.js";
-import { NATIVE_POLICY, ownRelease, findPackageRoot, catalog, packageMetadata, satisfies, releaseSchema, run as runTool } from './release/runtime.js';
+import { canonicalJson, NATIVE_POLICY, ownRelease, findPackageRoot, catalog, packageMetadata, satisfies, releaseSchema, run as runTool } from './release/runtime.js';
 
 export interface InstalledServer {
   service: ServiceName;
@@ -159,7 +159,7 @@ function bundleTarball(directory: string, packageName: string, version: string):
   if (result.status !== 0) throw new CliError(`Cannot inspect ${packageName}@${version} tarball`);
   const pkg = JSON.parse(result.stdout) as { name: string; version: string; hiveRelease?: unknown; engines?: { node?: string } };
   const release = ownRelease(findPackageRoot(import.meta.url, '@hivemagnus/hive'));
-  if (pkg.name !== packageName || pkg.version !== version || JSON.stringify(pkg.hiveRelease) !== JSON.stringify(release))
+  if (pkg.name !== packageName || pkg.version !== version || canonicalJson(releaseSchema.parse(pkg.hiveRelease)) !== canonicalJson(release))
     throw new CliError(`Tarball for ${packageName}@${version} differs from the launcher release bundle`);
   if (!pkg.engines?.node || !satisfies(process.versions.node, pkg.engines.node)) throw new CliError(`Unsupported Node engine for ${packageName}@${version}`);
   return file;
@@ -275,7 +275,7 @@ export async function installServers(paths: HivePaths, services: readonly Servic
   const integrity: Record<string, string> = {};
   for (const name of ['@hivemagnus/hive', ...plan.map((entry) => entry.packageName)]) {
     const pkg = await packageMetadata(source, name, release.components[name]!, options.from);
-    if (pkg.name !== name || pkg.version !== release.components[name] || !pkg.engines?.node || !satisfies(process.versions.node, pkg.engines.node) || JSON.stringify(releaseSchema.parse(pkg.hiveRelease)) !== JSON.stringify(release)) throw new CliError(`Target ${name} is not compatible with the complete release bundle`);
+    if (pkg.name !== name || pkg.version !== release.components[name] || !pkg.engines?.node || !satisfies(process.versions.node, pkg.engines.node) || canonicalJson(releaseSchema.parse(pkg.hiveRelease)) !== canonicalJson(release)) throw new CliError(`Target ${name} is not compatible with the complete release bundle`);
     if (!pkg.dist?.integrity) throw new CliError(`Target ${name} has no verifiable package integrity`);
     integrity[name] = pkg.dist.integrity;
   }

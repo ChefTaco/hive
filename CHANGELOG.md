@@ -6,6 +6,21 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-02
+
+### Fixed
+
+- Accept reordered npm registry JSON keys during fresh installation and staged upgrades, while still rejecting changed manifests and package integrity.
+- Wait for the complete public npm release bundle and verify tarball integrity before building release images.
+
+### Migration impact and compatibility
+
+- No new migrations, required/optional/removed environment names, wire changes or secret/key actions.
+  Migration impact remains fast; minimum upgrade-from versions and data compatibility are unchanged.
+- The published 1.2.0 launcher can bootstrap from its unchanged public tarballs with `init --from DIR`;
+  enrolled 1.2.0 installs should upgrade using the complete 1.2.1 tarball bundle with `upgrade --from DIR`.
+  See UPGRADING.md for exact commands.
+
 ## [1.2.0] - 2026-11-01
 
 ### Added
