@@ -28,6 +28,9 @@ All notable changes to this project are documented in this file. The format is b
 - Optional operator-tool configuration `HIVE_NPM_DEPLOY_TARGETS`; existing `DEPLOY_*` and
   `HIVE_E2E_*` values provide SSH, credentials and the model provider. No server env names were
   removed or made required, and no migration, wire-format or secret/key changes are introduced.
+- Keep staged runtime directories readable by the original service accounts under the worker's
+  restrictive umask. Preservation checks allow provider-health telemetry changes while still
+  rejecting changes to provider configuration or credentials.
 
 ### Migration impact and compatibility
 

@@ -271,6 +271,8 @@ def verify_static(directory, inventory):
                 match = now.execute('SELECT * FROM "' + table + '" WHERE ' + ' AND '.join('"' + key + '"=?' for key in pk), [row[key] for key in pk]).fetchone()
                 require(match, 'An existing row is missing')
                 allowed = {'updatedAt', 'lastUsedAt'}
+                if service['component'] == 'router' and table == 'Provider':
+                    allowed.update({'lastHealthAt', 'lastHealthStatus', 'lastHealthError'})
                 if service['component'] == 'router' and table == 'RuntimeSetting' and row['key'] == 'openapi.document':
                     allowed.add('valueJson')  # Exact generated content is checked by the runtime helper.
                 require({key for key in row.keys() if row[key] != match[key]} <= allowed, 'Existing application configuration changed')
@@ -353,6 +355,7 @@ def transaction(directory):
             os.chmod(target / 'package.json', 0o644)
             # Releases must remain traversable by original service accounts.
             os.chmod(target.parent, 0o755)
+            os.chmod(target, 0o755)
             with (directory / ('install-' + target.parents[2].name + '.log')).open('wb') as log:
                 subprocess.run(['npm', '--prefix', str(target), 'install', '--ignore-scripts', '--omit=dev', '--registry=https://registry.npmjs.org', '--no-audit', '--no-fund'], check=True, stdout=log, stderr=log, timeout=600, umask=0o022)
                 if project['base'] == '/opt/hive-npm':

@@ -233,6 +233,10 @@ An application transaction runs under a host-side systemd worker and an installa
    citations, streamed recall, provider-bound traces, expiry/auth checks and complete cleanup.
    Only a successful model report with successful cleanup accepts the transaction.
 
+Code directories remain readable by existing service accounts; transaction evidence and secrets
+stay owner-only. Provider health status, error and probe timestamps can change during readiness
+checks. Their URLs, credentials and other configuration must remain unchanged.
+
 `HIVE_AUTO_UPGRADE`, `HIVE_AUTO_MIGRATE`, `HIVE_UPDATE_CHECK`, `HIVE_UI_UPGRADE` and
 `HIVE_COMPOSE_UPGRADE_SUPERVISOR` stay false. No upgrade timer, coordinator or Compose supervisor
 is installed. Existing certificate/OS maintenance is retained. If a host already has the exact
