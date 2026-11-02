@@ -63,7 +63,7 @@ with an existing public `HIVE_FRESH_VERSION`. Exact pins remain subject to npm's
 normal package integrity checks and the launcher's managed-install validation.
 
 TLS verification stays enabled. Credentialed provider URLs require HTTPS outside
-loopback. Never set `NODE_TLS_REJECT_UNAUTHORIZED=0`.
+loopback. Use the CA setting above for private certificates.
 
 ## Checks and cleanup
 
