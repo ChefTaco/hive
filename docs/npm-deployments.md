@@ -186,11 +186,11 @@ Qdrant and scoped Redis. Unknown layouts and enrolled launcher projects are refu
 ```bash
 chmod 600 .env.npm-deploy
 # Read-only inspection, provider discovery and TLS/configuration validation:
-npm run deploy:npm -- --env-file .env.npm-deploy --to 1.2.1 --dry-run
+npm run deploy:npm -- --env-file .env.npm-deploy --to 1.2.2 --dry-run
 # Back up and upgrade each host, accepting it before starting the next:
-npm run deploy:npm -- --env-file .env.npm-deploy --to 1.2.1 --apply
+npm run deploy:npm -- --env-file .env.npm-deploy --to 1.2.2 --apply
 # Run live readiness and the full model/cleanup suite without replacing code:
-npm run deploy:npm -- --env-file .env.npm-deploy --to 1.2.1 --verify-only
+npm run deploy:npm -- --env-file .env.npm-deploy --to 1.2.2 --verify-only
 ```
 
 An exact stable public npm release is required; no prereleases, downgrades or major transitions.
@@ -232,6 +232,10 @@ An application transaction runs under a host-side systemd worker and an installa
    Run the [live model suite](model-e2e.md): inference, incremental SSE, scoped SDK recall and
    citations, streamed recall, provider-bound traces, expiry/auth checks and complete cleanup.
    Only a successful model report with successful cleanup accepts the transaction.
+
+Code directories remain readable by existing service accounts; transaction evidence and secrets
+stay owner-only. Provider health status, error and probe timestamps can change during readiness
+checks. Their URLs, credentials and other configuration must remain unchanged.
 
 `HIVE_AUTO_UPGRADE`, `HIVE_AUTO_MIGRATE`, `HIVE_UPDATE_CHECK`, `HIVE_UI_UPGRADE` and
 `HIVE_COMPOSE_UPGRADE_SUPERVISOR` stay false. No upgrade timer, coordinator or Compose supervisor

@@ -1,6 +1,6 @@
 {
   "name": "@hivemagnus/hive-router",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Hive Router: OpenAI-compatible model gateway with routing, failover, quotas and traces, plus the admin API and the unified Hive console",
   "keywords": [
     "hive",
@@ -115,17 +115,17 @@
   },
   "hiveRelease": {
     "schema": 1,
-    "version": "1.2.1",
+    "version": "1.2.2",
     "engineProtocol": 1,
     "engines": {
       "node": "^24.22.1 || ^26.13.0"
     },
     "components": {
-      "@hivemagnus/hive": "1.2.1",
-      "@hivemagnus/hive-router": "1.2.1",
-      "@hivemagnus/hive-iam-server": "1.2.1",
-      "@hivemagnus/hivemem-server": "1.2.1",
-      "@hivemagnus/hive-skills": "1.2.1"
+      "@hivemagnus/hive": "1.2.2",
+      "@hivemagnus/hive-router": "1.2.2",
+      "@hivemagnus/hive-iam-server": "1.2.2",
+      "@hivemagnus/hivemem-server": "1.2.2",
+      "@hivemagnus/hive-skills": "1.2.2"
     },
     "optionalComponents": [
       "skills"
@@ -143,7 +143,14 @@
     },
     "requiredIntermediates": [],
     "newRequiredEnv": [],
-    "newOptionalEnv": [],
+    "newOptionalEnv": [
+      {
+        "name": "HIVE_NPM_DEPLOY_TARGETS",
+        "component": "launcher",
+        "secret": false,
+        "description": "Optional repository deploy:npm target inventory; real values belong in a private operator env file."
+      }
+    ],
     "removedEnv": [],
     "migrations": [
       {
@@ -279,8 +286,8 @@
       "memory": "^1.0.3",
       "skills": "^1.1.0"
     },
-    "summary": "Accept equivalent npm registry manifests regardless of JSON key ordering; preserve exact bundle and integrity validation.",
-    "notesUrl": "https://github.com/ChefTaco/hive/releases/tag/v1.2.1",
+    "summary": "Harden TLS verification, queue error privacy, operator output and URL handling; add verified npm deployment orchestration.",
+    "notesUrl": "https://github.com/ChefTaco/hive/releases/tag/v1.2.2",
     "breaking": false
   }
 }

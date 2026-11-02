@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-11-02
+
 ### Security
 
 - Require TLS 1.2 or newer for Python deployment, readiness and Redis backup connections.
@@ -15,7 +17,7 @@ All notable changes to this project are documented in this file. The format is b
   job errors; keep account identifiers and SSH diagnostics out of operator-tool output.
 - Use linear URL normalization and backup path classification, constrain the test registry's
   redirects to public npm, and separate executable test fixtures from their JSON data.
-- No migrations, required/optional/removed env names, wire schema changes or secret/key actions.
+- No datastore migrations, new required server env names, wire schema changes or secret/key actions.
   The legacy TLS switches remain recognized; they no longer disable certificate verification.
 
 ### Added
@@ -26,6 +28,15 @@ All notable changes to this project are documented in this file. The format is b
 - Optional operator-tool configuration `HIVE_NPM_DEPLOY_TARGETS`; existing `DEPLOY_*` and
   `HIVE_E2E_*` values provide SSH, credentials and the model provider. No server env names were
   removed or made required, and no migration, wire-format or secret/key changes are introduced.
+- Keep staged runtime directories readable by the original service accounts under the worker's
+  restrictive umask. Preservation checks allow provider-health telemetry changes while still
+  rejecting changes to provider configuration or credentials.
+
+### Migration impact and compatibility
+
+- No new migrations; minimum upgrade-from versions and data/wire compatibility ranges are unchanged.
+  Existing configurations, credentials and signing keys require no migration or rotation.
+- The launcher and all four servers are released together as 1.2.2. Unchanged SDKs remain at 1.0.3.
 
 ## [1.2.1] - 2026-11-02
 

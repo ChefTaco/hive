@@ -27,7 +27,7 @@ Upgrade every enrolled component, including the managed launcher, together:
 ```bash
 npx @hivemagnus/hive@latest upgrade --dry-run
 npx @hivemagnus/hive@latest upgrade
-npx @hivemagnus/hive@latest upgrade --to 1.2.1
+npx @hivemagnus/hive@latest upgrade --to 1.2.2
 ```
 
 The explicit version is the **bundle version**, not a request to independently resolve each

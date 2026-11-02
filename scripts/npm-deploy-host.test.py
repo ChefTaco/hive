@@ -1,9 +1,11 @@
 import importlib.util
 import io
 import json
+import os
 import ssl
 from pathlib import Path
 import sqlite3
+import shutil
 import tempfile
 import types
 import unittest
@@ -90,7 +92,7 @@ class HostTests(unittest.TestCase):
                 self.assertEqual(host.rpc(dict(operation='status', id=tx.name))['phase'], 'recovery-required')
             self.assertEqual((tx/'transaction.json').stat().st_mode & 0o777, 0o600)
 
-    def transaction_fixture(self, fail=''):
+    def transaction_fixture(self, fail='', restrictive_umask=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             transactions = root/'transactions'
@@ -137,9 +139,19 @@ class HostTests(unittest.TestCase):
             def flock(*args):
                 if fail=='lock':raise BlockingIOError('Synthetic contention')
             with patch.multiple(host, ROOT=transactions, LOCK=root/'lock', SYSTEMD=root/'units', AUTOMATION=root/'automation.env'), patch.object(host,'inspect',return_value=inv), patch.object(host,'public_inventory',return_value={'machine':'fixture'}), patch.object(host,'engine',return_value=module), patch.object(host,'run_service',side_effect=migrate), patch.object(host.subprocess,'run',side_effect=execute), patch.object(host,'verify_static'), patch.object(host,'qdrant_inventory',return_value={'fixture-collection':1}), patch.object(host,'readiness',return_value={'iam':{'version':'1.2.2'}}), patch.object(host.time,'sleep',side_effect=sleep), patch.object(host.fcntl,'flock',side_effect=flock):
-                if fail:
-                    with self.assertRaises(Exception):host.transaction(tx)
-                else:host.transaction(tx)
+                previous_umask = os.umask(0o077) if restrictive_umask else None
+                try:
+                    if fail:
+                        with self.assertRaises(Exception):host.transaction(tx)
+                    else:host.transaction(tx)
+                finally:
+                    if previous_umask is not None:os.umask(previous_umask)
+            if restrictive_umask:
+                runtime = base/'releases'/tx.name/'runtime'
+                self.assertEqual(runtime.stat().st_mode & 0o777, 0o755)
+                self.assertEqual(runtime.parent.stat().st_mode & 0o777, 0o755)
+                for name in ('request.json', 'inventory.json', 'transaction.json'):
+                    self.assertEqual((tx/name).stat().st_mode & 0o777, 0o600)
             state=json.loads((tx/'transaction.json').read_text())
             return state,commands,str((base/'current').readlink())
 
@@ -160,6 +172,33 @@ class HostTests(unittest.TestCase):
         state,commands,pointer=self.transaction_fixture()
         self.assertEqual(state['phase'],'complete')
         self.assertEqual(pointer,'releases/fixture-transaction')
+
+    def test_service_accounts_can_traverse_staged_code_under_restrictive_worker_umask(self):
+        state,_,_=self.transaction_fixture(restrictive_umask=True)
+        self.assertEqual(state['phase'],'complete')
+
+    def test_provider_health_telemetry_can_change_but_credentials_and_configuration_cannot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            database=root/'state.db'
+            with sqlite3.connect(database) as db:
+                db.executescript('CREATE TABLE Provider(id TEXT PRIMARY KEY,baseUrl TEXT,encryptedAuthSecret TEXT,lastHealthAt TEXT,lastHealthStatus TEXT,lastHealthError TEXT,updatedAt TEXT);')
+                db.execute('INSERT INTO Provider VALUES (?,?,?,?,?,?,?)', ('synthetic-provider','https://client.example.com','synthetic-secret','before','unknown',None,'before'))
+            shutil.copyfile(database,root/'router-before.db')
+            host.private_json(root/'protected.json',{})
+            host.private_json(root/'qdrant-before.json',{})
+            inventory={'services':{'hive-router':{'component':'router','database':str(database),'user':'deploy','env':{key:'false' for key in host.SWITCHES}}}}
+            with patch.object(host,'qdrant_inventory',return_value={}), patch.object(host.subprocess,'run'), patch.object(host.subprocess,'check_output',return_value=''), patch.object(host,'inspect',return_value=inventory):
+                with sqlite3.connect(database) as db:
+                    db.execute("UPDATE Provider SET lastHealthAt='after',lastHealthStatus='healthy',lastHealthError='synthetic probe result',updatedAt='after'")
+                host.verify_static(root,inventory)
+                for field,value in [('baseUrl','https://unexpected.example.com'),('encryptedAuthSecret','synthetic-changed-secret')]:
+                    with sqlite3.connect(database) as db:
+                        db.execute(f'UPDATE Provider SET "{field}"=?',(value,))
+                    with self.assertRaisesRegex(RuntimeError,'configuration changed'):
+                        host.verify_static(root,inventory)
+                    with sqlite3.connect(database) as db:
+                        db.execute('UPDATE Provider SET baseUrl=?,encryptedAuthSecret=?',('https://client.example.com','synthetic-secret'))
 
     def test_lock_contention_does_not_stop_writers_or_leave_an_unfinished_transaction(self):
         state,commands,pointer=self.transaction_fixture('lock')

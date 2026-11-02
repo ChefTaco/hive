@@ -110,12 +110,14 @@ const base = {
     component:
       name.startsWith('HIVE_AUTO_UPGRADE') ||
       name === 'HIVE_UI_UPGRADE' ||
-      name === 'HIVE_COMPOSE_UPGRADE_SUPERVISOR'
+      name === 'HIVE_COMPOSE_UPGRADE_SUPERVISOR' ||
+      name === 'HIVE_NPM_DEPLOY_TARGETS'
         ? 'launcher'
         : 'router',
     secret: false,
-    description:
-      'See UPGRADING.md. Automation defaults off outside explicitly configured managed installations.',
+    description: name === 'HIVE_NPM_DEPLOY_TARGETS'
+      ? 'Optional repository deploy:npm target inventory; real values belong in a private operator env file.'
+      : 'See UPGRADING.md. Automation defaults off outside explicitly configured managed installations.',
   })),
   removedEnv: policy.removedEnv || [],
   migrations,
