@@ -97,9 +97,22 @@ jobs:
             fi
           done
 
+  registry-ready:
+    name: Verify public npm bundle availability
+    needs: publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.22.1
+      - name: Wait for registry metadata and verified tarballs
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        run: node scripts/wait-published-release.mjs
+
   images:
     name: Publish server image (${{ matrix.component }})
-    needs: publish
+    needs: [publish, registry-ready]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false

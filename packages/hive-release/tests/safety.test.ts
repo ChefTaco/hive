@@ -9,7 +9,13 @@ import { hash, withLock, run } from '../src/files.js';
 import childProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { autoEligible, parseVersion, releaseSchema, satisfies } from '../src/manifest.js';
+import {
+  autoEligible,
+  canonicalJson,
+  parseVersion,
+  releaseSchema,
+  satisfies,
+} from '../src/manifest.js';
 import { guardedMigration, schemaCommit, schemaPlan } from '../src/migration.js';
 import { maintenanceDate, updateStatus } from '../src/updates.js';
 import { releaseChanges } from '../src/engine.js';
@@ -22,6 +28,20 @@ const manifest = () =>
     JSON.parse(readFileSync(new URL('../../hive/package.json', import.meta.url), 'utf8'))
       .hiveRelease,
   );
+test('manifest equivalence ignores object key order while preserving arrays and values', () => {
+  assert.equal(
+    canonicalJson({ pins: { router: '1.2.1', iam: '1.2.1' }, migrations: ['a', 'b'] }),
+    canonicalJson({ migrations: ['a', 'b'], pins: { iam: '1.2.1', router: '1.2.1' } }),
+  );
+  assert.notEqual(
+    canonicalJson({ migrations: ['a', 'b'] }),
+    canonicalJson({ migrations: ['b', 'a'] }),
+  );
+  assert.notEqual(
+    canonicalJson({ pins: { iam: '1.2.1' } }),
+    canonicalJson({ pins: { iam: '1.2.2' } }),
+  );
+});
 test('command output is drained after exit before JSON or errors are returned', async () => {
   const original = childProcess.spawn;
   let code = 0;

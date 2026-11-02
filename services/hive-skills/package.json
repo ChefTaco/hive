@@ -1,6 +1,6 @@
 {
   "name": "@hivemagnus/hive-skills",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "type": "module",
   "engines": {
     "node": "^24.22.1 || ^26.13.0"
@@ -67,17 +67,17 @@
   ],
   "hiveRelease": {
     "schema": 1,
-    "version": "1.2.0",
+    "version": "1.2.1",
     "engineProtocol": 1,
     "engines": {
       "node": "^24.22.1 || ^26.13.0"
     },
     "components": {
-      "@hivemagnus/hive": "1.2.0",
-      "@hivemagnus/hive-router": "1.2.0",
-      "@hivemagnus/hive-iam-server": "1.2.0",
-      "@hivemagnus/hivemem-server": "1.2.0",
-      "@hivemagnus/hive-skills": "1.2.0"
+      "@hivemagnus/hive": "1.2.1",
+      "@hivemagnus/hive-router": "1.2.1",
+      "@hivemagnus/hive-iam-server": "1.2.1",
+      "@hivemagnus/hivemem-server": "1.2.1",
+      "@hivemagnus/hive-skills": "1.2.1"
     },
     "optionalComponents": [
       "skills"
@@ -95,80 +95,7 @@
     },
     "requiredIntermediates": [],
     "newRequiredEnv": [],
-    "newOptionalEnv": [
-      {
-        "name": "HIVE_AUTO_MIGRATE",
-        "component": "router",
-        "secret": false,
-        "description": "See UPGRADING.md. Automation defaults off outside explicitly configured managed installations."
-      },
-      {
-        "name": "HIVE_UPDATE_CHECK",
-        "component": "router",
-        "secret": false,
-        "description": "See UPGRADING.md. Automation defaults off outside explicitly configured managed installations."
-      },
-      {
-        "name": "HIVE_AUTO_UPGRADE",
-        "component": "launcher",
-        "secret": false,
-        "description": "See UPGRADING.md. Automation defaults off outside explicitly configured managed installations."
-      },
-      {
-        "name": "HIVE_AUTO_UPGRADE_POLICY",
-        "component": "launcher",
-        "secret": false,
-        "description": "See UPGRADING.md. Automation defaults off outside explicitly configured managed installations."
-      },
-      {
-        "name": "HIVE_AUTO_UPGRADE_WINDOW",
-        "component": "launcher",
-        "secret": false,
-        "description": "See UPGRADING.md. Automation defaults off outside explicitly configured managed installations."
-      },
-      {
-        "name": "HIVE_AUTO_UPGRADE_TIMEZONE",
-        "component": "launcher",
-        "secret": false,
-        "description": "See UPGRADING.md. Automation defaults off outside explicitly configured managed installations."
-      },
-      {
-        "name": "HIVE_UI_UPGRADE",
-        "component": "launcher",
-        "secret": false,
-        "description": "See UPGRADING.md. Automation defaults off outside explicitly configured managed installations."
-      },
-      {
-        "name": "HIVE_COMPOSE_UPGRADE_SUPERVISOR",
-        "component": "launcher",
-        "secret": false,
-        "description": "See UPGRADING.md. Automation defaults off outside explicitly configured managed installations."
-      },
-      {
-        "name": "HIVE_BACKUP_DIR",
-        "component": "router",
-        "secret": false,
-        "description": "See UPGRADING.md. Automation defaults off outside explicitly configured managed installations."
-      },
-      {
-        "name": "HIVE_UPDATE_REGISTRY",
-        "component": "router",
-        "secret": false,
-        "description": "See UPGRADING.md. Automation defaults off outside explicitly configured managed installations."
-      },
-      {
-        "name": "HIVE_MANAGED_PROJECT",
-        "component": "router",
-        "secret": false,
-        "description": "See UPGRADING.md. Automation defaults off outside explicitly configured managed installations."
-      },
-      {
-        "name": "HIVE_COORDINATOR_SOCKET",
-        "component": "router",
-        "secret": false,
-        "description": "See UPGRADING.md. Automation defaults off outside explicitly configured managed installations."
-      }
-    ],
+    "newOptionalEnv": [],
     "removedEnv": [],
     "migrations": [
       {
@@ -304,8 +231,8 @@
       "memory": "^1.0.3",
       "skills": "^1.1.0"
     },
-    "summary": "Managed upgrades with verified backups, explicit migrations, rollback and update notices.",
-    "notesUrl": "https://github.com/ChefTaco/hive/releases/tag/v1.2.0",
+    "summary": "Accept equivalent npm registry manifests regardless of JSON key ordering; preserve exact bundle and integrity validation.",
+    "notesUrl": "https://github.com/ChefTaco/hive/releases/tag/v1.2.1",
     "breaking": false
   }
 }

@@ -132,7 +132,7 @@ test('upgrade dry-run resolves exact tarballs without changing the managed insta
       mkdirSync(join(staging, 'package'), { recursive: true });
       writeJson(join(staging, 'package/package.json'), {
         name,
-        version: '1.2.0',
+        version: manifest.version,
         hiveRelease: manifest,
         engines: manifest.engines,
       });
@@ -150,7 +150,7 @@ test('upgrade dry-run resolves exact tarballs without changing the managed insta
     const before = snapshot(root);
     const plan = await planUpgrade(root, { from: source, dryRun: true });
     assert.equal(plan.from, '1.1.0');
-    assert.equal(plan.target.version, '1.2.0');
+    assert.equal(plan.target.version, manifest.version);
     assert.deepEqual(plan.services, ['router']);
     assert.deepEqual(snapshot(root), before);
     writeFileSync(
