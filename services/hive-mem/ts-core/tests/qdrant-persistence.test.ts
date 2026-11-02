@@ -13,6 +13,19 @@ interface StoredPoint {
   payload: JsonObject;
 }
 
+it('normalizes long trailing slash sequences before Qdrant requests', { timeout: 2000 }, async () => {
+  let requested = '';
+  const persistence = new QdrantHiveMemPersistence({
+    url: 'http://127.0.0.1:6333' + '/'.repeat(100_000),
+    fetchImpl: async (input) => {
+      requested = String(input);
+      return new Response(JSON.stringify({ result: { collections: [] } }));
+    },
+  });
+  await persistence.probe();
+  assert.equal(requested, 'http://127.0.0.1:6333/collections');
+});
+
 function principal(agentId = "agent-a", role?: string): AuthPrincipal {
   return { agentId, scopes: ["*"], rawClaims: role ? { role } : {} };
 }
@@ -86,8 +99,8 @@ async function startFakeQdrant(): Promise<FakeQdrant> {
         return;
       }
       send(response, 404, { status: "error", result: null });
-    } catch (error) {
-      send(response, 500, { status: "error", error: error instanceof Error ? error.message : String(error) });
+    } catch {
+      send(response, 500, { status: "error", error: "Invalid fake Qdrant request" });
     }
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

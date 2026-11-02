@@ -2,7 +2,10 @@
  * breach-check-service.ts — Check passwords against the HaveIBeenPwned Pwned Passwords API.
  *
  * Uses the k-anonymity model: only the first 5 characters of the SHA-1 hash
- * are sent to the API. The full hash never leaves the server.
+ * are sent to the API. The full hash never leaves the server. SHA-1 is required
+ * by this lookup protocol, not used for password storage (see password-service.ts,
+ * which uses Argon2id). Changing this digest breaks the breach check.
+ * https://haveibeenpwned.com/API/v3#SearchingPwnedPasswordsByRange
  */
 
 import { createHash } from 'node:crypto'

@@ -284,7 +284,7 @@ function collectSnapshot(host: string, fqdn: string): HostSnapshot {
   sshArgs.push(target, 'bash', '-lc', remoteScript(fqdn, Boolean(sudoPassword)));
   const result = spawnSync('ssh', sshArgs, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024, input: sudoPassword ? `${sudoPassword}\n` : undefined });
   if (result.status !== 0) {
-    throw new Error(`SSH inventory failed for ${target}: ${result.stderr.trim() || result.stdout.trim()}`);
+    throw new Error('SSH inventory failed; check SSH access and remote service configuration.');
   }
   return JSON.parse(result.stdout) as HostSnapshot;
 }

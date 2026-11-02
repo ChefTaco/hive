@@ -6,6 +6,21 @@ import { runBackupTool } from './hive-backup.ts';
 import { runBackupRestoreDrill } from './hive-backup-drill.ts';
 
 describe('hive backup and restore planner', () => {
+  it('does not include the configured SSH identity in printed or JSON plans', () => {
+    const previous = process.env['HIVE_BACKUP_SSH_USER'];
+    process.env['HIVE_BACKUP_SSH_USER'] = 'synthetic-private-ssh-identity';
+    try {
+      for (const flags of [[], ['--json']]) {
+        const result = runBackupTool('backup', ['--host', 'hive:hive.example.com', '--stamp', 'privacy-test', ...flags]);
+        assert.ok(!result.output.includes('synthetic-private-ssh-identity'));
+        assert.match(result.output, /configured-ssh-target/);
+      }
+    } finally {
+      if (previous === undefined) delete process.env['HIVE_BACKUP_SSH_USER'];
+      else process.env['HIVE_BACKUP_SSH_USER'] = previous;
+    }
+  });
+
   it('retains npm deployment inputs and systemd overrides through isolated recovery', () => {
     const suite = new URL('./hive-state-backup.test.py', import.meta.url).pathname;
     const result = spawnSync('python3', [suite], { encoding: 'utf8' });

@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
@@ -37,6 +38,22 @@ function snapshot(host: string, fqdn: string, overrides: Record<string, unknown>
 }
 
 describe('audit-deployments', () => {
+  it('does not echo SSH identities, credentials or remote stderr on inventory failure', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'hive-audit-privacy-'));
+    try {
+      writeFileSync(join(directory, 'ssh'), '#!/bin/sh\nprintf "%s\\n" "$HIVE_AUDIT_SUDO_PASSWORD" >&2\nexit 1\n', { mode: 0o700 });
+      const result = spawnSync(process.execPath, ['--experimental-strip-types', new URL('./audit-deployments.ts', import.meta.url).pathname, '--host', 'hive:hive.example.com'], {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: directory + ':' + process.env.PATH, HIVE_AUDIT_SSH_USER: 'synthetic-private-user', HIVE_AUDIT_SUDO_PASSWORD: 'synthetic-audit-password' },
+      });
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /SSH inventory failed/);
+      for (const value of ['synthetic-private-user', 'synthetic-audit-password']) assert.ok(!(result.stdout + result.stderr).includes(value));
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('reports no findings for matching healthy snapshots', () => {
     const findings = compareDeployments([
       snapshot('hive', 'hive.example.com'),

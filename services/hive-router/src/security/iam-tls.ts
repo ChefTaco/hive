@@ -14,13 +14,6 @@ type HiveMemTlsEnv = Pick<
 
 const caCache = new Map<string, Buffer>();
 
-function isLoopbackHostname(hostname: string): boolean {
-  return hostname === '127.0.0.1'
-    || hostname === '::1'
-    || hostname === '[::1]'
-    || hostname === 'localhost';
-}
-
 function readPinnedCa(path: string): Buffer {
   const cached = caCache.get(path);
   if (cached) return cached;
@@ -38,12 +31,9 @@ export function iamTlsOptions(url: URL, env: IamTlsEnv): ConnectionOptions {
     };
   }
   if (env.HIVE_ROUTER_IAM_ALLOW_INSECURE_TLS) {
-    if (env.NODE_ENV === 'production' || !isLoopbackHostname(url.hostname)) {
-      throw new Error(
-        'HIVE_ROUTER_IAM_ALLOW_INSECURE_TLS is restricted to loopback development',
-      );
-    }
-    return { rejectUnauthorized: false };
+    throw new Error(
+      'HIVE_ROUTER_IAM_ALLOW_INSECURE_TLS is unsupported; use HIVE_ROUTER_IAM_CA_CERT_PATH to trust the IAM certificate',
+    );
   }
   return { rejectUnauthorized: true };
 }
@@ -57,10 +47,7 @@ export function hiveMemTlsOptions(url: URL, env: HiveMemTlsEnv): ConnectionOptio
     };
   }
   if (env.HIVE_STATUS_ALLOW_INSECURE_TLS) {
-    if (env.NODE_ENV === 'production' || !isLoopbackHostname(url.hostname)) {
-      throw new Error('HIVE_STATUS_ALLOW_INSECURE_TLS is restricted to loopback development');
-    }
-    return { rejectUnauthorized: false };
+    throw new Error('HIVE_STATUS_ALLOW_INSECURE_TLS is unsupported; use HIVEMEM_CA_CERT_PATH to trust the HiveMem certificate');
   }
   return { rejectUnauthorized: true };
 }

@@ -252,7 +252,9 @@ export class QdrantHiveMemPersistence implements HiveMemPersistence {
 
 
   constructor(options: QdrantHiveMemPersistenceOptions) {
-    this.baseUrl = options.url.replace(/\/+$/u, "");
+    let end = options.url.length;
+    while (end > 0 && options.url[end - 1] === "/") end -= 1;
+    this.baseUrl = options.url.slice(0, end);
     this.apiKey = options.apiKey;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.journalPath = options.journalPath;

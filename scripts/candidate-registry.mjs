@@ -34,7 +34,17 @@ export async function candidateRegistry(packs, run) {
       res.writeHead(405).end();
       return;
     }
-    const path = decodeURIComponent(new URL(req.url, 'http://127.0.0.1').pathname);
+    let requestUrl;
+    let path;
+    try {
+      if (!req.url?.startsWith('/') || req.url.startsWith('//')) throw new Error('Invalid registry path');
+      requestUrl = new URL(req.url, 'https://registry.npmjs.org');
+      if (requestUrl.origin !== 'https://registry.npmjs.org') throw new Error('Invalid registry origin');
+      path = decodeURIComponent(requestUrl.pathname);
+    } catch {
+      res.writeHead(400).end();
+      return;
+    }
     const bytes = artifacts.get(path);
     if (bytes) {
       res.writeHead(200, { 'content-type': 'application/octet-stream' }).end(bytes);
@@ -54,7 +64,11 @@ export async function candidateRegistry(packs, run) {
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(body));
       return;
     }
-    res.writeHead(307, { location: `https://registry.npmjs.org${req.url}` }).end();
+    // The origin is constant; request data can affect only path/query components.
+    const destination = new URL('https://registry.npmjs.org');
+    destination.pathname = requestUrl.pathname;
+    destination.search = requestUrl.search;
+    res.writeHead(307, { location: destination.href }).end();
   });
   await new Promise((yes, no) => {
     server.once('error', no);

@@ -36,7 +36,7 @@ describe('IAM TLS policy', () => {
       NODE_ENV: 'production',
       HIVE_ROUTER_IAM_ALLOW_INSECURE_TLS: true,
       HIVE_ROUTER_IAM_CA_CERT_PATH: undefined,
-    })).toThrow(/restricted to loopback development/u);
+    })).toThrow(/use HIVE_ROUTER_IAM_CA_CERT_PATH/u);
   });
 
   it('rejects insecure TLS outside loopback in development', () => {
@@ -44,7 +44,7 @@ describe('IAM TLS policy', () => {
       NODE_ENV: 'development',
       HIVE_ROUTER_IAM_ALLOW_INSECURE_TLS: true,
       HIVE_ROUTER_IAM_CA_CERT_PATH: undefined,
-    })).toThrow(/restricted to loopback development/u);
+    })).toThrow(/use HIVE_ROUTER_IAM_CA_CERT_PATH/u);
   });
 
   it('pins the HiveMem certificate and rejects the legacy production bypass', () => {
@@ -60,6 +60,20 @@ describe('IAM TLS policy', () => {
       NODE_ENV: 'production',
       HIVE_STATUS_ALLOW_INSECURE_TLS: true,
       HIVEMEM_CA_CERT_PATH: undefined,
-    })).toThrow(/restricted to loopback development/u);
+    })).toThrow(/use HIVEMEM_CA_CERT_PATH/u);
+  });
+
+  it('rejects legacy bypasses on every development loopback address', () => {
+    for (const hostname of ['localhost', '127.0.0.1', '[::1]']) {
+      const url = new URL(`https://${hostname}:4200`);
+      expect(() => iamTlsOptions(url, {
+        NODE_ENV: 'development', HIVE_ROUTER_IAM_ALLOW_INSECURE_TLS: true,
+        HIVE_ROUTER_IAM_CA_CERT_PATH: undefined,
+      })).toThrow(/use HIVE_ROUTER_IAM_CA_CERT_PATH/u);
+      expect(() => hiveMemTlsOptions(url, {
+        NODE_ENV: 'development', HIVE_STATUS_ALLOW_INSECURE_TLS: true,
+        HIVEMEM_CA_CERT_PATH: undefined,
+      })).toThrow(/use HIVEMEM_CA_CERT_PATH/u);
+    }
   });
 });

@@ -143,9 +143,8 @@ function buildPlan(options: BackupOptions): BackupPlan {
       : [...service.backupPaths] }));
   const allPaths = services.flatMap((service) => service.paths);
   const quotedPaths = allPaths.map(quoteShell).join(' ');
-  const target = sshTarget(options.host.host);
   const commands = options.mode === 'backup'
-    ? [`ssh ${target} sudo python3 hive-state-backup.py backup --host ${options.host.host} --archive <protected-remote-archive> > ${quoteShell(outputFile)}`]
+    ? [`ssh <configured-ssh-target> sudo python3 hive-state-backup.py backup --host ${options.host.host} --archive <protected-remote-archive> > ${quoteShell(outputFile)}`]
     : [
       `python3 scripts/hive-state-backup.py restore-isolated --host ${options.host.host} --archive ${quoteShell(options.backupFile ?? outputFile)} --root ${quoteShell(resolve(options.outputDir, 'recovery-' + options.host.host + '-' + options.stamp))}`,
     ];

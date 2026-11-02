@@ -221,8 +221,7 @@ export async function backupStores(
         (/\.(env|pem|key|crt)$/.test(source) ||
           /\/compose\.ya?ml$/.test(source) ||
           /\/(keys|keyring|tls|certs)\//.test(source) ||
-          /revok|revocation/.test(source) ||
-          /\/config\/.*\.env$/.test(source)),
+          /revok|revocation/.test(source)),
     });
   };
   for (const spec of specs) {

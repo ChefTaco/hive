@@ -25,7 +25,7 @@ test('consolidation rejects cross-workspace and peer sources without enqueuing; 
   store.updateMemory(alpha, own.id, { valid_to: '2020-01-01T00:00:00.000Z' });
   const failed = await store.runQueueJob(admin, String(accepted.job_id));
   assert.equal(failed.status, 'failed');
-  assert.match(failed.error!, /no longer current/);
+  assert.equal(failed.error, 'Queue job execution failed');
   assert.equal(store.listPeerConclusions(alpha, alpha.agentId, new URLSearchParams('workspace_id=a')).length, 0);
 });
 

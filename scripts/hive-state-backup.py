@@ -58,7 +58,9 @@ class Redis:
         parsed = urllib.parse.urlparse(url)
         self.socket = socket.create_connection((parsed.hostname or 'localhost', parsed.port or 6379), timeout=10)
         if parsed.scheme == 'rediss':
-            self.socket = ssl.create_default_context().wrap_socket(self.socket, server_hostname=parsed.hostname)
+            context = ssl.create_default_context()
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            self.socket = context.wrap_socket(self.socket, server_hostname=parsed.hostname)
         self.file = self.socket.makefile('rb')
         if parsed.password:
             credentials = [urllib.parse.unquote(parsed.password)]

@@ -269,7 +269,7 @@ directory. Variables with no default are optional unless marked **required**.
 | `HIVE_ROUTER_SECURITY_EXPORTER_CLIENT_ID` | `security-exporter` | IAM client id accepted for the security event exporter. |
 | `HIVE_ROUTER_IAM_CA_CERT_PATH` | | CA certificate trusted for IAM HTTPS (OIDC, JWKS, proxy). |
 | `HIVE_ROUTER_IAM_JWKS_REFRESH_MS` / `HIVE_ROUTER_IAM_JWKS_MAX_AGE_MS` | `300000` / `900000` | JWKS refresh interval and the maximum age of cached keys. When the maximum is exceeded, the router rejects tokens. |
-| `HIVE_ROUTER_IAM_ALLOW_INSECURE_TLS` | `false` | Development only, loopback only. Rejected in production. |
+| `HIVE_ROUTER_IAM_ALLOW_INSECURE_TLS` | `false` | Legacy option: keep false. Certificate verification cannot be disabled; configure the corresponding CA path for private certificates. |
 
 ### HiveMem integration (optional)
 
@@ -280,7 +280,7 @@ directory. Variables with no default are optional unless marked **required**.
 | `HIVEMEM_CA_CERT_PATH` | | Certificate trusted for HiveMem HTTPS. |
 | `HIVE_ROUTER_MEMORY_PROXY_TOKEN` | | Server-side HiveMem admin token for `/api/memory/*`, minted with `hivemem-server issue-token --subject hive-router --role admin`. It is never sent to the browser. |
 | `HIVE_SKILLS_INTERNAL_URL` / `HIVE_SKILLS_PUBLIC_URL` | | Optional Hive Skills registry shown in the console. |
-| `HIVE_STATUS_ALLOW_INSECURE_TLS` | `false` | Development only, loopback only. Rejected in production. |
+| `HIVE_STATUS_ALLOW_INSECURE_TLS` | `false` | Legacy option: keep false. Certificate verification cannot be disabled; configure the corresponding CA path for private certificates. |
 
 ### Metrics, export and decision model
 

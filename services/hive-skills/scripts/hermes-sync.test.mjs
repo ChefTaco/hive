@@ -49,8 +49,8 @@ test('sync installs, withdraws only managed content and retries failed gateway r
     const bytes = f.pack();
     const entry = { slug: 'fixture', version: '1.0.0', sha256: createHash('sha256').update(bytes).digest('hex'), archiveUrl: 'https://registry.test/v1/skills/fixture/releases/1.0.0/archive' };
     let skills = [entry]; let restarts = 0;
-    const fetchImpl = async (url) => String(url).endsWith('/manifest') ? Response.json({ schemaVersion: 1, skills }) : new Response(bytes);
-    const options = { registry: 'https://registry.test', hermesHome: join(f.root, 'hermes'), fetchImpl, restart: () => { restarts++; } };
+    const fetchImpl = async (url) => new URL(url).pathname.endsWith('/manifest') ? Response.json({ schemaVersion: 1, skills }) : new Response(bytes);
+    const options = { registry: 'https://registry.test', hermesHome: join(f.root, 'hermes'), hermesVersion: '2.4.0', fetchImpl, restart: () => { restarts++; } };
     await syncSkills(options);
     assert.ok(existsSync(join(options.hermesHome, 'skills/registry/fixture/SKILL.md')));
     await syncSkills(options); assert.equal(restarts, 1);
@@ -71,7 +71,7 @@ for (const boundary of ['prepared', 'backed-up', 'activated', 'published']) test
   try {
     let bytes = f.pack();
     const entry = () => ({ slug: 'fixture', version: '1.0.0', sha256: createHash('sha256').update(bytes).digest('hex'), archiveUrl: 'https://registry.test/v1/skills/fixture/releases/1.0.0/archive' });
-    const options = { registry: 'https://registry.test', hermesHome: join(f.root, 'hermes'), fetchImpl: async (url) => String(url).endsWith('/manifest') ? Response.json({ schemaVersion: 1, skills: [entry()] }) : new Response(bytes), restart: () => {} };
+    const options = { registry: 'https://registry.test', hermesHome: join(f.root, 'hermes'), hermesVersion: '2.4.0', fetchImpl: async (url) => new URL(url).pathname.endsWith('/manifest') ? Response.json({ schemaVersion: 1, skills: [entry()] }) : new Response(bytes), restart: () => {} };
     await syncSkills(options);
     writeFileSync(join(f.source, 'SKILL.md'), '# Updated fixture'); bytes = f.pack();
     await assert.rejects(syncSkills({ ...options, checkpoint: (step) => { if (step === boundary) throw new Error('interrupted'); } }), /interrupted/);
@@ -96,7 +96,7 @@ test('canary manifests download from the channel-scoped archive URL', async () =
       fetched.push(String(url));
       return new Response(bytes);
     };
-    const options = { registry: 'https://registry.test', hermesHome: join(f.root, 'hermes'), fetchImpl, target: 'agent-1', token: 'tok', restart: () => {} };
+    const options = { registry: 'https://registry.test', hermesHome: join(f.root, 'hermes'), hermesVersion: '2.4.0', fetchImpl, target: 'agent-1', token: 'tok', restart: () => {} };
     await syncSkills(options);
     assert.deepEqual(fetched, [base + '?channel=canary']);
     archiveUrl = base;
