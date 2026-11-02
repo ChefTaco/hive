@@ -186,11 +186,11 @@ Qdrant and scoped Redis. Unknown layouts and enrolled launcher projects are refu
 ```bash
 chmod 600 .env.npm-deploy
 # Read-only inspection, provider discovery and TLS/configuration validation:
-npm run deploy:npm -- --env-file .env.npm-deploy --to 1.2.1 --dry-run
+npm run deploy:npm -- --env-file .env.npm-deploy --to 1.2.2 --dry-run
 # Back up and upgrade each host, accepting it before starting the next:
-npm run deploy:npm -- --env-file .env.npm-deploy --to 1.2.1 --apply
+npm run deploy:npm -- --env-file .env.npm-deploy --to 1.2.2 --apply
 # Run live readiness and the full model/cleanup suite without replacing code:
-npm run deploy:npm -- --env-file .env.npm-deploy --to 1.2.1 --verify-only
+npm run deploy:npm -- --env-file .env.npm-deploy --to 1.2.2 --verify-only
 ```
 
 An exact stable public npm release is required; no prereleases, downgrades or major transitions.
