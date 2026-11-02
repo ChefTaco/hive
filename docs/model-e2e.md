@@ -1,5 +1,9 @@
 # Real-model end-to-end verification
 
+For a disposable public npm installation of all four services, including Skills,
+use [`npm run test:e2e:fresh`](fresh-npm-e2e.md). It supplies fresh credentials,
+runs this suite with the published Memory SDK and removes the installation afterward.
+
 Run `npm run test:e2e:model` against a running Hive stack and an OpenAI-compatible model provider.
 The command verifies model discovery, ordinary inference, incremental streaming, and private
 memory recall through the TypeScript SDK. It also checks IAM/Memory integration, successful

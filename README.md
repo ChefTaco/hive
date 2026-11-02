@@ -89,6 +89,11 @@ For opt-in verification against a real model provider, run `npm run test:e2e:mod
 See [real-model end-to-end testing](docs/model-e2e.md) for environment configuration, streaming and
 memory-recall checks, private reports, and automatic cleanup.
 
+To test an entirely fresh public npm installation, including Skills, run
+`npm run test:e2e:fresh` with `HIVE_E2E_PROVIDER_URL` and `HIVE_E2E_MODEL` set.
+See [fresh npm full-stack testing](docs/fresh-npm-e2e.md) for exact release selection,
+Docker prerequisites, Qwen/llama.cpp settings and automatic installation cleanup.
+
 The OpenAPI specifications for all three HTTP APIs live in [`docs/openapi/`](docs/openapi). Run
 `npm run generate:openapi` after an intentional route or schema change.
 

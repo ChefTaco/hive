@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in `test:e2e:fresh` command installs exact public npm packages for all four
+  services, tests environment-configured model streaming and memory recall with
+  the published SDK, checks Skills distribution and restart persistence, and
+  removes its isolated installation, processes and containers automatically.
+- Test-only settings `HIVE_FRESH_VERSION` and `HIVE_FRESH_REPORT_PATH`; provider
+  settings reuse `HIVE_E2E_*`. No server configuration, migrations, compatibility
+  ranges, production credentials or signing-key changes are required.
+
 ## [1.2.2] - 2026-11-02
 
 ### Security
