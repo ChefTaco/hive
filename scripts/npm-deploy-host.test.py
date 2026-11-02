@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import ssl
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -27,8 +28,20 @@ class HostTests(unittest.TestCase):
         context = MagicMock()
         with patch.object(host.ssl, 'create_default_context', return_value=context), patch.object(host.socket, 'create_connection'), patch.object(host.urllib.request, 'urlopen') as http:
             host.tls_inspection(inv)
+            self.assertEqual(context.minimum_version, ssl.TLSVersion.TLSv1_2)
             http.assert_not_called()
             self.assertEqual([call.args[0] for call in context.load_verify_locations.call_args_list], ['/opt/fixture/router.crt', '/opt/fixture/iam-ca.crt', '/opt/fixture/memory-ca.crt'])
+
+    def test_readiness_requires_tls12_and_verifies_certificates(self):
+        context = MagicMock()
+        response = MagicMock()
+        response.status = 200
+        response.read.return_value = b'{"status":"ready"}'
+        response.__enter__.return_value = response
+        with patch.object(host, 'endpoints', return_value=[('router', 'https://hive.example.com', '/health/ready', None)]), patch.object(host.ssl, 'create_default_context', return_value=context), patch.object(host.urllib.request, 'urlopen', return_value=response) as opened:
+            host.readiness({})
+            self.assertEqual(context.minimum_version, ssl.TLSVersion.TLSv1_2)
+            self.assertIs(opened.call_args.kwargs['context'], context)
 
     def test_application_override_cannot_reenable_automation(self):
         host.validate_automation_override('HIVE_AUTO_MIGRATE=false\nexport HIVE_UPDATE_CHECK="false" # explicit\nOTHER_VALUE=fixture')

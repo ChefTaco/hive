@@ -4,15 +4,24 @@ import io
 import json
 from pathlib import Path
 import sqlite3
+import ssl
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
 
 spec = importlib.util.spec_from_file_location('backup', Path(__file__).with_name('hive-state-backup.py'))
 backup = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(backup)
 
 class RecoveryTests(unittest.TestCase):
+    def test_redis_tls_keeps_default_trust_and_requires_tls12(self):
+        context = MagicMock()
+        with patch.object(backup.socket, 'create_connection') as connect, patch.object(backup.ssl, 'create_default_context', return_value=context), patch.object(backup.Redis, 'command'):
+            backup.Redis('rediss://redis.example.com/0')
+            self.assertEqual(context.minimum_version, ssl.TLSVersion.TLSv1_2)
+            context.wrap_socket.assert_called_once_with(connect.return_value, server_hostname='redis.example.com')
+
     def test_optional_skills_runtime_is_inventoried_separately(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

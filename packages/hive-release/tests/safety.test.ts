@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -28,6 +28,22 @@ const manifest = () =>
     JSON.parse(readFileSync(new URL('../../hive/package.json', import.meta.url), 'utf8'))
       .hiveRelease,
   );
+
+test('backup protects nested configuration env files without an ambiguous path regex', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'hive-protected-path-test-'));
+  try {
+    const config = join(root, 'config', 'config', 'config');
+    mkdirSync(config, { recursive: true });
+    const envFile = join(config, 'operator.env');
+    writeFileSync(envFile, 'SYNTHETIC_CONFIG=fixture');
+    const receipt = await backupStores([{ service: 'router', paths: [envFile], sqlite: [] }], join(root, 'backup'), 'example-installation');
+    assert.equal(receipt.files.length, 1);
+    assert.equal(receipt.files[0]!.protected, true);
+    assert.equal(receipt.files[0]!.source, envFile);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 test('manifest equivalence ignores object key order while preserving arrays and values', () => {
   assert.equal(
     canonicalJson({ pins: { router: '1.2.1', iam: '1.2.1' }, migrations: ['a', 'b'] }),

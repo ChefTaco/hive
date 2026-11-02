@@ -45,8 +45,16 @@ test('staged engine handoff verifies capability and plan before owner manager op
     await assert.rejects(handoff(root, staged, plan, {}, adapter), /plan changed/);
     assert.deepEqual(calls, []);
     writeFileSync(
+      join(runtime, 'fixture.json'),
+      JSON.stringify({ hash: plan.hash, staged }),
+    );
+    writeFileSync(
       file,
-      `export const ENGINE_PROTOCOL=2;export async function planUpgrade(){return {hash:${JSON.stringify(plan.hash)}}}export async function upgrade(root,options,adapter){await adapter.stop();await adapter.start();await adapter.health(${JSON.stringify(staged)});return {phase:'completed'}}`,
+      `import { readFileSync } from 'node:fs';
+const fixture=JSON.parse(readFileSync(new URL('./fixture.json',import.meta.url),'utf8'));
+export const ENGINE_PROTOCOL=2;
+export async function planUpgrade(){return {hash:fixture.hash}}
+export async function upgrade(root,options,adapter){await adapter.stop();await adapter.start();await adapter.health(fixture.staged);return {phase:'completed'}}`,
     );
     const result = await handoff(root, staged, plan, {}, adapter);
     assert.equal(result.phase, 'completed');

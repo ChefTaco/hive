@@ -222,6 +222,7 @@ def tls_inspection(inventory):
         url = urlsplit(base)
         require(url.scheme == 'https' and url.hostname and not url.username and not url.password, 'Production endpoints require credential-free HTTPS URLs')
         context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         if ca:
             context.load_verify_locations(ca)
         with socket.create_connection((url.hostname, url.port or 443), timeout=15) as connection:
@@ -234,6 +235,7 @@ def readiness(inventory, versions=None):
     for component, base, path, ca in endpoints(inventory):
         require(base.startswith('https://'), 'Production readiness must use HTTPS')
         context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         if ca:
             context.load_verify_locations(ca)
         with urllib.request.urlopen(base.rstrip('/') + path, context=context, timeout=15) as response:

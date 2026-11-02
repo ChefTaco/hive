@@ -6,6 +6,18 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Security
+
+- Require TLS 1.2 or newer for Python deployment, readiness and Redis backup connections.
+  Router IAM/HiveMem HTTPS clients always verify certificates, including development loopback;
+  keep legacy insecure-TLS switches false and configure the corresponding CA path instead.
+- Return fixed queue failure messages instead of exception details, including older stored
+  job errors; keep account identifiers and SSH diagnostics out of operator-tool output.
+- Use linear URL normalization and backup path classification, constrain the test registry's
+  redirects to public npm, and separate executable test fixtures from their JSON data.
+- No migrations, required/optional/removed env names, wire schema changes or secret/key actions.
+  The legacy TLS switches remain recognized; they no longer disable certificate verification.
+
 ### Added
 
 - Environment-configured `deploy:npm` for existing independent systemd/npm installations, with

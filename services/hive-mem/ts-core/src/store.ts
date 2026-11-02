@@ -307,6 +307,15 @@ function memoryGraphNode(memory: MemoryRecord): GraphNode {
   };
 }
 
+function publicQueueError(error: string | null): string | null {
+  if (error === null || error === 'Recovered interrupted writer' || error === 'Recovered interrupted worker') return error;
+  return 'Queue job execution failed';
+}
+
+function publicQueueJob(job: QueueJobRecord): QueueJobRecord {
+  return { ...job, error: publicQueueError(job.error) };
+}
+
 function queueSummary(job: QueueJobRecord): QueueJobSummary {
   return {
     id: job.id,
@@ -323,7 +332,7 @@ function queueSummary(job: QueueJobRecord): QueueJobSummary {
     not_before: job.not_before,
     started_at: job.started_at,
     finished_at: job.finished_at,
-    error: job.error,
+    error: publicQueueError(job.error),
   };
 }
 
@@ -3327,13 +3336,13 @@ export class InMemoryHiveMemStore {
       if (receipt) {
         if (receipt.payload_hash !== fingerprint) throw new ConflictError('operation_id was used with a different payload');
         const live = typeof receipt.job_id === 'string' ? this.queueJobs.get(receipt.job_id) : undefined;
-        if (live) return live;
-        if (receipt.job && typeof receipt.job === 'object' && !Array.isArray(receipt.job)) return receipt.job as unknown as QueueJobRecord;
+        if (live) return publicQueueJob(live);
+        if (receipt.job && typeof receipt.job === 'object' && !Array.isArray(receipt.job)) return publicQueueJob(receipt.job as unknown as QueueJobRecord);
         throw new ConflictError('Operation receipt requires reconciliation');
       }
     }
     const existing = !receiptKey && [...this.queueJobs.values()].find((job) => job.owner_agent_id === input.owner_agent_id && job.workspace_id === input.workspace_id && job.task_type === input.task_type && job.idempotency_key === input.idempotency_key && ["pending", "in_progress", "failed"].includes(job.status));
-    if (existing) return existing;
+    if (existing) return publicQueueJob(existing);
     if (input.task_type === 'consolidation' && Array.isArray(input.payload.memory_ids)) for (const id of input.payload.memory_ids) {
       const memory = typeof id === 'string' ? this.memories.get(id) : undefined;
       if (!memory || memory.agent_id !== input.owner_agent_id || memory.workspace_id !== input.workspace_id || !this.currentMemory(memory)) throw new ForbiddenError('Consolidation sources must be current owned memories in the requested workspace');
@@ -3398,7 +3407,7 @@ export class InMemoryHiveMemStore {
     const live = typeof receipt.job_id === 'string' ? this.queueJobs.get(receipt.job_id) : undefined;
     if (live) return this.getQueueJob(principal, live.id);
     if (!receipt.job || typeof receipt.job !== 'object' || Array.isArray(receipt.job)) throw new NotFoundError('Operation result not found');
-    return receipt.job as unknown as QueueJobRecord;
+    return publicQueueJob(receipt.job as unknown as QueueJobRecord);
   }
 
   private retainQueueOperation(job: QueueJobRecord): void {
@@ -3507,7 +3516,7 @@ export class InMemoryHiveMemStore {
       if (job.task_type === "consolidation") this.operations.set("run:" + id, { id: "run:" + id, kind: "consolidation-run", run_id: id, actor: job.owner_agent_id, workspace_id: job.workspace_id, status: completed.status, created_at: job.created_at, finished_at: completed.finished_at, result: completed.result });
       this.queuePersistence();
       return completed;
-    } catch (error) {
+    } catch {
       const retryCount = running.retry_count + 1;
       const failed: QueueJobRecord = {
         ...running,
@@ -3516,7 +3525,7 @@ export class InMemoryHiveMemStore {
         not_before: new Date(Date.now() + Math.min(300_000, 1000 * 2 ** retryCount)).toISOString(),
         locked_at: null,
         finished_at: retryCount > 3 ? nowIso() : running.finished_at,
-        error: error instanceof Error ? error.message : String(error),
+        error: "Queue job execution failed",
       };
       this.queueJobs.set(id, failed);
       this.retainQueueOperation(failed);
@@ -4011,7 +4020,7 @@ export class InMemoryHiveMemStore {
     if (!job) throw new NotFoundError("Queue job not found");
     if (!isAdmin(principal) && job.owner_agent_id !== principal.agentId) throw new NotFoundError("Queue job not found");
     this.assertWorkspacePermission(principal, job.workspace_id, 'read');
-    return job;
+    return publicQueueJob(job);
   }
 
   retryQueueJob(principal: AuthPrincipal, id: string): QueueJobRecord {

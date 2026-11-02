@@ -153,6 +153,7 @@ def test_private_ca_positive_system_trust_negative_and_redirect_denied(hivemem_m
 
     server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(certificate, private_key)
     server.socket = context.wrap_socket(server.socket, server_side=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -383,7 +384,7 @@ def test_deploy_script_dry_run(temp_hermes_home):
         env={**os.environ, "HERMES_HIVEMEM_TOKEN": "test-token"},
     )
     assert "[dry-run]" in result.stdout
-    assert "https://example.test" in result.stdout
+    assert "API URL: https://example.test" in result.stdout.splitlines()
     assert "test-token" not in result.stdout
     assert "test-token" not in result.stderr
 

@@ -63,12 +63,12 @@ async function main() {
     create: { userId: user.id, roleId: role.id },
   })
 
-  console.log(`IAM admin password reset for ${username} (${email}).`)
+  console.log('IAM admin password reset completed.')
 }
 
 main()
-  .catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : error)
+  .catch(() => {
+    console.error('IAM admin password reset failed; check database access and administrator configuration.')
     process.exit(1)
   })
   .finally(() => prisma.$disconnect())

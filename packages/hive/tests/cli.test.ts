@@ -27,7 +27,8 @@ describe("hive command", () => {
     writeFileSync(join(managed, 'package.json'), JSON.stringify({ type: 'module', hiveRelease: {} }));
     const marker = join(paths.home, 'stopped');
     const pidFile = join(paths.home, 'delegated.pid');
-    writeFileSync(join(managed, 'dist/src/cli.js'), `import fs from 'node:fs';fs.writeFileSync(${JSON.stringify(pidFile)},String(process.pid));process.once('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(marker)},'stopped');process.exit(0)});console.log('delegated-ready');setInterval(()=>{},1000);`);
+    writeFileSync(join(managed, 'dist/src/fixture.json'), JSON.stringify({ pidFile, marker }));
+    writeFileSync(join(managed, 'dist/src/cli.js'), `import fs from 'node:fs';const {pidFile,marker}=JSON.parse(fs.readFileSync(new URL('./fixture.json',import.meta.url),'utf8'));fs.writeFileSync(pidFile,String(process.pid));process.once('SIGTERM',()=>{fs.writeFileSync(marker,'stopped');process.exit(0)});console.log('delegated-ready');setInterval(()=>{},1000);`);
     const child = spawn(process.execPath, [cli, 'coordinator'], { env: { PATH: process.env.PATH, HIVE_HOME: paths.home }, stdio: ['ignore', 'pipe', 'pipe'] });
     try {
       await new Promise<void>((yes, no) => { child.stdout.once('data', () => yes()); child.once('error', no); child.once('exit', () => no(new Error('Delegated coordinator exited before readiness'))); });
