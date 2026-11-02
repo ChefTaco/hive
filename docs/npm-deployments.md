@@ -152,3 +152,105 @@ Full-state backups include the separate Skills npm manifest/lockfile when
 Reinstall its recorded release and reconstruct both code pointers during disaster recovery.
 Source deployment scripts do not manage the npm runtime pointer and must not replace it
 as part of a later source deployment.
+
+## Reusable release command
+
+`npm run deploy:npm` updates all explicitly configured, independent installations in the
+systemd/npm layout above. It retains their existing units, service users, working directories,
+configuration, signing keys, TLS and datastores. Optional Skills is updated only where already
+installed. It never runs `init`, `adopt`, provisioning, seeding or secret/key rotation.
+
+Create an **ignored, owner-only** `.env.npm-deploy` file. All real destinations and credentials
+come from the environment; the command supplies no deployment host or model-provider default.
+
+```dotenv
+HIVE_NPM_DEPLOY_TARGETS='[{"name":"primary","host":"hive.example.com"},{"name":"secondary","host":"memory.example.com"}]'
+DEPLOY_USERNAME=deploy
+DEPLOY_SSH_KEY=/opt/deploy/id_ed25519
+# Omit for passwordless sudo; otherwise set the existing sudo credential:
+DEPLOY_SUDO_PASSWORD=replace-with-existing-sudo-password
+
+HIVE_E2E_USERNAME=admin
+HIVE_E2E_PASSWORD=replace-with-existing-operator-password
+HIVE_E2E_PROVIDER_URL=http://client.example.com:8000
+HIVE_E2E_MODEL=your-exact-Qwen-model-id
+HIVE_E2E_PROVIDER_KIND=LLAMACPP
+```
+
+Use an existing SSH key and trusted `known_hosts` entry; host-key checking is mandatory.
+The SSH account needs sudo permission to execute Python, manage systemd and read the owned state.
+Targets must be separate hosts with unique labels. This adapter currently supports the exact
+`/opt/hive-npm` and optional `/opt/hive-skills/npm` layout, Linux systemd, SQLite, single-node
+Qdrant and scoped Redis. Unknown layouts and enrolled launcher projects are refused.
+
+```bash
+chmod 600 .env.npm-deploy
+# Read-only inspection, provider discovery and TLS/configuration validation:
+npm run deploy:npm -- --env-file .env.npm-deploy --to 1.2.1 --dry-run
+# Back up and upgrade each host, accepting it before starting the next:
+npm run deploy:npm -- --env-file .env.npm-deploy --to 1.2.1 --apply
+# Run live readiness and the full model/cleanup suite without replacing code:
+npm run deploy:npm -- --env-file .env.npm-deploy --to 1.2.1 --verify-only
+```
+
+An exact stable public npm release is required; no prereleases, downgrades or major transitions.
+The default mode is `--dry-run`: it creates no remote files, runtime installations, backups,
+registry cache or local reports, and performs no inference or registry writes. It validates
+TLS peer identity with configured CA trust, without calling telemetry-writing readiness handlers;
+IAM probes use the configured **issuing CA**, not
+an assumed leaf certificate. Target packages must form one complete release with matching pins
+and engines. Changed engine protocols or wire/SDK compatibility metadata require operator review.
+Existing Memory test tokens are read from each host separately; they are never
+minted, expanded, printed or copied between installations. The provider must be unauthenticated
+and explicitly selected; its `/v1/models` response must include the exact configured model.
+
+An application transaction runs under a host-side systemd worker and an installation lock:
+
+1. Stage exact public npm pins in a new release directory, retaining a lockfile and checking
+   registry origins, integrity, the release bundle, Node engines and rollback compatibility.
+   Audit production dependencies, refusing high/critical advisories before maintenance.
+   Install scripts are disabled, then only `better-sqlite3` and `argon2` are rebuilt; optional
+   `msgpackr-extract` scripts are denied. Probe both native modules.
+2. Run checks and read-only migration plans as the existing service accounts. Rehearse SQLite
+   initialization against isolated copies, requiring every existing row and table to survive.
+   This adapter deliberately supports **unchanged migration inventories and data formats**.
+   New SQL, changed checksums, slow/one-way migrations, removed configured env names or missing
+   required configuration require a separately reviewed migration procedure before deployment.
+3. Stop writers in reverse dependency order. Take a host-bound full-state archive with native
+   Qdrant snapshots, scoped Redis DUMP records and absolute expirations, SQLite/WAL files, Memory
+   local state, protected configuration/keys, Skills archives and effective systemd wiring.
+   Verify hashes and extract an isolated recovery tree with SQLite integrity/foreign-key checks.
+4. Download an owner-only off-host backup and compare its SHA-256 with the host receipt. The
+   worker **cannot migrate until this acknowledgement arrives**. It remains quiesced meanwhile.
+5. Run explicit backed-up migration commands and compare every existing SQLite row/table before
+   switching. Write the five explicit `false` values into owner-only
+   `/etc/hive/automation-off.env`, referenced by additive `60-hive-automation-off.conf` drop-ins.
+   Existing env files, units, signing keys and certificates are retained. Switch `current`
+   atomically and start Memory, IAM, optional Skills and Router in dependency order.
+6. Require expected running versions, readiness, protected-file hashes, existing config rows,
+   Qdrant inventories, exact generated OpenAPI content and disabled automation in every process.
+   Run the [live model suite](model-e2e.md): inference, incremental SSE, scoped SDK recall and
+   citations, streamed recall, provider-bound traces, expiry/auth checks and complete cleanup.
+   Only a successful model report with successful cleanup accepts the transaction.
+
+`HIVE_AUTO_UPGRADE`, `HIVE_AUTO_MIGRATE`, `HIVE_UPDATE_CHECK`, `HIVE_UI_UPGRADE` and
+`HIVE_COMPOSE_UPGRADE_SUPERVISOR` stay false. No upgrade timer, coordinator or Compose supervisor
+is installed. Existing certificate/OS maintenance is retained. If a host already has the exact
+release, `--apply` runs live verification without reinstalling, restarting or taking another
+backup. A failed host prevents deployment to later hosts; successful earlier hosts retain their
+own release and data.
+
+Evidence is private under `output/npm-deploy/<transaction>/` locally and
+`/var/backups/hive/npm-deploy/<transaction>/` on each host. Retain backups, package lockfiles,
+prior releases and transaction receipts. The worker waits at most 15 minutes at each client
+acknowledgement boundary and records conservative recovery after controller loss. A killed host
+worker leaves an unfinished transaction that blocks another deployment. Inspect the receipt and
+systemd unit `hive-npm-deploy-<transaction>` before retrying; do not delete a pending receipt to
+bypass recovery. Network, disk and service operations also have bounded timeouts.
+
+Failures revert code pointers only when verified data compatibility permits restarting the old
+release. A migration or preservation failure keeps services stopped with `recovery-required`.
+Receipts include the exact host-bound isolated restore inspection command. **Live data restoration
+is never automatic**: preserve the failed state and reconcile newer revocations, disabled
+identities, signing-key state and Redis expiration before deliberately restoring only that host's
+state. Archive extraction and SQLite checks do not claim a running Qdrant/Redis restore test.
