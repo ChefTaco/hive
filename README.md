@@ -157,6 +157,12 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 
 ## Upgrading
 
+Existing systemd installations using public npm packages can use the environment-configured
+`npm run deploy:npm -- --env-file .env.npm-deploy --to X.Y.Z --apply` command. It keeps
+automation off and requires verified backups, preservation checks and live model streaming/recall
+acceptance on each installation. Start with `--dry-run`; see the
+[deployment command and recovery limits](docs/npm-deployments.md#reusable-release-command).
+
 For a managed installation, run `npx @hivemagnus/hive@latest upgrade --dry-run`, then
 `npx @hivemagnus/hive@latest upgrade`. The command upgrades the launcher and every enrolled server
 from an exact release bundle, verifies datastore backups before migration, checks live health,

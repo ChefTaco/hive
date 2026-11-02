@@ -6,6 +6,15 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- Environment-configured `deploy:npm` for existing independent systemd/npm installations, with
+  exact bundle/engine checks, verified off-host backups, guarded code switching, automation
+  opt-outs, durable host receipts and required live provider streaming/memory-recall cleanup.
+- Optional operator-tool configuration `HIVE_NPM_DEPLOY_TARGETS`; existing `DEPLOY_*` and
+  `HIVE_E2E_*` values provide SSH, credentials and the model provider. No server env names were
+  removed or made required, and no migration, wire-format or secret/key changes are introduced.
+
 ## [1.2.1] - 2026-11-02
 
 ### Fixed
