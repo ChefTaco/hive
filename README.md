@@ -1,5 +1,7 @@
 # Hive
 
+[Project site: UI previews and installation walkthroughs](https://hivemagnus.com/).
+
 [![CI](https://github.com/ChefTaco/hive/actions/workflows/hive-ci.yml/badge.svg)](https://github.com/ChefTaco/hive/actions/workflows/hive-ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
