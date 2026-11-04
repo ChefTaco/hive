@@ -17,10 +17,11 @@ source snapshot or passing unit test is not evidence of a production cutover.
 | Static HiveXUI extraction | Build/container and synthetic render checks pass | No backend imports; browser render and workflow acceptance |
 | Direct product authorization | Implemented; bounded regression tests pass | Resource audience, permissions, revocation and step-up regression tests |
 | Oathweave browser SSO | Disposable browser workflows pass; restored-account sign-in pending | PKCE, consent, MFA/passkeys, recovery, session/logout acceptance |
+| Memory and workspace workflows | Disposable create/edit/search/delete, policy/membership and archive/restore pass | Remaining advanced memory, queue and integration parity |
 | Security and chat UI consolidation | Candidate modules build; full parity pending | Existing route/workflow parity including files, sockets and approvals |
 | Shell suite lifecycle | Fresh co-located core and lifecycle drills pass; full/multi-host gates pending | Unattended/interactive, resume, multi-host, backup/restore, upgrade tests |
 | Host agent enrollment | Pending | Scoped credentials, existing profile preservation, real heartbeat/job proof |
-| External inference | HTTPS protocol fixture passes | Existing endpoint connectivity, discovery, generation, streaming and verified Emberpath enrollment; no inference provisioning |
+| External inference | Verified HTTPS fixture and actual Emberpath enrollment/inference pass | Operator-owned endpoint acceptance through protected references; no inference provisioning |
 | Production adoption and migration | Pending | Installation-bound restored backup, single writer, acceptance and recovery proof |
 | Published release and branding | Pending | Verified artifacts, compatibility lock and accurate walkthroughs |
 
@@ -115,9 +116,27 @@ signed ingress/static service kinds with a strict public-runtime allowlist and
 read-only host preflight. Fresh co-located core configuration/bootstrap, real
 terminal setup and unattended installation now have disposable end-to-end proof,
 including stable credentials/IDs on retry, four-product sign-in and restore.
+The core drill also verifies signed bundle upgrade and compatible rollback with
+independent recovery gates and preserved credentials/account links. This proves
+bundle activation with unchanged application/storage versions; it does not certify
+untested application migrations.
 Full/multi-host bootstrap and real native agent integration remain open.
 No official suite manifest or publisher trust key has been released.
 This is not an installation or migration release.
+
+`test:suite:core -- --output NEW_PRIVATE_DIRECTORY --external-provider --lifecycle
+--browser-review` keeps a developer-owned HTTPS protocol fixture outside the suite
+inventory. Failed generation must precede any registration. Successful discovery,
+generation and streaming are followed by real Emberpath ingress API enrollment,
+idempotent alias/provider checks and an Emberpath inference request over verified
+TLS. It installs no inference runtime or model. Browser review holds execution
+before backups until its protected completion receipt is written.
+
+Emberpath rehearsal mode skips external provider health probes and all trace or
+credential-receipt retention. It reports those providers as unchecked, while local
+database readiness remains enforced. Normal readiness retains provider checks.
+Independent native backup rehearsals also run the current product candidates;
+their data-integrity proof does not replace authenticated operator acceptance.
 
 An optional host `sshConfig` selects an operator-owned protected SSH configuration;
 strict host-key checking and non-interactive authentication remain mandatory.

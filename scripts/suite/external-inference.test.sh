@@ -15,6 +15,10 @@ cp "$ROOT/examples/installation.json" "$temporary/base.json"
 jq '.inference=[{id:"existing-provider",host:"control",engine:"ollama",protocol:"openai",endpoint:"https://inference.example.com",model:{id:"existing-model"},authHeaderFile:"/opt/credentials/provider.header"}]' "$temporary/base.json" > "$temporary/external.json"
 HIVE_CONFIG=$temporary/external.json HIVE_VERSION=0.1.0
 hive_validate
+jq '.inference[0].registration={endpoint:"https://console.example.com",apiPrefix:"/api/emberpath",credentialFile:"/opt/credentials/enrollment.header",providerSlug:"example"}' "$temporary/external.json" > "$temporary/prefix.json"
+HIVE_CONFIG=$temporary/prefix.json hive_validate
+jq '.inference[0].registration.apiPrefix="/api/../providers"' "$temporary/prefix.json" > "$temporary/invalid-prefix.json"
+if (HIVE_CONFIG=$temporary/invalid-prefix.json hive_validate) > "$temporary/result" 2>&1; then fail 'Unsafe API prefix passed validation'; fi
 hive_plan > "$temporary/plan.json"
 jq -e '.inference[0]|.endpoint=="https://inference.example.com" and .credentialConfigured==true and (has("authHeaderFile")|not) and (has("backend")|not)' "$temporary/plan.json" >/dev/null
 # No rejection may reach a remote host, Docker, downloader or model store.

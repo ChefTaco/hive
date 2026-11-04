@@ -23,6 +23,7 @@ model identifier and an HTTPS API base URL:
   "caFile": "/opt/credentials/inference-ca.pem",
   "registration": {
     "endpoint": "https://models.example.com",
+    "apiPrefix": "/api/emberpath",
     "credentialFile": "/opt/credentials/emberpath.header",
     "providerSlug": "external-provider"
   }
@@ -36,6 +37,15 @@ registration credential is scoped to Emberpath provider enrollment. A retained
 native Emberpath admin session header is also supported. Never put credential
 values in configuration, browser runtime or command arguments. TLS verification
 is mandatory; the controller follows no inference API redirects.
+
+`registration.apiPrefix` defaults to `/api` for a standalone Emberpath admin
+endpoint. Use the console origin with `/api/emberpath` for suite ingress. The
+resource credential must permit provider writes and routing writes for aliases;
+the receiving product checks it independently of the installer.
+The interactive wizard asks for these references and desired aliases when an
+enrollment origin is selected. Leaving that origin blank explicitly selects
+endpoint verification only. Standalone recovery packages and existing provider
+configurations remain available.
 
 The Bash adapter currently accepts engines `openai`, `ollama`, and `llamacpp`
 using `protocol: "openai"` for their OpenAI-compatible API (the default), or

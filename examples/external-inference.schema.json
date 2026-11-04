@@ -96,6 +96,11 @@
             "type": "string",
             "pattern": "^[A-Za-z0-9_.:/-]{1,200}$"
           }
+        },
+        "apiPrefix": {
+          "type": "string",
+          "pattern": "^/api(/[a-z][a-z0-9-]*)?$",
+          "default": "/api"
         }
       }
     }

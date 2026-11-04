@@ -46,6 +46,7 @@ hive_configure() {
   hive_need openssl; hive_need sha256sum
   local id directory origin profile output endpoint model credential engine protocol target bind port architecture selected mode certificate private_key username email
   local inference='[]' agents='[]' temporary config selected_json runtime version agent_id agent_profile agent_environment agent_service authorized
+  local external_ca enrollment_endpoint enrollment_prefix enrollment_credential enrollment_ca provider_slug provider_aliases
   if [[ -z "$HIVE_VERSION" ]]; then hive_prompt HIVE_VERSION 'Exact suite release version'; fi
   if [[ -z "$HIVE_MANIFEST" ]]; then
     HIVE_MANIFEST="$HIVE_ROOT/releases/$HIVE_VERSION.json"
@@ -92,6 +93,17 @@ hive_configure() {
     hive_prompt model 'Existing model identifier'
     hive_prompt credential 'Protected Authorization header file on the selected host (blank for no authentication)'
     inference=$(jq -nc --arg endpoint "$endpoint" --arg engine "$engine" --arg protocol "$protocol" --arg model "$model" --arg credential "$credential" '[{id:"external-provider",host:"control",engine:$engine,protocol:$protocol,endpoint:$endpoint,model:{id:$model}} + (if $credential!="" then {authHeaderFile:$credential} else {} end)]')
+    hive_prompt external_ca 'Protected external endpoint CA file (blank for system trust)'
+    if [[ -n "$external_ca" ]]; then inference=$(jq --arg ca "$external_ca" '.[0].caFile=$ca' <<< "$inference"); fi
+    hive_prompt enrollment_endpoint 'Emberpath enrollment HTTPS origin (blank for verification only)'
+    if [[ -n "$enrollment_endpoint" ]]; then
+      hive_prompt enrollment_prefix 'Emberpath API prefix (/api or suite ingress prefix)' /api/emberpath
+      hive_prompt enrollment_credential 'Protected Emberpath enrollment Authorization header file'
+      hive_prompt enrollment_ca 'Protected Emberpath CA file (blank for system trust)'
+      hive_prompt provider_slug 'Provider slug in Emberpath' external-provider
+      hive_prompt provider_aliases 'Provider aliases (comma separated; blank for none)'
+      inference=$(jq --arg endpoint "$enrollment_endpoint" --arg prefix "$enrollment_prefix" --arg credential "$enrollment_credential" --arg ca "$enrollment_ca" --arg slug "$provider_slug" --arg aliases "$provider_aliases" '.[0].registration={endpoint:$endpoint,apiPrefix:$prefix,credentialFile:$credential,providerSlug:$slug,aliases:($aliases|split(",")|map(gsub("^ +| +$";"")|select(length>0)))} | if $ca!="" then .[0].registration.caFile=$ca else . end' <<< "$inference")
+    else printf 'Endpoint verification only; Emberpath registration is not selected.\n'; fi
   fi
   hive_prompt runtime 'Opt-in native agent runtime (magnus/ardent/hermes/codex; blank to skip)'
   while [[ -n "$runtime" ]]; do

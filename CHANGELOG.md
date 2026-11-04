@@ -8,6 +8,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Configure protected external-provider enrollment through standalone or suite
+  ingress APIs, with interactive CA/credential references and explicit aliases.
+- Verify actual Emberpath enrollment and inference after external HTTPS acceptance,
+  followed by signed core bundle upgrade, compatible rollback and isolated recovery.
 - Pin deployment input files through retries, migrations and activation, with
   explicit configuration revisions and release recovery fingerprints.
 - Support protected per-host SSH configuration and rehearse two SSH inventories

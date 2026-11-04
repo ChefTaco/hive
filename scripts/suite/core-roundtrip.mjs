@@ -2,7 +2,9 @@
 // Disposable developer proof of the real shell installer and product images.
 // The registry is loopback-only and ephemeral; no public artifacts are published.
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const executeAsync = promisify(execFile);
 import {
   mkdirSync,
   writeFileSync,
@@ -16,6 +18,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 import { parseEnv } from 'node:util';
 import https from 'node:https';
+import { rehearseExternalProvider } from './core-external-provider.mjs';
 const root = resolve(import.meta.dirname, '../..');
 const outputIndex = process.argv.indexOf('--output');
 assert(
@@ -51,7 +54,8 @@ const registryName = id + '-registry',
   consolePort = await port();
 const registry = '127.0.0.1:' + registryPort;
 const tags = [];
-let passed = false;
+let passed = false,
+  closeExternalProvider;
 const configFile = join(output, 'installation.json'),
   manifestFile = join(output, 'release.json');
 const environment = Object.fromEntries(
@@ -60,9 +64,9 @@ const environment = Object.fromEntries(
     .map((name) => [name, process.env[name]]),
 );
 let config;
-function hive(command, ...extra) {
+async function hive(command, ...extra) {
   try {
-    return execute(
+    const result = await executeAsync(
       join(root, 'hive.sh'),
       [
         command,
@@ -76,8 +80,9 @@ function hive(command, ...extra) {
         '--yes',
         ...extra,
       ],
-      { env: environment, maxBuffer: 8 * 1024 * 1024 },
+      { env: environment, encoding:'utf8', maxBuffer: 8 * 1024 * 1024 },
     );
+    return result.stdout.trim();
   } catch (error) {
     put(
       join(output, command + '-failure.log'),
@@ -341,14 +346,14 @@ try {
     });
     config = JSON.parse(readFileSync(configFile, 'utf8'));
   } else {
-    put(join(output, 'plan.log'), hive('plan'));
-    put(join(output, 'install.log'), hive('install'));
+    put(join(output, 'plan.log'), await hive('plan'));
+    put(join(output, 'install.log'), await hive('install'));
   }
   const firstCredentials = readFileSync(join(owned, 'config/initial-credentials.env'));
   const identities = ['identity-id', 'model-id', 'memory-id'].map((name) =>
     readFileSync(join(owned, 'config/.initializer/secrets', name), 'utf8'),
   );
-  put(join(output, 'repeat-install.log'), hive('install'));
+  put(join(output, 'repeat-install.log'), await hive('install'));
   assert.deepEqual(readFileSync(join(owned, 'config/initial-credentials.env')), firstCredentials);
   assert.deepEqual(
     ['identity-id', 'model-id', 'memory-id'].map((name) =>
@@ -401,7 +406,7 @@ try {
     .split(';')[0];
   const headers = { ...browserHeaders, Cookie: cookie };
   const tokens = {};
-  for (const product of ['oathweave', 'emberpath', 'hivemem', 'hiveskills']) {
+  async function resourceToken(product, resourceHeaders) {
     const verifier = randomBytes(32).toString('base64url'),
       state = randomBytes(32).toString('base64url'),
       nonce = randomBytes(32).toString('base64url');
@@ -417,7 +422,7 @@ try {
         state,
         nonce,
       },
-      headers,
+      resourceHeaders,
     );
     assert.equal(code.status, 200, 'Fresh public client authorization failed: ' + product);
     assert.equal(code.body.state, state);
@@ -431,20 +436,35 @@ try {
         code_verifier: verifier,
         redirect_uri: config.origin + '/auth/callback',
       },
-      headers,
+      resourceHeaders,
     );
     assert.equal(token.status, 200);
-    tokens[product] = token.body.access_token;
-    const payload = JSON.parse(Buffer.from(tokens[product].split('.')[1], 'base64url'));
+    const value = token.body.access_token;
+    const payload = JSON.parse(Buffer.from(value.split('.')[1], 'base64url'));
     assert.equal(payload.aud, product);
     assert.equal(payload.sub, identities[0].trim());
+    return value;
   }
+  for (const product of ['oathweave', 'emberpath', 'hivemem', 'hiveskills'])
+    tokens[product] = await resourceToken(product, headers);
   const routes = {
     oathweave: '/api/oathweave/auth/me',
     emberpath: '/api/emberpath/auth/me',
     hivemem: '/api/hivemem/agents',
     hiveskills: '/api/hiveskills/admin/skills',
   };
+  if (process.argv.includes('--external-provider'))
+    closeExternalProvider = await rehearseExternalProvider({
+      root,
+      output,
+      owned,
+      origin: config.origin,
+      token: tokens.emberpath,
+      request,
+      execute,
+      environment,
+      docker,
+    });
   for (const [product, path] of Object.entries(routes)) {
     const result = await request(path, null, { Authorization: 'Bearer ' + tokens[product] });
     assert.equal(result.status, 200, 'Fresh receiving product authorization failed: ' + product);
@@ -456,13 +476,27 @@ try {
   );
   assert.equal((await request('/api/oathweave/browser/logout', {}, headers)).status, 200);
   if (process.argv.includes('--browser-review')) {
-    put(join(output, 'browser-credentials.json'), {schema: 1, origin: config.origin, username: credentials.SEED_ADMIN_USERNAME, password: credentials.SEED_ADMIN_PASSWORD, disposable: true});
-    console.log('Disposable core is ready for browser review; protected connection details are in the selected evidence directory.');
-    const completion = join(output, 'browser-completion.json'), deadline = Date.now() + 30 * 60_000;
-    while (!existsSync(completion) && Date.now() < deadline) await new Promise(done => setTimeout(done, 1000));
+    put(join(output, 'browser-credentials.json'), {
+      schema: 1,
+      origin: config.origin,
+      username: credentials.SEED_ADMIN_USERNAME,
+      password: credentials.SEED_ADMIN_PASSWORD,
+      disposable: true,
+    });
+    console.log(
+      'Disposable core is ready for browser review; protected connection details are in the selected evidence directory.',
+    );
+    const completion = join(output, 'browser-completion.json'),
+      deadline = Date.now() + 30 * 60_000;
+    while (!existsSync(completion) && Date.now() < deadline)
+      await new Promise((done) => setTimeout(done, 1000));
     assert(existsSync(completion), 'Browser review completion was not recorded');
     const review = JSON.parse(readFileSync(completion, 'utf8'));
-    assert.equal(review.result, 'passed', 'Browser review must pass before lifecycle proof continues');
+    assert.equal(
+      review.result,
+      'passed',
+      'Browser review must pass before lifecycle proof continues',
+    );
     assert.equal(review.disposable, true);
   }
   for (const [product, path] of Object.entries(routes))
@@ -471,12 +505,80 @@ try {
       401,
       'Revoked session remained usable: ' + product,
     );
-  put(join(output, 'backup.log'), hive('backup', '--archive', 'core-proof'));
-  put(join(output, 'rehearse.log'), hive('rehearse', '--archive', 'core-proof'));
+  put(join(output, 'backup.log'), await hive('backup', '--archive', 'core-proof'));
+  put(join(output, 'rehearse.log'), await hive('rehearse', '--archive', 'core-proof'));
   const rehearsal = JSON.parse(
     readFileSync(join(owned, 'rehearsals/core-proof/result.json'), 'utf8'),
   );
   assert.equal(rehearsal.result, 'passed');
+  if (process.argv.includes('--lifecycle')) {
+    const original = readFileSync(manifestFile, 'utf8');
+    function publishCandidate(document) {
+      put(manifestFile, document);
+      execute('openssl', [
+        'pkeyutl',
+        '-sign',
+        '-inkey',
+        join(output, 'publisher.key'),
+        '-rawin',
+        '-in',
+        manifestFile,
+        '-out',
+        manifestFile + '.sig',
+      ]);
+    }
+    publishCandidate({ ...JSON.parse(original), version: '0.1.1' });
+    put(
+      join(output, 'upgrade.log'),
+      await hive('upgrade', '--release', '0.1.1', '--archive', 'pre-upgrade-proof'),
+    );
+    assert.equal(JSON.parse(readFileSync(join(owned, 'receipt.json'), 'utf8')).version, '0.1.1');
+    publishCandidate(original);
+    put(
+      join(output, 'rollback.log'),
+      await hive('rollback', '--release', '0.1.0', '--archive', 'pre-rollback-proof'),
+    );
+    assert.equal(JSON.parse(readFileSync(join(owned, 'receipt.json'), 'utf8')).version, '0.1.0');
+    assert.deepEqual(readFileSync(join(owned, 'config/initial-credentials.env')), firstCredentials);
+    const renewed = await request(
+      '/api/oathweave/auth/login',
+      { username: credentials.SEED_ADMIN_USERNAME, password: credentials.SEED_ADMIN_PASSWORD },
+      browserHeaders,
+    );
+    assert.equal(
+      renewed.status,
+      200,
+      'Initial credentials must remain valid after upgrade and rollback',
+    );
+    assert.equal(renewed.body.user.id, identities[0].trim());
+    const renewedCookie = renewed.headers['set-cookie']
+      .find((value) => value.startsWith('__Host-oathweave_sso='))
+      .split(';')[0];
+    const renewedHeaders = { ...browserHeaders, Cookie: renewedCookie };
+    for (const [product, path] of Object.entries(routes)) {
+      const access = await resourceToken(product, renewedHeaders),
+        response = await request(path, null, { Authorization: 'Bearer ' + access });
+      assert.equal(
+        response.status,
+        200,
+        'Product account links must remain valid after rollback: ' + product,
+      );
+      if (product === 'emberpath') assert.equal(response.body.user.id, identities[1].trim());
+    }
+    assert.equal((await request('/api/oathweave/browser/logout', {}, renewedHeaders)).status, 200);
+    put(join(output, 'lifecycle-result.json'), {
+      schema: 1,
+      result: 'passed',
+      productionCutover: false,
+      applicationChanges: false,
+      checks: [
+        'signed bundle upgrade with unchanged image/storage versions',
+        'backup and isolated candidate recovery before upgrade',
+        'compatible binary rollback with independent backup',
+        'initial credentials and four product account links preserved',
+      ],
+    });
+  }
   const compose = JSON.parse(readFileSync(join(owned, 'compose.json'), 'utf8'));
   assert.deepEqual(
     Object.entries(compose.services)
@@ -508,6 +610,12 @@ try {
       'automatic migrations disabled after first initialization',
       'installation-bound backup',
       'isolated restore rehearsal',
+      ...(process.argv.includes('--external-provider')
+        ? ['external HTTPS verification and real Emberpath enrollment/inference']
+        : []),
+      ...(process.argv.includes('--lifecycle')
+        ? ['signed bundle upgrade and compatible rollback with stable identities']
+        : []),
     ],
     images,
   });
@@ -542,6 +650,7 @@ try {
   console.error('Private core proof retained at ' + output);
   throw error;
 } finally {
+  if (closeExternalProvider) await closeExternalProvider();
   for (const file of [
     join(owned, 'rehearsals/core-proof/isolated.json'),
     ...(existsSync(owned)

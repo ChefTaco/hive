@@ -26,8 +26,9 @@ hive_adapter_validate() {
       (.id|id) and ($c.hosts[.host]!=null) and (.engine|IN("llamacpp","ollama","openai")) and
       ((.protocol // "openai")|IN("openai","ollama")) and (if .protocol=="ollama" then .engine=="ollama" else true end) and (.endpoint|https) and
       (.model|type=="object" and keys==["id"]) and (.model.id|type=="string" and length>0 and length<=256) and
-      (if .registration then (.registration|keys-["endpoint","credentialFile","providerSlug","aliases","existingProviderId","caFile"]|length==0) and
+      (if .registration then (.registration|keys-["endpoint","apiPrefix","credentialFile","providerSlug","aliases","existingProviderId","caFile"]|length==0) and
         (.registration.endpoint|https) and (.registration.credentialFile|path) and
+        ((.registration.apiPrefix // "/api")|type=="string" and test("^/api(/[a-z][a-z0-9-]*)?$")) and
         ((.registration.caFile // "/dev/null")|path) and (.registration.providerSlug|id) and
         ((.registration.existingProviderId // "example")|type=="string" and test("^[A-Za-z0-9_-]+$")) and
         ((.registration.aliases // [])|type=="array" and length<=100 and all(.[];type=="string" and test("^[A-Za-z0-9_.:/-]{1,200}$"))) else true end) and

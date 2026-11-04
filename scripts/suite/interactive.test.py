@@ -41,7 +41,16 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
         ('Initial operator email', 'alice@example.com'),
         ('Existing console certificate file', str(base / 'console.crt')),
         ('Protected console private key file', str(base / 'console.key')),
-        ('Existing external inference HTTPS endpoint', ''), ('Opt-in native agent runtime', ''),
+        ('Existing external inference HTTPS endpoint', 'https://inference.example.com/v1'),
+        ('External provider engine', 'openai'), ('External API protocol', 'openai'),
+        ('Existing model identifier', 'synthetic-existing-model'),
+        ('Protected Authorization header file', '/opt/credentials/external.header'),
+        ('Protected external endpoint CA file', ''),
+        ('Emberpath enrollment HTTPS origin', 'https://localhost:65427'),
+        ('Emberpath API prefix', '/api/emberpath'),
+        ('Protected Emberpath enrollment Authorization header file', '/opt/credentials/enrollment.header'),
+        ('Protected Emberpath CA file', ''), ('Provider slug in Emberpath', 'synthetic-provider'),
+        ('Provider aliases', 'synthetic-fast, synthetic-default'), ('Opt-in native agent runtime', ''),
         ('Write protected installation configuration to', str(output)),
     ]
     arguments = [str(root / 'hive.sh'), 'plan', '--release', '0.1.0', '--manifest', str(release), '--trust-key', str(base / 'publisher.pub')]
@@ -88,6 +97,8 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     assert set(config['components']) == set(manifest['components'])
     assert config['console']['httpsPort'] == 65427
     assert config['bootstrap']['adminEmail'] == 'alice@example.com'
+    assert config['inference'][0]['registration']['apiPrefix'] == '/api/emberpath'
+    assert config['inference'][0]['registration']['aliases'] == ['synthetic-fast', 'synthetic-default']
     assert output.stat().st_mode & 0o077 == 0
     assert not (base / 'deployment').exists(), 'Planning contacted or initialized a host'
     plan = json.loads(subprocess.check_output([*arguments[:2], '--config', str(output), *arguments[2:]], text=True))

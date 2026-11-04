@@ -73,6 +73,8 @@ const server=https.createServer({key:fs.readFileSync(path.join(base,'server.key'
  if(req.url==='/api/chat'){if(body.stream){res.setHeader('Content-Type','application/x-ndjson');res.write(JSON.stringify({message:{content:'OK'},done:false})+'\\n');setTimeout(()=>res.end(JSON.stringify({done:true})+'\\n'),30);}else res.end(JSON.stringify({message:{content:'OK'},done:true}));return;}
  if(req.url==='/v1/chat/completions'){if(body.stream){res.setHeader('Content-Type',fs.existsSync(path.join(base,'bad-stream-type'))?'application/json':'text/event-stream');res.write('data: '+JSON.stringify({choices:[{delta:{content:'OK'}}]})+'\\n\\n');setTimeout(()=>res.end('data: [DONE]\\n\\n'),30);}else res.end(JSON.stringify({choices:[{message:{content:fs.existsSync(path.join(base,'fail-generation'))?null:'OK'}}]}));return;}
  if(req.headers.authorization!=='Bearer obviously-fake-test-enrollment'){res.statusCode=401;res.end('{}');return;}
+ if(req.url==='/api/emberpath/providers')req.url='/api/providers';
+ if(req.url==='/api/emberpath/model-aliases')req.url='/api/model-aliases';
  if(req.url==='/api/providers'){if(req.method==='POST'){creates++;const provider={...body,id:'provider-'+creates};providers.push(provider);fs.writeFileSync(path.join(base,'counts.json'),JSON.stringify({creates,aliasCreates}));if(body.slug==='uncertain'){res.destroy();return;}res.end(JSON.stringify({data:provider}));}else res.end(JSON.stringify({data:providers}));return;}
  if(req.url==='/api/model-aliases'){if(req.method==='POST'){aliasCreates++;aliases.push({...body,id:'alias-'+aliasCreates});fs.writeFileSync(path.join(base,'counts.json'),JSON.stringify({creates,aliasCreates}));res.end(JSON.stringify({data:aliases.at(-1)}));}else res.end(JSON.stringify({data:aliases}));return;}
  res.statusCode=404;res.end('{}');
@@ -218,6 +220,24 @@ const server=https.createServer({key:fs.readFileSync(path.join(base,'server.key'
     ).phase,
     'create-started',
   );
+  input.inference = [
+    {
+      ...inference,
+      id: 'ingress-model',
+      registration: {
+        ...inference.registration,
+        apiPrefix: '/api/emberpath',
+        providerSlug: 'ingress-provider',
+        aliases: ['ingress-alias'],
+      },
+    },
+  ];
+  action(input);
+  action(input);
+  assert.deepEqual(JSON.parse(readFileSync(join(temporary, 'counts.json'))), {
+    creates: 3,
+    aliasCreates: 2,
+  });
   // Explicit native Ollama protocol is verified through the same native API
   // Emberpath will use; no pull/create/delete endpoint exists in this fixture.
   input.inference = [
@@ -232,8 +252,8 @@ const server=https.createServer({key:fs.readFileSync(path.join(base,'server.key'
   action(input);
   action(input);
   assert.deepEqual(JSON.parse(readFileSync(join(temporary, 'counts.json'))), {
-    creates: 3,
-    aliasCreates: 1,
+    creates: 4,
+    aliasCreates: 2,
   });
   put(join(temporary, 'bad-stream-type'), 'fixture');
   input.inference = [inference];
@@ -251,8 +271,8 @@ const server=https.createServer({key:fs.readFileSync(path.join(base,'server.key'
     false,
   );
   assert.deepEqual(JSON.parse(readFileSync(join(temporary, 'counts.json'))), {
-    creates: 3,
-    aliasCreates: 1,
+    creates: 4,
+    aliasCreates: 2,
   });
   passed = true;
   console.log(
