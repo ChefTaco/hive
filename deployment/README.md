@@ -74,3 +74,42 @@ This bounded acceptance does not certify a fresh core/full installer or migratio
 
 Inference is external: see [external provider configuration](INFERENCE.md).
 No inference image, model volume, GPU matrix or model artifact belongs in a Hive release.
+
+## Fresh core setup
+
+Run `./hive.sh` for terminal setup with a signed manifest and publisher key, or
+prepare the same installation JSON for unattended use. The wizard selects actual
+release components and dependencies, exact versions, protected certificate/key
+references, an explicit HTTPS listener, optional external endpoints and opt-in
+native agent profiles. It never asks for a password on the command line. Provider
+authorization remains an explicit operator step. Inventory defaults to a protected
+configuration directory outside the checkout.
+
+The current fresh initializer supports a co-located core and its private Redis and
+Qdrant stores. Configure `bootstrap` in installation JSON using the initial
+operator labels and existing console TLS file references. `./hive.sh init` can
+prepare and review configuration separately; `install` performs this step when
+requested. Per-product secrets, initial identities and internal transport keys are
+generated once into protected files. Retries check the exact inputs and file
+digests. Existing data, configuration, model resources and Compose projects are
+never silently adopted or overwritten.
+
+Only private backends and datastores run during first initialization. After
+readiness, they stop and the normal release starts with automatic migrations and
+upgrades disabled. Ingress, the console and agents wait for that boundary. Initial
+Oathweave browser clients and resource grants come from its own bootstrap contract;
+Emberpath and HiveMem retain explicit, independently allocated local account IDs.
+Recovery delivery still needs the operator's trusted out-of-band delivery consumer.
+
+`npm run test:suite:core -- --output NEW_PRIVATE_DIRECTORY` exercises actual pinned
+images using a temporary loopback registry, generated accounts and empty stores.
+Add `--interactive` to exercise the terminal installer. Both variants verify repeat
+execution, four-product SSO, audience/revocation denial, a host-bound backup and an
+isolated restore. Their local trust keys and images are developer fixtures; they
+are not published release artifacts or migration approval. Full-profile fresh
+bootstrap, multi-host bootstrap and real agent enrollment remain separate gates.
+
+Deployment plans include a controller source fingerprint. Signed manifests may
+require it using `controllerSHA256`. A different controller cannot resume the same
+plan silently. A deterministic controller archive and its digest are retained with
+each activated or adopted release for recovery.

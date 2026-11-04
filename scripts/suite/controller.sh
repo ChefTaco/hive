@@ -2,9 +2,21 @@
 
 hive_die() { printf 'Hive: %s\n' "$*" >&2; exit 1; }
 hive_need() { command -v "$1" >/dev/null || hive_die "Required tool missing: $1"; }
+hive_runtime_files() {
+  printf '%s\n' LICENSE hive.sh deployment/Caddyfile \
+    scripts/suite/controller.sh scripts/suite/lifecycle.sh scripts/suite/host-runtime.sh \
+    scripts/suite/adapters.sh scripts/suite/adapters-host.sh scripts/suite/inference-registration.sh \
+    scripts/suite/public-runtime.sh scripts/suite/preflight-host.sh scripts/suite/initialize.sh \
+    scripts/suite/initialize-host.sh scripts/suite/integrity-host.sh scripts/suite/check-data.mjs
+}
+hive_controller_digest() {
+  local file
+  while IFS= read -r file; do [[ -f "$HIVE_ROOT/$file" && ! -L "$HIVE_ROOT/$file" ]] || hive_die 'Controller runtime must contain regular bundled source files'; done < <(hive_runtime_files)
+  (cd "$HIVE_ROOT"; hive_runtime_files | while IFS= read -r file; do sha256sum --zero -- "$file"; done) | sha256sum | cut -d ' ' -f1
+}
 hive_usage() {
   cat <<'EOF'
-Usage: hive.sh [plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse]
+Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse]
   --config FILE          Installation JSON (required for unattended use)
   --release VERSION      Override the exact release version
   --manifest FILE        Signed release manifest (default releases/VERSION.json)
@@ -17,32 +29,99 @@ Usage: hive.sh [plan|install|status|doctor|upgrade|rollback|backup|adopt|restore
   --reconciliation FILE  Protected acknowledgement of writes before restore
   --help                 Show this help
 
+init prepares protected configuration for an explicitly fresh installation.
 No arguments starts interactive configuration. Planning does not contact hosts.
 Secrets belong in protected environment/configuration files, never CLI arguments.
 EOF
 }
 
+hive_prompt() {
+  local variable=$1 label=$2 fallback=${3:-} answer
+  read -r -p "$label${fallback:+ [$fallback]}: " answer
+  printf -v "$variable" '%s' "${answer:-$fallback}"
+}
+
 hive_configure() {
   [[ -t 0 ]] || hive_die 'Interactive setup requires a terminal; use --config FILE --non-interactive'
-  local id directory origin profile output endpoint model credential engine inference='[]'
-  read -r -p 'Installation name: ' id
-  read -r -p 'Installation directory (absolute): ' directory
-  read -r -p 'Console HTTPS origin: ' origin
-  read -r -p 'Profile (core/full): ' profile
-  printf 'Inference services are external. Hive only verifies HTTPS APIs and registers providers with Emberpath.\n'
-  read -r -p 'Existing inference HTTPS endpoint (blank to skip): ' endpoint
-  if [[ -n "$endpoint" ]]; then
-    read -r -p 'External engine (openai/ollama/llamacpp; OpenAI-compatible API required): ' engine
-    read -r -p 'Existing model identifier: ' model
-    read -r -p 'Protected Authorization header file on control host (blank for no authentication): ' credential
-    inference=$(jq -n --arg endpoint "$endpoint" --arg engine "$engine" --arg model "$model" --arg credential "$credential" '[{id:"external-provider",host:"control",engine:$engine,protocol:"openai",endpoint:$endpoint,model:{id:$model}} + (if $credential!="" then {authHeaderFile:$credential} else {} end)]')
+  hive_need openssl; hive_need sha256sum
+  local id directory origin profile output endpoint model credential engine protocol target bind port architecture selected mode certificate private_key username email
+  local inference='[]' agents='[]' temporary config selected_json runtime version agent_id agent_profile agent_environment agent_service authorized
+  if [[ -z "$HIVE_VERSION" ]]; then hive_prompt HIVE_VERSION 'Exact suite release version'; fi
+  if [[ -z "$HIVE_MANIFEST" ]]; then
+    HIVE_MANIFEST="$HIVE_ROOT/releases/$HIVE_VERSION.json"
+    [[ -f "$HIVE_MANIFEST" ]] || hive_prompt HIVE_MANIFEST 'Signed release manifest file'
   fi
-  read -r -p 'Write configuration to: ' output
-  [[ ! -e "$output" && ! -L "$output" ]] || hive_die 'Configuration already exists'
-  jq -n --arg id "$id" --arg directory "$directory" --arg origin "$origin" --arg profile "$profile" --argjson inference "$inference" \
-    '{schema:1,installation:$id,release:"",profile:$profile,origin:$origin,hosts:{control:{target:"local",directory:$directory}},components:{},agents:[],inference:$inference}' > "$output"
+  HIVE_SIGNATURE=${HIVE_SIGNATURE:-$HIVE_MANIFEST.sig}
+  if [[ -z "$HIVE_TRUST_KEY" ]]; then
+    HIVE_TRUST_KEY="$HIVE_ROOT/trust/publisher.pub"
+    [[ -f "$HIVE_TRUST_KEY" ]] || hive_prompt HIVE_TRUST_KEY 'Publisher public trust key file'
+  fi
+  [[ -f "$HIVE_MANIFEST" && -f "$HIVE_SIGNATURE" && -f "$HIVE_TRUST_KEY" ]] || hive_die 'A signed release and publisher key are required before setup'
+  openssl pkeyutl -verify -pubin -inkey "$HIVE_TRUST_KEY" -rawin -in "$HIVE_MANIFEST" -sigfile "$HIVE_SIGNATURE" >/dev/null 2>&1 || hive_die 'Release signature verification failed'
+  jq -e --arg version "$HIVE_VERSION" '.schema==1 and .version==$version and (.components|keys|all(.[];test("^[a-z][a-z0-9-]{0,47}$")))' "$HIVE_MANIFEST" >/dev/null || hive_die 'Release metadata does not match the requested version'
+  hive_prompt id 'Installation name'
+  hive_prompt directory 'Installation directory on the selected host (absolute)'
+  hive_prompt target 'Host SSH target (local or deploy@host)' local
+  architecture=$(uname -m); case "$architecture" in x86_64) architecture=amd64;; aarch64) architecture=arm64;; esac
+  hive_prompt architecture 'Host architecture (amd64/arm64)' "$architecture"
+  hive_prompt origin 'Console HTTPS origin'
+  hive_prompt profile 'Product profile (core/full/custom)' core
+  if [[ "$profile" == custom ]]; then
+    printf 'Available components: %s\n' "$(jq -r '.components|keys|join(",")' "$HIVE_MANIFEST")"
+    hive_prompt selected 'Selected component names (comma-separated)'
+    selected_json=$(jq -nc --arg selected "$selected" '$selected|split(",")|map(gsub("^ +| +$";""))|unique')
+  else selected_json=$(jq -ce --arg profile "$profile" '.profiles[$profile]|select(type=="array" and length>0)' "$HIVE_MANIFEST") || hive_die 'Selected profile is unavailable'; fi
+  selected_json=$(jq -nc --argjson selected "$selected_json" --slurpfile release "$HIVE_MANIFEST" '
+    def dependencies: . as $before | ((. + [ .[] as $name|$release[0].components[$name].requiresLocal[]? ])|unique) as $after | if $after==$before then . else $after|dependencies end;
+    $selected|dependencies')
+  jq -e --argjson selected "$selected_json" '.components as $components|all($selected[];$components[.]!=null)' "$HIVE_MANIFEST" >/dev/null || hive_die 'Unknown selected component'
+  hive_prompt bind 'HTTPS bind address' 127.0.0.1
+  hive_prompt port 'HTTPS listener port' 443
+  hive_prompt mode 'Configuration mode (fresh/prepared)' fresh
+  if [[ "$mode" == fresh ]]; then
+    hive_prompt username 'Initial operator username' admin
+    hive_prompt email 'Initial operator email for identity recovery'
+    hive_prompt certificate 'Existing console certificate file on the selected host (absolute)'
+    hive_prompt private_key 'Protected console private key file on the selected host (absolute)'
+  elif [[ "$mode" != prepared ]]; then hive_die 'Choose fresh or prepared configuration'; fi
+  printf 'Inference services remain external. Hive verifies their APIs and registers providers only with an explicit Emberpath credential reference.\n'
+  hive_prompt endpoint 'Existing external inference HTTPS endpoint (blank to skip)'
+  if [[ -n "$endpoint" ]]; then
+    hive_prompt engine 'External provider engine (openai/ollama/llamacpp)' openai
+    hive_prompt protocol 'External API protocol (openai/ollama)' openai
+    hive_prompt model 'Existing model identifier'
+    hive_prompt credential 'Protected Authorization header file on the selected host (blank for no authentication)'
+    inference=$(jq -nc --arg endpoint "$endpoint" --arg engine "$engine" --arg protocol "$protocol" --arg model "$model" --arg credential "$credential" '[{id:"external-provider",host:"control",engine:$engine,protocol:$protocol,endpoint:$endpoint,model:{id:$model}} + (if $credential!="" then {authHeaderFile:$credential} else {} end)]')
+  fi
+  hive_prompt runtime 'Opt-in native agent runtime (magnus/ardent/hermes/codex; blank to skip)'
+  while [[ -n "$runtime" ]]; do
+    printf 'Released versions: %s\n' "$(jq -r --arg runtime "$runtime" '(.agentArtifacts[$runtime] // {})|keys|join(",")' "$HIVE_MANIFEST")"
+    hive_prompt agent_id 'Unique agent installation ID' "$runtime"
+    hive_prompt version 'Exact agent version'
+    hive_prompt agent_profile 'Existing agent profile directory on the selected host (absolute)'
+    hive_prompt agent_environment 'Protected agent environment file on the selected host (absolute)'
+    hive_prompt agent_service 'Service mode (user/none)' user
+    hive_prompt authorized 'Provider authorization already completed (yes/no)' no
+    [[ "$authorized" == yes || "$authorized" == no ]] || hive_die 'Provider authorization state must be yes or no'
+    agents=$(jq -nc --argjson agents "$agents" --arg id "$agent_id" --arg runtime "$runtime" --arg version "$version" --arg profile "$agent_profile" --arg environment "$agent_environment" --arg service "$agent_service" --arg authorized "$authorized" '$agents+[{id:$id,host:"control",runtime:$runtime,version:$version,profileDirectory:$profile,environmentFile:$environment,service:$service,authorized:($authorized=="yes")}]')
+    hive_prompt runtime 'Another opt-in agent runtime (blank to finish)'
+  done
+  temporary=$(mktemp -d)
+  config="$temporary/installation.json"
+  jq -n --arg id "$id" --arg directory "$directory" --arg target "$target" --arg architecture "$architecture" --arg origin "$origin" --arg profile "$profile" --arg version "$HIVE_VERSION" --arg bind "$bind" --arg port "$port" --arg mode "$mode" --arg username "${username:-}" --arg email "${email:-}" --arg certificate "${certificate:-}" --arg key "${private_key:-}" --argjson selected "$selected_json" --argjson agents "$agents" --argjson inference "$inference" --slurpfile release "$HIVE_MANIFEST" '
+    {schema:1,installation:$id,release:$version,profile:$profile,origin:$origin,hosts:{control:{target:$target,directory:$directory,architecture:$architecture}},components:($selected|map(. as $name|{key:$name,value:({host:"control"}+(if $release[0].components[$name].kind=="static-ui" then {} elif $release[0].components[$name].kind=="datastore" then {configDirectory:($directory+"/config/"+$name)} else {envFile:($directory+"/config/"+$name+".env"),configDirectory:($directory+"/config/"+$name)} end))})|from_entries),agents:$agents,inference:$inference} +
+    (if ($selected|index("hivexui"))!=null or ($selected|index("ingress"))!=null then {console:{host:"control",bindAddress:$bind,httpsPort:($port|tonumber),runtimeFile:($directory+"/config/runtime.json")}} else {} end) +
+    (if $mode=="fresh" then {bootstrap:{adminUsername:$username,adminEmail:$email,certificateFile:$certificate,privateKeyFile:$key}} else {} end)' > "$config"
+  HIVE_CONFIG=$config
+  if ! (hive_validate; hive_manifest); then rm -rf -- "$temporary"; hive_die 'Setup values do not match the release; no configuration or host changes were applied'; fi
+  hive_prompt output 'Write protected installation configuration to' "${XDG_CONFIG_HOME:-${HOME:-$PWD}/.config}/hive/$id/installation.json"
+  [[ ! -e "$output" && ! -L "$output" ]] || { rm -rf -- "$temporary"; hive_die 'Configuration already exists; it will not be overwritten'; }
+  if [[ ! -d $(dirname "$output") ]]; then install -d -m 700 "$(dirname "$output")"; fi
+  (set -o noclobber; cat "$config" > "$output") || { rm -rf -- "$temporary"; hive_die 'Could not create configuration'; }
   chmod 600 "$output"
-  printf 'Configuration written. Select an exact release and configure component environment files before install.\n'
+  rm -rf -- "$temporary"
+  HIVE_CONFIG=$output
+  printf 'Configuration written. The same file supports unattended installation; provider login remains an explicit operator step.\n'
 }
 
 hive_validate() {
@@ -51,7 +130,7 @@ hive_validate() {
   jq -e '
     def id: type=="string" and test("^[a-z][a-z0-9-]{0,47}$");
     def path: type=="string" and startswith("/") and test("^/[A-Za-z0-9_./-]+$") and (split("/") | all(. != ".."));
-    (keys-["schema","installation","release","profile","origin","hosts","components","console","agents","inference"]|length==0) and
+    (keys-["schema","installation","release","profile","origin","hosts","components","console","bootstrap","agents","inference"]|length==0) and
     .schema==1 and (.installation|id) and (.profile|IN("core","full","custom")) and
     (.origin|type=="string" and test("^https://[A-Za-z0-9.-]+(:[0-9]+)?$")) and
     (.hosts|type=="object" and length>0 and all(to_entries[];
@@ -69,6 +148,15 @@ hive_validate() {
   ' "$HIVE_CONFIG" >/dev/null || hive_die 'Invalid installation configuration'
   HIVE_ID=$(jq -r '.installation' "$HIVE_CONFIG")
   HIVE_VERSION=${HIVE_VERSION:-$(jq -r '.release' "$HIVE_CONFIG")}
+  if jq -e 'has("bootstrap")' "$HIVE_CONFIG" >/dev/null; then
+    jq -e '
+      def path: type=="string" and test("^/[A-Za-z0-9_./-]+$") and (split("/")|all(.!=".."));
+      .bootstrap|type=="object" and (keys-["adminUsername","adminEmail","certificateFile","privateKeyFile"]|length==0) and
+      (.adminUsername|type=="string" and test("^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$")) and
+      (.adminEmail|type=="string" and length<=254 and test("^[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")) and
+      (.certificateFile|path) and (.privateKeyFile|path)
+    ' "$HIVE_CONFIG" >/dev/null || hive_die 'Invalid fresh-install bootstrap configuration; provide initial operator labels and protected console certificate/key references'
+  fi
   if jq -e 'has("console")' "$HIVE_CONFIG" >/dev/null; then
     jq -e '
       def path: type=="string" and test("^/[A-Za-z0-9_./-]+$") and (split("/")|all(.!=".."));
@@ -103,6 +191,7 @@ hive_manifest() {
       (if .value.kind=="ingress" then .key=="ingress" else true end) and
       (.value.image|test("^[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}$")) and
       (.value.service|type=="object" and (keys-["user","command","entrypoint","healthcheck","environment","depends_on","networks","expose","working_dir","labels","mem_limit","cpus","ulimits"]|length==0)) and
+      ((.value.service.environment // {})|type=="object" and all(to_entries[];(.key|test("^[A-Z][A-Z0-9_]*$")) and (.value|type=="string"))) and
       (.value.service.user|type=="string" and test("^[1-9][0-9]*:[1-9][0-9]*$")) and
       (.value.service.healthcheck.test|type=="array" and length>0) and
       (.value.service.healthcheck.disable != true) and
@@ -122,11 +211,15 @@ hive_manifest() {
     (if $c.profile=="custom" then true else all($r.profiles[$c.profile][]; . as $name | $selected|index($name)!=null) end)
   ' "$HIVE_MANIFEST" >/dev/null || hive_die 'Selected components do not match the release/profile'
   HIVE_MANIFEST_DIGEST=$(sha256sum "$HIVE_MANIFEST" | cut -d ' ' -f1)
-  HIVE_PLAN_DIGEST=$( { sha256sum "$HIVE_CONFIG" | cut -d ' ' -f1; printf '%s\n' "$HIVE_MANIFEST_DIGEST"; } | sha256sum | cut -d ' ' -f1)
+  HIVE_CONTROLLER_DIGEST=$(hive_controller_digest)
+  if jq -e 'has("controllerSHA256")' "$HIVE_MANIFEST" >/dev/null; then
+    [[ $(jq -er .controllerSHA256 "$HIVE_MANIFEST") == "$HIVE_CONTROLLER_DIGEST" ]] || hive_die 'Signed release requires different controller source; use its original verified installer bundle'
+  fi
+  HIVE_PLAN_DIGEST=$( { sha256sum "$HIVE_CONFIG" | cut -d ' ' -f1; printf '%s\n' "$HIVE_MANIFEST_DIGEST" "$HIVE_CONTROLLER_DIGEST"; } | sha256sum | cut -d ' ' -f1)
 }
 
 hive_plan() {
-  jq --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" '{schema,installation,release:$version,manifestDigest:$digest,profile,origin,
+  jq --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" --arg controller "${HIVE_CONTROLLER_DIGEST:-}" '{schema,installation,release:$version,manifestDigest:$digest,controllerSourceSHA256:$controller,profile,origin,
     hosts:(.hosts|map_values({target,directory})),
     console:(if .console then {host:.console.host,bindAddress:.console.bindAddress,httpsPort:.console.httpsPort,publicRuntimeConfigured:true} else null end),
     components:(.components|map_values({host,environmentConfigured:has("envFile"),configurationMounted:has("configDirectory")})),
@@ -135,11 +228,14 @@ hive_plan() {
 
 # Arguments are transported as JSON over stdin. No configuration is sourced as shell.
 hive_host() {
-  local host=$1 script=$2 target payload
+  local host=$1 script=$2 target payload bootstrap_users
+  bootstrap_users=${HIVE_BOOTSTRAP_USERS:-'{}'}
   target=$(jq -r --arg host "$host" '.hosts[$host].target' "$HIVE_CONFIG")
   payload=$(jq -c --arg host "$host" --arg installation "$HIVE_ID" --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" --arg plan "${HIVE_PLAN_DIGEST:-}" \
     --arg action "${HIVE_HOST_ACTION:-}" --arg operation "${HIVE_OPERATION:-}" --arg archive "${HIVE_ARCHIVE:-}" --argjson allowMigrations "${HIVE_ALLOW_MIGRATIONS:-false}" \
-    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
+    --argjson serviceUsers "$bootstrap_users" --arg ingressTemplate "${HIVE_BOOTSTRAP_INGRESS:-}" --arg integrityScript "$(base64 -w0 "$HIVE_ROOT/scripts/suite/check-data.mjs")" \
+    --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" \
+    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapServiceUsers:$serviceUsers,ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
   if [[ "$target" == local ]]; then
     printf '%s\n' "$payload" | bash -c "$script"
   else
@@ -171,6 +267,7 @@ hive_render() {
         volumes:((if $kind=="static-ui" then [{type:"bind",source:$c.console.runtimeFile,target:"/usr/share/nginx/html/runtime.json",read_only:true}] else [{type:"bind",source:($c.hosts[$host].directory+"/data/"+$name),target:"/data"}] end) +
           (if $placement.configDirectory then [{type:"bind",source:$placement.configDirectory,target:"/config",read_only:true}] else [] end))
       } + (if $placement.envFile then {env_file:[$placement.envFile]} else {} end) +
+        (if $kind=="application" then {environment:(($r.components[$name].service.environment // {})+{HIVE_AUTO_MIGRATE:"false",HIVE_AUTO_UPGRADE:"false",HIVE_UPDATE_CHECK:"false",HIVE_UI_UPGRADE:"false"})} else {} end) +
         (if $kind=="ingress" then {ports:[{target:8443,published:($c.console.httpsPort|tostring),host_ip:$c.console.bindAddress,protocol:"tcp"}]} else {} end))})|from_entries),networks:({default:{driver:"bridge"}}+($r.networks // {}))}'
 }
 
@@ -190,6 +287,7 @@ hive_main() {
   local command=install confirmed=false interactive=true
   HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_ALLOW_MIGRATIONS=false
   HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY=''
+  HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
   if (($#)) && [[ "$1" != --* ]]; then command=$1; shift; fi
   while (($#)); do
     case $1 in
@@ -206,15 +304,17 @@ hive_main() {
       *) hive_die 'Unknown option';;
     esac
   done
-  case "$command" in plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse) ;; *) hive_die 'Unknown command';; esac
+  case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse) ;; *) hive_die 'Unknown command';; esac
   hive_need jq
   if [[ -z "$HIVE_CONFIG" ]]; then
     [[ "$interactive" == true ]] || hive_die '--config is required'
-    hive_configure; return
+    hive_configure
   fi
   hive_validate
   case "$command" in
-    plan) hive_plan; return;;
+    plan)
+      if [[ -n "$HIVE_MANIFEST" || -n "$HIVE_SIGNATURE" || -n "$HIVE_TRUST_KEY" ]]; then hive_need openssl; hive_need sha256sum; hive_manifest; fi
+      hive_plan; return;;
     status)
       local host
       while IFS= read -r host; do
@@ -235,6 +335,7 @@ hive_main() {
     [[ "$answer" == y ]] || hive_die 'Cancelled'
   fi
   case "$command" in
+    init) hive_initialize;;
     install|upgrade|rollback|backup|adopt|restore|rehearse) hive_lifecycle "$command";;
   esac
 }

@@ -8,6 +8,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Add complete terminal core configuration, protected first-install bootstrap,
+  scoped product account links and private initialization before ingress activation.
+- Retain controller source/archive digests with release recovery artifacts.
+- Exercise interactive and unattended core installation, four-product SSO,
+  repeated execution, verified backup and isolated restoration on actual containers.
+- Preserve sparse backups and fail immediately on any database integrity error;
+  check SQLite WAL families through private copies and retain rehearsal dependencies.
 - Isolate identity cookies at shared ingress while preserving native product sessions, streaming and WebSockets.
 - Add disposable-account browser rehearsal support for consent, MFA, passkeys, recovery and step-up authentication.
 - Separate unprivileged HTTPS ingress/static-console deployment candidate and

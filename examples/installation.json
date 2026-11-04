@@ -40,10 +40,12 @@
       "configDirectory": "/opt/hive/config/ingress"
     },
     "oathweave-redis": {
-      "host": "control"
+      "host": "control",
+      "configDirectory": "/opt/hive/config/oathweave-redis"
     },
     "hivemem-qdrant": {
-      "host": "control"
+      "host": "control",
+      "configDirectory": "/opt/hive/config/hivemem-qdrant"
     }
   },
   "agents": [],
@@ -53,5 +55,11 @@
     "bindAddress": "127.0.0.1",
     "httpsPort": 8443,
     "runtimeFile": "/opt/hive/config/runtime.json"
+  },
+  "bootstrap": {
+    "adminUsername": "admin",
+    "adminEmail": "admin@example.com",
+    "certificateFile": "/secure/hive/console.crt",
+    "privateKeyFile": "/secure/hive/console.key"
   }
 }

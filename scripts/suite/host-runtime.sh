@@ -14,19 +14,27 @@ die() { printf 'Hive host: %s\n' "$*" >&2; exit 1; }
 digest() { sha256sum -- "$1" | cut -d ' ' -f1; }
 tree_digest() { (cd "$1"; find . -type f -print0 | sort -z | xargs -0 -r sha256sum --zero) | sha256sum | cut -d ' ' -f1; }
 recovery_image='node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205'
-check_data() {
-  local base=$1 definition=$2 service uid gid
-  local code='import {readdirSync,lstatSync,openSync,readSync,closeSync} from "node:fs";
-import {join} from "node:path";import {DatabaseSync} from "node:sqlite";
-let databases=0;
-function walk(path){for(const name of readdirSync(path)){const file=join(path,name),stat=lstatSync(file);if(stat.isDirectory()){walk(file);continue;}if(!stat.isFile())throw Error("Unsupported recovery file type");const fd=openSync(file,"r"),header=Buffer.alloc(16);readSync(fd,header,0,16,0);closeSync(fd);if(header.toString()!=="SQLite format 3\u0000")continue;const db=new DatabaseSync(file,{readOnly:true});try{const result=db.prepare("PRAGMA integrity_check").all();if(result.length!==1||Object.values(result[0])[0]!=="ok")throw Error("SQLite integrity failed");databases++;}finally{db.close();}}}
-walk("/data");console.log(JSON.stringify({sqliteIntegrity:"passed",databases}));'
-  while read -r service uid gid; do
-    docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true --network none --user "$uid:$gid" \
-      --mount "type=bind,source=$base/data/$service,target=/data,readonly" --entrypoint node "$recovery_image" --input-type=module -e "$code"
-  done < <(jq -r '.services|to_entries[]|select(any(.value.volumes[]?; .target=="/data"))|[.key,(.value.user|split(":")[])]|@tsv' "$definition")
-}
 atomic_json() { jq . > "$1.tmp"; chmod 600 "$1.tmp"; sync -f "$1.tmp"; mv -T -- "$1.tmp" "$1"; sync -f "$(dirname -- "$1")"; }
+prepare_data_directories() {
+  local candidate=$1 service uid gid path
+    while read -r service uid gid; do
+      path="$directory/data/$service"
+      [[ ! -L "$path" ]] || die 'Data directory cannot be a symlink'
+      if [[ -d "$path" ]]; then
+        [[ $(stat -c %u "$path") == "$uid" && $(stat -c %g "$path") == "$gid" ]] || die 'Data ownership differs'
+      else install -d -m 700 -o "$uid" -g "$gid" "$path"; fi
+    done < <(jq -r '.services|to_entries[]|select(any(.value.volumes[]?; .target=="/data"))|[.key,(.value.user|split(":")[])]|@tsv' "$candidate")
+}
+save_release_artifacts() {
+  local candidate=$1 file source
+    install -d -m 700 "$directory/releases/$version"
+    for file in manifest signature trust; do
+      case "$file" in manifest) source="manifest.$plan.json";; signature) source="signature.$plan";; trust) source="trust.$plan.pub";; esac
+      cp -- "$directory/$source" "$directory/releases/$version/$file"
+    done
+    cp -- "$candidate" "$directory/releases/$version/compose.json"
+    cp -- "$directory/controller.$plan.tar.gz" "$directory/releases/$version/controller.tar.gz"
+}
 compose() { docker compose -f "$directory/compose.json" "$@"; }
 [[ "$directory" =~ ^/[A-Za-z0-9_./-]+$ && "$directory" != *'/../'* && "$directory" != */.. && ${#directory} -gt 4 ]] || die 'Invalid installation path'
 [[ "$installation" =~ ^[a-z][a-z0-9-]{0,47}$ && "$host" =~ ^[a-z][a-z0-9-]{0,47}$ && "$plan" =~ ^[a-f0-9]{64}$ ]] || die 'Invalid installation identity'
@@ -140,6 +148,7 @@ case "$action" in
     candidate="$directory/candidate.$plan.json"
     [[ $(digest "$directory/manifest.$plan.json") == "$(jq -er .digest <<< "$input")" ]] || die 'Release digest differs'
     openssl pkeyutl -verify -pubin -inkey "$directory/trust.$plan.pub" -rawin -in "$directory/manifest.$plan.json" -sigfile "$directory/signature.$plan" >/dev/null 2>&1 || die 'Release signature differs'
+    [[ $(digest "$directory/controller.$plan.tar.gz") == "$(jq -er .controllerArchiveSHA256 <<< "$input")" ]] || die 'Controller recovery artifact digest differs'
     docker compose -f "$candidate" config --quiet
     while IFS= read -r path; do
       [[ "$path" == "$directory/config/"* && -f "$path" && ! -L "$path" ]] || die 'Environment files must be regular files in the protected config directory'
@@ -177,7 +186,9 @@ case "$action" in
     [[ ! -d "$directory/agents" ]] || members+=(agents)
     [[ ! -d "$directory/agent-profiles" ]] || members+=(agent-profiles)
     [[ ! -f "$directory/data-formats.json" ]] || members+=(data-formats.json)
-    tar --hard-dereference -czf "$backup/state.tar.gz.partial" -C "$directory" -- "${members[@]}"
+    # Preserve sparse datastore/WAL extents; expanding them during recovery can
+    # consume far more disk than the live store or its compressed archive.
+    tar --sparse --hard-dereference -czf "$backup/state.tar.gz.partial" -C "$directory" -- "${members[@]}"
     gzip -t "$backup/state.tar.gz.partial"
     mv "$backup/state.tar.gz.partial" "$backup/state.tar.gz"
     jq -n --arg uuid "$identity" --arg id "$installation" --arg host "$host" --arg sha "$(digest "$backup/state.tar.gz")" \
@@ -206,6 +217,37 @@ case "$action" in
       fi
     done < <(jq -r '.services|keys[]' "$directory/candidate.$plan.json")
     ;;
+  initialize-data)
+    assert_transaction
+    [[ $(jq -r .operation <<< "$input") == install && $(jq -r '.bootstrap!=null' <<< "$input") == true ]] || die 'Data initialization is restricted to explicit fresh installs'
+    # A repeat install already has product-owned initialized data. Never reseed it.
+    if [[ -f "$directory/receipt.json" ]]; then exit 0; fi
+    candidate="$directory/candidate.$plan.json"
+    initial_receipt="$directory/bootstrap.$plan.json"
+    if [[ -f "$initial_receipt" ]]; then
+      jq -e --arg plan "$plan" --arg digest "$(jq -er .digest <<< "$input")" '.schema==1 and .plan==$plan and .manifestDigest==$digest' "$initial_receipt" >/dev/null || die 'Fresh initialization receipt differs from the exact candidate'
+      if [[ $(jq -r .phase "$initial_receipt") == ready ]]; then exit 0; fi
+    else
+      [[ -z $(find "$directory/data" -type f -print -quit) && -z $(docker compose -f "$candidate" ps -aq) ]] || die 'Fresh initialization cannot take custody of existing data or containers'
+      jq -n --arg plan "$plan" --arg digest "$(jq -er .digest <<< "$input")" '{schema:1,plan:$plan,manifestDigest:$digest,phase:"started"}' | atomic_json "$initial_receipt"
+    fi
+    prepare_data_directories "$candidate"
+    bootstrap_compose="$directory/bootstrap.$plan.compose.json"
+    jq --slurpfile release "$directory/manifest.$plan.json" '
+      .services |= with_entries(select(.key as $name|($release[0].components[$name].kind // "application")|IN("application","datastore")) |
+        .value |= (del(.ports,.restart) | .environment=((.environment // {}) + {
+          HIVE_AUTO_MIGRATE:"true",HIVE_AUTO_UPGRADE:"false",HIVE_UPDATE_CHECK:"false",
+          HIVEMEM_WORKER_ENABLED:"false",HIVE_SKILLS_DEPLOYMENT_WORKER_ENABLED:"false",
+          SECURITY_FUSION_DISPATCH_ENABLED:"false",SECURITY_FUSION_COLLECTOR_ENABLED:"false"
+        })))
+    ' "$candidate" > "$bootstrap_compose"
+    docker compose -f "$bootstrap_compose" config --quiet
+    # Only private backends/datastores start. Ingress, UI and native agents wait
+    # until initialized data is ready with automatic migrations disabled again.
+    docker compose -f "$bootstrap_compose" up -d --wait --wait-timeout 180
+    docker compose -f "$bootstrap_compose" stop --timeout 45
+    jq '.phase="ready"' "$initial_receipt" | atomic_json "$initial_receipt"
+    ;;
   activate)
     assert_transaction
     [[ $(phase) != migration-started ]] || die 'Migration outcome is unknown'
@@ -213,23 +255,12 @@ case "$action" in
     if [[ ! -f "$directory/data-formats.json" ]]; then
       jq '.components|map_values(.storageFormat // "unversioned")' "$directory/manifest.$plan.json" | atomic_json "$directory/data-formats.json"
     fi
-    while read -r service uid gid; do
-      path="$directory/data/$service"
-      [[ ! -L "$path" ]] || die 'Data directory cannot be a symlink'
-      if [[ -d "$path" ]]; then
-        [[ $(stat -c %u "$path") == "$uid" && $(stat -c %g "$path") == "$gid" ]] || die 'Data ownership differs'
-      else install -d -m 700 -o "$uid" -g "$gid" "$path"; fi
-    done < <(jq -r '.services|to_entries[]|select(any(.value.volumes[]?; .target=="/data"))|[.key,(.value.user|split(":")[])]|@tsv' "$candidate")
+    prepare_data_directories "$candidate"
     record activating
     docker compose -f "$candidate" up -d --wait --wait-timeout 180
-    install -d -m 700 "$directory/releases/$version"
-    for file in manifest signature trust; do
-      case "$file" in manifest) source="manifest.$plan.json";; signature) source="signature.$plan";; trust) source="trust.$plan.pub";; esac
-      cp -- "$directory/$source" "$directory/releases/$version/$file"
-    done
-    cp -- "$candidate" "$directory/releases/$version/compose.json"
+    save_release_artifacts "$candidate"
     mv -T -- "$candidate" "$directory/compose.json"
-    jq '{schema:1,installation,host,version,digest,plan}' <<< "$input" | atomic_json "$directory/receipt.json"
+    jq '{schema:1,installation,host,version,digest,plan,controllerSourceSHA256,controllerArchiveSHA256}' <<< "$input" | atomic_json "$directory/receipt.json"
     record ready
     ;;
   complete) assert_transaction; record complete;;
@@ -258,13 +289,15 @@ case "$action" in
     # No production env, network, port, external volume, dispatcher or collector is
     # reachable. The original protected files stay byte-exact in the restored tree.
     jq --arg base "$directory" --arg restored "$rehearsal" --arg name "rehearsal-$installation-$host-$archive" '
+      (.services|keys|map(select(test("collector|dispatcher|agent")|not))) as $selected |
       .name=$name | .services |= with_entries(
         select((.key|test("collector|dispatcher|agent"))|not) |
-        .value |= (del(.ports,.network_mode,.external_links,.links,.depends_on,.networks,.restart) |
+        .value |= (del(.ports,.network_mode,.external_links,.links,.restart) |
+          (if has("depends_on") then .depends_on |= (if type=="array" then map(select(. as $name|$selected|index($name)!=null)) else with_entries(select(.key as $name|$selected|index($name)!=null)) end) else . end) |
           .environment=((.environment // {}) + {HIVE_REHEARSAL:"true",SECURITY_FUSION_DISPATCH_ENABLED:"false",SECURITY_FUSION_COLLECTOR_ENABLED:"false"}) |
           .volumes |= map(if .source|startswith($base+"/") then .source=($restored+.source[($base|length):]) else error("Unowned restore mount") end) |
           if has("env_file") then .env_file |= map(if type=="string" and startswith($base+"/") then $restored+.[($base|length):] else error("Unowned restore environment") end) else . end)) |
-      .networks={default:{internal:true,driver:"bridge"}}' "$candidate" > "$rehearsal/isolated.json"
+      .networks=((.networks // {default:{}})|map_values({internal:true,driver:"bridge"}))' "$candidate" > "$rehearsal/isolated.json"
     docker compose -f "$rehearsal/isolated.json" config --quiet
     [[ $(tree_digest "$rehearsal/data") == "$(jq -er .dataSHA256 "$backup/receipt.json")" ]] || die 'Restored data differs from the backup receipt'
     # Restore ownership only inside this disposable tree, before the non-root services run.
@@ -334,8 +367,9 @@ case "$action" in
     ;;
   adopt)
     assert_transaction
+    save_release_artifacts "$directory/candidate.$plan.json"
     cp -- "$directory/candidate.$plan.json" "$directory/compose.json"
-    jq '{schema:1,installation,host,version,digest,plan}' <<< "$input" | atomic_json "$directory/receipt.json"
+    jq '{schema:1,installation,host,version,digest,plan,controllerSourceSHA256,controllerArchiveSHA256}' <<< "$input" | atomic_json "$directory/receipt.json"
     jq '.components|map_values(.storageFormat // "unversioned")' "$directory/manifest.$plan.json" | atomic_json "$directory/data-formats.json"
     record ready
     ;;

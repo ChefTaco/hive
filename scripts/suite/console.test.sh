@@ -22,6 +22,7 @@ hive_manifest
 hive_render control > "$temporary/compose.json"
 jq -e '.services.ingress.ports==[{target:8443,published:"8443",host_ip:"127.0.0.1",protocol:"tcp"}] and .services.hivexui.volumes==[{type:"bind",source:"/opt/hive/config/runtime.json",target:"/usr/share/nginx/html/runtime.json",read_only:true}] and (.services.hivexui|has("env_file")|not) and (.services.hivexui.tmpfs|index("/var/run:uid=101,gid=101,mode=700")!=null) and ([.services|to_entries[]|select(.key!="ingress")|.value|has("ports")]|all(.==false))' "$temporary/compose.json" >/dev/null
 cp "$HIVE_MANIFEST" "$temporary/valid-release.json"
+jq -e '.services.emberpath.environment.HIVE_AUTO_MIGRATE=="false" and .services.emberpath.environment.HIVE_AUTO_UPGRADE=="false"' "$temporary/compose.json" >/dev/null
 for patch in '.components.hivexui.envFile="/opt/hive/config/backend.env"' '.components.hivexui.configDirectory="/opt/hive/config/identity"' '.console.host="missing"' '.console.runtimeFile="/etc/passwd"' '.console.bindAddress="999.0.0.1"' '.console.httpsPort=0' '.console.httpsPort=443.5' '.components.ingress.host="missing"'; do
   jq "$patch" "$temporary/valid-config.json" > "$HIVE_CONFIG"
   reject hive_validate

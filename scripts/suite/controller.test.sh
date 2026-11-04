@@ -36,7 +36,7 @@ jq '.components.emberpath.service.volumes=["/var/run/docker.sock:/var/run/docker
 mv "$temporary/unsafe.json" "$temporary/release.json"
 openssl pkeyutl -sign -inkey "$temporary/private" -rawin -in "$temporary/release.json" -out "$temporary/release.sig"
 reject hive_manifest
-for patch in '.components.emberpath.service.user="0:0"' '.components.emberpath.service.cap_add=["SYS_ADMIN"]' '.components.emberpath.service.healthcheck=null' '.components.emberpath.service.post_start=[{command:"true",user:"root",privileged:true}]' '.components.emberpath.service.healthcheck.disable=true' '.networks={unsafe:{driver:"host"}}'; do
+for patch in '.controllerSHA256=("0"*64)' '.components.emberpath.service.user="0:0"' '.components.emberpath.service.cap_add=["SYS_ADMIN"]' '.components.emberpath.service.healthcheck=null' '.components.emberpath.service.post_start=[{command:"true",user:"root",privileged:true}]' '.components.emberpath.service.healthcheck.disable=true' '.networks={unsafe:{driver:"host"}}'; do
   jq "$patch" "$temporary/valid.json" > "$temporary/release.json"
   openssl pkeyutl -sign -inkey "$temporary/private" -rawin -in "$temporary/release.json" -out "$temporary/release.sig"
   reject hive_manifest

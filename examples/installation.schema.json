@@ -71,6 +71,32 @@
       "items": {
         "$ref": "external-inference.schema.json"
       }
+    },
+    "bootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adminUsername",
+        "adminEmail",
+        "certificateFile",
+        "privateKeyFile"
+      ],
+      "properties": {
+        "adminUsername": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$"
+        },
+        "adminEmail": {
+          "type": "string",
+          "format": "email"
+        },
+        "certificateFile": {
+          "$ref": "#/$defs/path"
+        },
+        "privateKeyFile": {
+          "$ref": "#/$defs/path"
+        }
+      }
     }
   },
   "$defs": {

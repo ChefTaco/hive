@@ -79,12 +79,13 @@
     "deploy:npm": "node --experimental-strip-types scripts/deploy-npm.ts",
     "test:deploy-npm": "node --experimental-strip-types --test scripts/deploy-npm.test.ts && python3 scripts/npm-deploy-host.test.py",
     "test:e2e:fresh": "node -- scripts/fresh-npm-e2e.mjs",
-    "test:suite": "bash scripts/suite/controller.test.sh && bash scripts/suite/console.test.sh && bash scripts/suite/preflight.test.sh && bash scripts/suite/external-inference.test.sh && node --test scripts/suite/browser-rehearsal.test.mjs",
+    "test:suite": "bash scripts/suite/controller.test.sh && bash scripts/suite/console.test.sh && bash scripts/suite/preflight.test.sh && bash scripts/suite/initialize.test.sh && bash scripts/suite/integrity-host.test.sh && python3 scripts/suite/interactive.test.py && bash scripts/suite/external-inference.test.sh && node --test scripts/suite/browser-rehearsal.test.mjs scripts/suite/check-data.test.mjs",
     "test:suite:sso": "node scripts/suite/sso-roundtrip.mjs",
     "test:suite:ingress": "node scripts/suite/ingress-roundtrip.mjs",
     "test:suite:containers": "node scripts/suite/sso-roundtrip.mjs --containers",
     "test:suite:lifecycle": "node scripts/suite/lifecycle-roundtrip.mjs",
     "test:suite:adapters": "node scripts/suite/adapters-roundtrip.mjs",
+    "test:suite:core": "node scripts/suite/core-roundtrip.mjs",
     "test:suite:native": "node scripts/suite/native-rehearsal.mjs"
   }
 }

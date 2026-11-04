@@ -18,7 +18,7 @@ source snapshot or passing unit test is not evidence of a production cutover.
 | Direct product authorization | Implemented; bounded regression tests pass | Resource audience, permissions, revocation and step-up regression tests |
 | Oathweave browser SSO | Disposable browser workflows pass; restored-account sign-in pending | PKCE, consent, MFA/passkeys, recovery, session/logout acceptance |
 | Security and chat UI consolidation | Candidate modules build; full parity pending | Existing route/workflow parity including files, sockets and approvals |
-| Shell suite lifecycle | In progress | Unattended/interactive, resume, multi-host, backup/restore, upgrade tests |
+| Shell suite lifecycle | Fresh co-located core and lifecycle drills pass; full/multi-host gates pending | Unattended/interactive, resume, multi-host, backup/restore, upgrade tests |
 | Host agent enrollment | Pending | Scoped credentials, existing profile preservation, real heartbeat/job proof |
 | External inference | HTTPS protocol fixture passes | Existing endpoint connectivity, discovery, generation, streaming and verified Emberpath enrollment; no inference provisioning |
 | Production adoption and migration | Pending | Installation-bound restored backup, single writer, acceptance and recovery proof |
@@ -106,12 +106,21 @@ adapters implement host-bound backups, isolated restore rehearsal, exact migrati
 compatible rollback, reconciliation-bound restore, explicit Compose adoption and
 transaction receipts. The disposable SQLite lifecycle drill covers retries, restored
 candidate execution and uncertain migration refusal. It does not certify interactive
-core/full installs or interrupted multi-host execution. The renderer now assembles
+full installs or interrupted multi-host execution. The renderer now assembles
 signed ingress/static service kinds with a strict public-runtime allowlist and
-read-only host preflight. Complete secrets/bootstrap and real native agent
-integration remain open.
+read-only host preflight. Fresh co-located core configuration/bootstrap, real
+terminal setup and unattended installation now have disposable end-to-end proof,
+including stable credentials/IDs on retry, four-product sign-in and restore.
+Full/multi-host bootstrap and real native agent integration remain open.
 No official suite manifest or publisher trust key has been released.
 This is not an installation or migration release.
+
+The core restore drill uses private SQLite family copies, including WAL/SHM, for
+integrity checks without writing the source. Any failed service aborts verification;
+a later healthy datastore cannot mask it. Rehearsals retain selected dependency
+ordering and private networks, force every network internal, publish no ports and
+disable dispatchers/collectors. Sparse datastore files remain sparse in backups.
+Controller source and recovery-archive digests are included in deployment evidence.
 
 Ollama, llama.cpp, other inference services and hosted API providers are external
 dependencies. Hive only records endpoints and protected credential references,

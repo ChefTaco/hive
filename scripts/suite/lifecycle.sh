@@ -2,7 +2,7 @@
 
 hive_action() {
   local host=$1
-  HIVE_HOST_ACTION=$2 hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/public-runtime.sh" "$HIVE_ROOT/scripts/suite/adapters-host.sh" "$HIVE_ROOT/scripts/suite/inference-registration.sh" "$HIVE_ROOT/scripts/suite/host-runtime.sh")"
+  HIVE_HOST_ACTION=$2 hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/public-runtime.sh" "$HIVE_ROOT/scripts/suite/integrity-host.sh" "$HIVE_ROOT/scripts/suite/adapters-host.sh" "$HIVE_ROOT/scripts/suite/inference-registration.sh" "$HIVE_ROOT/scripts/suite/host-runtime.sh")"
 }
 
 hive_all() {
@@ -23,6 +23,10 @@ hive_hold() {
 hive_stage() {
   local host temporary
   temporary=$(mktemp -d)
+  hive_need tar
+  hive_runtime_files > "$temporary/controller-files"
+  tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -czf "$temporary/controller.tar.gz" -C "$HIVE_ROOT" -T "$temporary/controller-files"
+  HIVE_CONTROLLER_ARCHIVE_DIGEST=$(sha256sum "$temporary/controller.tar.gz" | cut -d ' ' -f1)
   # The directory contains Compose and public manifests only. Configuration values
   # and secrets stay on their owning hosts.
   while IFS= read -r host; do
@@ -36,6 +40,7 @@ hive_stage() {
     hive_transfer "$host" "$HIVE_MANIFEST" "manifest.$HIVE_PLAN_DIGEST.json"
     hive_transfer "$host" "$HIVE_SIGNATURE" "signature.$HIVE_PLAN_DIGEST"
     hive_transfer "$host" "$HIVE_TRUST_KEY" "trust.$HIVE_PLAN_DIGEST.pub"
+    hive_transfer "$host" "$temporary/controller.tar.gz" "controller.$HIVE_PLAN_DIGEST.tar.gz"
     hive_action "$host" stage || { rm -rf -- "$temporary"; hive_die 'Host staging failed before quiescence'; }
     hive_action "$host" compatibility || { rm -rf -- "$temporary"; hive_die 'Storage compatibility check failed before quiescence'; }
     hive_action "$host" adapters-preflight || { rm -rf -- "$temporary"; hive_die 'Native agent or external endpoint reference preflight failed'; }
@@ -45,11 +50,15 @@ hive_stage() {
 
 hive_lifecycle() {
   local operation=$1
+  if [[ "$operation" == install ]] && jq -e '.bootstrap!=null' "$HIVE_CONFIG" >/dev/null; then hive_initialize; fi
   hive_doctor
   case "$operation" in
     install|upgrade|rollback)
       hive_stage
       hive_all adapters-stage || hive_die 'Native agent staging failed; existing suite remains active'
+      if [[ "$operation" == install ]] && jq -e '.bootstrap!=null' "$HIVE_CONFIG" >/dev/null; then
+        hive_all initialize-data || hive_hold
+      fi
       if [[ "$operation" != install ]]; then
         HIVE_ARCHIVE=${HIVE_ARCHIVE:-"pre-$operation-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 4)"}
         hive_all quiesce || hive_hold
