@@ -1,0 +1,91 @@
+{
+	admin off
+	https_port 8443
+	auto_https disable_redirects
+}
+
+(verified_backend) {
+	flush_interval -1
+	transport http {
+		tls
+		tls_server_name {args[0]}
+		tls_trust_pool file /config/backend-ca.pem
+	}
+}
+
+{$HIVE_CONSOLE_HOST} {
+	tls /config/console.crt /config/console.key
+	handle /_hive/ready {
+		respond "ready" 200
+	}
+	handle_path /api/emberpath/* {
+		rewrite * /api{uri}
+		reverse_proxy {$EMBERPATH_ENDPOINT:https://unconfigured.invalid} {
+			import verified_backend {$EMBERPATH_TLS_NAME:unconfigured.invalid}
+		}
+	}
+	handle_path /api/oathweave/* {
+		rewrite * /api/v1{uri}
+		reverse_proxy {$OATHWEAVE_ENDPOINT:https://unconfigured.invalid} {
+			import verified_backend {$OATHWEAVE_TLS_NAME:unconfigured.invalid}
+		}
+	}
+	handle_path /api/hivemem/* {
+		rewrite * /v1{uri}
+		reverse_proxy {$HIVEMEM_ENDPOINT:https://unconfigured.invalid} {
+			import verified_backend {$HIVEMEM_TLS_NAME:unconfigured.invalid}
+		}
+	}
+	handle_path /api/hiveskills/* {
+		reverse_proxy {$HIVESKILLS_ENDPOINT:https://unconfigured.invalid} {
+			import verified_backend {$HIVESKILLS_TLS_NAME:unconfigured.invalid}
+		}
+	}
+	handle_path /api/cindertrace/* {
+		rewrite * /api/v1{uri}
+		reverse_proxy {$CINDERTRACE_ENDPOINT:https://unconfigured.invalid} {
+			import verified_backend {$CINDERTRACE_TLS_NAME:unconfigured.invalid}
+		}
+	}
+	handle_path /api/chattermost/* {
+		reverse_proxy {$CHATTERMOST_ENDPOINT:https://unconfigured.invalid} {
+			import verified_backend {$CHATTERMOST_TLS_NAME:unconfigured.invalid}
+		}
+	}
+	# Preserve explicit native model, memory, chat and signed security paths.
+	handle /v1/* {
+		reverse_proxy {$EMBERPATH_ENDPOINT:https://unconfigured.invalid} {
+			import verified_backend {$EMBERPATH_TLS_NAME:unconfigured.invalid}
+		}
+	}
+	handle_path /memory/* {
+		reverse_proxy {$HIVEMEM_ENDPOINT:https://unconfigured.invalid} {
+			import verified_backend {$HIVEMEM_TLS_NAME:unconfigured.invalid}
+		}
+	}
+	handle /api/v4/* {
+		reverse_proxy {$CHATTERMOST_ENDPOINT:https://unconfigured.invalid} {
+			import verified_backend {$CHATTERMOST_TLS_NAME:unconfigured.invalid}
+		}
+	}
+	handle /api/v1/security-fusion/* {
+		reverse_proxy {$CINDERTRACE_ENDPOINT:https://unconfigured.invalid} {
+			import verified_backend {$CINDERTRACE_TLS_NAME:unconfigured.invalid}
+		}
+	}
+	@unknown_api path /api/* /api-docs/*
+	handle @unknown_api {
+		respond "API unavailable" 404
+	}
+	handle {
+		reverse_proxy http://hivexui:8080
+	}
+	handle_errors {
+		respond "Service unavailable" 503
+	}
+}
+
+# Container-local readiness only; never published on the host.
+http://127.0.0.1:8081 {
+	respond /ready "ready" 200
+}

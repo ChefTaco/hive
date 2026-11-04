@@ -1,0 +1,68 @@
+{
+  "services": {
+    "ingress": {
+      "image": "${HIVE_INGRESS_IMAGE:?Released ingress image digest required}",
+      "user": "1000:1000",
+      "command": [
+        "caddy",
+        "run",
+        "--config",
+        "/config/Caddyfile",
+        "--adapter",
+        "caddyfile"
+      ],
+      "env_file": [
+        "${HIVE_INGRESS_ENV:?Protected ingress environment required}"
+      ],
+      "environment": {
+        "XDG_CONFIG_HOME": "/data/config",
+        "XDG_DATA_HOME": "/data"
+      },
+      "ports": [
+        "${HIVE_BIND_ADDRESS:-127.0.0.1}:${HIVE_HTTPS_PORT:-443}:8443"
+      ],
+      "volumes": [
+        "${HIVE_INGRESS_CONFIG:?Ingress configuration required}:/config:ro",
+        "${HIVE_INGRESS_DATA:?Ingress state directory required}:/data"
+      ],
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:mode=1777"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "restart": "unless-stopped",
+      "stop_grace_period": "45s"
+    },
+    "hivexui": {
+      "image": "${HIVEXUI_IMAGE:?Released HiveXUI image digest required}",
+      "user": "101:101",
+      "volumes": [
+        "${HIVEXUI_RUNTIME:?Public runtime JSON required}:/usr/share/nginx/html/runtime.json:ro"
+      ],
+      "read_only": true,
+      "tmpfs": [
+        "/tmp:mode=1777",
+        "/var/cache/nginx:uid=101,gid=101,mode=700",
+        "/var/run:uid=101,gid=101,mode=700"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "restart": "unless-stopped",
+      "stop_grace_period": "30s"
+    }
+  },
+  "networks": {
+    "default": {
+      "driver": "bridge"
+    }
+  }
+}

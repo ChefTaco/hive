@@ -8,6 +8,11 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Experimental shell suite controller with offline installation plans, signed
+  release verification, constrained per-host Compose rendering and fail-closed
+  activation. Recovery, agent and inference adapters remain gated.
+- Reproducible public product extraction with provenance hashes and an explicit
+  ecosystem migration and workflow-parity ledger.
 - Opt-in `test:e2e:fresh` command installs exact public npm packages for all four
   services, tests environment-configured model streaming and memory recall with
   the published SDK, checks Skills distribution and restart persistence, and
