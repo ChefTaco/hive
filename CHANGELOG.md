@@ -12,7 +12,11 @@ All notable changes to this project are documented in this file. The format is b
   disposable native/container SSO, resource API and protocol transport acceptance.
 - Experimental shell suite controller with offline installation plans, signed
   release verification, constrained per-host Compose rendering and fail-closed
-  activation. Recovery, agent and inference adapters remain gated.
+  activation. Candidate lifecycle and native-agent adapters include protected recovery
+  receipts and isolated tests; production migration gates remain held.
+- External-only inference endpoint verification and Emberpath provider enrollment.
+  Reject obsolete managed-inference settings and manifests with migration guidance;
+  preserve existing model resources and hold legacy inference projects before changes.
 - Reproducible public product extraction with provenance hashes and an explicit
   ecosystem migration and workflow-parity ledger.
 - Opt-in `test:e2e:fresh` command installs exact public npm packages for all four

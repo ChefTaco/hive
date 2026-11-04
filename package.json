@@ -42,7 +42,7 @@
     "audit:deployments": "node --experimental-strip-types scripts/audit-deployments.ts",
     "verify:iam-hardening": "node --experimental-strip-types scripts/verify-iam-hardening.ts",
     "audit:production": "npm --prefix packages/hive-release audit --omit=dev --audit-level=high && npm --prefix services/hive-router audit --omit=dev --audit-level=high && npm --prefix services/hive-iam audit --workspace @hivemagnus/hive-iam-server --omit=dev --audit-level=high && npm --prefix services/hive-iam/apps/iam-core audit --omit=dev --audit-level=high && npm --prefix services/hive-iam audit --workspace @hivemagnus/hive-iam-sdk --omit=dev --audit-level=high && npm --prefix services/hive-mem/ts-core audit --omit=dev --audit-level=high && npm --prefix services/hive-skills audit --omit=dev --audit-level=high && npm --prefix packages/hive audit --omit=dev --audit-level=high",
-    "scripts:check": "bash -n scripts/*.sh services/hive-iam/scripts/*.sh services/hive-iam/apps/iam-core/scripts/*.sh services/hive-mem/scripts/*.sh services/hive-router/scripts/*.sh services/hive-skills/scripts/*.sh",
+    "scripts:check": "bash -n scripts/*.sh services/hive-iam/scripts/*.sh services/hive-iam/apps/iam-core/scripts/*.sh services/hive-mem/scripts/*.sh services/hive-router/scripts/*.sh services/hive-skills/scripts/*.sh scripts/suite/*.sh",
     "tls:check": "bash scripts/check-tls-bypasses.sh",
     "deploy:router": "bash services/hive-router/scripts/deploy-hive-router.sh",
     "deploy:iam": "bash services/hive-iam/scripts/deploy-iam-core.sh",
@@ -79,9 +79,12 @@
     "deploy:npm": "node --experimental-strip-types scripts/deploy-npm.ts",
     "test:deploy-npm": "node --experimental-strip-types --test scripts/deploy-npm.test.ts && python3 scripts/npm-deploy-host.test.py",
     "test:e2e:fresh": "node -- scripts/fresh-npm-e2e.mjs",
-    "test:suite": "bash scripts/suite/controller.test.sh",
+    "test:suite": "bash scripts/suite/controller.test.sh && bash scripts/suite/external-inference.test.sh && node --test scripts/suite/browser-rehearsal.test.mjs",
     "test:suite:sso": "node scripts/suite/sso-roundtrip.mjs",
     "test:suite:ingress": "node scripts/suite/ingress-roundtrip.mjs",
-    "test:suite:containers": "node scripts/suite/sso-roundtrip.mjs --containers"
+    "test:suite:containers": "node scripts/suite/sso-roundtrip.mjs --containers",
+    "test:suite:lifecycle": "node scripts/suite/lifecycle-roundtrip.mjs",
+    "test:suite:adapters": "node scripts/suite/adapters-roundtrip.mjs",
+    "test:suite:native": "node scripts/suite/native-rehearsal.mjs"
   }
 }

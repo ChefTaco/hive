@@ -20,7 +20,7 @@ source snapshot or passing unit test is not evidence of a production cutover.
 | Security and chat UI consolidation | Candidate modules build; full parity pending | Existing route/workflow parity including files, sockets and approvals |
 | Shell suite lifecycle | In progress | Unattended/interactive, resume, multi-host, backup/restore, upgrade tests |
 | Host agent enrollment | Pending | Scoped credentials, existing profile preservation, real heartbeat/job proof |
-| CPU/CUDA/ROCm inference | Pending | Physical hardware generation and streaming proof for each supported profile |
+| External inference | HTTPS protocol fixture passes | Existing endpoint connectivity, discovery, generation, streaming and verified Emberpath enrollment; no inference provisioning |
 | Production adoption and migration | Pending | Installation-bound restored backup, single writer, acceptance and recovery proof |
 | Published release and branding | Pending | Verified artifacts, compatibility lock and accurate walkthroughs |
 
@@ -64,7 +64,8 @@ keys, identities, migration history, audit chains and storage. Restore a backup 
 isolation with external dispatch disabled, test the candidate, then stop the old
 writer before routing traffic to the replacement. Preserve the previous runtime.
 Binary rollback requires data compatibility; database restore requires explicit
-write reconciliation. No hardware profile is certified without hardware proof.
+write reconciliation. Inference services and their model storage remain external to Hive;
+rehearsals never restore or launch model containers.
 
 ## Current verification boundary
 
@@ -90,18 +91,38 @@ candidate images as described in `deployment/README.md` first.
 
 The console has candidate security and chat modules, locally bundled brand fonts,
 light/dark themes and lazy loading. The original Hive console pages are retained
-as a porting baseline. Memory aggregation, actor coordination, Skills workflows,
+as a porting baseline. Actor coordination, complete Skills deployment,
 advanced chat administration and all permission/visual/accessibility parity still
 need completion. Existing frontends remain active until those gates pass.
 
 The Bash controller verifies signed manifests and image digests, plans placement,
-checks hosts and applies constrained Compose definitions. It refuses unsupported
-agent/inference selections and lifecycle operations rather than reporting partial
-success. Interactive generation currently requires further component setup.
-Backup/restore/adoption/upgrade/rollback adapters, ingress assembly, complete
-preflight, secrets/bootstrap, interrupted multi-host recovery, agent installation
-and managed inference remain open. No official suite manifest or publisher trust
-key has been released. This is not an installation or migration release.
+checks hosts and applies constrained Compose definitions. Candidate lifecycle
+adapters implement host-bound backups, isolated restore rehearsal, exact migrations,
+compatible rollback, reconciliation-bound restore, explicit Compose adoption and
+transaction receipts. The disposable SQLite lifecycle drill covers retries, restored
+candidate execution and uncertain migration refusal. It does not certify interactive
+core/full installs or interrupted multi-host execution. Ingress assembly, complete
+preflight, secrets/bootstrap and real native agent integration remain open.
+No official suite manifest or publisher trust key has been released.
+This is not an installation or migration release.
+
+Ollama, llama.cpp, other inference services and hosted API providers are external
+dependencies. Hive only records endpoints and protected credential references,
+verifies HTTPS connectivity/model discovery/generation/streaming and registers
+verified providers through Emberpath APIs. The current Bash protocol adapter supports
+OpenAI-compatible and native Ollama APIs; other native provider protocols stay configured in Emberpath.
+Emberpath owns routing, aliases, quotas and telemetry. Hive does not install or manage
+inference services, model files, volumes, licenses, GPUs or hardware certification.
+Obsolete managed-inference configuration, release profiles and existing draft Compose
+resources are rejected with migration guidance, before lifecycle actions. Preserve all
+existing model resources under their current owner. See `deployment/INFERENCE.md`.
+
+`npm run test:suite` checks rejection without SSH, Docker or download calls.
+`npm run test:suite:adapters` uses a synthetic external HTTPS provider and verifies
+registration ordering, idempotence and unknown-outcome handling. Native artifact
+launcher checks preserve existing profiles; they do not prove real agent enrollment.
+`npm run test:suite:lifecycle` exercises the isolated candidate/recovery lifecycle.
+None of these tests contacts or modifies a production installation.
 
 Operational identity inventories and proposed account links are private ignored
 artifacts, with independent installation boundaries and explicit pending decisions.
@@ -150,3 +171,14 @@ HiveMem account links require an existing active identity and an explicit review
 credential-generation pin for rotated identities. Regressions cover missing and
 disabled accounts, stale pins and native-token rotation. Workspace administration
 and installation-specific mapping acceptance remain pending.
+
+
+Isolated native-backup candidate acceptance now has a dedicated developer harness
+in `deployment/REHEARSALS.md`. It verifies durable SQLite rows, native signing keys
+and complete Qdrant payload/vector digests while keeping application networks
+internal and background workers disabled. It excludes reviewed legacy model paths
+from candidate copies and preserves original recovery archives. Results and account
+links stay private. Historical snapshot success does not replace fresh backup,
+complete browser parity, native agent or real external-provider acceptance gates.
+Startup seeding now preserves existing Emberpath provider credentials and routing
+edits; generated documentation synchronization avoids needless writes.

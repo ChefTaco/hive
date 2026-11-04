@@ -18,6 +18,18 @@
 	handle /_hive/ready {
 		respond "ready" 200
 	}
+	handle /api/emberpath/health/ready {
+		rewrite * /health/ready
+		reverse_proxy {$EMBERPATH_ENDPOINT:https://unconfigured.invalid} {
+			import verified_backend {$EMBERPATH_TLS_NAME:unconfigured.invalid}
+		}
+	}
+	handle /api/cindertrace/health/ready {
+		rewrite * /ready
+		reverse_proxy {$CINDERTRACE_ENDPOINT:https://unconfigured.invalid} {
+			import verified_backend {$CINDERTRACE_TLS_NAME:unconfigured.invalid}
+		}
+	}
 	handle_path /api/emberpath/* {
 		rewrite * /api{uri}
 		reverse_proxy {$EMBERPATH_ENDPOINT:https://unconfigured.invalid} {
@@ -54,8 +66,8 @@
 	}
 	# Preserve explicit native model, memory, chat and signed security paths.
 	handle /v1/* {
-		reverse_proxy {$EMBERPATH_ENDPOINT:https://unconfigured.invalid} {
-			import verified_backend {$EMBERPATH_TLS_NAME:unconfigured.invalid}
+		reverse_proxy {$EMBERPATH_API_ENDPOINT:https://unconfigured.invalid} {
+			import verified_backend {$EMBERPATH_API_TLS_NAME:unconfigured.invalid}
 		}
 	}
 	handle_path /memory/* {

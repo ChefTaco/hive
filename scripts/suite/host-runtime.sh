@@ -1,0 +1,339 @@
+#!/usr/bin/env bash
+# Transported verbatim by the controller. Only JSON data crosses the SSH boundary.
+set -Eeuo pipefail
+umask 077
+read -r input
+directory=$(jq -er .directory <<< "$input")
+installation=$(jq -er .installation <<< "$input")
+host=$(jq -er .host <<< "$input")
+action=$(jq -er .action <<< "$input")
+plan=$(jq -er .plan <<< "$input")
+version=$(jq -er .version <<< "$input")
+archive=$(jq -r '.archive // empty' <<< "$input")
+die() { printf 'Hive host: %s\n' "$*" >&2; exit 1; }
+digest() { sha256sum -- "$1" | cut -d ' ' -f1; }
+tree_digest() { (cd "$1"; find . -type f -print0 | sort -z | xargs -0 -r sha256sum --zero) | sha256sum | cut -d ' ' -f1; }
+recovery_image='node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205'
+check_data() {
+  local base=$1 definition=$2 service uid gid
+  local code='import {readdirSync,lstatSync,openSync,readSync,closeSync} from "node:fs";
+import {join} from "node:path";import {DatabaseSync} from "node:sqlite";
+let databases=0;
+function walk(path){for(const name of readdirSync(path)){const file=join(path,name),stat=lstatSync(file);if(stat.isDirectory()){walk(file);continue;}if(!stat.isFile())throw Error("Unsupported recovery file type");const fd=openSync(file,"r"),header=Buffer.alloc(16);readSync(fd,header,0,16,0);closeSync(fd);if(header.toString()!=="SQLite format 3\u0000")continue;const db=new DatabaseSync(file,{readOnly:true});try{const result=db.prepare("PRAGMA integrity_check").all();if(result.length!==1||Object.values(result[0])[0]!=="ok")throw Error("SQLite integrity failed");databases++;}finally{db.close();}}}
+walk("/data");console.log(JSON.stringify({sqliteIntegrity:"passed",databases}));'
+  while read -r service uid gid; do
+    docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true --network none --user "$uid:$gid" \
+      --mount "type=bind,source=$base/data/$service,target=/data,readonly" --entrypoint node "$recovery_image" --input-type=module -e "$code"
+  done < <(jq -r '.services|to_entries[]|[.key,(.value.user|split(":")[])]|@tsv' "$definition")
+}
+atomic_json() { jq . > "$1.tmp"; chmod 600 "$1.tmp"; sync -f "$1.tmp"; mv -T -- "$1.tmp" "$1"; sync -f "$(dirname -- "$1")"; }
+compose() { docker compose -f "$directory/compose.json" "$@"; }
+[[ "$directory" =~ ^/[A-Za-z0-9_./-]+$ && "$directory" != *'/../'* && "$directory" != */.. && ${#directory} -gt 4 ]] || die 'Invalid installation path'
+[[ "$installation" =~ ^[a-z][a-z0-9-]{0,47}$ && "$host" =~ ^[a-z][a-z0-9-]{0,47}$ && "$plan" =~ ^[a-f0-9]{64}$ ]] || die 'Invalid installation identity'
+[[ ! -L "$directory" ]] || die 'Installation root cannot be a symlink'
+# Legacy draft inference resources are never taken into lifecycle custody. This
+# guard is read-only and runs before creating receipts, stopping or archiving.
+if [[ -f "$directory/compose.json" ]] && jq -e '.services|to_entries|any(.[]; (.key+" "+(.value.image // ""))|test("(^inference-|(^|[/ :_-])(ollama|llama[.-]?cpp|vllm)([/ :@_-]|$))";"i"))' "$directory/compose.json" >/dev/null; then
+  die 'Obsolete managed-inference Compose project: preserve all existing services, volumes and model files. Separate inference into operator-owned external services and review the suite resource inventory before retrying; no host changes were made.'
+fi
+if [[ -d "$directory/data" ]] && [[ -n $(find "$directory/data" -mindepth 1 -maxdepth 1 -name 'inference-*' -print -quit) ]]; then
+  die 'Obsolete managed-inference data: keep existing model files in place. Review their external ownership and prepare a suite-only data directory before running lifecycle or rehearsal commands; no model files were changed.'
+fi
+if [[ -d "$directory/data" ]] && [[ -n $(find "$directory/data" -type f \( -iname '*.gguf' -o -iname '*.ggml' -o -iname '*.safetensors' -o -iname '*.pt' -o -iname '*.pth' \) -print -quit) ]]; then
+  die 'Obsolete managed-inference model assets: preserve existing files in place and prepare a reviewed suite-only data inventory. Hive will not adopt or archive model weights; no host changes were made.'
+fi
+if [[ "$action" == prepare ]]; then
+  install -d -m 700 "$directory" "$directory/releases" "$directory/data" "$directory/config" "$directory/backups" "$directory/rehearsals"
+fi
+[[ -d "$directory" && ! -L "$directory/controller.lock" ]] || die 'Installation is not initialized'
+exec 9>"$directory/controller.lock"
+flock -n 9 || die 'Another controller holds this host'
+if [[ -e "$directory/installation.json" ]]; then
+  jq -e --arg id "$installation" --arg host "$host" '.installation==$id and .host==$host' "$directory/installation.json" >/dev/null || die 'Installation or host ownership differs'
+elif [[ "$action" == prepare ]]; then
+  [[ ! -e "$directory/compose.json" || $(jq -r .operation <<< "$input") == adopt ]] || die 'Existing Compose requires explicit adoption'
+  jq -n --arg id "$installation" --arg host "$host" --arg uuid "$(openssl rand -hex 24)" \
+    '{schema:1,installation:$id,host:$host,uuid:$uuid}' | atomic_json "$directory/installation.json"
+elif [[ "$action" != adopt-check ]]; then die 'Installation ownership record is missing'; fi
+identity=$(jq -er .uuid "$directory/installation.json" 2>/dev/null || true)
+transaction="$directory/transaction.json"
+phase() { jq -r '.phase // "none"' "$transaction" 2>/dev/null || printf 'none\n'; }
+record() {
+  jq -n --arg plan "$plan" --arg phase "$1" --arg version "$version" --arg operation "$(jq -r '.operation' <<< "$input")" \
+    '{schema:1,plan:$plan,phase:$phase,version:$version,operation:$operation}' | atomic_json "$transaction"
+}
+assert_transaction() {
+  jq -e --arg plan "$plan" --arg operation "$(jq -r .operation <<< "$input")" '.plan==$plan and .operation==$operation' "$transaction" >/dev/null || die 'A different transaction requires recovery'
+}
+assert_stopped() {
+  [[ -z $(compose ps --status running -q) ]] || die 'All installation containers must be stopped'
+}
+verify_archive() {
+  [[ "$archive" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]{0,95}$ ]] || die 'Archive must be a backup ID from this installation'
+  backup="$directory/backups/$archive"
+  [[ -d "$backup" && ! -L "$backup" && ! -L "$backup/state.tar.gz" && ! -L "$backup/receipt.json" ]] || die 'Backup is missing'
+  jq -e --arg uuid "$identity" --arg id "$installation" --arg host "$host" \
+    '.uuid==$uuid and .installation==$id and .host==$host and .verified==true' "$backup/receipt.json" >/dev/null || die 'Backup belongs to another installation or is unverified'
+  [[ $(digest "$backup/state.tar.gz") == "$(jq -er .sha256 "$backup/receipt.json")" ]] || die 'Backup checksum differs'
+  tar -xOzf "$backup/state.tar.gz" compose.json | jq -e '.services|to_entries|all(.[]; ((.key+" "+(.value.image // ""))|test("(^inference-|(^|[/ :_-])(ollama|llama[.-]?cpp|vllm)([/ :@_-]|$))";"i")|not))' >/dev/null || die 'Obsolete managed-inference archive: retain the original archive and prepare a reviewed suite-only recovery export; external model resources must not be restored or launched by Hive'
+  # Archives are produced without symlinks, hard links or special files. Reject any
+  # such member before extraction, including an otherwise correctly checksummed upload.
+  tar -tvzf "$backup/state.tar.gz" | awk 'substr($0,1,1)!="-" && substr($0,1,1)!="d" {bad=1} END {exit bad}' || die 'Unsafe archive member type'
+  if tar -tzf "$backup/state.tar.gz" | awk 'tolower($0) ~ /\.(gguf|ggml|safetensors|pt|pth)$/ {found=1} END {exit !found}'; then
+    die 'Obsolete managed-inference archive: preserve the original archive and prepare a reviewed suite-only recovery export without model assets; Hive will not extract or store model weights'
+  fi
+  while IFS= read -r member; do
+    [[ "$member" =~ ^(data|config|releases|agents|agent-profiles)(/|$)|^(compose.json|receipt.json|installation.json|data-formats.json)$ ]] || die 'Unexpected archive member'
+    [[ "$member" != /* && "$member" != *'..'* && "$member" != *\\* ]] || die 'Unsafe archive path'
+  done < <(tar -tzf "$backup/state.tar.gz")
+}
+check_reconciliation() {
+  jq -e --arg host "$host" --arg uuid "$identity" --arg sha "$(digest "$backup/state.tar.gz")" \
+    '.hosts[$host] | .installationUUID==$uuid and .archiveSHA256==$sha and .subsequentWritesReconciled==true and (.currentDataSHA256|test("^[a-f0-9]{64}$"))' \
+    "$directory/reconciliation.$plan.json" >/dev/null || die 'Restore requires installation-bound write reconciliation'
+}
+case "$action" in
+  adapters-preflight) assert_transaction; adapter_preflight;;
+  adapters-stage) assert_transaction; adapter_stage_agents;;
+  adapters-accept) assert_transaction; adapter_inference_probe; adapter_register_inference; adapter_agents_service start;;
+  prepare)
+    if [[ -f "$transaction" && $(phase) != complete ]]; then
+      if [[ $(jq -r .operation <<< "$input") == restore ]]; then
+        verify_archive; check_reconciliation
+        cp -- "$transaction" "$directory/recovery-transaction.$(date -u +%Y%m%d%H%M%S).json"
+        record prepared
+      else assert_transaction; fi
+    fi
+    if [[ -f "$directory/receipt.json" && $(jq -r .version "$directory/receipt.json") != "$version" ]]; then
+      [[ $(jq -r .operation <<< "$input") =~ ^(upgrade|rollback|restore|rehearse)$ ]] || die 'Use upgrade or rollback for a different release'
+    fi
+    if [[ ! -f "$transaction" || $(phase) == complete ]]; then record prepared; fi
+    ;;
+  compatibility)
+    assert_transaction
+    [[ $(phase) != migration-started ]] || die 'A previous migration needs recovery'
+    operation=$(jq -r .operation <<< "$input")
+    if [[ -f "$directory/receipt.json" ]]; then
+      previous=$(jq -r .version "$directory/receipt.json")
+      if [[ "$previous" == "$version" ]]; then
+        [[ $(jq -r .digest "$directory/receipt.json") == "$(jq -r .digest <<< "$input")" ]] || die 'Published release bytes changed'
+      elif [[ "$operation" == upgrade ]]; then
+        [[ $(printf '%s\n%s\n' "$previous" "$version" | sort -V | tail -1) == "$version" ]] || die 'Use rollback for an older version'
+      fi
+    fi
+    while IFS= read -r component; do
+      current=$(jq -r --arg name "$component" '.[$name] // "unversioned"' "$directory/data-formats.json" 2>/dev/null || printf 'unversioned\n')
+      target=$(jq -r --arg name "$component" '.components[$name].storageFormat // "unversioned"' "$directory/manifest.$plan.json")
+      if [[ "$operation" == install && ! -f "$directory/receipt.json" ]]; then continue; fi
+      if [[ "$current" != "$target" ]]; then
+        if [[ "$operation" == rollback ]]; then
+          jq -e --arg name "$component" --arg current "$current" '.components[$name].readableFormats | index($current)!=null' "$directory/manifest.$plan.json" >/dev/null || die 'Binary rollback cannot read the current storage format; use rehearsed restore'
+        else
+          [[ $(jq -r .allowMigrations <<< "$input") == true ]] || die 'Storage transition needs --allow-migrations'
+          jq -e --arg name "$component" --arg current "$current" '.components[$name].migration | .from==$current and (.command|type=="array" and length>0 and all(.[];type=="string"))' "$directory/manifest.$plan.json" >/dev/null || die 'No exact migration from the current storage format'
+        fi
+      fi
+    done < <(jq -r '.services|keys[]' "$directory/candidate.$plan.json")
+    ;;
+  stage)
+    assert_transaction
+    candidate="$directory/candidate.$plan.json"
+    [[ $(digest "$directory/manifest.$plan.json") == "$(jq -er .digest <<< "$input")" ]] || die 'Release digest differs'
+    openssl pkeyutl -verify -pubin -inkey "$directory/trust.$plan.pub" -rawin -in "$directory/manifest.$plan.json" -sigfile "$directory/signature.$plan" >/dev/null 2>&1 || die 'Release signature differs'
+    docker compose -f "$candidate" config --quiet
+    while IFS= read -r path; do
+      [[ "$path" == "$directory/config/"* && -f "$path" && ! -L "$path" ]] || die 'Environment files must be regular files in the protected config directory'
+      permissions=$(stat -c %a "$path")
+      (( (8#$permissions & 077) == 0 )) || die 'Environment files must be owner-only'
+    done < <(jq -r '.services[].env_file[]? | if type=="string" then . else .path end' "$candidate")
+    while IFS= read -r path; do
+      [[ "$path" == "$directory/config/"* && -d "$path" && ! -L "$path" ]] || die 'Configuration mounts must be owned config directories'
+      [[ -z $(find "$path" -type l -print -quit) ]] || die 'Configuration cannot contain symlinks'
+    done < <(jq -r '.services[].volumes[]? | select(.target=="/config") | .source' "$candidate")
+    docker compose -f "$candidate" pull --quiet
+    docker pull --quiet "$recovery_image" >/dev/null
+    ;;
+  quiesce)
+    assert_transaction
+    [[ $(phase) != migration-started ]] || die 'An uncertain migration requires recovery'
+    adapter_agents_service stop
+    if [[ -f "$directory/compose.json" ]]; then compose stop --timeout 45; assert_stopped; fi
+    record quiesced
+    ;;
+  backup)
+    assert_transaction
+    assert_stopped
+    [[ "$archive" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]{0,95}$ ]] || die 'A backup ID is required'
+    backup="$directory/backups/$archive"
+    if [[ -e "$backup" ]]; then verify_archive; exit 0; fi
+    adapter_snapshot_profiles
+    [[ -z $(find "$directory/data" "$directory/config" "$directory/releases" ! -type f ! -type d -print -quit) ]] || die 'Backup tree contains unsupported links or special files'
+    install -d -m 700 "$backup"
+    members=(data config releases compose.json receipt.json installation.json)
+    [[ ! -d "$directory/agents" ]] || members+=(agents)
+    [[ ! -d "$directory/agent-profiles" ]] || members+=(agent-profiles)
+    [[ ! -f "$directory/data-formats.json" ]] || members+=(data-formats.json)
+    tar --hard-dereference -czf "$backup/state.tar.gz.partial" -C "$directory" -- "${members[@]}"
+    gzip -t "$backup/state.tar.gz.partial"
+    mv "$backup/state.tar.gz.partial" "$backup/state.tar.gz"
+    jq -n --arg uuid "$identity" --arg id "$installation" --arg host "$host" --arg sha "$(digest "$backup/state.tar.gz")" \
+      --arg dataSHA "$(tree_digest "$directory/data")" --arg configSHA "$(tree_digest "$directory/config")" \
+      --slurpfile release "$directory/receipt.json" '{schema:1,uuid:$uuid,installation:$id,host:$host,sha256:$sha,dataSHA256:$dataSHA,configSHA256:$configSHA,verified:true,release:$release[0]}' | atomic_json "$backup/receipt.json"
+    verify_archive
+    record backed-up
+    ;;
+  migrate)
+    assert_transaction
+    [[ $(phase) != migration-started ]] || die 'Migration outcome is unknown; never replay it'
+    manifest="$directory/manifest.$plan.json"
+    # Each migration is claimed durably before execution. A failure holds the suite
+    # stopped; the controller cannot infer whether a partially executed step committed.
+    while IFS= read -r component; do
+      format=$(jq -r --arg component "$component" '.components[$component].storageFormat // "unversioned"' "$manifest")
+      current=$(jq -r --arg component "$component" '.[$component] // "unversioned"' "$directory/data-formats.json" 2>/dev/null || printf 'unversioned\n')
+      if [[ "$current" != "$format" ]]; then
+        jq -e --arg name "$component" --arg from "$current" '.components[$name].migration | .from==$from and (.command|type=="array" and length>0 and all(.[];type=="string"))' "$manifest" >/dev/null || die 'An explicit migration is required'
+        [[ $(jq -r .allowMigrations <<< "$input") == true ]] || die 'Migration execution requires --allow-migrations'
+        record migration-started
+        mapfile -t arguments < <(jq -r --arg name "$component" '.components[$name].migration.command[]' "$manifest")
+        docker compose -f "$directory/candidate.$plan.json" run --no-deps --rm -T "$component" "${arguments[@]}"
+        jq -n --arg name "$component" --arg format "$format" --slurpfile previous "$directory/data-formats.json" '$previous[0]+{($name):$format}' | atomic_json "$directory/data-formats.json"
+        record migrated
+      fi
+    done < <(jq -r '.services|keys[]' "$directory/candidate.$plan.json")
+    ;;
+  activate)
+    assert_transaction
+    [[ $(phase) != migration-started ]] || die 'Migration outcome is unknown'
+    candidate="$directory/candidate.$plan.json"
+    if [[ ! -f "$directory/data-formats.json" ]]; then
+      jq '.components|map_values(.storageFormat // "unversioned")' "$directory/manifest.$plan.json" | atomic_json "$directory/data-formats.json"
+    fi
+    while read -r service uid gid; do
+      path="$directory/data/$service"
+      [[ ! -L "$path" ]] || die 'Data directory cannot be a symlink'
+      if [[ -d "$path" ]]; then
+        [[ $(stat -c %u "$path") == "$uid" && $(stat -c %g "$path") == "$gid" ]] || die 'Data ownership differs'
+      else install -d -m 700 -o "$uid" -g "$gid" "$path"; fi
+    done < <(jq -r '.services|to_entries[]|[.key,(.value.user|split(":")[])]|@tsv' "$candidate")
+    record activating
+    docker compose -f "$candidate" up -d --wait --wait-timeout 180
+    install -d -m 700 "$directory/releases/$version"
+    for file in manifest signature trust; do
+      case "$file" in manifest) source="manifest.$plan.json";; signature) source="signature.$plan";; trust) source="trust.$plan.pub";; esac
+      cp -- "$directory/$source" "$directory/releases/$version/$file"
+    done
+    cp -- "$candidate" "$directory/releases/$version/compose.json"
+    mv -T -- "$candidate" "$directory/compose.json"
+    jq '{schema:1,installation,host,version,digest,plan}' <<< "$input" | atomic_json "$directory/receipt.json"
+    record ready
+    ;;
+  complete) assert_transaction; record complete;;
+  hold)
+    assert_transaction
+    # Readiness failure on a later host must not leave earlier suite writers active.
+    adapter_agents_service stop
+    [[ ! -f "$directory/compose.json" ]] || compose stop --timeout 45
+    [[ ! -f "$directory/candidate.$plan.json" ]] || docker compose -f "$directory/candidate.$plan.json" stop --timeout 45
+    [[ $(phase) == migration-started ]] || record recovery-required
+    ;;
+  resume-current)
+    assert_transaction
+    compose up -d --wait --wait-timeout 180
+    adapter_agents_service start
+    record complete
+    ;;
+  rehearse)
+    verify_archive
+    rehearsal="$directory/rehearsals/$archive"
+    [[ ! -e "$rehearsal" ]] || die 'A rehearsal with this ID already exists; retain it as evidence'
+    install -d -m 700 "$rehearsal"
+    tar --extract --gzip --file "$backup/state.tar.gz" --directory "$rehearsal" --same-owner --same-permissions
+    candidate="$directory/candidate.$plan.json"
+    [[ -f "$candidate" ]] || candidate="$rehearsal/compose.json"
+    # No production env, network, port, external volume, dispatcher or collector is
+    # reachable. The original protected files stay byte-exact in the restored tree.
+    jq --arg base "$directory" --arg restored "$rehearsal" --arg name "rehearsal-$installation-$host-$archive" '
+      .name=$name | .services |= with_entries(
+        select((.key|test("collector|dispatcher|agent"))|not) |
+        .value |= (del(.ports,.network_mode,.external_links,.links,.depends_on,.networks,.restart) |
+          .environment=((.environment // {}) + {HIVE_REHEARSAL:"true",SECURITY_FUSION_DISPATCH_ENABLED:"false",SECURITY_FUSION_COLLECTOR_ENABLED:"false"}) |
+          .volumes |= map(if .source|startswith($base+"/") then .source=($restored+.source[($base|length):]) else error("Unowned restore mount") end) |
+          if has("env_file") then .env_file |= map(if type=="string" and startswith($base+"/") then $restored+.[($base|length):] else error("Unowned restore environment") end) else . end)) |
+      .networks={default:{internal:true,driver:"bridge"}}' "$candidate" > "$rehearsal/isolated.json"
+    docker compose -f "$rehearsal/isolated.json" config --quiet
+    [[ $(tree_digest "$rehearsal/data") == "$(jq -er .dataSHA256 "$backup/receipt.json")" ]] || die 'Restored data differs from the backup receipt'
+    # Restore ownership only inside this disposable tree, before the non-root services run.
+    while read -r service uid gid; do chown -R -- "$uid:$gid" "$rehearsal/data/$service"; done < <(jq -r '.services|to_entries[]|[.key,(.value.user|split(":")[])]|@tsv' "$rehearsal/isolated.json")
+    result=passed
+    if ! check_data "$rehearsal" "$rehearsal/isolated.json"; then result=failed; fi
+    if [[ "$result" == passed && -f "$directory/manifest.$plan.json" ]]; then
+      while IFS= read -r component; do
+        from=$(jq -r --arg name "$component" '.[$name] // "unversioned"' "$rehearsal/data-formats.json" 2>/dev/null || printf 'unversioned\n')
+        target=$(jq -r --arg name "$component" '.components[$name].storageFormat // "unversioned"' "$directory/manifest.$plan.json")
+        if [[ "$from" != "$target" && $(jq -r .operation <<< "$input") != rollback ]]; then
+          mapfile -t arguments < <(jq -r --arg name "$component" '.components[$name].migration.command[]' "$directory/manifest.$plan.json")
+          if ((${#arguments[@]}==0)) || ! docker compose -f "$rehearsal/isolated.json" run --no-deps --rm -T "$component" "${arguments[@]}"; then result=failed; break; fi
+        fi
+      done < <(jq -r '.services|keys[]' "$rehearsal/isolated.json")
+    fi
+    if [[ "$result" == passed ]] && ! docker compose -f "$rehearsal/isolated.json" up -d --wait --wait-timeout 180; then result=failed; fi
+    docker compose -f "$rehearsal/isolated.json" stop --timeout 45
+    if ! check_data "$rehearsal" "$rehearsal/isolated.json"; then result=failed; fi
+    jq -n --arg result "$result" --arg sha "$(digest "$backup/state.tar.gz")" --arg uuid "$identity" --arg plan "$plan" '{schema:1,result:$result,archiveSHA256:$sha,installationUUID:$uuid,candidatePlan:$plan,isolated:true,portsPublished:false}' | atomic_json "$rehearsal/result.json"
+    [[ "$result" == passed ]] || die 'Rehearsal readiness failed; isolated state and evidence retained'
+    ;;
+  restore-check)
+    verify_archive
+    check_reconciliation
+    jq -e --arg sha "$(digest "$backup/state.tar.gz")" '.result=="passed" and .isolated==true and .archiveSHA256==$sha' "$directory/rehearsals/$archive/result.json" >/dev/null || die 'Restore needs a successful rehearsal of these exact archive bytes'
+    ;;
+  restore)
+    assert_transaction
+    assert_stopped
+    verify_archive
+    check_reconciliation
+    [[ $(tree_digest "$directory/data") == "$(jq -er --arg host "$host" '.hosts[$host].currentDataSHA256' "$directory/reconciliation.$plan.json")" ]] || die 'Data changed after write reconciliation'
+    [[ $(tree_digest "$directory/config") == "$(jq -er .configSHA256 "$backup/receipt.json")" ]] || die 'Secrets/configuration changed since backup; reconcile them before restoring'
+    restored="$directory/restore.$plan"
+    [[ ! -e "$restored" ]] || die 'An interrupted restore needs manual reconciliation'
+    install -d -m 700 "$restored"
+    tar -xzf "$backup/state.tar.gz" -C "$restored" --same-owner --same-permissions
+    [[ $(tree_digest "$restored/data") == "$(jq -er .dataSHA256 "$backup/receipt.json")" ]] || die 'Restored data verification failed'
+    record restoring
+    adapter_restore_profiles "$restored"
+    # Each original is retained. A crash after the first rename is a held restore,
+    # never a reason to start a partly replaced installation automatically.
+    mv -T "$directory/data" "$directory/pre-restore-data.$plan"
+    mv -T "$restored/data" "$directory/data"
+    if [[ -d "$restored/agents" ]]; then
+      [[ ! -d "$directory/agents" ]] || mv -T "$directory/agents" "$directory/pre-restore-agents.$plan"
+      mv -T "$restored/agents" "$directory/agents"
+    fi
+    for file in compose.json receipt.json data-formats.json; do
+      [[ ! -f "$directory/$file" ]] || cp -- "$directory/$file" "$directory/pre-restore-$plan.$file"
+      [[ ! -f "$restored/$file" ]] || mv -T -- "$restored/$file" "$directory/$file"
+    done
+    record restored
+    ;;
+  adopt-check)
+    [[ -f "$directory/compose.json" && -f "$directory/adoption.$plan.json" ]] || die 'Explicit existing and expected Compose definitions are required'
+    [[ $(jq -Sc . "$directory/compose.json") == "$(jq -Sc . "$directory/adoption.$plan.json")" ]] || die 'Existing Compose differs from the reviewed deployment plan'
+    expected=$(jq -r '.services|keys[]' "$directory/compose.json" | sort)
+    [[ $(compose ps --status running --services | sort) == "$expected" ]] || die 'Every adopted service must already be running'
+    while IFS= read -r component; do
+      image=$(jq -r --arg name "$component" '.services[$name].image' "$directory/compose.json")
+      container=$(compose ps -q "$component")
+      [[ $(docker inspect -f '{{.Image}}' "$container") == "$(docker image inspect -f '{{.Id}}' "$image")" ]] || die 'Actual adopted image differs'
+      [[ $(docker inspect -f '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.Privileged}}' "$container") == 'true false' ]] || die 'Adopted container hardening differs'
+    done <<< "$expected"
+    ;;
+  adopt)
+    assert_transaction
+    cp -- "$directory/candidate.$plan.json" "$directory/compose.json"
+    jq '{schema:1,installation,host,version,digest,plan}' <<< "$input" | atomic_json "$directory/receipt.json"
+    jq '.components|map_values(.storageFormat // "unversioned")' "$directory/manifest.$plan.json" | atomic_json "$directory/data-formats.json"
+    record ready
+    ;;
+  *) die 'Unknown host action';;
+esac

@@ -4,4 +4,6 @@ set -Eeuo pipefail
 umask 077
 HIVE_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$HIVE_ROOT/scripts/suite/controller.sh"
+source "$HIVE_ROOT/scripts/suite/lifecycle.sh"
+source "$HIVE_ROOT/scripts/suite/adapters.sh"
 hive_main "$@"

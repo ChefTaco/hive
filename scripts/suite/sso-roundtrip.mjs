@@ -253,17 +253,6 @@ try {
   const require = createRequire(join(identityRoot, 'package.json'));
   const Database = require('better-sqlite3');
   const db = new Database(join(env.IAM_DATA_DIR, 'iam.db'));
-  db.prepare(
-    'INSERT INTO clients (id,name,clientType,redirectUris,grantTypes,firstParty,active,createdAt,updatedAt) VALUES (?,?,?,?,?,1,1,?,?)',
-  ).run(
-    'hivexui-emberpath',
-    'hivexui-emberpath',
-    'public',
-    JSON.stringify(['https://console.example.com/auth/callback']),
-    JSON.stringify(['authorization_code']),
-    Date.now(),
-    Date.now(),
-  );
   // Identity administrator roles do not implicitly confer product permissions.
   // Give this disposable account one explicit product permission for acceptance.
   db.prepare(
@@ -305,6 +294,27 @@ try {
   assert.equal(nativeLogin.status, 200);
   const nativeIdentity = await nativeLogin.json();
   assert.equal(typeof nativeIdentity.accessToken, 'string');
+  const registered = await request(origin + '/api/v1/clients', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + nativeIdentity.accessToken,
+    },
+    body: JSON.stringify({
+      name: 'hivexui-emberpath',
+      clientType: 'public',
+      firstParty: true,
+      redirectUris: ['https://console.example.com/auth/callback'],
+      grantTypes: ['authorization_code'],
+    }),
+  });
+  assert.equal(registered.status, 201, 'Authorized public client registration failed');
+  assert.equal(
+    (await registered.json()).client.id,
+    'hivexui-emberpath',
+    'Registered browser policy identifier changed',
+  );
+
   const cookie = login.headers.get('set-cookie').split(';')[0];
   assert(cookie.startsWith('__Host-oathweave_sso='));
   const verifier = randomBytes(32).toString('base64url'),

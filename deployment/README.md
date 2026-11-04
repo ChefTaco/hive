@@ -13,7 +13,9 @@ directory owned by UID/GID 1000. Runtime secrets and certificates remain outside
 Only Caddy receives the ingress private key. HiveXUI receives public runtime JSON.
 
 Set `HIVE_CONSOLE_HOST` and each selected product's `*_ENDPOINT` and `*_TLS_NAME`.
-An endpoint contains only HTTPS scheme, host and optional port. A TLS name matches
+Set `EMBERPATH_API_ENDPOINT` and `EMBERPATH_API_TLS_NAME` separately for the
+native model API listener; `EMBERPATH_ENDPOINT` targets its browser administration
+listener. An endpoint contains only HTTPS scheme, host and optional port. A TLS name matches
 the upstream certificate. The CA bundle contains the exact approved roots. No
 transport disables certificate verification. Unconfigured products fail closed.
 Compose names can be used only for services on this host and a shared bridge;
@@ -55,3 +57,6 @@ an isolated Redis network. It checks local-ID preservation, reader write denial,
 native-token rejection and logout revocation on the actual receiving API. It
 cleans up its containers and networks and never selects a live installation.
 This bounded acceptance does not certify a fresh core/full installer or migration.
+
+Inference is external: see [external provider configuration](INFERENCE.md).
+No inference image, model volume, GPU matrix or model artifact belongs in a Hive release.

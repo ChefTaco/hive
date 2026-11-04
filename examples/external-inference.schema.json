@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hivemagnus.com/schemas/external-inference.schema.json",
+  "title": "Hive external inference endpoint",
+  "description": "External dependencies only. Obsolete managed inference fields are rejected; preserve their existing resources outside Hive. See deployment/INFERENCE.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "host",
+    "engine",
+    "endpoint",
+    "model"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,47}$"
+    },
+    "host": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,47}$"
+    },
+    "engine": {
+      "enum": [
+        "openai",
+        "ollama",
+        "llamacpp"
+      ]
+    },
+    "protocol": {
+      "enum": [
+        "openai",
+        "ollama"
+      ]
+    },
+    "endpoint": {
+      "type": "string",
+      "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._:/@-]+)?$"
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "authHeaderFile": {
+      "type": "string",
+      "pattern": "^/[A-Za-z0-9_./-]+$"
+    },
+    "caFile": {
+      "type": "string",
+      "pattern": "^/[A-Za-z0-9_./-]+$"
+    },
+    "registration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpoint",
+        "credentialFile",
+        "providerSlug"
+      ],
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._:/@-]+)?$"
+        },
+        "credentialFile": {
+          "type": "string",
+          "pattern": "^/[A-Za-z0-9_./-]+$"
+        },
+        "caFile": {
+          "type": "string",
+          "pattern": "^/[A-Za-z0-9_./-]+$"
+        },
+        "providerSlug": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,47}$"
+        },
+        "existingProviderId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "aliases": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.:/-]{1,200}$"
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "protocol": {
+            "const": "ollama"
+          }
+        },
+        "required": [
+          "protocol"
+        ]
+      },
+      "then": {
+        "properties": {
+          "engine": {
+            "const": "ollama"
+          }
+        }
+      }
+    }
+  ]
+}

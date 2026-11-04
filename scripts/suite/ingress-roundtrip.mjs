@@ -127,6 +127,7 @@ server.listen(9443,'0.0.0.0');
   ];
   for (const product of [
     'EMBERPATH',
+    'EMBERPATH_API',
     'OATHWEAVE',
     'HIVEMEM',
     'HIVESKILLS',
@@ -220,6 +221,8 @@ server.listen(9443,'0.0.0.0');
   };
   for (const [input, expected] of [
     ['/api/emberpath/providers?limit=1', '/api/providers?limit=1'],
+    ['/api/emberpath/health/ready','/health/ready'],
+    ['/api/cindertrace/health/ready','/ready'],
     ['/api/oathweave/users', '/api/v1/users'],
     ['/api/hivemem/memories', '/v1/memories'],
     ['/api/cindertrace/security-fusion/cases', '/api/v1/security-fusion/cases'],
