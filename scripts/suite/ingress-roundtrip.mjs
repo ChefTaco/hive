@@ -53,9 +53,10 @@ try {
 const https=require('https'),fs=require('fs'),crypto=require('crypto');
 const server=https.createServer({key:fs.readFileSync('/config/console.key'),cert:fs.readFileSync('/config/console.crt')},(req,res)=>{
  if(req.url==='/v1/stream'){res.writeHead(200,{'Content-Type':'text/event-stream'});res.write('data: first\\n\\n');setTimeout(()=>res.end('data: last\\n\\n'),350);return;}
+ res.setHeader('Set-Cookie',['__Host-oathweave_sso=obviously-fake-forged; Path=/; Secure; HttpOnly','iam_refresh=obviously-fake-forged; Path=/; Secure; HttpOnly','MMSID=obviously-fake-native; Path=/; Secure; HttpOnly']);
  res.setHeader('Content-Type','application/json');res.end(JSON.stringify({path:req.url,authorization:req.headers.authorization,cookie:req.headers.cookie,origin:req.headers.origin}));
 });
-server.on('upgrade',(req,socket)=>{const accept=crypto.createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');socket.write('HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\nSec-WebSocket-Accept: '+accept+'\\r\\n\\r\\n');socket.write(Buffer.from([129,2,111,107]));setTimeout(()=>socket.destroy(),2000);});
+server.on('upgrade',(req,socket)=>{const accept=crypto.createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');socket.write('HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\nSec-WebSocket-Accept: '+accept+'\\r\\nX-Fixture-Cookie: '+req.headers.cookie+'\\r\\n\\r\\n');socket.write(Buffer.from([129,2,111,107]));setTimeout(()=>socket.destroy(),2000);});
 server.listen(9443,'0.0.0.0');
 `,
     { mode: 0o600 },
@@ -193,6 +194,7 @@ server.listen(9443,'0.0.0.0');
         res.on('end', () =>
           resolve({
             status: res.statusCode,
+            cookies: res.headers['set-cookie'],
             body: Buffer.concat(chunks).toString(),
             streamMilliseconds: Date.now() - first,
           }),
@@ -216,13 +218,14 @@ server.listen(9443,'0.0.0.0');
   assert.match((await request('/')).body, /HiveXUI/);
   const headers = {
     Authorization: 'Bearer obviously-fake-transport-fixture',
-    Cookie: 'MMSID=obviously-fake-cookie',
+    Cookie:
+      '__Host-oathweave_sso=obviously-fake-sso; MMSID=obviously-fake-cookie; iam_refresh=obviously-fake-refresh',
     Origin: 'https://console.example.com',
   };
   for (const [input, expected] of [
     ['/api/emberpath/providers?limit=1', '/api/providers?limit=1'],
-    ['/api/emberpath/health/ready','/health/ready'],
-    ['/api/cindertrace/health/ready','/ready'],
+    ['/api/emberpath/health/ready', '/health/ready'],
+    ['/api/cindertrace/health/ready', '/ready'],
     ['/api/oathweave/users', '/api/v1/users'],
     ['/api/hivemem/memories', '/v1/memories'],
     ['/api/cindertrace/security-fusion/cases', '/api/v1/security-fusion/cases'],
@@ -237,9 +240,24 @@ server.listen(9443,'0.0.0.0');
     assert.deepEqual(JSON.parse(result.body), {
       path: expected,
       authorization: headers.Authorization,
-      cookie: headers.Cookie,
+      cookie: input.startsWith('/api/oathweave/')
+        ? headers.Cookie
+        : '; MMSID=obviously-fake-cookie;',
       origin: headers.Origin,
     });
+    const cookies = result.cookies.filter(Boolean);
+    assert.equal(
+      cookies.some((cookie) => cookie.startsWith('__Host-oathweave_sso=')),
+      input.startsWith('/api/oathweave/'),
+    );
+    assert.equal(
+      cookies.some((cookie) => cookie.startsWith('iam_refresh=')),
+      input.startsWith('/api/oathweave/'),
+    );
+    assert(
+      cookies.some((cookie) => cookie.startsWith('MMSID=')),
+      'Native product cookies must survive',
+    );
   }
   assert.equal(
     (await request('/api/hiveskills/admin/skills', headers)).status,
@@ -268,6 +286,7 @@ server.listen(9443,'0.0.0.0');
     });
     req.on('upgrade', (res, socket, head) => {
       assert.equal(res.statusCode, 101);
+      assert.equal(res.headers['x-fixture-cookie'], '; MMSID=obviously-fake-cookie;');
       const done = (buffer) => {
         try {
           assert.equal(buffer.subarray(0, 4).toString('hex'), '81026f6b');
@@ -288,7 +307,7 @@ server.listen(9443,'0.0.0.0');
   });
   passed = true;
   console.log(
-    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit native/browser mappings, unchanged user headers, streaming and WebSocket transport.',
+    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, SSO cookie isolation, native sessions, streaming and WebSocket transport.',
   );
 } catch (error) {
   for (const container of containers) {

@@ -20,7 +20,7 @@ jq '.hosts.control.directory="/opt/../../"' "$temporary/installation.json" > "$t
 reject "$ROOT/hive.sh" plan --config "$temporary/bad.json"
 openssl genpkey -algorithm ED25519 -out "$temporary/private" >/dev/null 2>&1
 openssl pkey -in "$temporary/private" -pubout -out "$temporary/public" >/dev/null 2>&1
-jq -n --slurpfile c "$temporary/installation.json" '{schema:1,version:"0.1.0",profiles:{core:($c[0].components|keys),full:($c[0].components|keys)},components:($c[0].components|map_values({image:("example.com/synthetic@sha256:"+("0"*64)),service:{user:"1000:1000",healthcheck:{test:["CMD","true"]}}}))}' > "$temporary/release.json"
+jq -n --slurpfile c "$temporary/installation.json" '{schema:1,version:"0.1.0",profiles:{core:($c[0].components|keys),full:($c[0].components|keys)},components:($c[0].components|map_values({image:("example.com/synthetic@sha256:"+("0"*64)),service:{user:"1000:1000",healthcheck:{test:["CMD","true"]}}}))} | .components.hivexui.kind="static-ui" | .components.ingress.kind="ingress"' > "$temporary/release.json"
 openssl pkeyutl -sign -inkey "$temporary/private" -rawin -in "$temporary/release.json" -out "$temporary/release.sig"
 HIVE_CONFIG=$temporary/installation.json HIVE_VERSION=0.1.0
 HIVE_MANIFEST=$temporary/release.json HIVE_SIGNATURE=$temporary/release.sig HIVE_TRUST_KEY=$temporary/public

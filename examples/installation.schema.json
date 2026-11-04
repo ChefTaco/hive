@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hivemagnus.com/schemas/installation.schema.json",
+  "title": "Hive installation inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "installation",
+    "release",
+    "profile",
+    "origin",
+    "hosts",
+    "components",
+    "agents",
+    "inference"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "installation": {
+      "$ref": "#/$defs/id"
+    },
+    "release": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.-]+)?$"
+    },
+    "profile": {
+      "enum": [
+        "core",
+        "full",
+        "custom"
+      ]
+    },
+    "origin": {
+      "type": "string",
+      "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]+)?$"
+    },
+    "hosts": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/host"
+      }
+    },
+    "components": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/placement"
+      }
+    },
+    "console": {
+      "$ref": "#/$defs/console"
+    },
+    "agents": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/agent"
+      }
+    },
+    "inference": {
+      "type": "array",
+      "description": "External endpoints only. Managed inference settings are obsolete; preserve existing services and model resources outside Hive.",
+      "items": {
+        "$ref": "external-inference.schema.json"
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,47}$"
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^/[A-Za-z0-9_./-]+$",
+      "not": {
+        "pattern": "(^|/)\\.\\.(/|$)"
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "directory"
+      ],
+      "properties": {
+        "target": {
+          "type": "string",
+          "pattern": "^(local|[a-zA-Z_][a-zA-Z0-9_-]*@[a-zA-Z0-9][a-zA-Z0-9.-]*)$"
+        },
+        "directory": {
+          "$ref": "#/$defs/path"
+        },
+        "architecture": {
+          "enum": [
+            "amd64",
+            "arm64"
+          ]
+        },
+        "minimumFreeMiB": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 2048
+        }
+      }
+    },
+    "placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host"
+      ],
+      "properties": {
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "envFile": {
+          "$ref": "#/$defs/path"
+        },
+        "configDirectory": {
+          "$ref": "#/$defs/path"
+        }
+      }
+    },
+    "console": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "bindAddress",
+        "httpsPort",
+        "runtimeFile"
+      ],
+      "properties": {
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "bindAddress": {
+          "type": "string",
+          "description": "Explicit IPv4 address or ::/::1; default wizard selection is loopback."
+        },
+        "httpsPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "runtimeFile": {
+          "$ref": "#/$defs/path"
+        }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "host",
+        "runtime",
+        "version",
+        "profileDirectory",
+        "environmentFile",
+        "service",
+        "authorized"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "host": {
+          "$ref": "#/$defs/id"
+        },
+        "runtime": {
+          "enum": [
+            "magnus",
+            "ardent",
+            "hermes",
+            "codex"
+          ]
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "profileDirectory": {
+          "$ref": "#/$defs/path"
+        },
+        "environmentFile": {
+          "$ref": "#/$defs/path"
+        },
+        "service": {
+          "enum": [
+            "user",
+            "none"
+          ]
+        },
+        "authorized": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

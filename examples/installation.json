@@ -5,15 +5,53 @@
   "profile": "core",
   "origin": "https://hive.example.com",
   "hosts": {
-    "control": {"target": "local", "directory": "/opt/hive"}
+    "control": {
+      "target": "local",
+      "directory": "/opt/hive"
+    }
   },
   "components": {
-    "oathweave": {"host": "control", "envFile": "/opt/hive/config/oathweave.env", "configDirectory": "/opt/hive/config/oathweave"},
-    "emberpath": {"host": "control", "envFile": "/opt/hive/config/emberpath.env", "configDirectory": "/opt/hive/config/emberpath"},
-    "hivemem": {"host": "control", "envFile": "/opt/hive/config/hivemem.env"},
-    "hiveskills": {"host": "control", "envFile": "/opt/hive/config/hiveskills.env", "configDirectory": "/opt/hive/config/hiveskills"},
-    "hivexui": {"host": "control"}
+    "oathweave": {
+      "host": "control",
+      "envFile": "/opt/hive/config/oathweave.env",
+      "configDirectory": "/opt/hive/config/oathweave"
+    },
+    "emberpath": {
+      "host": "control",
+      "envFile": "/opt/hive/config/emberpath.env",
+      "configDirectory": "/opt/hive/config/emberpath"
+    },
+    "hivemem": {
+      "host": "control",
+      "envFile": "/opt/hive/config/hivemem.env",
+      "configDirectory": "/opt/hive/config/hivemem"
+    },
+    "hiveskills": {
+      "host": "control",
+      "envFile": "/opt/hive/config/hiveskills.env",
+      "configDirectory": "/opt/hive/config/hiveskills"
+    },
+    "hivexui": {
+      "host": "control"
+    },
+    "ingress": {
+      "host": "control",
+      "envFile": "/opt/hive/config/ingress.env",
+      "configDirectory": "/opt/hive/config/ingress"
+    },
+    "oathweave-redis": {
+      "host": "control"
+    },
+    "hivemem-qdrant": {
+      "host": "control"
+    }
   },
   "agents": [],
-  "inference": []
+  "inference": [],
+  "console": {
+    "host": "control",
+    "bindAddress": "127.0.0.1",
+    "httpsPort": 8443,
+    "runtimeFile": "/opt/hive/config/runtime.json"
+  }
 }

@@ -18,13 +18,28 @@ import https from 'node:https';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomBytes, createHash } from 'node:crypto';
+import { identityBrowserReview } from './identity-browser-review.mjs';
 
 const sources = resolve(
   process.env.HIVE_SUITE_SOURCES || fileURLToPath(new URL('../../..', import.meta.url)),
 );
 const identityRoot = join(sources, 'Oathweave/apps/iam-core');
 const routerRoot = join(sources, 'Emberpath');
-const temporary = mkdtempSync(join(tmpdir(), 'hive-sso-acceptance-'));
+const reviewIndex = process.argv.indexOf('--browser-review');
+const review =
+  reviewIndex < 0
+    ? null
+    : {
+        directory: resolve(process.argv[reviewIndex + 1]),
+        port: 5299,
+        origin: 'https://localhost:5299',
+        seconds: 1800,
+      };
+if (review) {
+  assert(process.argv.includes('--containers'), 'Browser review requires disposable containers');
+  mkdirSync(review.directory, { mode: 0o700 });
+}
+const temporary = review?.directory ?? mkdtempSync(join(tmpdir(), 'hive-sso-acceptance-'));
 const children = [];
 const containerMode = process.argv.includes('--containers');
 const network = 'hive-sso-test-' + randomBytes(5).toString('hex');
@@ -101,8 +116,18 @@ function launch(command, args, env, name) {
       if (name === 'router')
         for (const key of ['OATHWEAVE_JWKS_URL', 'OATHWEAVE_USERINFO_URL'])
           values[key] = values[key].replace('https://localhost:', 'https://identity:');
-      for (const [key, value] of Object.entries(values))
-        if (!Object.hasOwn(acceptanceEnvironment, key)) options.push('-e', key + '=' + value);
+      const envFile = join(temporary, name + '.env');
+      for (const value of Object.values(values))
+        assert(!/[\r\n]/.test(value), 'Unexpected multiline environment value');
+      writeFileSync(
+        envFile,
+        Object.entries(values)
+          .filter(([key]) => !Object.hasOwn(acceptanceEnvironment, key))
+          .map(([key, value]) => key + '=' + value)
+          .join('\n') + '\n',
+        { mode: 0o600 },
+      );
+      options.push('--env-file', envFile);
       command = 'docker';
       args = [
         ...options,
@@ -202,6 +227,7 @@ try {
     IAM_BROWSER_ISSUER: origin,
     COOKIE_SECRET: randomBytes(32).toString('hex'),
     IAM_AGENT_SECRET: randomBytes(32).toString('hex'),
+    ...(review ? { RATE_LIMIT_MAX_ATTEMPTS: '50' } : {}),
     SEED_ADMIN_USERNAME: 'admin',
     SEED_ADMIN_EMAIL: 'alice@example.com',
     SEED_ADMIN_PASSWORD: password,
@@ -209,14 +235,40 @@ try {
     SEED_HIVE_CLIENT_SECRET: randomBytes(32).toString('hex'),
     TLS_CERT_PATH: cert,
     TLS_KEY_PATH: key,
-    CORS_ORIGIN: 'https://console.example.com',
+    CORS_ORIGIN: 'https://console.example.com' + (review ? ',' + review.origin : ''),
+    ...(review
+      ? {
+          WEBAUTHN_RP_ID: 'localhost',
+          WEBAUTHN_RP_ORIGIN: review.origin,
+          IAM_RECOVERY_OUTBOX_DIRECTORY: join(temporary, 'identity', 'recovery-outbox'),
+        }
+      : {}),
     NODE_EXTRA_CA_CERTS: cert,
     HIVE_AUTO_MIGRATE: 'true',
     HIVE_AUTO_UPGRADE: 'false',
     HIVE_UPDATE_CHECK: 'false',
     HIVE_MANAGED_PROJECT: '',
     IAM_BROWSER_CLIENT_POLICIES: JSON.stringify({
-      'hivexui-emberpath': { audience: 'emberpath', permissions: ['router:providers:read'] },
+      'hivexui-emberpath': { audience: 'emberpath', permissions: ['router:providers:read', 'router:testing:read'] },
+      ...(review
+        ? {
+            'hivexui-browser-emberpath': {
+              audience: 'emberpath',
+              permissions: ['router:providers:read', 'router:testing:read'],
+            },
+            'hivexui-browser-oathweave': {
+              audience: 'oathweave',
+              permissions: [
+                'iam:users:read',
+                'iam:roles:read',
+                'iam:clients:read',
+                'iam:sessions:revoke',
+                'iam:audit:read',
+                'iam:policy:write',
+              ],
+            },
+          }
+        : {}),
     }),
   };
   // Do not inherit any operator database or signing-key overrides.
@@ -261,7 +313,7 @@ try {
     'fake-routing-reader',
     'FAKE_ROUTING_READER',
     'Synthetic routing reader',
-    JSON.stringify(['router:providers:read']),
+    JSON.stringify(['router:providers:read', 'router:testing:read']),
     Date.now(),
     Date.now(),
   );
@@ -368,7 +420,7 @@ try {
     { fetch: request },
   );
   const principal = await verify(token.access_token);
-  assert.deepEqual(principal.permissions, ['router:providers:read']);
+  assert.deepEqual(principal.permissions, ['router:providers:read', 'router:testing:read']);
   // Run the actual receiving API against its own fresh datastore. The reviewed
   // issuer/subject binding must retain this product ID without role promotion.
   const apiPort = await port(),
@@ -444,7 +496,7 @@ try {
   assert.equal(session.status, 200);
   const resourceUser = (await session.json()).user;
   assert.equal(resourceUser.id, localUserId);
-  assert.deepEqual(resourceUser.permissions, ['router:providers:read']);
+  assert.deepEqual(resourceUser.permissions, ['router:providers:read', 'router:testing:read']);
   assert.equal(
     (await request(adminOrigin + '/api/providers', { headers: resourceHeaders })).status,
     200,
@@ -460,6 +512,12 @@ try {
     403,
     'Reader mutated the resource API',
   );
+  for (const path of ['/api/testing/run', '/api/testing/run/']) {
+    const result = await request(adminOrigin + path, { method: 'POST', headers: resourceHeaders, body: '{}' });
+    assert.equal(result.status, 403, 'Testing reader executed inference');
+  }
+  const preview = await request(adminOrigin + '/api/testing/preview', { method: 'POST', headers: resourceHeaders, body: '{}' });
+  assert.equal(preview.status, 400, 'Testing reader must reach preview validation without write permission');
   assert.equal(
     (
       await request(adminOrigin + '/api/providers', {
@@ -493,6 +551,22 @@ try {
     (containerMode ? 'Containers: ' : 'Native: ') +
       'PASS: isolated Oathweave login, SSO cookie, PKCE, one-use code, resource HTTP authorization, preserved local ID, mutation denial and online revocation (verified TLS).',
   );
+  if (review)
+    await identityBrowserReview({
+      review,
+      temporary,
+      origin,
+      identityPort,
+      adminPort,
+      network,
+      docker,
+      containers: testContainers,
+      request,
+      nativeToken: nativeIdentity.accessToken,
+      password,
+      cert,
+      key,
+    });
 } catch (error) {
   if (containerMode)
     for (const identifier of testContainers) {
@@ -517,5 +591,5 @@ try {
       docker('network', 'rm', network, identityDataNetwork);
     } catch {}
   }
-  if (!process.exitCode) rmSync(temporary, { recursive: true, force: true });
+  if (!process.exitCode && !review) rmSync(temporary, { recursive: true, force: true });
 }

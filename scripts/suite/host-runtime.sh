@@ -24,7 +24,7 @@ walk("/data");console.log(JSON.stringify({sqliteIntegrity:"passed",databases}));
   while read -r service uid gid; do
     docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true --network none --user "$uid:$gid" \
       --mount "type=bind,source=$base/data/$service,target=/data,readonly" --entrypoint node "$recovery_image" --input-type=module -e "$code"
-  done < <(jq -r '.services|to_entries[]|[.key,(.value.user|split(":")[])]|@tsv' "$definition")
+  done < <(jq -r '.services|to_entries[]|select(any(.value.volumes[]?; .target=="/data"))|[.key,(.value.user|split(":")[])]|@tsv' "$definition")
 }
 atomic_json() { jq . > "$1.tmp"; chmod 600 "$1.tmp"; sync -f "$1.tmp"; mv -T -- "$1.tmp" "$1"; sync -f "$(dirname -- "$1")"; }
 compose() { docker compose -f "$directory/compose.json" "$@"; }
@@ -150,6 +150,10 @@ case "$action" in
       [[ "$path" == "$directory/config/"* && -d "$path" && ! -L "$path" ]] || die 'Configuration mounts must be owned config directories'
       [[ -z $(find "$path" -type l -print -quit) ]] || die 'Configuration cannot contain symlinks'
     done < <(jq -r '.services[].volumes[]? | select(.target=="/config") | .source' "$candidate")
+    while IFS= read -r path; do
+      [[ "$path" == "$directory/config/"* && -f "$path" && ! -L "$path" ]] || die 'Static runtime must be a regular public configuration file in the installation config tree'
+      hive_check_public_runtime "$path" || die 'Public static runtime contains unsupported fields, credentials or incomplete product identity configuration'
+    done < <(jq -r '.services[].volumes[]? | select(.target=="/usr/share/nginx/html/runtime.json") | .source' "$candidate")
     docker compose -f "$candidate" pull --quiet
     docker pull --quiet "$recovery_image" >/dev/null
     ;;
@@ -215,7 +219,7 @@ case "$action" in
       if [[ -d "$path" ]]; then
         [[ $(stat -c %u "$path") == "$uid" && $(stat -c %g "$path") == "$gid" ]] || die 'Data ownership differs'
       else install -d -m 700 -o "$uid" -g "$gid" "$path"; fi
-    done < <(jq -r '.services|to_entries[]|[.key,(.value.user|split(":")[])]|@tsv' "$candidate")
+    done < <(jq -r '.services|to_entries[]|select(any(.value.volumes[]?; .target=="/data"))|[.key,(.value.user|split(":")[])]|@tsv' "$candidate")
     record activating
     docker compose -f "$candidate" up -d --wait --wait-timeout 180
     install -d -m 700 "$directory/releases/$version"
@@ -264,7 +268,7 @@ case "$action" in
     docker compose -f "$rehearsal/isolated.json" config --quiet
     [[ $(tree_digest "$rehearsal/data") == "$(jq -er .dataSHA256 "$backup/receipt.json")" ]] || die 'Restored data differs from the backup receipt'
     # Restore ownership only inside this disposable tree, before the non-root services run.
-    while read -r service uid gid; do chown -R -- "$uid:$gid" "$rehearsal/data/$service"; done < <(jq -r '.services|to_entries[]|[.key,(.value.user|split(":")[])]|@tsv' "$rehearsal/isolated.json")
+    while read -r service uid gid; do chown -R -- "$uid:$gid" "$rehearsal/data/$service"; done < <(jq -r '.services|to_entries[]|select(any(.value.volumes[]?; .target=="/data"))|[.key,(.value.user|split(":")[])]|@tsv' "$rehearsal/isolated.json")
     result=passed
     if ! check_data "$rehearsal" "$rehearsal/isolated.json"; then result=failed; fi
     if [[ "$result" == passed && -f "$directory/manifest.$plan.json" ]]; then

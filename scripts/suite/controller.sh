@@ -47,22 +47,42 @@ hive_configure() {
 
 hive_validate() {
   [[ -f "$HIVE_CONFIG" && ! -L "$HIVE_CONFIG" ]] || hive_die 'Configuration must be a regular file'
+  if declare -F hive_external_inference_config >/dev/null; then hive_external_inference_config; fi
   jq -e '
     def id: type=="string" and test("^[a-z][a-z0-9-]{0,47}$");
     def path: type=="string" and startswith("/") and test("^/[A-Za-z0-9_./-]+$") and (split("/") | all(. != ".."));
+    (keys-["schema","installation","release","profile","origin","hosts","components","console","agents","inference"]|length==0) and
     .schema==1 and (.installation|id) and (.profile|IN("core","full","custom")) and
     (.origin|type=="string" and test("^https://[A-Za-z0-9.-]+(:[0-9]+)?$")) and
     (.hosts|type=="object" and length>0 and all(to_entries[];
       (.key|id) and (.value.directory|path) and (.value.directory|length>4) and
+      (.value|keys-["target","directory","architecture","minimumFreeMiB"]|length==0) and
+      ((.value.architecture // "amd64")|IN("amd64","arm64")) and
+      ((.value.minimumFreeMiB // 2048)|type=="number" and floor==. and .>=0) and
       (.value.target|.=="local" or test("^[a-zA-Z_][a-zA-Z0-9_-]*@[a-zA-Z0-9][a-zA-Z0-9.-]*$")))) and
     (. as $c | .components|type=="object" and all(to_entries[];
       (.key|id) and ($c.hosts[.value.host] != null) and
+      (.value|keys-["host","envFile","configDirectory"]|length==0) and
       ((.value.envFile // "/dev/null")|path) and
       ((.value.configDirectory // "/dev/null")|path))) and
     (.agents|type=="array") and (.inference|type=="array")
   ' "$HIVE_CONFIG" >/dev/null || hive_die 'Invalid installation configuration'
   HIVE_ID=$(jq -r '.installation' "$HIVE_CONFIG")
   HIVE_VERSION=${HIVE_VERSION:-$(jq -r '.release' "$HIVE_CONFIG")}
+  if jq -e 'has("console")' "$HIVE_CONFIG" >/dev/null; then
+    jq -e '
+      def path: type=="string" and test("^/[A-Za-z0-9_./-]+$") and (split("/")|all(.!=".."));
+      . as $c | .console as $ui |
+      ($ui|type=="object" and (keys-["host","bindAddress","httpsPort","runtimeFile"]|length==0)) and
+      ($c.hosts[$ui.host]!=null) and $c.components.hivexui.host==$ui.host and $c.components.ingress.host==$ui.host and
+      ($c.components.hivexui|has("envFile") or has("configDirectory")|not) and
+      ($c.components.ingress.envFile|path) and ($c.components.ingress.configDirectory|path) and
+      ($ui.runtimeFile|path) and ($ui.runtimeFile|startswith($c.hosts[$ui.host].directory+"/config/")) and
+      ($ui.httpsPort|type=="number" and floor==. and .>=1 and .<=65535) and
+      ($ui.bindAddress|type=="string" and
+        (.=="::" or .=="::1" or (split(".")|length==4 and all(.[];test("^[0-9]{1,3}$") and (tonumber<=255)))))
+    ' "$HIVE_CONFIG" >/dev/null || hive_die 'Invalid console placement: co-locate ingress and HiveXUI, supply an explicit listener and a public runtime file inside the protected installation config tree; HiveXUI cannot receive an environment file or backend configuration'
+  fi
   if declare -F hive_adapter_validate >/dev/null; then hive_adapter_validate; fi
 }
 
@@ -78,6 +98,9 @@ hive_manifest() {
     .schema==1 and .version==$version and
     (.components|type=="object" and length>0 and all(to_entries[];
       (.key|test("^[a-z][a-z0-9-]{0,47}$")) and
+      ((.value.kind // "application")|IN("application","datastore","static-ui","ingress")) and
+      (if .value.kind=="static-ui" then .key=="hivexui" and ((.value.service.environment // {})|length==0) else true end) and
+      (if .value.kind=="ingress" then .key=="ingress" else true end) and
       (.value.image|test("^[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}$")) and
       (.value.service|type=="object" and (keys-["user","command","entrypoint","healthcheck","environment","depends_on","networks","expose","working_dir","labels","mem_limit","cpus","ulimits"]|length==0)) and
       (.value.service.user|type=="string" and test("^[1-9][0-9]*:[1-9][0-9]*$")) and
@@ -93,6 +116,7 @@ hive_manifest() {
   jq -e --slurpfile config "$HIVE_CONFIG" '
     . as $r | $config[0] as $c |
     ($c.components|keys) as $selected |
+    (if $c.console then $r.components.hivexui.kind=="static-ui" and $r.components.ingress.kind=="ingress" else all($selected[]; ($r.components[.].kind // "application")|IN("application","datastore")) end) and
     all($selected[]; $r.components[.] != null) and
     all($selected[]; . as $name | all(($r.components[$name].requiresLocal // [])[]; . as $dependency | $c.components[$dependency].host==$c.components[$name].host)) and
     (if $c.profile=="custom" then true else all($r.profiles[$c.profile][]; . as $name | $selected|index($name)!=null) end)
@@ -104,6 +128,7 @@ hive_manifest() {
 hive_plan() {
   jq --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" '{schema,installation,release:$version,manifestDigest:$digest,profile,origin,
     hosts:(.hosts|map_values({target,directory})),
+    console:(if .console then {host:.console.host,bindAddress:.console.bindAddress,httpsPort:.console.httpsPort,publicRuntimeConfigured:true} else null end),
     components:(.components|map_values({host,environmentConfigured:has("envFile"),configurationMounted:has("configDirectory")})),
     agents:(.agents|map({host,runtime})),inference:(.inference|map({host,engine,protocol:(.protocol // "openai"),endpoint,model,credentialConfigured:has("authHeaderFile"),registrationConfigured:has("registration")}))}' "$HIVE_CONFIG"
 }
@@ -114,7 +139,7 @@ hive_host() {
   target=$(jq -r --arg host "$host" '.hosts[$host].target' "$HIVE_CONFIG")
   payload=$(jq -c --arg host "$host" --arg installation "$HIVE_ID" --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" --arg plan "${HIVE_PLAN_DIGEST:-}" \
     --arg action "${HIVE_HOST_ACTION:-}" --arg operation "${HIVE_OPERATION:-}" --arg archive "${HIVE_ARCHIVE:-}" --argjson allowMigrations "${HIVE_ALLOW_MIGRATIONS:-false}" \
-    '{directory:.hosts[$host].directory,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
+    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
   if [[ "$target" == local ]]; then
     printf '%s\n' "$payload" | bash -c "$script"
   else
@@ -128,28 +153,7 @@ hive_host() {
 hive_doctor() {
   local host
   while IFS= read -r host; do
-    hive_host "$host" 'set -euo pipefail; read -r input; directory=$(jq -r .directory <<< "$input");
-      for tool in docker jq flock openssl tar gzip sha256sum stat find sort curl; do command -v "$tool" >/dev/null; done;
-    docker info >/dev/null; docker compose version >/dev/null;
-      case $(uname -m) in x86_64|aarch64) ;; *) exit 1;; esac;
-      test -d "$directory" || test -w "$(dirname "$directory")";
-      while IFS= read -r path; do
-        test "$path" = /dev/null && continue;
-        test -f "$path" && test ! -L "$path" && test -r "$path";
-        permissions=$(stat -c %a "$path"); test "$((8#$permissions & 077))" = 0;
-      done < <(jq -r ".placements[].envFile // \"/dev/null\"" <<< "$input");
-      while IFS= read -r path; do
-        test -f "$path" && test ! -L "$path" && test -r "$path";
-        test "$(stat -c %u "$path")" = "$(id -u)";
-        permissions=$(stat -c %a "$path"); test "$((8#$permissions & 077))" = 0;
-      done < <(jq -r ".agents[].environmentFile, (.inference[]|.authHeaderFile,.caFile,.registration.credentialFile,.registration.caFile|select(.!=null))" <<< "$input");
-      while IFS= read -r path; do
-        test -d "$path" && test ! -L "$path";
-        test -z "$(find "$path" -type l -print -quit)";
-      done < <(jq -r ".placements[].configDirectory // empty" <<< "$input");
-      if test -e "$directory/installation.json"; then
-        test "$(jq -r .installation "$directory/installation.json")" = "$(jq -r .installation <<< "$input")";
-      fi' || hive_die "Host preflight failed: $host"
+    hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/public-runtime.sh" "$HIVE_ROOT/scripts/suite/preflight-host.sh")" || hive_die "Host preflight failed: $host"
     printf 'Host %s: preflight passed\n' "$host"
   done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
 }
@@ -160,12 +164,14 @@ hive_render() {
     $config[0] as $c | $release[0] as $r |
     {name:($c.installation+"-"+$host),services:($c.components|to_entries|map(select(.value.host==$host)|
       .key as $name | .value as $placement |
+      ($r.components[$name].kind // "application") as $kind |
       {key:$name,value:($r.components[$name].service + {
         image:$r.components[$name].image, restart:"unless-stopped",
-        security_opt:["no-new-privileges:true"],cap_drop:["ALL"],read_only:true,init:true,stop_grace_period:"45s",tmpfs:["/tmp:mode=1777"],
-        volumes:([{type:"bind",source:($c.hosts[$host].directory+"/data/"+$name),target:"/data"}] +
+        security_opt:["no-new-privileges:true"],cap_drop:["ALL"],read_only:true,init:true,stop_grace_period:"45s",tmpfs:(["/tmp:mode=1777"] + (if $kind=="static-ui" then ($r.components[$name].service.user|split(":")) as $user | ["/var/cache/nginx:uid="+$user[0]+",gid="+$user[1]+",mode=700","/var/run:uid="+$user[0]+",gid="+$user[1]+",mode=700"] else [] end)),
+        volumes:((if $kind=="static-ui" then [{type:"bind",source:$c.console.runtimeFile,target:"/usr/share/nginx/html/runtime.json",read_only:true}] else [{type:"bind",source:($c.hosts[$host].directory+"/data/"+$name),target:"/data"}] end) +
           (if $placement.configDirectory then [{type:"bind",source:$placement.configDirectory,target:"/config",read_only:true}] else [] end))
-      } + (if $placement.envFile then {env_file:[$placement.envFile]} else {} end))})|from_entries),networks:({default:{driver:"bridge"}}+($r.networks // {}))}'
+      } + (if $placement.envFile then {env_file:[$placement.envFile]} else {} end) +
+        (if $kind=="ingress" then {ports:[{target:8443,published:($c.console.httpsPort|tostring),host_ip:$c.console.bindAddress,protocol:"tcp"}]} else {} end))})|from_entries),networks:({default:{driver:"bridge"}}+($r.networks // {}))}'
 }
 
 hive_transfer() {

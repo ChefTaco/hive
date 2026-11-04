@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Isolate identity cookies at shared ingress while preserving native product sessions, streaming and WebSockets.
+- Add disposable-account browser rehearsal support for consent, MFA, passkeys, recovery and step-up authentication.
 - Separate unprivileged HTTPS ingress/static-console deployment candidate and
   disposable native/container SSO, resource API and protocol transport acceptance.
 - Experimental shell suite controller with offline installation plans, signed

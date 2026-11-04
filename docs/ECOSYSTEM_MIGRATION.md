@@ -16,7 +16,7 @@ source snapshot or passing unit test is not evidence of a production cutover.
 | Independent backend builds and tests | In progress | Clean installation, typecheck, build, existing regression suites |
 | Static HiveXUI extraction | Build/container and synthetic render checks pass | No backend imports; browser render and workflow acceptance |
 | Direct product authorization | Implemented; bounded regression tests pass | Resource audience, permissions, revocation and step-up regression tests |
-| Oathweave browser SSO | Protocol acceptance passes; complete UX pending | PKCE, consent, MFA/passkeys, recovery, session/logout acceptance |
+| Oathweave browser SSO | Disposable browser workflows pass; restored-account sign-in pending | PKCE, consent, MFA/passkeys, recovery, session/logout acceptance |
 | Security and chat UI consolidation | Candidate modules build; full parity pending | Existing route/workflow parity including files, sockets and approvals |
 | Shell suite lifecycle | In progress | Unattended/interactive, resume, multi-host, backup/restore, upgrade tests |
 | Host agent enrollment | Pending | Scoped credentials, existing profile preservation, real heartbeat/job proof |
@@ -81,11 +81,16 @@ Native machine credentials remain independent of human browser SSO.
 `npm run test:suite:sso` starts disposable Oathweave/Redis/SQLite with verified local
 TLS. It proves code replay rejection, native/browser issuer separation, exact
 resource permission claims and logout revocation. It does not prove every browser
-login, passkey, recovery, consent or step-up workflow.
+login, passkey, recovery, consent or step-up workflow. The optional disposable
+`--browser-review` harness supplies generated accounts, a protected recovery outbox
+and the real static console for separate browser acceptance. Browser reviews cover
+passkeys, TOTP, recovery-code preservation, consent decline/retry, recent-session
+step-up without mutation replay, one-use password recovery and prior-session
+revocation. They never select or reset an existing installation's account.
 
 `npm run test:suite:ingress` runs disposable bridge-network containers. It proves
-explicit native/browser path mappings, unchanged user headers, certificate-name
-rejection, streaming and WebSocket transport. It does not prove product-level
+explicit native/browser path mappings, identity-cookie isolation, native session
+preservation, certificate-name rejection, streaming and WebSocket transport. It does not prove product-level
 permissions, attachment access or migrated-data compatibility. Build the local
 candidate images as described in `deployment/README.md` first.
 
@@ -101,8 +106,10 @@ adapters implement host-bound backups, isolated restore rehearsal, exact migrati
 compatible rollback, reconciliation-bound restore, explicit Compose adoption and
 transaction receipts. The disposable SQLite lifecycle drill covers retries, restored
 candidate execution and uncertain migration refusal. It does not certify interactive
-core/full installs or interrupted multi-host execution. Ingress assembly, complete
-preflight, secrets/bootstrap and real native agent integration remain open.
+core/full installs or interrupted multi-host execution. The renderer now assembles
+signed ingress/static service kinds with a strict public-runtime allowlist and
+read-only host preflight. Complete secrets/bootstrap and real native agent
+integration remain open.
 No official suite manifest or publisher trust key has been released.
 This is not an installation or migration release.
 

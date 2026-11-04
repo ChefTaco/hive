@@ -2,7 +2,7 @@
 
 hive_action() {
   local host=$1
-  HIVE_HOST_ACTION=$2 hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/adapters-host.sh" "$HIVE_ROOT/scripts/suite/inference-registration.sh" "$HIVE_ROOT/scripts/suite/host-runtime.sh")"
+  HIVE_HOST_ACTION=$2 hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/public-runtime.sh" "$HIVE_ROOT/scripts/suite/adapters-host.sh" "$HIVE_ROOT/scripts/suite/inference-registration.sh" "$HIVE_ROOT/scripts/suite/host-runtime.sh")"
 }
 
 hive_all() {
