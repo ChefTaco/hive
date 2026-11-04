@@ -7,7 +7,7 @@ hive_runtime_files() {
     scripts/suite/controller.sh scripts/suite/lifecycle.sh scripts/suite/host-runtime.sh \
     scripts/suite/adapters.sh scripts/suite/adapters-host.sh scripts/suite/inference-registration.sh \
     scripts/suite/public-runtime.sh scripts/suite/preflight-host.sh scripts/suite/initialize.sh \
-    scripts/suite/initialize-host.sh scripts/suite/integrity-host.sh scripts/suite/check-data.mjs
+    scripts/suite/initialize-host.sh scripts/suite/integrity-host.sh scripts/suite/input-artifacts-host.sh scripts/suite/check-data.mjs
 }
 hive_controller_digest() {
   local file
@@ -130,12 +130,14 @@ hive_validate() {
   jq -e '
     def id: type=="string" and test("^[a-z][a-z0-9-]{0,47}$");
     def path: type=="string" and startswith("/") and test("^/[A-Za-z0-9_./-]+$") and (split("/") | all(. != ".."));
-    (keys-["schema","installation","release","profile","origin","hosts","components","console","bootstrap","agents","inference"]|length==0) and
+    (keys-["schema","installation","release","configurationRevision","profile","origin","hosts","components","console","bootstrap","agents","inference"]|length==0) and
+    ((.configurationRevision // "1")|type=="string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")) and
     .schema==1 and (.installation|id) and (.profile|IN("core","full","custom")) and
     (.origin|type=="string" and test("^https://[A-Za-z0-9.-]+(:[0-9]+)?$")) and
     (.hosts|type=="object" and length>0 and all(to_entries[];
       (.key|id) and (.value.directory|path) and (.value.directory|length>4) and
-      (.value|keys-["target","directory","architecture","minimumFreeMiB"]|length==0) and
+      (.value|keys-["target","directory","architecture","minimumFreeMiB","sshConfig"]|length==0) and
+      ((.value.sshConfig // "/dev/null")|path) and
       ((.value.architecture // "amd64")|IN("amd64","arm64")) and
       ((.value.minimumFreeMiB // 2048)|type=="number" and floor==. and .>=0) and
       (.value.target|.=="local" or test("^[a-zA-Z_][a-zA-Z0-9_-]*@[a-zA-Z0-9][a-zA-Z0-9.-]*$")))) and
@@ -212,6 +214,7 @@ hive_manifest() {
   ' "$HIVE_MANIFEST" >/dev/null || hive_die 'Selected components do not match the release/profile'
   HIVE_MANIFEST_DIGEST=$(sha256sum "$HIVE_MANIFEST" | cut -d ' ' -f1)
   HIVE_CONTROLLER_DIGEST=$(hive_controller_digest)
+  HIVE_RELEASE_SUMMARY=$(jq -c --slurpfile config "$HIVE_CONFIG" '.components|with_entries(select(.key as $name|$config[0].components[$name]!=null))|map_values({image,productVersion:.version,storageFormat}|with_entries(select(.value!=null)))' "$HIVE_MANIFEST")
   if jq -e 'has("controllerSHA256")' "$HIVE_MANIFEST" >/dev/null; then
     [[ $(jq -er .controllerSHA256 "$HIVE_MANIFEST") == "$HIVE_CONTROLLER_DIGEST" ]] || hive_die 'Signed release requires different controller source; use its original verified installer bundle'
   fi
@@ -219,16 +222,19 @@ hive_manifest() {
 }
 
 hive_plan() {
-  jq --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" --arg controller "${HIVE_CONTROLLER_DIGEST:-}" '{schema,installation,release:$version,manifestDigest:$digest,controllerSourceSHA256:$controller,profile,origin,
+  local released=${HIVE_RELEASE_SUMMARY:-'{}'}
+  jq --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --argjson released "$released" '{schema,installation,release:$version,configurationRevision:(.configurationRevision // "1"),manifestDigest:$digest,controllerSourceSHA256:$controller,profile,origin,
     hosts:(.hosts|map_values({target,directory})),
     console:(if .console then {host:.console.host,bindAddress:.console.bindAddress,httpsPort:.console.httpsPort,publicRuntimeConfigured:true} else null end),
-    components:(.components|map_values({host,environmentConfigured:has("envFile"),configurationMounted:has("configDirectory")})),
+    components:(.components|with_entries(.key as $name|.value=({host:.value.host,environmentConfigured:(.value|has("envFile")),configurationMounted:(.value|has("configDirectory"))}+($released[$name] // {})))),
     agents:(.agents|map({host,runtime})),inference:(.inference|map({host,engine,protocol:(.protocol // "openai"),endpoint,model,credentialConfigured:has("authHeaderFile"),registrationConfigured:has("registration")}))}' "$HIVE_CONFIG"
 }
 
 # Arguments are transported as JSON over stdin. No configuration is sourced as shell.
 hive_host() {
   local host=$1 script=$2 target payload bootstrap_users
+  local -a ssh_options
+  hive_ssh_options "$host"
   bootstrap_users=${HIVE_BOOTSTRAP_USERS:-'{}'}
   target=$(jq -r --arg host "$host" '.hosts[$host].target' "$HIVE_CONFIG")
   payload=$(jq -c --arg host "$host" --arg installation "$HIVE_ID" --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" --arg plan "${HIVE_PLAN_DIGEST:-}" \
@@ -242,7 +248,18 @@ hive_host() {
     # The remote command is fixed. Dynamic data is base64 stdin, never shell code.
     local encoded
     encoded=$(printf '%s' "$script" | base64 -w0)
-    printf '%s\n' "$payload" | ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -- "$target" "bash -c \"\$(printf '%s' '$encoded' | base64 -d)\""
+    printf '%s\n' "$payload" | ssh "${ssh_options[@]}" -- "$target" "bash -c \"\$(printf '%s' '$encoded' | base64 -d)\""
+  fi
+}
+
+hive_ssh_options() {
+  local host=$1 configuration permissions
+  ssh_options=(-o BatchMode=yes -o StrictHostKeyChecking=yes)
+  configuration=$(jq -r --arg host "$host" '.hosts[$host].sshConfig // empty' "$HIVE_CONFIG")
+  if [[ -n "$configuration" ]]; then
+    [[ -f "$configuration" && ! -L "$configuration" && -r "$configuration" && $(stat -c %u "$configuration") == "$(id -u)" ]] || hive_die 'SSH configuration must be an operator-owned regular file'
+    permissions=$(stat -c %a "$configuration"); (( (8#$permissions & 077)==0 )) || hive_die 'SSH configuration must be owner-only'
+    ssh_options=(-F "$configuration" "${ssh_options[@]}")
   fi
 }
 
@@ -273,12 +290,14 @@ hive_render() {
 
 hive_transfer() {
   local host=$1 file=$2 relative=$3 target directory
+  local -a ssh_options
+  hive_ssh_options "$host"
   target=$(jq -r --arg host "$host" '.hosts[$host].target' "$HIVE_CONFIG")
   directory=$(jq -r --arg host "$host" '.hosts[$host].directory' "$HIVE_CONFIG")
   if [[ "$target" == local ]]; then
     install -m 600 -- "$file" "$directory/$relative"
   else
-    scp -q -p -o BatchMode=yes -o StrictHostKeyChecking=yes -- "$file" "$target:$directory/$relative"
+    scp -q -p "${ssh_options[@]}" -- "$file" "$target:$directory/$relative"
   fi
 }
 
@@ -288,6 +307,7 @@ hive_main() {
   HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_ALLOW_MIGRATIONS=false
   HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY=''
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
+  HIVE_RELEASE_SUMMARY=''
   if (($#)) && [[ "$1" != --* ]]; then command=$1; shift; fi
   while (($#)); do
     case $1 in

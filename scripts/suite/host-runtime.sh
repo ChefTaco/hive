@@ -34,6 +34,7 @@ save_release_artifacts() {
     done
     cp -- "$candidate" "$directory/releases/$version/compose.json"
     cp -- "$directory/controller.$plan.tar.gz" "$directory/releases/$version/controller.tar.gz"
+    cp -- "$directory/deployment-inputs.$plan.json" "$directory/releases/$version/configuration-inputs.json"
 }
 compose() { docker compose -f "$directory/compose.json" "$@"; }
 [[ "$directory" =~ ^/[A-Za-z0-9_./-]+$ && "$directory" != *'/../'* && "$directory" != */.. && ${#directory} -gt 4 ]] || die 'Invalid installation path'
@@ -163,6 +164,7 @@ case "$action" in
       [[ "$path" == "$directory/config/"* && -f "$path" && ! -L "$path" ]] || die 'Static runtime must be a regular public configuration file in the installation config tree'
       hive_check_public_runtime "$path" || die 'Public static runtime contains unsupported fields, credentials or incomplete product identity configuration'
     done < <(jq -r '.services[].volumes[]? | select(.target=="/usr/share/nginx/html/runtime.json") | .source' "$candidate")
+    pin_deployment_inputs "$candidate"
     docker compose -f "$candidate" pull --quiet
     docker pull --quiet "$recovery_image" >/dev/null
     ;;
@@ -199,6 +201,7 @@ case "$action" in
     ;;
   migrate)
     assert_transaction
+    assert_deployment_inputs "$directory/candidate.$plan.json"
     [[ $(phase) != migration-started ]] || die 'Migration outcome is unknown; never replay it'
     manifest="$directory/manifest.$plan.json"
     # Each migration is claimed durably before execution. A failure holds the suite
@@ -219,6 +222,7 @@ case "$action" in
     ;;
   initialize-data)
     assert_transaction
+    assert_deployment_inputs "$directory/candidate.$plan.json"
     [[ $(jq -r .operation <<< "$input") == install && $(jq -r '.bootstrap!=null' <<< "$input") == true ]] || die 'Data initialization is restricted to explicit fresh installs'
     # A repeat install already has product-owned initialized data. Never reseed it.
     if [[ -f "$directory/receipt.json" ]]; then exit 0; fi
@@ -250,6 +254,7 @@ case "$action" in
     ;;
   activate)
     assert_transaction
+    assert_deployment_inputs "$directory/candidate.$plan.json"
     [[ $(phase) != migration-started ]] || die 'Migration outcome is unknown'
     candidate="$directory/candidate.$plan.json"
     if [[ ! -f "$directory/data-formats.json" ]]; then
@@ -260,7 +265,7 @@ case "$action" in
     docker compose -f "$candidate" up -d --wait --wait-timeout 180
     save_release_artifacts "$candidate"
     mv -T -- "$candidate" "$directory/compose.json"
-    jq '{schema:1,installation,host,version,digest,plan,controllerSourceSHA256,controllerArchiveSHA256}' <<< "$input" | atomic_json "$directory/receipt.json"
+    jq --slurpfile inputs "$directory/deployment-inputs.$plan.json" '{schema:1,installation,host,version,digest,plan,controllerSourceSHA256,controllerArchiveSHA256,deploymentInputSHA256:$inputs[0].sha256}' <<< "$input" | atomic_json "$directory/receipt.json"
     record ready
     ;;
   complete) assert_transaction; record complete;;
@@ -369,7 +374,7 @@ case "$action" in
     assert_transaction
     save_release_artifacts "$directory/candidate.$plan.json"
     cp -- "$directory/candidate.$plan.json" "$directory/compose.json"
-    jq '{schema:1,installation,host,version,digest,plan,controllerSourceSHA256,controllerArchiveSHA256}' <<< "$input" | atomic_json "$directory/receipt.json"
+    jq --slurpfile inputs "$directory/deployment-inputs.$plan.json" '{schema:1,installation,host,version,digest,plan,controllerSourceSHA256,controllerArchiveSHA256,deploymentInputSHA256:$inputs[0].sha256}' <<< "$input" | atomic_json "$directory/receipt.json"
     jq '.components|map_values(.storageFormat // "unversioned")' "$directory/manifest.$plan.json" | atomic_json "$directory/data-formats.json"
     record ready
     ;;

@@ -8,6 +8,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Pin deployment input files through retries, migrations and activation, with
+  explicit configuration revisions and release recovery fingerprints.
+- Support protected per-host SSH configuration and rehearse two SSH inventories
+  through interrupted activation, credential-drift refusal and isolated recovery.
 - Add complete terminal core configuration, protected first-install bootstrap,
   scoped product account links and private initialization before ingress activation.
 - Retain controller source/archive digests with release recovery artifacts.

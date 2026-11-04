@@ -455,6 +455,16 @@ try {
     401,
   );
   assert.equal((await request('/api/oathweave/browser/logout', {}, headers)).status, 200);
+  if (process.argv.includes('--browser-review')) {
+    put(join(output, 'browser-credentials.json'), {schema: 1, origin: config.origin, username: credentials.SEED_ADMIN_USERNAME, password: credentials.SEED_ADMIN_PASSWORD, disposable: true});
+    console.log('Disposable core is ready for browser review; protected connection details are in the selected evidence directory.');
+    const completion = join(output, 'browser-completion.json'), deadline = Date.now() + 30 * 60_000;
+    while (!existsSync(completion) && Date.now() < deadline) await new Promise(done => setTimeout(done, 1000));
+    assert(existsSync(completion), 'Browser review completion was not recorded');
+    const review = JSON.parse(readFileSync(completion, 'utf8'));
+    assert.equal(review.result, 'passed', 'Browser review must pass before lifecycle proof continues');
+    assert.equal(review.disposable, true);
+  }
   for (const [product, path] of Object.entries(routes))
     assert.equal(
       (await request(path, null, { Authorization: 'Bearer ' + tokens[product] })).status,

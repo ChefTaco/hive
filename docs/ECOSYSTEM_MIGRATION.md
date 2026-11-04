@@ -106,7 +106,11 @@ adapters implement host-bound backups, isolated restore rehearsal, exact migrati
 compatible rollback, reconciliation-bound restore, explicit Compose adoption and
 transaction receipts. The disposable SQLite lifecycle drill covers retries, restored
 candidate execution and uncertain migration refusal. It does not certify interactive
-full installs or interrupted multi-host execution. The renderer now assembles
+full installs. Two host inventories now have real strict-SSH transport, interrupted
+activation, input-drift refusal, stable retry and separate backup/restore proof
+through `test:suite:multi-host`. Both SSH targets run on one physical developer
+host; this does not certify a deployment across separate physical machines.
+The renderer now assembles
 signed ingress/static service kinds with a strict public-runtime allowlist and
 read-only host preflight. Fresh co-located core configuration/bootstrap, real
 terminal setup and unattended installation now have disposable end-to-end proof,
@@ -114,6 +118,14 @@ including stable credentials/IDs on retry, four-product sign-in and restore.
 Full/multi-host bootstrap and real native agent integration remain open.
 No official suite manifest or publisher trust key has been released.
 This is not an installation or migration release.
+
+An optional host `sshConfig` selects an operator-owned protected SSH configuration;
+strict host-key checking and non-interactive authentication remain mandatory.
+Environment and read-only configuration mounts are fingerprinted before changes,
+checked again before migrations and activation, and retained with release receipts.
+Changing those files during a retry fails closed. Restore the original inputs, or
+review the change and select a new `configurationRevision` before planning again.
+Plans show the controller digest and exact signed image/product/storage versions.
 
 The core restore drill uses private SQLite family copies, including WAL/SHM, for
 integrity checks without writing the source. Any failed service aborts verification;

@@ -97,6 +97,11 @@
           "$ref": "#/$defs/path"
         }
       }
+    },
+    "configurationRevision": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$",
+      "description": "Change deliberately after reviewing a new set of mounted configuration artifacts; interrupted runs retain the original input digests."
     }
   },
   "$defs": {
@@ -136,6 +141,10 @@
           "type": "integer",
           "minimum": 0,
           "default": 2048
+        },
+        "sshConfig": {
+          "$ref": "#/$defs/path",
+          "description": "Optional operator-owned mode-0600 OpenSSH configuration. Host keys remain strictly verified."
         }
       }
     },
