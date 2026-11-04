@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Separate unprivileged HTTPS ingress/static-console deployment candidate and
+  disposable native/container SSO, resource API and protocol transport acceptance.
 - Experimental shell suite controller with offline installation plans, signed
   release verification, constrained per-host Compose rendering and fail-closed
   activation. Recovery, agent and inference adapters remain gated.

@@ -81,6 +81,7 @@
     "test:e2e:fresh": "node -- scripts/fresh-npm-e2e.mjs",
     "test:suite": "bash scripts/suite/controller.test.sh",
     "test:suite:sso": "node scripts/suite/sso-roundtrip.mjs",
-    "test:suite:ingress": "node scripts/suite/ingress-roundtrip.mjs"
+    "test:suite:ingress": "node scripts/suite/ingress-roundtrip.mjs",
+    "test:suite:containers": "node scripts/suite/sso-roundtrip.mjs --containers"
   }
 }

@@ -46,3 +46,12 @@ It checks TLS certificate-name rejection, path mappings, unchanged user headers,
 streaming and WebSocket upgrades. It is not a product authorization or migrated
 data test. Released deployment must use registry image digests rather than these
 local candidate tags.
+
+For the real browser-protocol/resource authorization check, build the extracted
+Oathweave and Emberpath images as `oathweave:candidate` and `emberpath:candidate`,
+then run `npm run test:suite:containers` from Hive as an unprivileged operator
+with Docker access. This starts fresh product stores, generated test keys and
+an isolated Redis network. It checks local-ID preservation, reader write denial,
+native-token rejection and logout revocation on the actual receiving API. It
+cleans up its containers and networks and never selects a live installation.
+This bounded acceptance does not certify a fresh core/full installer or migration.

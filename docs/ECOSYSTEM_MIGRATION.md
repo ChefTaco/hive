@@ -116,7 +116,9 @@ native/browser issuers remain distinct; HiveMem and HiveSkills deny unlinked
 subjects; ChatterMost preserves encrypted session binding through store reload and
 accepts only explicitly configured console origins for cookie mutations/sockets.
 The real Oathweave-to-Emberpath HTTP test denies unauthorized writes and rejects
-resource access after logout. The memory SDK's independent build and tests pass.
+resource access after logout. `npm run test:suite:containers` repeats this flow
+using the actual non-root read-only images, with Redis on a separate internal
+network and product APIs on a host-local bridge. The memory SDK's independent build and tests pass.
 
 Owned OpenAPI baselines now live in the extracted repositories. Emberpath and
 HiveMem inherit incomplete schema coverage; HiveSkills adds a source-derived route
@@ -129,6 +131,22 @@ and horizontal overflow. Their API/WebSocket fixtures are synthetic. They do not
 establish authenticated browser parity against real migrated product data.
 
 Cindertrace's full workspace privacy walk encounters a pre-existing ignored
-recovery tree. Exact staged-byte and clean public-candidate scans pass with zero
-findings. Recovery state is retained. The complete workspace gate remains open;
-this source is not a migration or publication approval.
+recovery tree. A fresh isolated export matching every indexed source file passes
+the complete `npm run verify` suite, including its privacy walk, with zero findings.
+The exact staged-byte scan also passes. Original recovery state is retained; the
+operational checkout's broad filesystem scan still includes it. These candidate
+checks are not migration or publication approval.
+
+Direct Emberpath browser credentials cannot use retained IAM/Memory/Hive proxy or
+coordinator routes or the legacy documentation paths, even with overly broad
+permission claims. Protected documentation exposes only provider identity fields.
+Browser skill
+deployment mutations return an explicit unavailable state until the Magnus job
+adapter exists. HiveXUI points suite lifecycle work to the controller. Native
+compatibility flows remain available for recovery while those replacements are
+completed.
+
+HiveMem account links require an existing active identity and an explicit reviewed
+credential-generation pin for rotated identities. Regressions cover missing and
+disabled accounts, stale pins and native-token rotation. Workspace administration
+and installation-specific mapping acceptance remain pending.

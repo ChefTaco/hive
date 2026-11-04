@@ -2,22 +2,36 @@
 // Development acceptance only. The shell installation controller does not use Node.
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, openSync, closeSync } from 'node:fs';
+import {
+  writeFileSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  openSync,
+  closeSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { createServer } from 'node:net';
 import https from 'node:https';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomBytes, createHash } from 'node:crypto';
 
 const sources = resolve(
-  process.env.HIVE_SUITE_SOURCES || new URL('../../..', import.meta.url).pathname,
+  process.env.HIVE_SUITE_SOURCES || fileURLToPath(new URL('../../..', import.meta.url)),
 );
 const identityRoot = join(sources, 'Oathweave/apps/iam-core');
 const routerRoot = join(sources, 'Emberpath');
 const temporary = mkdtempSync(join(tmpdir(), 'hive-sso-acceptance-'));
 const children = [];
+const containerMode = process.argv.includes('--containers');
+const network = 'hive-sso-test-' + randomBytes(5).toString('hex');
+const testContainers = [];
+const identityDataNetwork = network + '-identity-data';
+const docker = (...args) =>
+  execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 const acceptanceEnvironment = Object.fromEntries(
   ['PATH', 'LANG', 'LC_ALL', 'TZ']
     .filter((name) => process.env[name])
@@ -38,6 +52,69 @@ async function stop(child) {
   if (child.exitCode === null) child.kill('SIGKILL');
 }
 function launch(command, args, env, name) {
+  if (containerMode) {
+    const identifier = network + '-' + name;
+    testContainers.push(identifier);
+    const user = name === 'redis' ? '999:999' : `${process.getuid()}:${process.getgid()}`;
+    const options = [
+      'create',
+      '--init',
+      '--name',
+      identifier,
+      '--network',
+      name === 'redis' ? identityDataNetwork : network,
+      '--network-alias',
+      name,
+      '--user',
+      user,
+      '--read-only',
+      '--cap-drop',
+      'ALL',
+      '--security-opt',
+      'no-new-privileges',
+      '--tmpfs',
+      '/tmp:mode=1777',
+    ];
+    if (name === 'redis') {
+      command = 'docker';
+      args = [
+        ...options,
+        '--tmpfs',
+        '/data:uid=999,gid=999,mode=700',
+        'redis:8.10.3-alpine@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537',
+        'redis-server',
+        ...args,
+      ];
+      args[args.indexOf('--bind') + 1] = '0.0.0.0';
+    } else {
+      const data = join(temporary, name === 'identity' ? 'identity' : 'router');
+      options.push('-v', data + ':' + data);
+      for (const file of new Set([env.TLS_CERT_PATH, env.TLS_KEY_PATH]))
+        options.push('-v', file + ':' + file + ':ro');
+      const ports = name === 'identity' ? [env.PORT] : [env.API_PORT, env.ADMIN_PORT];
+      for (const port of ports) options.push('-p', `127.0.0.1:${port}:${port}`);
+      const values = {
+        ...env,
+        HOST: '0.0.0.0',
+        HIVE_HEALTH_URL: `https://localhost:${name === 'identity' ? env.PORT : env.API_PORT}${name === 'identity' ? '/api/v1/health/ready' : '/health/ready'}`,
+      };
+      if (name === 'router')
+        for (const key of ['OATHWEAVE_JWKS_URL', 'OATHWEAVE_USERINFO_URL'])
+          values[key] = values[key].replace('https://localhost:', 'https://identity:');
+      for (const [key, value] of Object.entries(values))
+        if (!Object.hasOwn(acceptanceEnvironment, key)) options.push('-e', key + '=' + value);
+      command = 'docker';
+      args = [
+        ...options,
+        name === 'identity' ? 'oathweave:candidate' : 'emberpath:candidate',
+        'start',
+      ];
+    }
+    docker(...args);
+    if (name === 'identity') docker('network', 'connect', identityDataNetwork, identifier);
+    args = ['start', '--attach', identifier];
+    env = acceptanceEnvironment;
+  }
   const fd = openSync(join(temporary, name + '.log'), 'a', 0o600);
   const child = spawn(command, args, { env, cwd: temporary, stdio: ['ignore', fd, fd] });
   closeSync(fd);
@@ -45,6 +122,11 @@ function launch(command, args, env, name) {
   return child;
 }
 try {
+  if (containerMode) {
+    assert(process.getuid() > 0, 'Container acceptance must run as an unprivileged operator');
+    docker('network', 'create', network);
+    docker('network', 'create', '--internal', identityDataNetwork);
+  }
   const identityPort = await port(),
     redisPort = await port();
   const origin = `https://localhost:${identityPort}`;
@@ -63,7 +145,7 @@ try {
       '-subj',
       '/CN=localhost',
       '-addext',
-      'subjectAltName=DNS:localhost,IP:127.0.0.1',
+      'subjectAltName=DNS:localhost,DNS:identity,IP:127.0.0.1',
       '-keyout',
       key,
       '-out',
@@ -115,7 +197,7 @@ try {
     PORT: String(identityPort),
     HIVE_HOME: join(temporary, 'identity'),
     IAM_DATA_DIR: join(temporary, 'identity/iam'),
-    REDIS_URL: `redis://127.0.0.1:${redisPort}`,
+    REDIS_URL: `redis://${containerMode ? 'redis' : '127.0.0.1'}:${redisPort}`,
     JWT_ISSUER: 'legacy-native-issuer',
     IAM_BROWSER_ISSUER: origin,
     COOKIE_SECRET: randomBytes(32).toString('hex'),
@@ -154,6 +236,7 @@ try {
     'identity',
   );
   let ready = false;
+  let readinessFailure;
   for (let attempt = 0; attempt < 100; attempt++) {
     if (server.exitCode !== null) break;
     try {
@@ -161,10 +244,12 @@ try {
         ready = true;
         break;
       }
-    } catch {}
+    } catch (error) {
+      readinessFailure = error.code ?? error.message;
+    }
     await delay(100);
   }
-  assert(ready, 'Isolated identity service did not become ready');
+  assert(ready, 'Isolated identity service did not become ready: ' + readinessFailure);
   const require = createRequire(join(identityRoot, 'package.json'));
   const Database = require('better-sqlite3');
   const db = new Database(join(env.IAM_DATA_DIR, 'iam.db'));
@@ -211,6 +296,15 @@ try {
   assert.equal(login.status, 200, 'Browser login failed');
   const loginBody = await login.json();
   assert(!('refreshToken' in loginBody), 'Browser received a refresh token');
+  assert(!('accessToken' in loginBody), 'Browser received an unscoped native access token');
+  const nativeLogin = await request(origin + '/api/v1/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'admin', password }),
+  });
+  assert.equal(nativeLogin.status, 200);
+  const nativeIdentity = await nativeLogin.json();
+  assert.equal(typeof nativeIdentity.accessToken, 'string');
   const cookie = login.headers.get('set-cookie').split(';')[0];
   assert(cookie.startsWith('__Host-oathweave_sso='));
   const verifier = randomBytes(32).toString('base64url'),
@@ -359,7 +453,7 @@ try {
   assert.equal(
     (
       await request(adminOrigin + '/api/providers', {
-        headers: { Authorization: `Bearer ${loginBody.accessToken}` },
+        headers: { Authorization: `Bearer ${nativeIdentity.accessToken}` },
       })
     ).status,
     401,
@@ -386,13 +480,32 @@ try {
     'Resource API accepted a revoked SSO session',
   );
   console.log(
-    'PASS: isolated Oathweave login, SSO cookie, PKCE, one-use code, resource HTTP authorization, preserved local ID, mutation denial and online revocation (verified TLS).',
+    (containerMode ? 'Containers: ' : 'Native: ') +
+      'PASS: isolated Oathweave login, SSO cookie, PKCE, one-use code, resource HTTP authorization, preserved local ID, mutation denial and online revocation (verified TLS).',
   );
 } catch (error) {
+  if (containerMode)
+    for (const identifier of testContainers) {
+      try {
+        writeFileSync(join(temporary, identifier + '.json'), docker('inspect', identifier), {
+          mode: 0o600,
+        });
+      } catch {}
+    }
   console.error('SSO acceptance failed:', error.message);
   console.error('Private disposable evidence directory retained:', temporary);
   process.exitCode = 1;
 } finally {
   for (const child of children.reverse()) await stop(child);
+  for (const identifier of testContainers.reverse()) {
+    try {
+      docker('rm', '-f', identifier);
+    } catch {}
+  }
+  if (containerMode) {
+    try {
+      docker('network', 'rm', network, identityDataNetwork);
+    } catch {}
+  }
   if (!process.exitCode) rmSync(temporary, { recursive: true, force: true });
 }
