@@ -8,7 +8,7 @@ export function extendFullFixture({ manifest, registry, id, tags, docker, user }
     const image = JSON.parse(docker('image', 'inspect', tag, '--format', '{{json .RepoDigests}}')).find(value => value.startsWith(registry + '/' + id + '/' + product + '@sha256:'));
     assert(image); return image;
   };
-  const images = Object.fromEntries([['magnus', 'magnus-server:candidate'], ['cindertrace', 'cindertrace:candidate'], ['chattermost', 'chattermost:candidate'], ['chat-migrator', 'chattermost-migrator:candidate'], ['emberfold', 'emberfold:candidate']].map(([product, local]) => [product, push(product, local)]));
+  const images = Object.fromEntries([['magnus', 'magnus-server:candidate'], ['cindertrace', 'cindertrace:candidate'], ['chattermost', 'chattermost:candidate'], ['chat-migrator', 'chattermost-migrator:candidate'], ['emberfold', 'emberfold:candidate'], ['magnus-gateway', 'magnus-gateway:candidate']].map(([product, local]) => [product, push(product, local)]));
   const postgres17 = JSON.parse(docker('image', 'inspect', 'postgres:17', '--format', '{{json .RepoDigests}}')).find(image => image.startsWith('postgres@sha256:'));
   const postgres18 = JSON.parse(docker('image', 'inspect', 'postgres:18', '--format', '{{json .RepoDigests}}')).find(image => image.startsWith('postgres@sha256:'));
   assert(postgres17 && postgres18);
@@ -22,5 +22,7 @@ export function extendFullFixture({ manifest, registry, id, tags, docker, user }
     manifest.components[product] = { image: images[product], kind: 'application', storageFormat: product + '-candidate-v1', requiresLocal: Object.keys(dependencies), service: { user, networks: ['default', network], depends_on: dependencies, healthcheck: product === 'chattermost' ? health(['node', 'dist/scripts/container.js', 'health']) : health(['node', '-e', `fetch('https://localhost:${product === 'magnus' ? 4000 : 4101}/${product === 'cindertrace' ? 'ready' : ''}').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))`]) }, initialization: product === 'magnus' ? { image: images.magnus, command: ['migrate'], verificationCommand: ['verify-initialization'] } : product === 'cindertrace' ? { image: images.cindertrace, command: ['node', 'scripts/apply-migrations.mjs'], verificationCommand: ['node', 'scripts/apply-migrations.mjs', '--verify-current'], workingDirectory: '/app/services/security-fusion' } : { image: images['chat-migrator'], command: ['migrate'], verificationCommand: ['validate-current'] } };
   }
   manifest.components.emberfold = { image: images.emberfold, kind: 'application', storageFormat: 'emberfold-stateless-v1', service: { user, healthcheck: health(['node', '-e', "fetch('http://127.0.0.1:8096/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]) } };
-  manifest.profiles.full = Object.keys(manifest.components).sort();
+  // Offered, but no profile selects it: the web terminal is an explicit opt-in.
+  manifest.components['magnus-gateway'] = { image: images['magnus-gateway'], kind: 'application', storageFormat: 'magnus-gateway-known-hosts-v1', requiresLocal: ['magnus'], service: { user, depends_on: { magnus: { condition: 'service_healthy' } }, healthcheck: health(['magnus-fleet-gateway', 'healthcheck']) } };
+  manifest.profiles.full = Object.keys(manifest.components).filter(name => name !== 'magnus-gateway').sort();
 }

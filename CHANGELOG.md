@@ -8,6 +8,12 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Add the Magnus fleet gateway as an optional suite component, `magnus-gateway`, with the ingress routes for the browser terminal under `/api/magnus/terminal/*`. It is off by default, and no release profile can select it. `bootstrap.magnusGateway.grantTerminalToInitialOperator` is the separate choice that lists `magnus:terminal` in the `hivexui-magnus` client, which a fresh install no longer does. `hive.sh magnus-trust` approves each node's host key with a fingerprint read on the node.
+
+- Configure Magnus with `RESOURCE_ENROLLMENT_DASHBOARD_PARTICIPANT=absent` when no gateway is selected, so nodes can pass a resource drain.
+
+- Route `GET /api/magnus/docs/openapi.json` to Magnus's public API document.
+
 - Add the Hive Registry, a mandatory container in every installation: a SQLite install catalog and read-only lookup API at `/api/registry`, written by `hive.sh` from the signed manifest and observed state. `hive.sh registry` looks up entries and manages externally managed products, `status` and `doctor` report drift, and upgrade and adoption add it to existing installations. Not related to the HiveSkills skills registry.
 
 - Publish `ghcr.io/cheftaco/hive-registry` and `ghcr.io/cheftaco/hive-ingress` from the tag-driven release.

@@ -53,7 +53,7 @@ if jq -e '.bootstrap.productEndpoints!=null' <<< "$input" >/dev/null; then
       [[ -n "$container" ]] || { printf 'Product HTTPS listener is not owned by this installation\n' >&2; exit 1; }
       docker inspect "$container" | jq -e --arg target "$target/tcp" --arg port "$port" --arg bind "$bind" '.[0].HostConfig.PortBindings[$target]|any(.[];.HostPort==$port and .HostIp==$bind)' >/dev/null
     fi
-  done < <(jq -r '. as $input | .placements|keys[]|. as $name|$input.bootstrap.productEndpoints[$name]|select(.!=null)|. as $endpoint| [{name:$name,url:.origin,target:({oathweave:4200,emberpath:9443,hivemem:18790,hiveskills:4030,magnus:4000,cindertrace:4101,chattermost:8065}[$name])}] + (if $name=="emberpath" then [{name:$name,url:.inferenceOrigin,target:4020}] else [] end)|.[]|. as $listener|(.url|capture("^https://(?<hostname>[^:]+)(?::(?<port>[0-9]+))?$"))|[$name,($listener.target|tostring),(.port // "443"),$endpoint.bindAddress,.hostname]|@tsv' <<< "$input")
+  done < <(jq -r '. as $input | .placements|keys[]|. as $name|$input.bootstrap.productEndpoints[$name]|select(.!=null)|. as $endpoint| [{name:$name,url:.origin,target:({oathweave:4200,emberpath:9443,hivemem:18790,hiveskills:4030,magnus:4000,"magnus-gateway":4310,cindertrace:4101,chattermost:8065}[$name])}] + (if $name=="emberpath" then [{name:$name,url:.inferenceOrigin,target:4020}] else [] end)|.[]|. as $listener|(.url|capture("^https://(?<hostname>[^:]+)(?::(?<port>[0-9]+))?$"))|[$name,($listener.target|tostring),(.port // "443"),$endpoint.bindAddress,.hostname]|@tsv' <<< "$input")
 fi
 if jq -e '.console!=null' <<< "$input" >/dev/null; then
   command -v ss >/dev/null

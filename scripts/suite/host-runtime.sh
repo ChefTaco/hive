@@ -23,6 +23,8 @@ prepare_data_directories() {
       if [[ -d "$path" ]]; then
         [[ $(stat -c %u "$path") == "$uid" && $(stat -c %g "$path") == "$gid" ]] || die 'Data ownership differs'
       else install -d -m 700 -o "$uid" -g "$gid" "$path"; fi
+      # The approved host-key store. The gateway refuses every connection without this private directory.
+      if [[ "$service" == magnus-gateway && ! -d "$path/known-hosts" ]]; then install -d -m 700 -o "$uid" -g "$gid" "$path/known-hosts"; fi
     done < <(jq -r '.services|to_entries[]|select(any(.value.volumes[]?; .target=="/data"))|[.key,(.value.user|split(":")[])]|@tsv' "$candidate")
 }
 save_release_artifacts() {

@@ -9,8 +9,8 @@ hive_bootstrap_validate() {
     . as $c | .bootstrap as $b |
     if $b.productEndpoints then
       ($b.trustBundleFile|path) and all($b.productEndpoints|keys[];$c.components[.]!=null) and
-      all($c.components|keys[]|select(IN("oathweave","emberpath","hivemem","hiveskills","magnus","cindertrace","chattermost"));. as $name|$b.productEndpoints[$name]!=null) and
-      ($b.productEndpoints|type=="object" and (keys-["emberpath","hivemem","hiveskills","oathweave","magnus","cindertrace","chattermost"]|length==0) and has("oathweave") and all(to_entries[];
+      all($c.components|keys[]|select(IN("oathweave","emberpath","hivemem","hiveskills","magnus","magnus-gateway","cindertrace","chattermost"));. as $name|$b.productEndpoints[$name]!=null) and
+      ($b.productEndpoints|type=="object" and (keys-["emberpath","hivemem","hiveskills","oathweave","magnus","magnus-gateway","cindertrace","chattermost"]|length==0) and has("oathweave") and all(to_entries[];
         (.value|type=="object" and (keys-["origin","inferenceOrigin","bindAddress","certificateFile","privateKeyFile"]|length==0)) and
         (.value.origin|origin) and (.value.bindAddress|bind) and (.value.certificateFile|path) and (.value.privateKeyFile|path) and
         (if .key=="emberpath" then (.value.inferenceOrigin|origin) and
@@ -20,6 +20,16 @@ hive_bootstrap_validate() {
         [[$c.console.host,$c.console.bindAddress,($c.console.httpsPort|tostring)]]|unique|length)==(($b.productEndpoints|length)+1+(if $b.productEndpoints.emberpath then 1 else 0 end))
     else ($b|has("trustBundleFile")|not) end
   ' "$HIVE_CONFIG" >/dev/null || hive_die 'Distributed bootstrap requires an explicit HTTPS endpoint for each selected product, a distinct Emberpath inference origin, protected product certificate/key references and a trust bundle present on each host. Datastores remain private and local to their product.'
+  # Off unless asked for: the web terminal is new authority over every fleet node. Selecting
+  # the gateway deploys it. Only the separate grant flag gives the initial operator the terminal.
+  jq -e '
+    def path: type=="string" and test("^/[A-Za-z0-9_./-]+$") and (split("/")|all(.!=".."));
+    if .components["magnus-gateway"] then
+      .bootstrap.magnusGateway|type=="object" and (keys-["sshUsername","sshPrivateKeyFile","grantTerminalToInitialOperator"]|length==0) and
+      (.sshUsername|type=="string" and test("^[a-z_][a-z0-9_-]{0,31}$")) and (.sshPrivateKeyFile|path) and
+      ((.grantTerminalToInitialOperator // false)|type=="boolean")
+    else .bootstrap|has("magnusGateway")|not end
+  ' "$HIVE_CONFIG" >/dev/null || hive_die 'bootstrap.magnusGateway belongs with a selected magnus-gateway component and holds sshUsername, sshPrivateKeyFile and the optional boolean grantTerminalToInitialOperator'
 }
 
 hive_initialize() {
@@ -29,7 +39,7 @@ hive_initialize() {
     .bootstrap!=null and .console!=null and
     (.components|keys) as $names |
     (["hive-registry","hivexui","ingress","oathweave","oathweave-redis"]-$names|length==0) and
-    ($names-["hive-registry","emberpath","hivemem","hivemem-qdrant","hiveskills","hivexui","ingress","oathweave","oathweave-redis","magnus","magnus-postgres","magnus-redis","cindertrace","cindertrace-postgres","cindertrace-redis","chattermost","chattermost-postgres","emberfold"]|length==0) and
+    ($names-["hive-registry","emberpath","hivemem","hivemem-qdrant","hiveskills","hivexui","ingress","oathweave","oathweave-redis","magnus","magnus-gateway","magnus-postgres","magnus-redis","cindertrace","cindertrace-postgres","cindertrace-redis","chattermost","chattermost-postgres","emberfold"]|length==0) and
     (. as $c|all(["magnus","cindertrace","chattermost"][];. as $name| if $c.components[$name] then
       $release[0].components[$name].initialization!=null and
       $c.components[$name+"-postgres"].host==$c.components[$name].host and
@@ -37,6 +47,7 @@ hive_initialize() {
       (if $c.bootstrap.productEndpoints then $c.bootstrap.productEndpoints[$name]!=null else true end)
      else $c.components[$name+"-postgres"]==null and $c.components[$name+"-redis"]==null end)) and
     (if .components.emberfold then .components.emberfold.host==.console.host else true end) and
+    (if .components["magnus-gateway"] then .components.magnus!=null and .components["magnus-gateway"].host==.components.magnus.host else true end) and
     .components.oathweave.host==.components["oathweave-redis"].host and
     (if .components.hivemem then .components["hivemem-qdrant"]!=null and .components.hivemem.host==.components["hivemem-qdrant"].host else .components["hivemem-qdrant"]==null end) and
     (if (.hosts|length)>1 then .bootstrap.productEndpoints!=null else true end) and

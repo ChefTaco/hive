@@ -14,6 +14,7 @@ import { extendFullFixture } from './full-release-fixture.mjs';
 import { restoredPeerRehearsal } from './restored-peer-rehearsal.mjs';
 import { applySuiteCatalog, hiveRegistryComponent } from './suite-catalog.mjs';
 import { hostStatuses, proveRegistry, proveRestoredRegistry, registryCall } from './registry-proof.mjs';
+import { proveTerminal, proveTerminalOff } from './terminal-proof.mjs';
 const execute = promisify(execFile), root = resolve(import.meta.dirname, '../..');
 function argument(name) { const index = process.argv.indexOf(name); assert(index >= 0 && process.argv[index + 1], name + ' is required'); return resolve(process.argv[index + 1]); }
 const output = argument('--output'), template = argument('--template-release');
@@ -30,8 +31,10 @@ const id = 'distributed-' + randomBytes(5).toString('hex'), registryName = id + 
 const interactive=process.argv.includes('--interactive'),consoleHost=interactive?'control':'console';
 const addresses = { identity: join(output, 'identity'), [consoleHost]: join(output,consoleHost) },consoleDirectory=addresses[consoleHost];
 const configFile = join(output, 'installation.json'), manifestFile = join(output, 'release.json'), sshConfig = join(output, 'ssh.conf');
+const magnusGateway = process.argv.includes('--magnus-gateway');
 const full = process.argv.includes('--full'), browserReview = process.argv.includes('--browser-review'), relaxAuthLimits = process.argv.includes('--relax-auth-limits');
 assert(!(interactive && relaxAuthLimits), '--relax-auth-limits applies to the unattended path');
+assert(!magnusGateway || (full && !interactive), '--magnus-gateway applies to the unattended full suite');
 const selectionIndex=process.argv.indexOf('--components'), selection=selectionIndex<0 ? null : process.argv[selectionIndex+1].split(',');
 assert(!selection || (!full && selection.every(name=>/^[a-z][a-z0-9-]*$/.test(name)) && ['hive-registry','oathweave','oathweave-redis','hivexui','ingress'].every(name=>selection.includes(name))),'Custom developer fixture requires the suite foundation and cannot combine --full');
 const selected=name=>!selection || selection.includes(name);
@@ -90,7 +93,7 @@ fi
   await new Promise(done => setTimeout(done, 300));
   assert.equal(run('ssh', ['-F', sshConfig, username + '@identity.example.com', 'command -v docker']), join(output, 'bin/docker'));
   let config = JSON.parse(readFileSync(join(root, 'examples/installation.json'), 'utf8'));
-  config.installation = id; if (selection) { config.profile='custom'; config.components=Object.fromEntries(Object.entries(config.components).filter(([name])=>selected(name))); } if (full) { config.profile = 'full'; for (const name of Object.keys(manifest.components)) if (!config.components[name]) config.components[name] = { host: consoleHost, configDirectory: '/config/' + name, ...(/-(postgres|redis)$/.test(name) ? {} : { envFile: '/config/' + name + '.env' }) }; } config.origin = 'https://localhost:' + consolePort;
+  config.installation = id; if (selection) { config.profile='custom'; config.components=Object.fromEntries(Object.entries(config.components).filter(([name])=>selected(name))); } if (full) { config.profile = 'full'; for (const name of Object.keys(manifest.components)) if (!config.components[name] && (name !== 'magnus-gateway' || magnusGateway)) config.components[name] = { host: consoleHost, configDirectory: '/config/' + name, ...(/-(postgres|redis)$/.test(name) ? {} : { envFile: '/config/' + name + '.env' }) }; } config.origin = 'https://localhost:' + consolePort;
   config.hosts = Object.fromEntries(Object.entries(addresses).map(([host, directory]) => [host, { target: username + '@' + host + '.example.com', directory, sshConfig }]));
   config.console = { host: consoleHost, bindAddress: '127.0.0.1', httpsPort: consolePort, runtimeFile: join(consoleDirectory, 'config/runtime.json') };
   for (const [name, placement] of Object.entries(config.components)) {
@@ -99,13 +102,17 @@ fi
     if (placement.configDirectory) placement.configDirectory = join(addresses[placement.host], 'config', name);
   }
   config.bootstrap = { adminUsername: 'admin', adminEmail: 'alice@example.com', certificateFile: join(output, 'server.crt'), privateKeyFile: join(output, 'server.key'), trustBundleFile: join(output, 'server.crt'), productEndpoints: {} };
-  for (const product of ['oathweave', 'emberpath', 'hivemem', 'hiveskills', ...(full ? ['magnus', 'cindertrace', 'chattermost'] : [])].filter(selected)) config.bootstrap.productEndpoints[product] = { origin: 'https://' + gateway + ':' + await port(), bindAddress: gateway, certificateFile: join(output, 'server.crt'), privateKeyFile: join(output, 'server.key'), ...(product === 'emberpath' ? { inferenceOrigin: 'https://' + gateway + ':' + await port() } : {}) };
+  if (magnusGateway) {
+    run('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', 'fleet-gateway-fixture', '-f', join(output, 'fleet-key')]);
+    config.bootstrap.magnusGateway = { sshUsername: 'deploy', sshPrivateKeyFile: join(output, 'fleet-key'), grantTerminalToInitialOperator: true };
+  }
+  for (const product of ['oathweave', 'emberpath', 'hivemem', 'hiveskills', ...(full ? ['magnus', 'cindertrace', 'chattermost'] : []), ...(magnusGateway ? ['magnus-gateway'] : [])].filter(selected)) config.bootstrap.productEndpoints[product] = { origin: 'https://' + gateway + ':' + await port(), bindAddress: gateway, certificateFile: join(output, 'server.crt'), privateKeyFile: join(output, 'server.key'), ...(product === 'emberpath' ? { inferenceOrigin: 'https://' + gateway + ':' + await port() } : {}) };
   run('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', config.bootstrap.privateKeyFile, '-out', config.bootstrap.certificateFile, '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:' + gateway, '-days', '2']); chmodSync(config.bootstrap.privateKeyFile, 0o600);
   run('openssl', ['genpkey', '-algorithm', 'ED25519', '-out', join(output, 'publisher.key')]); run('openssl', ['pkey', '-in', join(output, 'publisher.key'), '-pubout', '-out', join(output, 'publisher.pub')]);
   if(!interactive)put(configFile, config); put(manifestFile, manifest); run('openssl', ['pkeyutl', '-sign', '-inkey', join(output, 'publisher.key'), '-rawin', '-in', manifestFile, '-out', manifestFile + '.sig']);
   if(interactive) {
     assert(full && !selection,'Interactive developer acceptance selects the full profile');
-    const questions=[['Installation name',id],['Installation directory on the selected host',consoleDirectory],['Host SSH target',username+'@control.example.com'],['Host architecture',process.arch==='arm64'?'arm64':'amd64'],['Console HTTPS origin',config.origin],['Product profile','full'],['HTTPS bind address','127.0.0.1'],['HTTPS listener port',String(consolePort)],['Configuration mode','distributed'],['Initial operator username','admin'],['Initial operator email','alice@example.com'],['Existing console certificate file',config.bootstrap.certificateFile],['Protected console private key file',config.bootstrap.privateKeyFile],['Existing external inference HTTPS endpoint',''],['Opt-in native agent runtime',''],['Product trust bundle file available on every host',config.bootstrap.trustBundleFile]];
+    const questions=[['Installation name',id],['Installation directory on the selected host',consoleDirectory],['Host SSH target',username+'@control.example.com'],['Host architecture',process.arch==='arm64'?'arm64':'amd64'],['Console HTTPS origin',config.origin],['Product profile','full'],['HTTPS bind address','127.0.0.1'],['HTTPS listener port',String(consolePort)],['Configuration mode','distributed'],['Initial operator username','admin'],['Initial operator email','alice@example.com'],['Existing console certificate file',config.bootstrap.certificateFile],['Protected console private key file',config.bootstrap.privateKeyFile],['Deploy the Magnus web terminal gateway','no'],['Existing external inference HTTPS endpoint',''],['Opt-in native agent runtime',''],['Product trust bundle file available on every host',config.bootstrap.trustBundleFile]];
     for(const product of ['oathweave','emberpath','hivemem','hiveskills','magnus','cindertrace','chattermost']) {
       const host=['oathweave','hiveskills'].includes(product)?'identity':consoleHost,endpoint=config.bootstrap.productEndpoints[product];
       questions.push(['Inventory host for '+product,host]);
@@ -219,6 +226,9 @@ fi
     const magnusSecret = { 'X-Api-Secret': parseEnv(readFileSync(join(consoleDirectory, 'config/magnus.env'), 'utf8')).API_SECRET };
     assert.equal((await request('/api/magnus/console/session', null, magnusSecret)).status, 401, 'Ingress forwarded a machine API secret');
     assert.equal((await rawRequest('/api/magnus/heartbeat/stream/stats', { Authorization: 'Bearer ' + tokens.magnus })).status, 404, 'Machine-only Magnus route reached through ingress');
+    assert.match((await request('/api/magnus/docs/openapi.json')).body.openapi, /^3\./, 'API docs did not reach Magnus');
+    if (magnusGateway) await proveTerminal({ hive, docker, put, output, network: id + '-' + consoleHost + '_default', origin: config.origin, port: consolePort, ca, password: credentials.SEED_ADMIN_PASSWORD, cookieHeaders: headers, consoleDirectory });
+    else await proveTerminalOff({ hive, docker, session: magnusSession.body.data, token: tokens.magnus, port: consolePort, ca, consoleDirectory });
   }
   const routes = Object.fromEntries(Object.entries({ oathweave: '/api/oathweave/auth/me', emberpath: '/api/emberpath/auth/me', hivemem: '/api/hivemem/agents', hiveskills: '/api/hiveskills/admin/skills', ...(full ? { magnus: '/api/magnus/console/session' } : {}) }).filter(([name])=>selected(name)));
   for (const [product, path] of Object.entries(routes)) assert.equal((await request(path, null, { Authorization: 'Bearer ' + tokens[product] })).status, 200, 'Distributed authorized product failed: ' + product);

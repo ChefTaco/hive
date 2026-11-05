@@ -119,6 +119,18 @@
     "dependencies": ["oathweave", "magnus-postgres", "magnus-redis"],
     "connection": { "browserPrefix": "/api/magnus", "consolePath": "/fleet", "nativeApis": {}, "internalEndpoints": { "api": "https://magnus:4000" } }
   },
+  "magnus-gateway": {
+    "displayName": "Magnus Fleet Gateway",
+    "description": "Optional web terminal for the Magnus console. Holds the restricted SSH key. Off unless selected.",
+    "repository": "https://github.com/ChefTaco/magnus",
+    "documentation": "https://github.com/ChefTaco/magnus/blob/HEAD/services/fleet-gateway/README.md",
+    "license": "https://github.com/ChefTaco/magnus/blob/HEAD/LICENSE",
+    "licenseSpdx": "Apache-2.0",
+    "consoleSection": null,
+    "required": false,
+    "dependencies": ["magnus"],
+    "connection": { "browserPrefix": "/api/magnus/terminal", "consolePath": null, "nativeApis": {}, "internalEndpoints": { "api": "https://magnus-gateway:4310" } }
+  },
   "magnus-postgres": {
     "displayName": "Magnus PostgreSQL",
     "description": "Private PostgreSQL datastore for Magnus.",

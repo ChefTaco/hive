@@ -50,8 +50,87 @@ initial operator to Magnus as an explicit ADMIN. The ingress allows only the
 browser-facing rows of Magnus's `docs/console-api.md`, answers 404 for everything
 else, and forwards no machine credential, so `x-api-secret` and `x-node-token` never
 reach Magnus through it. Agents and services keep using the Magnus endpoint directly.
-Browser terminal access is deferred until its gateway exists. The former
+The ingress also maps `GET /api/magnus/docs/openapi.json` to Magnus's public
+`/api/docs/openapi.json`, the one browser route outside `/api/v1`. The former
 `bootstrap.magnusConsoleOrigin` setting is refused with a clear message; remove it.
+
+## Magnus web terminal
+
+The browser terminal gives a person a shell on a fleet node, so it is off in every
+fresh installation. No release profile can select it. Turning it on takes two
+explicit choices in the installation configuration, and the plan reports both under
+`magnusTerminal`:
+
+```json
+{
+  "components": {
+    "magnus-gateway": {
+      "host": "control",
+      "envFile": "/opt/hive/config/magnus-gateway.env",
+      "configDirectory": "/opt/hive/config/magnus-gateway"
+    }
+  },
+  "bootstrap": {
+    "magnusGateway": {
+      "sshUsername": "deploy",
+      "sshPrivateKeyFile": "/opt/credentials/fleet-gateway-key",
+      "grantTerminalToInitialOperator": true
+    }
+  }
+}
+```
+
+1. **Selecting `magnus-gateway`** deploys one non-root, read-only replica of the fleet
+   gateway on Magnus's host, on port 4310. The key file must already exist on that host,
+   owner-only and unencrypted. Hive copies it into the gateway's read-only `/config` and
+   never creates a fleet key. Use a dedicated restricted account on each node. Hive
+   generates `FLEET_GATEWAY_API_TOKEN` and `RESOURCE_ENROLLMENT_DASHBOARD_SECRET` once,
+   gives Magnus the token's digest, the same drain secret and the gateway's URL, and
+   records the gateway in the Hive Registry.
+2. **`grantTerminalToInitialOperator: true`** adds `magnus:terminal` to the `hivexui-magnus`
+   browser client. Oathweave gives its initial administrator every permission a browser
+   client lists, and a browser token never carries more than the list, so this flag is what
+   grants the terminal. Without it no token in this installation can carry the permission.
+
+A terminal needs all of this: the gateway, an `ADMIN` link, `magnus:terminal`, and identity
+verification within the last five minutes. The interactive setup asks the same questions and
+defaults each to no. Both choices are read when the installation is first initialized.
+Enabling the terminal on an existing installation has no command yet: its configuration is
+fingerprinted, and a changed plan is refused rather than applied over it. Installations
+initialized before this option list `magnus:terminal` in their client and role, which has no
+effect until a gateway exists.
+
+Without a gateway, Magnus is configured with `RESOURCE_ENROLLMENT_DASHBOARD_PARTICIPANT=absent`,
+so a node with no console work can still pass a resource drain. `DASHBOARD_PUBLIC_ORIGIN` only
+builds links in notifications: the console does not answer drain challenges, and the gateway does.
+
+In a distributed configuration the gateway needs a `bootstrap.productEndpoints["magnus-gateway"]`
+entry like any other product, on Magnus's host. Bind it where only the console host's ingress and
+Magnus can reach it. Its `/internal` route is for Magnus and has no route through the ingress.
+
+### Approving a node
+
+The gateway never learns a host key from a connection, and a node with no approval refuses
+every terminal. For each node, read the fingerprint on the node itself, over a path you
+already trust, and approve that value:
+
+```bash
+# On the node:
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+
+# Optional: see what the network path presents. Compare it; never approve it on its own.
+./hive.sh magnus-trust scan --config FILE --node-id NODE_ID --host node-1.example.com
+
+# Approve. The gateway connects and confirms the node presents this fingerprint.
+./hive.sh magnus-trust add --config FILE --node-id NODE_ID --host node-1.example.com \
+  --fingerprint SHA256:... --approved-by alice --approval-ref change-1234
+```
+
+`--host` must be the node's inventory hostname or address. `list`, `rotate`, `extra` and `remove`
+reach the same CLI; see the gateway's
+[README](https://github.com/ChefTaco/magnus/blob/HEAD/services/fleet-gateway/README.md#trusting-a-host-key).
+Approvals live in the gateway's data directory, so they survive restarts and are part of backups,
+as the key in its configuration directory is. Restrict those backups accordingly.
 
 Dispatch, ingestion, retention and notification integrations in fresh Cindertrace
 configuration start disabled until the operator reviews their product-owned
@@ -78,6 +157,9 @@ credential file, and waits for a protected `browser-completion.json` containing
 `{"result":"passed"}`. Keep credentials and evidence outside Git.
 Add `--release-live-networks` on a host short of Docker address pools: a rehearsal needs a
 second set of private networks, so this takes the disposable stack down first.
+Add `--magnus-gateway` to opt the fixture in to the web terminal and prove it end to end: a real
+Oathweave token through the ingress to the real gateway and a disposable sshd node. It waits out the
+five-minute verification window. Without the flag the run proves that the terminal is off.
 
 A passing disposable run is not production cutover approval, physical multi-host
 certification, ARM64 certification, or proof that every existing installation's

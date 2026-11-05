@@ -2,7 +2,7 @@
 # Product-owned bootstrap contracts. Called only by the fresh initializer after
 # all hosts have passed preflight. No existing product state is adopted here.
 hive_full_configuration() {
-  local component password image user uid gid hash_output password_hash endpoint hostname
+  local component password image user uid gid hash_output password_hash endpoint hostname magnus_identities
   for component in magnus cindertrace chattermost; do
     has_component "$component" || continue
     case "$component" in magnus) password=$(secret magnus-db);; cindertrace) password=$(secret security-db);; chattermost) password=$(secret chat-db);; esac
@@ -12,6 +12,8 @@ hive_full_configuration() {
       printf 'bind 0.0.0.0\nprotected-mode yes\ndir /data\nappendonly yes\nappendfsync everysec\nrequirepass %s\n' "$password" | publish_file "$component-redis" "$directory/config/$component-redis/redis.conf"
     fi
   done
+  # The gateway and the server must hold the same links.
+  has_component magnus && magnus_identities=$(jq -nc --arg issuer "$issuer" --arg subject "$subject" --arg id "$(secret magnus-id)" '[{issuer:$issuer,subject:$subject,localUserId:$id,role:"ADMIN"}]')
   if has_component magnus; then
     {
       common_environment; resource_identity; line MAGNUS_HOME /data; line MAGNUS_AUTO_MIGRATE false; line MAGNUS_UPDATE_CHECK false; line MAGNUS_AGENT_UPGRADES false
@@ -24,8 +26,31 @@ hive_full_configuration() {
       line CONTROL_API_URL "$(product_endpoint magnus https://magnus:4000)"; line CORS_ORIGIN "$origin"; line DASHBOARD_PUBLIC_ORIGIN "$origin"
       line SECURITY_FUSION_MODE off; line ENABLE_AGENT_DISCOVERY false
       line MAGNUS_CONSOLE_BASE_PATH /fleet; line MAGNUS_HERMES_ENABLED true
-      line MAGNUS_OATHWEAVE_IDENTITIES_JSON "$(jq -nc --arg issuer "$issuer" --arg subject "$subject" --arg id "$(secret magnus-id)" '[{issuer:$issuer,subject:$subject,localUserId:$id,role:"ADMIN"}]')"
+      line MAGNUS_OATHWEAVE_IDENTITIES_JSON "$magnus_identities"
+      # DASHBOARD_PUBLIC_ORIGIN above is only for links in notifications: the console does not
+      # answer drain challenges, the gateway does. With no gateway, say so explicitly, or every
+      # node's resource drain waits for a participant that does not exist. CA trust for the
+      # gateway's certificate comes from NODE_EXTRA_CA_CERTS in the common environment.
+      if has_component magnus-gateway; then
+        line FLEET_GATEWAY_URL "$(product_endpoint magnus-gateway https://magnus-gateway:4310)"
+        line FLEET_GATEWAY_TOKEN_SHA256 "$(printf '%s' "$(secret magnus-gateway-api)" | sha256sum | cut -d ' ' -f1)"
+        line RESOURCE_ENROLLMENT_DASHBOARD_SECRET "$(secret magnus-gateway-drain)"
+      else line RESOURCE_ENROLLMENT_DASHBOARD_PARTICIPANT absent; fi
     } | publish_file magnus "$directory/config/magnus.env"
+  fi
+  if has_component magnus-gateway; then
+    endpoint=$(product_endpoint magnus-gateway https://magnus-gateway:4310); hostname=${endpoint#https://}; hostname=${hostname%%:*}
+    {
+      common_environment; resource_identity
+      line TLS_CERT_PATH /config/tls.crt; line TLS_KEY_PATH /config/tls.key; line FLEET_GATEWAY_BIND_HOST 0.0.0.0; line FLEET_GATEWAY_PORT 4310; line FLEET_GATEWAY_TLS_NAME "$hostname"
+      line FLEET_GATEWAY_PUBLIC_ORIGIN "$origin"; line FLEET_GATEWAY_TRUST_FORWARDED_FOR true
+      line MAGNUS_OATHWEAVE_IDENTITIES_JSON "$magnus_identities"
+      line CONTROL_API_URL "$(product_endpoint magnus https://magnus:4000)"; line CONTROL_API_CA_PATH /config/authority.pem
+      line FLEET_GATEWAY_API_TOKEN "$(secret magnus-gateway-api)"; line RESOURCE_ENROLLMENT_DASHBOARD_SECRET "$(secret magnus-gateway-drain)"
+      line FLEET_GATEWAY_SSH_USERNAME "$(jq -er .bootstrap.magnusGateway.sshUsername <<< "$input")"; line FLEET_GATEWAY_SSH_PRIVATE_KEY_PATH /config/ssh-key
+      line FLEET_GATEWAY_KNOWN_HOSTS_FILE /data/known-hosts/known-hosts.json
+    } | publish_file magnus-gateway "$directory/config/magnus-gateway.env"
+    publish_file magnus-gateway "$directory/config/magnus-gateway/ssh-key" < "$(jq -er .bootstrap.magnusGateway.sshPrivateKeyFile <<< "$input")"
   fi
   if has_component cindertrace; then
     jq -nc --arg username "$username" --arg password "$(secret security-admin-password)" '{username:$username,password:$password}' | publish_file cindertrace "$directory/config/cindertrace/initial-browser-account.json"

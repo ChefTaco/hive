@@ -9,7 +9,8 @@ hive_runtime_files() {
     scripts/suite/adapters.sh scripts/suite/native-initialization-host.sh scripts/suite/adapters-host.sh scripts/suite/inference-registration.sh \
     scripts/suite/public-runtime.sh scripts/suite/preflight-host.sh scripts/suite/initialize.sh \
     scripts/suite/initialize-host.sh scripts/suite/initialize-full-host.sh scripts/suite/initialize-migrations-host.sh scripts/suite/integrity-host.sh scripts/suite/input-artifacts-host.sh scripts/suite/check-data.mjs \
-    scripts/suite/registry.sh scripts/suite/registry-host.sh
+    scripts/suite/registry.sh scripts/suite/registry-host.sh \
+    scripts/suite/magnus-gateway.sh scripts/suite/magnus-gateway-host.sh
 }
 hive_controller_digest() {
   local file
@@ -18,7 +19,7 @@ hive_controller_digest() {
 }
 hive_usage() {
   cat <<'EOF'
-Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|skills-prepare|registry]
+Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|skills-prepare|registry|magnus-trust]
   --config FILE          Installation JSON (required for unattended use)
   --release VERSION      Override the exact release version
   --manifest FILE        Signed release manifest (default releases/VERSION.json)
@@ -42,6 +43,8 @@ agents-accept verifies manually started agents without restarting suite services
 registry looks up and edits this installation's Hive Registry (the install catalog; HiveSkills
 is the separate skills registry): registry list|installed|summary|history|get ID|connection ID|
 add ID --file F|update ID --file F|remove ID. The installer records release products itself.
+magnus-trust approves SSH host keys for the optional Magnus fleet gateway, with a fingerprint read
+on the node itself: magnus-trust list|scan|add|rotate|extra|remove. See deployment/FULL.md.
 No arguments starts interactive configuration. Planning does not contact hosts.
 Secrets belong in protected environment/configuration files, never CLI arguments.
 EOF
@@ -60,6 +63,7 @@ hive_configure() {
   local inference='[]' agents='[]' temporary config selected_json runtime version agent_id agent_profile agent_environment agent_service authorized
   local external_ca enrollment_endpoint enrollment_prefix enrollment_credential enrollment_ca provider_slug provider_aliases
   local product product_host product_origin product_bind product_certificate product_key product_inference trust_bundle ssh_config magnus_console
+  local gateway_deploy='' gateway_username='' gateway_key='' gateway_grant=no
   if [[ -z "$HIVE_VERSION" ]]; then hive_prompt HIVE_VERSION 'Exact suite release version'; fi
   if [[ -z "$HIVE_MANIFEST" ]]; then
     HIVE_MANIFEST="$HIVE_ROOT/releases/$HIVE_VERSION.json"
@@ -103,6 +107,18 @@ hive_configure() {
   elif [[ "$mode" != prepared ]]; then hive_die 'Choose fresh, distributed or prepared configuration'; fi
   if [[ "$mode" == fresh || "$mode" == distributed ]]; then
     selected_json=$(jq -nc --argjson selected "$selected_json" '$selected+["oathweave","oathweave-redis","hivexui","ingress"]|unique')
+    # The web terminal is new authority over every fleet node, so no profile selects it.
+    if jq -e '.components["magnus-gateway"]!=null' "$HIVE_MANIFEST" >/dev/null && jq -ne --argjson selected "$selected_json" '$selected|index("magnus")!=null' >/dev/null; then
+      if jq -ne --argjson selected "$selected_json" '$selected|index("magnus-gateway")!=null' >/dev/null; then gateway_deploy=yes
+      else hive_prompt gateway_deploy 'Deploy the Magnus web terminal gateway (yes/no)' no; fi
+      if [[ "$gateway_deploy" == yes ]]; then
+        selected_json=$(jq -nc --argjson selected "$selected_json" '$selected+["magnus-gateway"]|unique')
+        hive_prompt gateway_username 'Restricted SSH account on fleet nodes for the gateway'
+        hive_prompt gateway_key 'Protected SSH private key file on the Magnus host (absolute)'
+        hive_prompt gateway_grant 'Grant magnus:terminal to the initial operator (yes/no)' no
+      elif [[ "$gateway_deploy" != no ]]; then hive_die 'Answer yes or no'; fi
+      [[ "$gateway_grant" == yes || "$gateway_grant" == no ]] || hive_die 'Answer yes or no'
+    fi
   fi
   printf 'Inference services remain external. Hive verifies their APIs and registers providers only with an explicit Emberpath credential reference.\n'
   hive_prompt endpoint 'Existing external inference HTTPS endpoint (blank to skip)'
@@ -139,15 +155,15 @@ hive_configure() {
   done
   temporary=$(mktemp -d)
   config="$temporary/installation.json"
-  jq -n --arg id "$id" --arg directory "$directory" --arg target "$target" --arg architecture "$architecture" --arg origin "$origin" --arg profile "$profile" --arg version "$HIVE_VERSION" --arg bind "$bind" --arg port "$port" --arg mode "$mode" --arg username "${username:-}" --arg email "${email:-}" --arg certificate "${certificate:-}" --arg key "${private_key:-}" --argjson selected "$selected_json" --argjson agents "$agents" --argjson inference "$inference" --slurpfile release "$HIVE_MANIFEST" '
+  jq -n --arg id "$id" --arg directory "$directory" --arg target "$target" --arg architecture "$architecture" --arg origin "$origin" --arg profile "$profile" --arg version "$HIVE_VERSION" --arg bind "$bind" --arg port "$port" --arg mode "$mode" --arg username "${username:-}" --arg email "${email:-}" --arg certificate "${certificate:-}" --arg key "${private_key:-}" --arg gatewayUsername "$gateway_username" --arg gatewayKey "$gateway_key" --arg gatewayGrant "$gateway_grant" --argjson selected "$selected_json" --argjson agents "$agents" --argjson inference "$inference" --slurpfile release "$HIVE_MANIFEST" '
     {schema:1,installation:$id,release:$version,profile:$profile,origin:$origin,hosts:{control:{target:$target,directory:$directory,architecture:$architecture}},components:($selected|map(. as $name|{key:$name,value:({host:"control"}+(if $release[0].components[$name].kind=="static-ui" then {} elif $release[0].components[$name].kind=="datastore" then {configDirectory:($directory+"/config/"+$name)} else {envFile:($directory+"/config/"+$name+".env"),configDirectory:($directory+"/config/"+$name)} end))})|from_entries),agents:$agents,inference:$inference} +
     (if ($selected|index("hivexui"))!=null or ($selected|index("ingress"))!=null then {console:{host:"control",bindAddress:$bind,httpsPort:($port|tonumber),runtimeFile:($directory+"/config/runtime.json")}} else {} end) +
-    (if $mode=="fresh" or $mode=="distributed" then {bootstrap:{adminUsername:$username,adminEmail:$email,certificateFile:$certificate,privateKeyFile:$key}} else {} end)' > "$config"
+    (if $mode=="fresh" or $mode=="distributed" then {bootstrap:({adminUsername:$username,adminEmail:$email,certificateFile:$certificate,privateKeyFile:$key} + (if ($selected|index("magnus-gateway"))!=null then {magnusGateway:{sshUsername:$gatewayUsername,sshPrivateKeyFile:$gatewayKey,grantTerminalToInitialOperator:($gatewayGrant=="yes")}} else {} end))} else {} end)' > "$config"
   if [[ "$mode" == distributed ]]; then
     printf 'Place products within this installation. Each product keeps its private datastore on its selected host. Every host must trust the explicit HTTPS certificate bundle.\n'
     hive_prompt trust_bundle 'Product trust bundle file available on every host (absolute)'
     jq --arg trust "$trust_bundle" '.bootstrap.trustBundleFile=$trust | .bootstrap.productEndpoints={}' "$config" > "$temporary/next.json"; mv "$temporary/next.json" "$config"
-    for product in oathweave emberpath hivemem hiveskills magnus cindertrace chattermost; do
+    for product in oathweave emberpath hivemem hiveskills magnus magnus-gateway cindertrace chattermost; do
       jq -e --arg name "$product" '.components[$name]!=null' "$config" >/dev/null || continue
       hive_prompt product_host "Inventory host for $product (existing or new host ID)" control
       [[ "$product_host" =~ ^[a-z][a-z0-9-]{0,47}$ ]] || { rm -rf -- "$temporary"; hive_die 'Invalid inventory host ID'; }
@@ -215,7 +231,7 @@ hive_validate() {
     fi
     jq -e '
       def path: type=="string" and test("^/[A-Za-z0-9_./-]+$") and (split("/")|all(.!=".."));
-      .bootstrap|type=="object" and (keys-["adminUsername","adminEmail","certificateFile","privateKeyFile","productEndpoints","trustBundleFile"]|length==0) and
+      .bootstrap|type=="object" and (keys-["adminUsername","adminEmail","certificateFile","privateKeyFile","productEndpoints","trustBundleFile","magnusGateway"]|length==0) and
       (.adminUsername|type=="string" and test("^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$")) and
       (.adminEmail|type=="string" and length<=254 and test("^[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")) and
       (.certificateFile|path) and (.privateKeyFile|path)
@@ -249,6 +265,7 @@ hive_manifest() {
   [[ -f "$HIVE_MANIFEST" && -f "$HIVE_SIGNATURE" && -f "$HIVE_TRUST_KEY" ]] || hive_die 'Signed release manifest, signature and publisher key are required'
   openssl pkeyutl -verify -pubin -inkey "$HIVE_TRUST_KEY" -rawin -in "$HIVE_MANIFEST" -sigfile "$HIVE_SIGNATURE" >/dev/null 2>&1 || hive_die 'Release signature verification failed'
   if declare -F hive_registry_release >/dev/null; then hive_registry_release; fi
+  if declare -F hive_magnus_gateway_release >/dev/null; then hive_magnus_gateway_release; fi
   if declare -F hive_skills_manifest >/dev/null; then hive_skills_manifest; fi
   if declare -F hive_adapter_manifest >/dev/null; then hive_adapter_manifest; fi
   jq -e --arg version "$HIVE_VERSION" '
@@ -301,6 +318,7 @@ hive_plan() {
   local released=${HIVE_RELEASE_SUMMARY:-'{}'}
   jq --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg plan "${HIVE_PLAN_DIGEST:-}" --argjson released "$released" --argjson relax "${HIVE_RELAX_AUTH_LIMITS:-false}" '{schema,installation,release:$version,configurationRevision:(.configurationRevision // "1"),planDigest:$plan,manifestDigest:$digest,controllerSourceSHA256:$controller,profile,origin,
     authLimits:{relaxed:$relax,products:(if $relax then [.components|keys[]|select(IN("oathweave","cindertrace","chattermost"))] else [] end)},
+    magnusTerminal:{gatewaySelected:(.components["magnus-gateway"]!=null),grantedToInitialOperator:(.bootstrap.magnusGateway.grantTerminalToInitialOperator==true)},
     hosts:(.hosts|map_values({target,directory})),
     console:(if .console then {host:.console.host,bindAddress:.console.bindAddress,httpsPort:.console.httpsPort,publicRuntimeConfigured:true} else null end),
     components:(.components|with_entries(.key as $name|.value=({host:.value.host,environmentConfigured:(.value|has("envFile")),configurationMounted:(.value|has("configDirectory"))}+($released[$name] // {})))),
@@ -320,8 +338,8 @@ hive_host() {
     --arg action "${HIVE_HOST_ACTION:-}" --arg operation "${HIVE_OPERATION:-}" --arg archive "${HIVE_ARCHIVE:-}" --argjson allowMigrations "${HIVE_ALLOW_MIGRATIONS:-false}" \
     --argjson serviceUsers "$bootstrap_users" --argjson images "$bootstrap_images" --argjson identityIds "${HIVE_BOOTSTRAP_IDENTITIES:-null}" --arg ingressTemplate "${HIVE_BOOTSTRAP_INGRESS:-}" --arg integrityScript "$(base64 -w0 "$HIVE_ROOT/scripts/suite/check-data.mjs")" \
     --arg skillsManifest "${HIVE_SKILLS_MANIFEST:-}" --arg skillsSignature "${HIVE_SKILLS_SIGNATURE:-}" --arg skillsTrust "${HIVE_SKILLS_TRUST:-}" --arg skillsTokenSHA "${HIVE_SKILLS_TOKEN_SHA:-}" \
-    --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" --argjson registry "${HIVE_REGISTRY_INPUT:-null}" \
-    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
+    --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" --argjson registry "${HIVE_REGISTRY_INPUT:-null}" --argjson magnusTrust "${HIVE_MAGNUS_TRUST_INPUT:-null}" \
+    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,magnusTrust:$magnusTrust,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
   if [[ "$target" == local ]]; then
     printf '%s\n' "$payload" | bash -c "$script"
   else
@@ -369,7 +387,7 @@ hive_render() {
         (if $kind=="application" then {environment:(($r.components[$name].service.environment // {})+{HIVE_AUTO_MIGRATE:"false",HIVE_AUTO_UPGRADE:"false",HIVE_UPDATE_CHECK:"false",HIVE_UI_UPGRADE:"false"} + (if $name=="magnus" then {MAGNUS_AUTO_MIGRATE:"false"} else {} end) + (if $relax then ($relaxedEnvironment[$name] // {}) else {} end))} else {} end) +
         (if $kind=="ingress" then {ports:[{target:8443,published:($c.console.httpsPort|tostring),host_ip:$c.console.bindAddress,protocol:"tcp"}]}
          elif $c.bootstrap.productEndpoints[$name] then $c.bootstrap.productEndpoints[$name] as $endpoint |
-          {ports:([{target:({oathweave:4200,emberpath:9443,hivemem:18790,hiveskills:4030,magnus:4000,cindertrace:4101,chattermost:8065}[$name]),published:($endpoint.origin|capture("^https://[^:]+(?::(?<port>[0-9]+))?$")|.port // "443"),host_ip:$endpoint.bindAddress,protocol:"tcp"}] +
+          {ports:([{target:({oathweave:4200,emberpath:9443,hivemem:18790,hiveskills:4030,magnus:4000,"magnus-gateway":4310,cindertrace:4101,chattermost:8065}[$name]),published:($endpoint.origin|capture("^https://[^:]+(?::(?<port>[0-9]+))?$")|.port // "443"),host_ip:$endpoint.bindAddress,protocol:"tcp"}] +
             (if $name=="emberpath" then [{target:4020,published:($endpoint.inferenceOrigin|capture("^https://[^:]+(?::(?<port>[0-9]+))?$")|.port // "443"),host_ip:$endpoint.bindAddress,protocol:"tcp"}] else [] end))}
          else {} end) +
         # The registry starts first on its host, before the products it records.
@@ -396,7 +414,7 @@ hive_main() {
   HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY=''
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
   HIVE_RELEASE_SUMMARY='' HIVE_REGISTRY_FILE='' HIVE_REGISTRY_ORIGINAL_CONFIG='' HIVE_REGISTRY_TEMPORARY='' HIVE_OPERATION=''
-  local -a registry_arguments=()
+  local -a registry_arguments=() trust_arguments=()
   if (($#)) && [[ "$1" != --* ]]; then command=$1; shift; fi
   while (($#)); do
     case $1 in
@@ -409,6 +427,10 @@ hive_main() {
         [[ "$command" == registry ]] || hive_die '--file applies only to registry'
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
         HIVE_REGISTRY_FILE=$2; shift 2;;
+      --node-id|--host|--port|--fingerprint|--previous|--approved-by|--approval-ref)
+        [[ "$command" == magnus-trust ]] || hive_die 'Unknown option'
+        (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
+        trust_arguments+=("$1" "$2"); shift 2;;
       --config|--release|--manifest|--signature|--trust-key|--archive|--reconciliation)
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
         case $1 in
@@ -416,11 +438,16 @@ hive_main() {
           --signature) HIVE_SIGNATURE=$2;; --trust-key) HIVE_TRUST_KEY=$2;; --archive) HIVE_ARCHIVE=$2;; --reconciliation) HIVE_RECONCILIATION=$2;;
         esac; shift 2;;
       *)
-        [[ "$command" == registry && "$1" != --* ]] || hive_die 'Unknown option'
-        registry_arguments+=("$1"); shift;;
+        [[ "$1" != --* ]] || hive_die 'Unknown option'
+        case "$command" in
+          registry) registry_arguments+=("$1");;
+          magnus-trust) trust_arguments=("$1" "${trust_arguments[@]}");;
+          *) hive_die 'Unknown option';;
+        esac
+        shift;;
     esac
   done
-  case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry) ;; *) hive_die 'Unknown command';; esac
+  case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust) ;; *) hive_die 'Unknown command';; esac
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
     case "$command" in plan|install|upgrade) ;; *) hive_die '--relax-auth-limits applies only to plan, install and upgrade';; esac
   fi
@@ -476,6 +503,7 @@ hive_main() {
     doctor)
       hive_registry_preflight; hive_registry_doctor; return;;
     registry) hive_registry_command "${registry_arguments[@]}"; return;;
+    magnus-trust) hive_magnus_trust "${trust_arguments[@]}"; return;;
   esac
   hive_need openssl; hive_need sha256sum; hive_manifest
   hive_plan

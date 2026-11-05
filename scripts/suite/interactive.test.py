@@ -172,6 +172,33 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     subprocess.run([*arguments[:2], '--config', str(full_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
     print('Passed: interactive full profile, protected config and identical unattended planning.')
 
+    # A release can offer the web terminal, but it is off unless the operator asks for it.
+    manifest['components']['magnus-gateway'] = {'image': 'example.com/synthetic@sha256:' + '2' * 64, 'kind': 'application', 'requiresLocal': ['magnus'],
+                                                'service': {'user': f'{os.getuid()}:{os.getgid()}', 'healthcheck': {'test': ['CMD', 'true']}}}
+    release.write_text(json.dumps(with_catalog(manifest)))
+    openssl('pkeyutl', '-sign', '-inkey', base / 'publisher.key', '-rawin', '-in', release, '-out', str(release) + '.sig')
+    def with_gateway_answers(name, answers):
+        target = base / 'inventory' / (name + '.json')
+        result = []
+        for label, answer in full_questions:
+            if label == 'Write protected installation configuration to': answer = str(target)
+            result.append((label, answer))
+            if label == 'Protected console private key file': result += answers
+        review.write_text(json.dumps({'command': arguments, 'questions': result, 'transcriptFile': str(base / (name + '-transcript.log')), 'timeoutSeconds': 30}))
+        subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
+        return json.loads(target.read_text()), target
+    declined, _ = with_gateway_answers('gateway-default', [('Deploy the Magnus web terminal gateway', '')])
+    assert 'magnus-gateway' not in declined['components'] and 'magnusGateway' not in declined['bootstrap']
+    selected, target = with_gateway_answers('gateway-selected', [('Deploy the Magnus web terminal gateway', 'yes'),
+                                                                 ('Restricted SSH account on fleet nodes', 'deploy'),
+                                                                 ('Protected SSH private key file on the Magnus host', '/opt/credentials/fleet-key'),
+                                                                 ('Grant magnus:terminal to the initial operator', '')])
+    assert selected['components']['magnus-gateway']['envFile'].endswith('/config/magnus-gateway.env')
+    assert selected['bootstrap']['magnusGateway'] == {'sshUsername': 'deploy', 'sshPrivateKeyFile': '/opt/credentials/fleet-key', 'grantTerminalToInitialOperator': False}
+    plan = json.loads(subprocess.run([*arguments[:2], '--config', str(target), *arguments[2:]], check=True, stdout=subprocess.PIPE).stdout)
+    assert plan['magnusTerminal'] == {'gatewaySelected': True, 'grantedToInitialOperator': False}
+    print('Passed: interactive terminal gateway is off by default, and selecting it does not grant the terminal.')
+
     custom_output = base / 'inventory' / 'custom.json'
     custom_questions = []
     for label, answer in questions[:13]:

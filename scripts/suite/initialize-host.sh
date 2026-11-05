@@ -48,7 +48,17 @@ if [[ "$distributed" == true ]]; then
     check_certificate "$certificate" "$private_key" "$hostname"
     hostname_option=-verify_hostname; [[ ! "$hostname" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || hostname_option=-verify_ip
     openssl verify -CAfile "$trust_bundle" "$hostname_option" "$hostname" "$certificate" >/dev/null || die 'Product certificate is not trusted by the configured bundle'
-  done < <(jq -r '.placements|keys[]|select(IN("oathweave","emberpath","hivemem","hiveskills","magnus","cindertrace","chattermost"))' <<< "$input")
+  done < <(jq -r '.placements|keys[]|select(IN("oathweave","emberpath","hivemem","hiveskills","magnus","magnus-gateway","cindertrace","chattermost"))' <<< "$input")
+fi
+if has_component magnus-gateway; then
+  # The operator's restricted key. Hive copies it into the gateway's protected config and
+  # never creates a fleet key itself.
+  gateway_ssh_key=$(jq -er .bootstrap.magnusGateway.sshPrivateKeyFile <<< "$input")
+  [[ -f "$gateway_ssh_key" && ! -L "$gateway_ssh_key" && -r "$gateway_ssh_key" && "$gateway_ssh_key" == "$(realpath -m -- "$gateway_ssh_key")" ]] || die 'Fleet gateway SSH key reference is invalid'
+  permissions=$(stat -c %a "$gateway_ssh_key"); (( (8#$permissions & 077)==0 )) || die 'Fleet gateway SSH private key must be owner-only'
+  head -n 1 -- "$gateway_ssh_key" | grep -Eq '^-----BEGIN (OPENSSH|RSA|EC) PRIVATE KEY-----$' || die 'Fleet gateway SSH key must be an unencrypted private key file'
+  ! grep -q ENCRYPTED "$gateway_ssh_key" || die 'Fleet gateway SSH key must be an unencrypted private key file'
+  certificate_references+=("$gateway_ssh_key")
 fi
 while IFS= read -r user; do
   uid=${user%:*}; gid=${user#*:}
@@ -137,6 +147,7 @@ if has_component emberpath; then ensure_secret router-key; fi
 if has_component hivemem; then for name in memory-key memory-renewal qdrant-key; do ensure_secret "$name"; done; fi
 if has_component hiveskills; then ensure_secret skills-session; fi
 if has_component magnus; then for name in magnus-db magnus-redis magnus-api magnus-jwt magnus-manager magnus-audit magnus-result magnus-log magnus-rotation magnus-metrics magnus-webhook; do ensure_secret "$name"; done; fi
+if has_component magnus-gateway; then for name in magnus-gateway-api magnus-gateway-drain; do ensure_secret "$name"; done; fi
 if has_component cindertrace; then for name in security-db security-redis security-admin-password security-session security-console security-audit security-receipt security-backup security-rate; do ensure_secret "$name"; done; fi
 if has_component chattermost; then for name in chat-db chat-cookie chat-token chat-admin-password chat-bot; do ensure_secret "$name"; done; fi
 if has_component emberfold; then ensure_secret context-api; fi
@@ -160,7 +171,7 @@ if [[ ! -e "$ca" ]]; then
 fi
 openssl verify -CAfile "$ca" "$ca" >/dev/null || die 'Initialization authority verification failed'
 record_file "$ca"
-for component in oathweave emberpath hivemem hiveskills magnus cindertrace chattermost; do
+for component in oathweave emberpath hivemem hiveskills magnus magnus-gateway cindertrace chattermost; do
   has_component "$component" || continue
   ensure_key "$component"
   leaf="$state/certificates/$component.pem"
@@ -188,7 +199,7 @@ publish_file() {
   else chown "$uid:$gid" "$temporary"; sync -f "$temporary"; mv -T -- "$temporary" "$path"; fi
   record_file "$path"
 }
-for component in oathweave emberpath hivemem hiveskills magnus cindertrace chattermost; do
+for component in oathweave emberpath hivemem hiveskills magnus magnus-gateway cindertrace chattermost; do
   has_component "$component" || continue
   if [[ "$distributed" == true ]]; then
     key_reference=$(jq -er --arg name "$component" '.bootstrap.productEndpoints[$name].privateKeyFile' <<< "$input")
@@ -209,14 +220,16 @@ email=$(jq -er .bootstrap.adminEmail <<< "$input")
 subject=$(secret identity-id); model_id=$(secret model-id 2>/dev/null || true); memory_id=$(secret memory-id 2>/dev/null || true)
 issuer="$origin/api/oathweave"
 if has_component oathweave; then
-jq -n --arg id "$subject" --arg redirect "$origin/auth/callback" --argjson selection "$(jq -c .bootstrapServiceUsers <<< "$input")" '{schema:1,adminId:$id,clients:[
+# Oathweave gives its initial administrator every permission listed here and a browser token
+# carries no more than this list, so magnus:terminal appears only on the explicit opt-in.
+jq -n --arg id "$subject" --arg redirect "$origin/auth/callback" --argjson selection "$(jq -c .bootstrapServiceUsers <<< "$input")" --argjson terminal "$(jq -c '.bootstrapServiceUsers["magnus-gateway"]!=null and .bootstrap.magnusGateway.grantTerminalToInitialOperator==true' <<< "$input")" '{schema:1,adminId:$id,clients:[
  {id:"hivexui-oathweave",audience:"oathweave",permissions:["iam:users:read","iam:users:write","iam:users:delete","iam:roles:read","iam:roles:write","iam:sa:read","iam:sa:write","iam:sa:delete","iam:clients:read","iam:clients:write","iam:sessions:revoke","iam:audit:read","iam:system:login","iam:policy:write"],redirectUris:[$redirect],firstParty:true},
  {id:"hivexui-emberpath",audience:"emberpath",permissions:["router:providers:read","router:providers:write","router:routing:read","router:routing:write","router:testing:read","router:testing:write","router:keys:read","router:keys:write","router:settings:read","router:settings:write","router:admin:read","router:admin:write"],redirectUris:[$redirect],firstParty:true},
  {id:"hivexui-hivemem",audience:"hivemem",permissions:["hivemem:admin:all"],redirectUris:[$redirect],firstParty:true},
  {id:"hivexui-hiveskills",audience:"hiveskills",permissions:["hiveskills:admin"],redirectUris:[$redirect],firstParty:true}]} |
  .clients += ((if $selection.cindertrace then [{id:"hivexui-cindertrace",audience:"cindertrace",permissions:["cindertrace:view","cindertrace:investigate","cindertrace:admin"],redirectUris:[$redirect],firstParty:true}] else [] end) +
  (if $selection.chattermost then [{id:"hivexui-chattermost",audience:"chattermost",permissions:["chattermost:session"],redirectUris:[$redirect],firstParty:true}] else [] end) +
- (if $selection.magnus then [{id:"hivexui-magnus",audience:"magnus",permissions:["magnus:view","magnus:operate","magnus:admin","magnus:terminal"],redirectUris:[$redirect],firstParty:true}] else [] end)) | .clients |= map(select(.audience as $name|$selection[$name]!=null))' | publish_file oathweave "$directory/config/oathweave/suite-bootstrap.json"
+ (if $selection.magnus then [{id:"hivexui-magnus",audience:"magnus",permissions:(["magnus:view","magnus:operate","magnus:admin"]+(if $terminal then ["magnus:terminal"] else [] end)),redirectUris:[$redirect],firstParty:true}] else [] end)) | .clients |= map(select(.audience as $name|$selection[$name]!=null))' | publish_file oathweave "$directory/config/oathweave/suite-bootstrap.json"
 policies=$(jq -c '.clients|map({key:.id,value:{audience,permissions}})|from_entries' "$directory/config/oathweave/suite-bootstrap.json")
 fi
 if has_component hivemem; then
@@ -300,7 +313,7 @@ if has_component ingress; then
     hostname=${endpoint#https://}; hostname=${hostname%%:*}
     line "${label}_ENDPOINT" "$endpoint"; line "${label}_TLS_NAME" "$hostname"
   done
-  for mapping in cindertrace:CINDERTRACE:4101 chattermost:CHATTERMOST:8065 magnus:MAGNUS:4000; do
+  for mapping in cindertrace:CINDERTRACE:4101 chattermost:CHATTERMOST:8065 magnus:MAGNUS:4000 magnus-gateway:MAGNUS_GATEWAY:4310; do
     component=${mapping%%:*}; tail=${mapping#*:}; label=${tail%%:*}; port=${tail##*:}
     jq -e --arg name "$component" '.bootstrapServiceUsers[$name]!=null' <<< "$input" >/dev/null || continue
     endpoint=$(product_endpoint "$component" "https://$component:$port"); hostname=${endpoint#https://}; hostname=${hostname%%:*}
