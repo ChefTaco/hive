@@ -16,7 +16,10 @@ HiveXUI is the single browser UI for every Hive:Magnus product.
 - Use one cohesive visual theme across all modules.
 - Show a UI section only when its product is installed. An operator who did not
   install a product sees no trace of it.
-- After the UI is unified: publish the release, then update the HiveMagnus repository
+- After the UI is merged, hold a whole-console design review. Keep the Magnus UI's
+  visually impressive parts, such as its animations and marquees, rather than
+  flattening them, and respect reduced-motion preferences.
+- After that review: publish the release, then update the HiveMagnus repository
   and website.
 - `--relax-auth-limits` greatly relaxes sign-in and password-attempt limits for testing
   without changing stored policy. Throttling stays enabled at a high ceiling, and the
