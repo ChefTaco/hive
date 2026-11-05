@@ -1,16 +1,19 @@
 name: Publish to npm
 
-# Publishes every @hivemagnus package whose version is not on npm yet, with provenance, then the
-# server images and the Hive Registry and suite ingress images (linux/amd64 and linux/arm64) to
-# GitHub Container Registry.
-# - Push a tag vX.Y.Z (matching the launcher version) to publish.
+# Publishes the legacy @hivemagnus npm packages (the hive launcher, hive-router,
+# hive-iam-server, hivemem-server, hive-skills and the SDKs) whose version is not on npm yet,
+# with provenance, then their server images (linux/amd64 and linux/arm64) to GitHub Container
+# Registry. These packages are superseded by the separate product repositories and the Hive
+# suite; this workflow remains for their maintenance releases on the v1 line.
+# - Push a tag v1.Y.Z (matching the launcher version) to publish.
 # - Run it by hand (Actions > Publish to npm > Run workflow) for a dry run.
+# Suite releases (v2.0.0 and later) use suite-release.yml, which publishes no npm package.
 # Publishing waits for approval on the `npm-publish` environment, then authenticates to npm
 # through trusted publishing (OIDC). No npm token is stored.
 
 on:
   push:
-    tags: ['v*']
+    tags: ['v1.*']
   workflow_dispatch:
     inputs:
       dry_run:
@@ -192,86 +195,9 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
-  # Suite images built from this repository rather than from an npm package. The Hive
-  # Registry and the suite ingress are installed by hive.sh from a signed manifest.
-  suite-images:
-    name: Publish suite image (${{ matrix.component }})
-    needs: [publish, registry-ready]
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - component: hive-registry
-            context: services/hive-registry
-            file: services/hive-registry/Dockerfile
-            check: node /app/dist/cli.js --version
-          - component: hive-ingress
-            context: deployment
-            file: deployment/ingress.Dockerfile
-            check: caddy version
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-      attestations: write
-    env:
-      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
-      IMAGE: ghcr.io/cheftaco/${{ matrix.component }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24.22.1
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - name: Exact release and immutable tag
-        id: meta
-        run: |
-          version="$(node -p "require('./packages/hive/package.json').version")"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          exists=false
-          if docker buildx imagetools inspect "$IMAGE:$version" >/dev/null 2>&1; then exists=true; fi
-          echo "exists=$exists" >> "$GITHUB_OUTPUT"
-      - name: Build and execute each architecture before publication
-        if: steps.meta.outputs.exists == 'false'
-        run: |
-          for arch in amd64 arm64; do
-            docker buildx build --load --platform "linux/$arch" -f "${{ matrix.file }}" -t "suite-image-check:$arch" "${{ matrix.context }}"
-            docker run --rm --platform "linux/$arch" --read-only --cap-drop ALL --security-opt no-new-privileges:true "suite-image-check:$arch" ${{ matrix.check }}
-          done
-      - uses: docker/login-action@v4
-        if: env.DRY_RUN != 'true' && steps.meta.outputs.exists == 'false'
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish immutable image with provenance and SBOM
-        id: build
-        if: steps.meta.outputs.exists == 'false'
-        uses: docker/build-push-action@v7
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.file }}
-          platforms: linux/amd64,linux/arm64
-          push: ${{ env.DRY_RUN != 'true' }}
-          tags: ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.licenses=Apache-2.0
-          provenance: mode=max
-          sbom: true
-      - uses: actions/attest-build-provenance@v4
-        if: env.DRY_RUN != 'true' && steps.meta.outputs.exists == 'false'
-        with:
-          subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true
-
   promote-images:
     name: Promote tested same-major image channels
-    needs: [publish, images, suite-images]
+    needs: [publish, images]
     if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
     runs-on: ubuntu-24.04
     permissions:
@@ -289,7 +215,7 @@ jobs:
         run: |
           version="$(node -p "require('./packages/hive/package.json').version")"
           IFS=. read -r major minor patch <<< "$version"
-          for name in hive-iam-server hive-router hivemem-server hive-skills hive-registry hive-ingress; do
+          for name in hive-iam-server hive-router hivemem-server hive-skills; do
             image="ghcr.io/cheftaco/$name"
             docker buildx imagetools create --tag "$image:$major.$minor" --tag "$image:$major" "$image:$version"
           done
