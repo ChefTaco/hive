@@ -43,6 +43,22 @@
 	header_up X-Forwarded-For {client_ip}
 }
 
+# The Magnus fleet gateway's browser routes. Default deny, as for magnus_backend, except
+# that the gateway also needs Origin and Sec-Fetch-Site: without them its cross-origin
+# check is silently off. A header set here is sent even when empty, and the gateway
+# refuses an empty one, so each caller passes only the ones this request really has.
+(magnus_terminal_upstream) {
+	reverse_proxy {$MAGNUS_GATEWAY_ENDPOINT:https://unconfigured.invalid} {
+		import stateless_backend {$MAGNUS_GATEWAY_TLS_NAME:unconfigured.invalid}
+		header_up -*
+		header_up Authorization {http.request.header.Authorization}
+		header_up Content-Type {http.request.header.Content-Type}
+		header_up Accept {http.request.header.Accept}
+		header_up X-Forwarded-For {client_ip}
+		{block}
+	}
+}
+
 # Hive Registry: this installation's install catalog, not the HiveSkills skills
 # registry. Default deny: GET only, an explicit route list, no cookies, and only a
 # well-formed bearer credential. The registry decides what that credential may see.
@@ -62,6 +78,10 @@
 	@magnus_ready {
 		method GET
 		path /api/magnus/health/ready
+	}
+	@magnus_docs {
+		method GET
+		path /api/magnus/docs/openapi.json
 	}
 	@registry_ready {
 		method GET
@@ -130,6 +150,13 @@
 			import magnus_backend {$MAGNUS_TLS_NAME:unconfigured.invalid}
 		}
 	}
+	# The one browser route outside /api/v1. It is public and has one exact target.
+	handle @magnus_docs {
+		rewrite * /api/docs/openapi.json
+		reverse_proxy {$MAGNUS_ENDPOINT:https://unconfigured.invalid} {
+			import magnus_backend {$MAGNUS_TLS_NAME:unconfigured.invalid}
+		}
+	}
 	handle_path /api/magnus/* {
 		rewrite * /api/v1{uri}
 		# Patterns match decoded paths, so refuse any request whose raw path could
@@ -140,6 +167,58 @@
 			CEL
 		handle @magnus_unsafe_path {
 			respond "API unavailable" 404
+		}
+		# The browser terminal is the optional fleet gateway, not Magnus: these exact routes
+		# and methods reach the gateway's /terminal/*, and nothing else on it has a route, so
+		# /internal stays reachable only by the Magnus API. With no gateway selected the
+		# routes answer 404 like any other, and POST /api/v1/terminal/ticket stays retired.
+		@magnus_terminal expression <<CEL
+			"{$MAGNUS_GATEWAY_ENDPOINT:}" != "" && (
+				({method} == "POST" && {path}.matches("^/api/v1/terminal/(open|input|resize|renew|close)$"))
+				|| ({method} == "GET" && {path}.matches("^/api/v1/terminal/(stream|status)$"))
+			)
+			CEL
+		handle @magnus_terminal {
+			@magnus_terminal_not_bearer {
+				header Authorization *
+				not header_regexp Authorization "^Bearer [^ ,]+$"
+			}
+			handle @magnus_terminal_not_bearer {
+				respond "Bearer token required" 401
+			}
+			uri strip_prefix /api/v1
+			@terminal_origin_and_site {
+				header Origin *
+				header Sec-Fetch-Site *
+			}
+			handle @terminal_origin_and_site {
+				import magnus_terminal_upstream {
+					header_up Origin {http.request.header.Origin}
+					header_up Sec-Fetch-Site {http.request.header.Sec-Fetch-Site}
+				}
+			}
+			@terminal_origin_only {
+				header Origin *
+				not header Sec-Fetch-Site *
+			}
+			handle @terminal_origin_only {
+				import magnus_terminal_upstream {
+					header_up Origin {http.request.header.Origin}
+				}
+			}
+			# A browser sends no Origin on a same-origin GET.
+			@terminal_site_only {
+				not header Origin *
+				header Sec-Fetch-Site *
+			}
+			handle @terminal_site_only {
+				import magnus_terminal_upstream {
+					header_up Sec-Fetch-Site {http.request.header.Sec-Fetch-Site}
+				}
+			}
+			handle {
+				import magnus_terminal_upstream
+			}
 		}
 		# A route parameter also matches a literal segment. These non-browser routes
 		# are shadowed by a broader browser pattern, so they are refused first.
@@ -153,9 +232,6 @@
 		handle @magnus_explicit_deny {
 			respond "API unavailable" 404
 		}
-		# Deferred: the browser terminal needs its own gateway at
-		# /api/magnus/terminal/*. It has no route until that gateway exists, and
-		# POST /api/v1/terminal/ticket stays retired.
 		@magnus_browser expression <<CEL
 			({method} == "GET" && (
 				{path} == "/api/v1/agents/upgrade/eligibility"

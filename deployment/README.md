@@ -39,7 +39,9 @@ Configure the same prefixes in HiveXUI runtime JSON. The first three rewrite to 
 and `/v1` respectively; Skills receives its native paths, Cindertrace `/api/v1`,
 and chat its native `/api/v4` paths. Magnus is the exception to prefix mapping:
 only an explicit list of browser-facing routes rewrites to `/api/v1`, and everything
-else answers 404 (see [FULL.md](FULL.md)). The ingress preserves user Authorization,
+else answers 404 (see [FULL.md](FULL.md)). `/api/magnus/terminal/*` reaches the optional
+fleet gateway instead of Magnus, for its exact routes, and answers 404 when no gateway is
+selected ([Magnus web terminal](FULL.md#magnus-web-terminal)). The ingress preserves user Authorization,
 Origin and native product sessions without injecting an administrator credential.
 Oathweave's SSO and refresh cookies reach only Oathweave; other APIs cannot set
 these identity cookies. Static assets receive no Authorization or Cookie header
@@ -63,7 +65,7 @@ After building HiveXUI as `hivexui:candidate`, run
 `node scripts/suite/ingress-roundtrip.mjs` for disposable transport acceptance.
 It checks TLS certificate-name rejection, path mappings, identity-cookie isolation,
 native session preservation, streaming and WebSocket upgrades, plus the Magnus route
-allowlist and header stripping. Set `HIVE_MAGNUS_ROUTE_INVENTORY` to Magnus's
+allowlist, header stripping, and the fleet gateway's routes and browser headers. Set `HIVE_MAGNUS_ROUTE_INVENTORY` to Magnus's
 `docs/console-api.md` to check every row of that inventory. It is not a product authorization or migrated
 data test. Released deployment must use registry image digests rather than these
 local candidate tags.

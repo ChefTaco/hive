@@ -19,7 +19,6 @@ const docker = (...args) =>
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let passed = false;
 try {
-  mkdirSync(join(temporary, 'state'), { mode: 0o700 });
   execFileSync(
     'openssl',
     [
@@ -63,6 +62,12 @@ const plain=http.createServer((req,res)=>{res.setHeader('Set-Cookie','MMSID=obvi
 plain.listen(8096,'0.0.0.0');
 const registry=http.createServer((req,res)=>{res.setHeader('Set-Cookie','hive_registry_forged=obviously-fake; Path=/');res.setHeader('Content-Type','application/json');res.end(JSON.stringify({path:req.url,method:req.method,authorization:req.headers.authorization,cookie:req.headers.cookie,origin:req.headers.origin}));});
 registry.listen(8095,'0.0.0.0');
+const gateway=https.createServer({key:fs.readFileSync('/config/console.key'),cert:fs.readFileSync('/config/console.crt')},(req,res)=>{
+ res.setHeader('Set-Cookie','hive_gateway_forged=obviously-fake; Path=/');
+ if(req.url.startsWith('/terminal/stream')){res.writeHead(200,{'Content-Type':'application/octet-stream'});res.write('first output');setTimeout(()=>res.end(' last output'),350);return;}
+ res.setHeader('Content-Type','application/json');const chunks=[];req.on('data',chunk=>chunks.push(chunk));req.on('end',()=>res.end(JSON.stringify({gateway:true,path:req.url,method:req.method,headers:req.headers,body:Buffer.concat(chunks).toString()})));
+});
+gateway.listen(4310,'0.0.0.0');
 `,
     { mode: 0o600 },
   );
@@ -94,6 +99,8 @@ registry.listen(8095,'0.0.0.0');
     'emberfold',
     '--network-alias',
     'hive-registry',
+    '--network-alias',
+    'magnus-gateway',
     ...restrictions,
     '-v',
     `${temporary}:/config:ro`,
@@ -151,50 +158,59 @@ registry.listen(8095,'0.0.0.0');
       '-e',
       product + '_TLS_NAME=' + (product === 'HIVESKILLS' ? 'wrong.invalid' : 'localhost'),
     );
-  docker(
-    'run',
-    '-d',
-    '--name',
-    ingress,
-    '--network',
-    network,
-    ...restrictions,
-    ...env,
-    '-v',
-    `${temporary}:/config:ro`,
-    '-v',
-    `${temporary}/state:/data`,
-    '-p',
-    '127.0.0.1::8443',
-    caddyImage,
-    'caddy',
-    'run',
-    '--config',
-    '/config/Caddyfile',
-    '--adapter',
-    'caddyfile',
-  );
-  let inspect;
-  for (let attempt = 0; attempt < 50; attempt++) {
-    inspect = JSON.parse(docker('inspect', ingress))[0];
-    if (inspect.NetworkSettings.Ports['8443/tcp']?.length) break;
-    if (inspect.State.Status === 'exited') break;
-    await delay(100);
+  // The gateway is optional: this ingress has it, and a second one below does not.
+  async function startIngress(name, environment, state) {
+    mkdirSync(state, { recursive: true, mode: 0o700 });
+    docker(
+      'run',
+      '-d',
+      '--name',
+      name,
+      '--network',
+      network,
+      ...restrictions,
+      ...environment,
+      '-v',
+      `${temporary}:/config:ro`,
+      '-v',
+      `${state}:/data`,
+      '-p',
+      '127.0.0.1::8443',
+      caddyImage,
+      'caddy',
+      'run',
+      '--config',
+      '/config/Caddyfile',
+      '--adapter',
+      'caddyfile',
+    );
+    let inspect;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      inspect = JSON.parse(docker('inspect', name))[0];
+      if (inspect.NetworkSettings.Ports['8443/tcp']?.length) break;
+      if (inspect.State.Status === 'exited') break;
+      await delay(100);
+    }
+    writeFileSync(join(temporary, name + '-inspect.json'), JSON.stringify(inspect, null, 2), {
+      mode: 0o600,
+    });
+    const port = inspect.NetworkSettings.Ports['8443/tcp']?.[0]?.HostPort;
+    assert(port, 'Ingress did not publish its test listener');
+    return port;
   }
-  writeFileSync(join(temporary, 'ingress-inspect.json'), JSON.stringify(inspect, null, 2), {
-    mode: 0o600,
-  });
-  const port = inspect.NetworkSettings.Ports['8443/tcp']?.[0]?.HostPort;
-  assert(port, 'Ingress did not publish its test listener');
   const options = {
     hostname: 'localhost',
-    port,
+    port: await startIngress(
+      ingress,
+      [...env, '-e', 'MAGNUS_GATEWAY_ENDPOINT=https://magnus-gateway:4310', '-e', 'MAGNUS_GATEWAY_TLS_NAME=localhost'],
+      join(temporary, 'state'),
+    ),
     ca: readFileSync(join(temporary, 'console.crt')),
     timeout: 5000,
   };
-  async function request(path, headers = {}, method = 'GET', body) {
+  async function request(path, headers = {}, method = 'GET', body, target = options) {
     return new Promise((resolve, reject) => {
-      const req = https.request({ ...options, path, headers, method }, (res) => {
+      const req = https.request({ ...target, path, headers, method }, (res) => {
         const chunks = [];
         let first;
         res.on('data', (chunk) => {
@@ -215,17 +231,16 @@ registry.listen(8095,'0.0.0.0');
       req.end(body);
     });
   }
-  let ready = false;
-  for (let attempt = 0; attempt < 80; attempt++) {
-    try {
-      if ((await request('/_hive/ready')).status === 200) {
-        ready = true;
-        break;
-      }
-    } catch {}
-    await delay(100);
+  async function waitReady(target) {
+    for (let attempt = 0; attempt < 80; attempt++) {
+      try {
+        if ((await request('/_hive/ready', {}, 'GET', undefined, target)).status === 200) return;
+      } catch {}
+      await delay(100);
+    }
+    assert.fail('Ingress did not become ready');
   }
-  assert(ready, 'Ingress did not become ready');
+  await waitReady(options);
   assert.match((await request('/')).body, /HiveXUI/);
   const cookieNames = ['__Host-oathweave_sso', 'iam_refresh', 'hive_router_admin', 'hivemem_dash', 'hive_skills_session', 'cindertrace_session', 'MMSID', 'MMUSERID', 'MMCSRF'];
   const headers = {
@@ -348,11 +363,110 @@ registry.listen(8095,'0.0.0.0');
     ['/api/magnus/nodes/node-1%0a'],
     ['/api/magnus/nodes/node%252F1'],
     ['/api/magnus/nodes/node%5c1'],
+    ['/api/magnus/docs/openapi.json', 'POST'],
+    ['/api/magnus/docs/openapi'],
+    ['/api/magnus/docs/other.json'],
+    ['/api/magnus/docs'],
+    ['/api/magnus/internal/resource-enrollment/drain', 'POST'],
+    ['/api/magnus/terminal/internal/resource-enrollment/drain', 'POST'],
+    ['/api/magnus/terminal/../internal/resource-enrollment/drain', 'POST'],
+    ['/api/magnus/terminal/%2e%2e/internal/resource-enrollment/drain', 'POST'],
+    ['/api/magnus/terminal/..%2finternal', 'POST'],
+    ['/api/magnus/terminal/health'],
+    ['/api/magnus/health/internal'],
+    ['/api/magnus/terminal/open'],
+    ['/api/magnus/terminal/input'],
+    ['/api/magnus/terminal/resize'],
+    ['/api/magnus/terminal/renew'],
+    ['/api/magnus/terminal/close'],
+    ['/api/magnus/terminal/stream', 'POST'],
+    ['/api/magnus/terminal/status', 'POST'],
+    ['/api/magnus/terminal/open', 'PUT'],
+    ['/api/magnus/terminal/open', 'DELETE'],
+    ['/api/magnus/terminal/open', 'OPTIONS'],
+    ['/api/magnus/terminal/open/extra', 'POST'],
+    ['/api/magnus/terminal/open/', 'POST'],
+    ['/api/magnus/terminal/OPEN', 'POST'],
+    ['/api/magnus/terminal//open', 'POST'],
+    ['/api/magnus/terminal/unknown', 'POST'],
+    ['/api/magnus/terminal/'],
+    ['/api/magnus/terminal'],
   ]) {
     const result = await request(input, magnusHeaders, method);
     assert.equal(result.status, 404, (method ?? 'GET') + ' ' + input + ' was not refused');
     assert.equal(result.body, refused, input + ' reached a backend');
   }
+  // The API docs route is the one Magnus browser route outside /api/v1.
+  const magnusDocs = JSON.parse((await request('/api/magnus/docs/openapi.json', magnusHeaders)).body);
+  assert.equal(magnusDocs.path, '/api/docs/openapi.json');
+  assert.equal(magnusDocs.method, 'GET');
+  assert.equal(magnusDocs.headers['x-api-secret'], undefined, 'The docs route forwarded a machine secret');
+  // The terminal goes to the gateway, not to Magnus, with its browser headers intact and
+  // every credential a browser could use against the gateway's machine routes removed.
+  const terminalHeaders = {
+    ...magnusHeaders,
+    'Sec-Fetch-Site': 'same-origin',
+    'x-fleet-gateway-token': 'obviously-fake-gateway-token',
+    'x-resource-drain-key': 'obviously-fake-drain-key',
+  };
+  for (const [verb, method, query, payload] of [
+    ['open', 'POST', '', '{"nodeId":"node-1"}'],
+    ['input', 'POST', '', '{"sessionId":"ts_fake","data":"x"}'],
+    ['resize', 'POST', '', '{"sessionId":"ts_fake","cols":80,"rows":24}'],
+    ['renew', 'POST', '', '{"sessionId":"ts_fake"}'],
+    ['close', 'POST', '', '{"sessionId":"ts_fake"}'],
+    ['status', 'GET', '?sessionId=ts_fake'],
+  ]) {
+    const result = await request('/api/magnus/terminal/' + verb + query, terminalHeaders, method, payload);
+    assert.equal(result.status, 200, verb);
+    const body = JSON.parse(result.body);
+    assert.equal(body.gateway, true, verb + ' did not reach the gateway');
+    assert.equal(body.path, '/terminal/' + verb + query);
+    assert.equal(body.method, method);
+    assert.equal(body.body, payload ?? '', verb + ' changed the request body');
+    assert.equal(body.headers.origin, headers.Origin, verb + ' dropped Origin');
+    assert.equal(body.headers['sec-fetch-site'], 'same-origin', verb + ' dropped Sec-Fetch-Site');
+    assert.equal(body.headers.authorization, headers.Authorization);
+    assert.equal(body.headers['content-type'], 'application/json');
+    for (const name of ['x-api-secret', 'x-node-token', 'x-log-token', 'x-fleet-gateway-token', 'x-resource-drain-key', 'x-idempotency-key', 'cookie'])
+      assert.equal(body.headers[name], undefined, verb + ' forwarded ' + name);
+    assert.notEqual(body.headers['x-forwarded-for'], '192.0.2.1', 'Ingress trusted a browser forwarding header');
+    assert(!body.headers['x-forwarded-for'].includes(','), 'X-Forwarded-For must hold exactly one address');
+    assert.deepEqual((result.cookies || []).filter(Boolean), [], verb + ' let the gateway set a cookie');
+  }
+  // A same-origin browser GET has no Origin. A header the request did not have must stay
+  // absent, because the gateway refuses an empty one and would refuse every stream.
+  for (const [sent, origin, site] of [
+    [{ 'Sec-Fetch-Site': 'same-origin' }, undefined, 'same-origin'],
+    [{ Origin: headers.Origin }, headers.Origin, undefined],
+    [{}, undefined, undefined],
+    [{ Origin: 'https://attacker.example.com', 'Sec-Fetch-Site': 'cross-site' }, 'https://attacker.example.com', 'cross-site'],
+  ]) {
+    const body = JSON.parse((await request('/api/magnus/terminal/status?sessionId=ts_fake', { Authorization: headers.Authorization, ...sent })).body);
+    assert.equal(body.headers.origin, origin, 'Origin was changed on the way to the gateway');
+    assert.equal(body.headers['sec-fetch-site'], site, 'Sec-Fetch-Site was changed on the way to the gateway');
+  }
+  const terminalStream = await request('/api/magnus/terminal/stream?sessionId=ts_fake', { Authorization: headers.Authorization, 'Sec-Fetch-Site': 'same-origin', 'Accept-Encoding': 'gzip' });
+  assert.equal(terminalStream.status, 200);
+  assert.equal(terminalStream.body, 'first output last output', 'Terminal stream was compressed or altered');
+  assert(terminalStream.streamMilliseconds > 150, 'Terminal stream was buffered until completion');
+  for (const authorization of ['Basic b2JfdmlvdXNseQ==', 'Bearer two words', 'Bearer a,b'])
+    assert.equal((await request('/api/magnus/terminal/open', { Authorization: authorization }, 'POST', '{}')).status, 401, 'Non-bearer Authorization reached the gateway');
+  // The Magnus API itself keeps stripping a machine secret on the routes beside the terminal.
+  const besideTerminal = JSON.parse((await request('/api/magnus/console/session', terminalHeaders)).body);
+  assert.equal(besideTerminal.headers['x-api-secret'], undefined);
+  assert.equal(besideTerminal.gateway, undefined, 'A Magnus route reached the gateway');
+  // Off by default: without a selected gateway the terminal routes do not exist at all.
+  const withoutGatewayName = network + '-edge-no-gateway';
+  containers.push(withoutGatewayName);
+  const withoutGateway = { ...options, port: await startIngress(withoutGatewayName, env, join(temporary, 'state-no-gateway')) };
+  await waitReady(withoutGateway);
+  for (const [path, method] of [['/api/magnus/terminal/open', 'POST'], ['/api/magnus/terminal/stream?sessionId=ts_fake', 'GET'], ['/api/magnus/terminal/status?sessionId=ts_fake', 'GET'], ['/api/magnus/terminal/close', 'POST']]) {
+    const result = await request(path, { Authorization: headers.Authorization }, method, method === 'POST' ? '{}' : undefined, withoutGateway);
+    assert.equal(result.status, 404, path + ' exists without a selected gateway');
+    assert.equal(result.body, refused);
+  }
+  assert.equal(JSON.parse((await request('/api/magnus/console/session', { Authorization: headers.Authorization }, 'GET', undefined, withoutGateway)).body).path, '/api/v1/console/session');
   const magnusStream = await request('/api/magnus/events/stream', { ...magnusHeaders, Accept: 'text/event-stream' });
   assert.equal(magnusStream.status, 200);
   assert.match(magnusStream.body, /first[\s\S]*last/);
@@ -363,6 +477,10 @@ registry.listen(8095,'0.0.0.0');
     let section = '';
     for (const line of readFileSync(process.env.HIVE_MAGNUS_ROUTE_INVENTORY, 'utf8').split('\n')) {
       if (line.startsWith('## ')) section = line.slice(3);
+      if (section === 'Browser-facing' && line.startsWith('| GET | `/api/docs/openapi.json` |')) {
+        assert.equal(JSON.parse((await request('/api/magnus/docs/openapi.json')).body).path, '/api/docs/openapi.json');
+        counts.browser++;
+      }
       const row = line.match(/^\| (GET|POST|PUT|PATCH|DELETE|ALL) \| `(\/api\/v1\/[^`]*)` \|/);
       if (!row || section === 'Explicit denies') continue;
       const allowed = section === 'Browser-facing';
@@ -448,7 +566,7 @@ registry.listen(8095,'0.0.0.0');
     assert.equal((await request('/api/registry/v1/products', { Authorization: authorization })).status, 401, authorization);
   passed = true;
   console.log(
-    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming, WebSocket transport, and the Magnus route allowlist with machine credentials stripped.',
+    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming, WebSocket transport, the Magnus route allowlist with machine credentials stripped, and the exact fleet gateway browser routes with Origin and Sec-Fetch-Site intact.',
   );
 } catch (error) {
   for (const container of containers) {
