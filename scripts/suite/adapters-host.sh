@@ -3,6 +3,37 @@
 adapter_curl() { curl --fail --silent --show-error --proto '=https' --connect-timeout 10 --max-time 1800 --max-redirs 0 "$@"; }
 adapter_download() { curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --location --max-redirs 5 --connect-timeout 10 --max-time 7200 "$@"; }
 adapter_atomic() { printf '%s\n' "$2" | atomic_json "$1"; }
+adapter_profile_boundary() {
+  local profile=$1 found
+  found=$(find "$profile" \( -type f \( -iname '*.gguf' -o -iname '*.ggml' -o -iname '*.safetensors' \) -o -type d \( -path '*/.ollama/models' -o -path '*/.cache/huggingface/hub' \) \) -print -quit) || die 'Native profile cannot be reviewed safely before installation or backup'
+  [[ -z "$found" ]] || die 'Native profile includes externally owned model assets or caches; preserve them in place and review a suite-only profile backup contract. Hive will not install or archive inference resources.'
+}
+adapter_arguments() {
+  local values=$1 profile=$2 environment=$3 target=$4 argument
+  HIVE_AGENT_ARGUMENTS=()
+  while IFS= read -r argument; do
+    case "$argument" in '@PROFILE@') argument=$profile;; '@ENV_FILE@') argument=$environment;; '@ARTIFACT@/'*) argument="$target/${argument#@ARTIFACT@/}";; esac
+    HIVE_AGENT_ARGUMENTS+=("$argument")
+  done < <(jq -r '.[]' <<< "$values")
+}
+adapter_native_command() {
+  local profile=$1; shift
+  (cd "$profile"; env -i PATH="$PATH" HOME="${HOME:-$profile}" LANG="${LANG:-C.UTF-8}" LC_ALL="${LC_ALL:-C.UTF-8}" \
+    XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" "$@")
+}
+adapter_assert_agent_inputs() {
+  local item=$1 candidate=$2 target=$3 environment permissions spec unsupported current_tree
+  spec=$(jq -Sc . <<< "$item" | sha256sum | cut -d ' ' -f1)
+  [[ $(jq -er .configurationSHA256 "$candidate") == "$spec" ]] || die 'Native agent configuration differs from its staged candidate'
+  environment=$(jq -er .environmentFile <<< "$item")
+  [[ -f "$environment" && ! -L "$environment" && $(stat -c %u "$environment") == "$(id -u)" ]] || die 'Native agent environment is not a protected owned file'
+  permissions=$(stat -c %a "$environment"); (( (8#$permissions & 077)==0 )) || die 'Native agent environment permissions changed'
+  [[ ! -L "$target" && ! -L "$target.verification.json" ]] || die 'Native artifact contains unsupported links'
+  unsupported=$(find "$target" ! -type f ! -type d -print -quit) || die 'Native artifact inventory cannot be read'
+  [[ -z "$unsupported" ]] || die 'Native artifact contains unsupported file types'
+  current_tree=$(tree_digest "$target") || die 'Native artifact fingerprint cannot be read'
+  [[ $(digest "$environment") == "$(jq -er .environmentSHA256 "$candidate")" && "$current_tree" == "$(jq -er .treeSHA256 "$target.verification.json")" ]] || die 'Native agent inputs changed since staging'
+}
 adapter_preflight() {
   local item id runtime profile environment artifact architecture path permissions
   architecture=$(uname -m); case "$architecture" in x86_64) architecture=amd64;; aarch64) architecture=arm64;; *) die 'Unsupported host architecture';; esac
@@ -10,6 +41,7 @@ adapter_preflight() {
     id=$(jq -er .id <<< "$item"); runtime=$(jq -er .runtime <<< "$item")
     profile=$(jq -er .profileDirectory <<< "$item"); environment=$(jq -er .environmentFile <<< "$item")
     [[ -d "$profile" && ! -L "$profile" && -f "$environment" && ! -L "$environment" ]] || die 'Agent profile or protected environment is missing'
+    adapter_profile_boundary "$profile"
     [[ $(stat -c %u "$profile") == "$(id -u)" && $(stat -c %u "$environment") == "$(id -u)" ]] || die 'Agent profiles must belong to the selected native account'
     local permissions; permissions=$(stat -c %a "$environment"); (( (8#$permissions & 077)==0 )) || die 'Agent environment must be owner-only'
     [[ $(id -u) != 0 ]] || die 'Native agents must be installed through their existing unprivileged account'
@@ -25,12 +57,18 @@ adapter_preflight() {
 }
 
 adapter_stage_agents() {
-  local item id runtime version architecture artifact sha target url executable argument profile environment temporary
+  local item id runtime version architecture artifact sha target url executable profile environment temporary verification env_sha candidate preflight_passed current_tree unsupported
   architecture=$(uname -m); case "$architecture" in x86_64) architecture=amd64;; aarch64) architecture=arm64;; esac
   while IFS= read -r item; do
     id=$(jq -er .id <<< "$item"); runtime=$(jq -er .runtime <<< "$item"); version=$(jq -er .version <<< "$item")
     artifact=$(jq -c --arg runtime "$runtime" --arg version "$version" --arg arch "$architecture" '.agentArtifacts[$runtime][$version][$arch]' "$directory/manifest.$plan.json")
     sha=$(jq -er .sha256 <<< "$artifact"); url=$(jq -er .url <<< "$artifact"); target="$directory/agents/$id/artifacts/$sha"
+    verification="$target.verification.json"
+    profile=$(jq -er .profileDirectory <<< "$item"); environment=$(jq -er .environmentFile <<< "$item")
+    env_sha=$(digest "$environment"); candidate="$directory/agents/$id/candidate.$plan.json"
+    if [[ -f "$candidate" ]]; then
+      [[ $(jq -r '.environmentSHA256 // empty' "$candidate") == "$env_sha" && $(jq -r '.configurationSHA256 // empty' "$candidate") == "$(jq -Sc . <<< "$item" | sha256sum | cut -d ' ' -f1)" ]] || die 'Agent configuration or environment changed during retry; restore its original inputs or review a new configurationRevision'
+    fi
     install -d -m 700 "$directory/agents/$id/artifacts"
     if [[ ! -e "$target" ]]; then
       temporary="$target.partial"; [[ ! -e "$temporary" ]] || die 'Interrupted agent extraction needs inspection'
@@ -38,6 +76,7 @@ adapter_stage_agents() {
       adapter_download --output "$temporary/archive.tgz" "$url"
       [[ $(digest "$temporary/archive.tgz") == "$sha" ]] || die 'Agent artifact checksum differs'
       tar -tvzf "$temporary/archive.tgz" | awk 'substr($0,1,1)!="-" && substr($0,1,1)!="d" {bad=1} END {exit bad}' || die 'Agent archive contains unsupported links or special files'
+      if tar -tzf "$temporary/archive.tgz" | awk 'tolower($0) ~ /\.(gguf|ggml|safetensors)$/ {found=1} END {exit !found}'; then die 'Native artifact includes inference model assets; retain its original archive and obtain a reviewed external-only agent bundle'; fi
       while IFS= read -r name; do [[ "$name" != /* && "$name" != *'..'* && "$name" != *\\* ]] || die 'Unsafe agent archive path'; done < <(tar -tzf "$temporary/archive.tgz")
       tar -xzf "$temporary/archive.tgz" -C "$temporary" --no-same-owner --no-same-permissions
       rm -- "$temporary/archive.tgz"
@@ -46,23 +85,60 @@ adapter_stage_agents() {
       [[ -f "$temporary/$executable" && ! -L "$temporary/$executable" ]] || die 'Native launcher is absent'
       chmod 700 "$temporary/$executable"
       mv -T -- "$temporary" "$target"
+      current_tree=$(tree_digest "$target") || die 'Native artifact fingerprint cannot be recorded'
+      jq -n --arg sha "$sha" --arg tree "$current_tree" '{schema:1,artifactSHA256:$sha,treeSHA256:$tree}' | atomic_json "$verification"
     fi
+    [[ -f "$verification" && ! -L "$verification" && ! -L "$target" ]] || die 'Existing native artifact needs review against its original archive; it has no verification receipt'
+    unsupported=$(find "$target" ! -type f ! -type d -print -quit) || die 'Native artifact inventory cannot be read'
+    current_tree=$(tree_digest "$target") || die 'Native artifact fingerprint cannot be verified'
+    [[ -z "$unsupported" && "$current_tree" == "$(jq -er .treeSHA256 "$verification")" ]] || die 'Native artifact contents changed after verification'
     executable="$target/$(jq -er .executable <<< "$artifact")"
-    profile=$(jq -er .profileDirectory <<< "$item"); environment=$(jq -er .environmentFile <<< "$item")
-    local -a arguments=()
-    while IFS= read -r argument; do
-      case "$argument" in '@PROFILE@') argument=$profile;; '@ENV_FILE@') argument=$environment;; '@ARTIFACT@/'*) argument="$target/${argument#@ARTIFACT@/}";; esac
-      arguments+=("$argument")
-    done < <(jq -r '.arguments[]' <<< "$artifact")
+    preflight_passed=false
+    if jq -e '.preflight!=null' <<< "$artifact" >/dev/null; then
+      adapter_arguments "$(jq -c .preflight.arguments <<< "$artifact")" "$profile" "$environment" "$target"
+      adapter_native_command "$profile" timeout 30 "$executable" "${HIVE_AGENT_ARGUMENTS[@]}" > "$directory/agents/$id/preflight.$plan.log" 2>&1 || die 'Native agent cannot run on this host; inspect its protected preflight log before activation'
+      [[ $(stat -c %s "$directory/agents/$id/preflight.$plan.log") -le 4096 ]] || die 'Native preflight output exceeds its evidence bound'
+      [[ $(cat "$directory/agents/$id/preflight.$plan.log") == "$(jq -er .preflight.expectedOutput <<< "$artifact")" ]] || die 'Native agent preflight version differs from the signed artifact'
+      preflight_passed=true
+    fi
+    adapter_arguments "$(jq -c .arguments <<< "$artifact")" "$profile" "$environment" "$target"
     {
-      printf '#!/usr/bin/env bash\nset -euo pipefail\ncd %q\nexec ' "$profile"
-      printf '%q ' "$executable" "${arguments[@]}"
+      printf '#!/usr/bin/env bash\nset -euo pipefail\numask 077\ncd %q\nexec env -i ' "$profile"
+      printf '%q ' "PATH=$PATH" "HOME=${HOME:-$profile}" "LANG=${LANG:-C.UTF-8}" "LC_ALL=${LC_ALL:-C.UTF-8}" "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+      printf '%q ' "$executable" "${HIVE_AGENT_ARGUMENTS[@]}"
       printf '\n'
     } > "$directory/agents/$id/run.$plan.new"
     chmod 700 "$directory/agents/$id/run.$plan.new"
     mv -T "$directory/agents/$id/run.$plan.new" "$directory/agents/$id/run.$plan"
-    jq -n --arg id "$id" --arg runtime "$runtime" --arg version "$version" --arg sha "$sha" --arg profile "$profile" --argjson authorized "$(jq -r .authorized <<< "$item")" \
-      '{schema:1,id:$id,runtime:$runtime,version:$version,artifactSHA256:$sha,profileDirectory:$profile,operatorAuthorized:$authorized,installed:true,accepted:false}' | atomic_json "$directory/agents/$id/candidate.$plan.json"
+    jq -n --arg id "$id" --arg runtime "$runtime" --arg version "$version" --arg sha "$sha" --arg profile "$profile" --arg envSHA "$env_sha" --arg configSHA "$(jq -Sc . <<< "$item" | sha256sum | cut -d ' ' -f1)" --argjson preflight "$preflight_passed" --argjson authorized "$(jq -r .authorized <<< "$item")" \
+      '{schema:1,id:$id,runtime:$runtime,version:$version,artifactSHA256:$sha,profileDirectory:$profile,environmentSHA256:$envSHA,configurationSHA256:$configSHA,preflightPassed:$preflight,operatorAuthorized:$authorized,installed:true,accepted:false}' | atomic_json "$candidate"
+  done < <(jq -c '.agents[]' <<< "$input")
+}
+
+adapter_accept_agents() {
+  local strict=${1:-false} item id runtime version architecture active_plan artifact candidate target executable proof env_file
+  active_plan=$(jq -er .plan "$directory/receipt.json" 2>/dev/null || printf '%s' "$plan")
+  architecture=$(uname -m); case "$architecture" in x86_64) architecture=amd64;; aarch64) architecture=arm64;; esac
+  while IFS= read -r item; do
+    id=$(jq -er .id <<< "$item"); runtime=$(jq -er .runtime <<< "$item"); version=$(jq -er .version <<< "$item")
+    candidate="$directory/agents/$id/candidate.$active_plan.json"
+    [[ -f "$candidate" && ! -L "$candidate" ]] || die 'Native agent candidate receipt is unavailable'
+    artifact=$(jq -c --arg runtime "$runtime" --arg version "$version" --arg arch "$architecture" '.agentArtifacts[$runtime][$version][$arch]' "$directory/manifest.$active_plan.json")
+    [[ $(jq -er .artifactSHA256 "$candidate") == "$(jq -er .sha256 <<< "$artifact")" && $(jq -er .version "$candidate") == "$version" ]] || die 'Native agent version differs from the active signed release'
+    cp -- "$candidate" "$directory/agents/$id/receipt.json"
+    if [[ $(jq -r .authorized <<< "$item") != true ]] || ! jq -e '.acceptanceArguments!=null' <<< "$artifact" >/dev/null; then
+      printf 'Agent %s: acceptance pending operator authorization or an owned product acceptance contract\n' "$id"
+      [[ "$strict" != true ]] || die 'Native agent acceptance is pending'; continue
+    fi
+    if [[ $(jq -r .service <<< "$item") == none && "$strict" != true ]]; then printf 'Agent %s: manual startup selected; run agents-accept after starting its prepared launcher\n' "$id"; continue; fi
+    target="$directory/agents/$id/artifacts/$(jq -er .sha256 <<< "$artifact")"; env_file=$(jq -er .environmentFile <<< "$item")
+    adapter_assert_agent_inputs "$item" "$candidate" "$target"
+    executable="$target/$(jq -er .executable <<< "$artifact")"; proof="$directory/agents/$id/acceptance.$active_plan.json"
+    adapter_arguments "$(jq -c .acceptanceArguments <<< "$artifact")" "$(jq -er .profileDirectory <<< "$item")" "$env_file" "$target"
+    adapter_native_command "$(jq -er .profileDirectory <<< "$item")" timeout 330 "$executable" "${HIVE_AGENT_ARGUMENTS[@]}" > "$proof" 2> "$proof.log" || die 'Native agent acceptance failed; inspect its protected result and log'
+    [[ $(stat -c %s "$proof") -le 65536 ]] || die 'Native acceptance response exceeds its evidence bound'
+    jq -e --arg version "$version" '.ok==true and .version==$version' "$proof" >/dev/null || die 'Native agent has not passed its product acceptance contract'
+    jq --arg accepted "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg evidence "$(digest "$proof")" '.accepted=true|.acceptedAt=$accepted|.acceptanceProofSHA256=$evidence' "$candidate" | atomic_json "$directory/agents/$id/receipt.json"
   done < <(jq -c '.agents[]' <<< "$input")
 }
 
@@ -80,6 +156,8 @@ adapter_agents_service() {
       [[ ! -f "$directory/agents/$id/unit.json" ]] || systemctl --user stop "$unit"
       printf 'Agent %s: installed; explicit operator/provider authorization is pending\n' "$id"; continue
     fi
+    local candidate="$directory/agents/$id/candidate.$launch_plan.json"
+    adapter_assert_agent_inputs "$item" "$candidate" "$directory/agents/$id/artifacts/$(jq -er .artifactSHA256 "$candidate")"
     local units; units=${XDG_CONFIG_HOME:-${HOME:?}/.config}/systemd/user
     install -d -m 700 "$units"
     [[ ! -f "$units/$unit" || -f "$directory/agents/$id/unit.json" ]] || die 'An existing service with this name is not installer-owned'
@@ -108,6 +186,7 @@ adapter_snapshot_profiles() {
   while IFS= read -r item; do
     id=$(jq -er .id <<< "$item"); profile=$(jq -er .profileDirectory <<< "$item")
     [[ -d "$profile" && ! -L "$profile" ]] || die 'Native profile is unavailable'
+    adapter_profile_boundary "$profile"
     while IFS= read -r -d '' link; do
       [[ $(readlink -- "$link") != /* ]] || die 'Profile contains an absolute link requiring explicit adoption'
       resolved=$(readlink -f -- "$link")

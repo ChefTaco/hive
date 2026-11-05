@@ -47,6 +47,8 @@ hive_adapter_manifest() {
     all($c.agents[]; . as $a | $r.agentArtifacts[$a.runtime][$a.version][$c.hosts[$a.host].architecture // "amd64"] |
       (.url|type=="string" and startswith("https://")) and (.sha256|test("^[a-f0-9]{64}$")) and
       (.executable|test("^[A-Za-z0-9_./-]+$") and (split("/")|all(.!=".." and .!=""))) and
-      (.arguments|type=="array" and all(.[];type=="string" and (test("[\\r\\n]")|not))))
+      (.arguments|type=="array" and all(.[];type=="string" and (test("[\\r\\n]")|not))) and
+      (if .preflight then (.preflight.arguments|type=="array" and length>0 and all(.[];type=="string" and (test("[\\r\\n]")|not))) and (.preflight.expectedOutput|type=="string" and length>0 and length<=256 and (test("[\\r\\n]")|not)) else true end) and
+      (if .acceptanceArguments then (.acceptanceArguments|type=="array" and length>0 and all(.[];type=="string" and (test("[\\r\\n]")|not))) else true end))
   ' "$HIVE_MANIFEST" >/dev/null || hive_die 'Selected native agent artifact is absent from the signed release matrix'
 }

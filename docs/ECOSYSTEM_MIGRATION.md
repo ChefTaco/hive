@@ -20,7 +20,7 @@ source snapshot or passing unit test is not evidence of a production cutover.
 | Memory and workspace workflows | Disposable create/edit/search/delete, policy/membership and archive/restore pass | Remaining advanced memory, queue and integration parity |
 | Security and chat UI consolidation | Candidate modules build; full parity pending | Existing route/workflow parity including files, sockets and approvals |
 | Shell suite lifecycle | Fresh co-located core and lifecycle drills pass; full/multi-host gates pending | Unattended/interactive, resume, multi-host, backup/restore, upgrade tests |
-| Host agent enrollment | Pending | Scoped credentials, existing profile preservation, real heartbeat/job proof |
+| Host agent enrollment | Native Magnus artifact/heartbeat/job proof passes; other runtimes pending | Scoped model-agent identities, existing profile preservation and per-runtime acceptance |
 | External inference | Verified HTTPS fixture and actual Emberpath enrollment/inference pass | Operator-owned endpoint acceptance through protected references; no inference provisioning |
 | Production adoption and migration | Pending | Installation-bound restored backup, single writer, acceptance and recovery proof |
 | Published release and branding | Pending | Verified artifacts, compatibility lock and accurate walkthroughs |
@@ -120,7 +120,7 @@ The core drill also verifies signed bundle upgrade and compatible rollback with
 independent recovery gates and preserved credentials/account links. This proves
 bundle activation with unchanged application/storage versions; it does not certify
 untested application migrations.
-Full/multi-host bootstrap and real native agent integration remain open.
+Full/multi-host bootstrap and remaining native runtime integrations remain open.
 No official suite manifest or publisher trust key has been released.
 This is not an installation or migration release.
 
@@ -168,6 +168,10 @@ existing model resources under their current owner. See `deployment/INFERENCE.md
 `npm run test:suite:adapters` uses a synthetic external HTTPS provider and verifies
 registration ordering, idempotence and unknown-outcome handling. Native artifact
 launcher checks preserve existing profiles; they do not prove real agent enrollment.
+The separate `test:suite:agents` rehearsal stages a real packaged Magnus agent,
+verifies authenticated health and a recent heartbeat, and completes an authenticated
+read-only command against a disposable Magnus API. Other runtime acceptance remains
+pending. See `deployment/NATIVE_AGENTS.md` for explicit manual startup and acceptance.
 `npm run test:suite:lifecycle` exercises the isolated candidate/recovery lifecycle.
 None of these tests contacts or modifies a production installation.
 

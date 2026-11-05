@@ -53,6 +53,7 @@ hive_lifecycle() {
   if [[ "$operation" == install ]] && jq -e '.bootstrap!=null' "$HIVE_CONFIG" >/dev/null; then hive_initialize; fi
   hive_doctor
   case "$operation" in
+    agents-accept) hive_all agents-accept || hive_die 'Native acceptance failed; existing suite services were not restarted';;
     install|upgrade|rollback)
       hive_stage
       hive_all adapters-stage || hive_die 'Native agent staging failed; existing suite remains active'

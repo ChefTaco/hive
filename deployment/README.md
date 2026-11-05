@@ -107,7 +107,12 @@ Add `--interactive` to exercise the terminal installer. Both variants verify rep
 execution, four-product SSO, audience/revocation denial, a host-bound backup and an
 isolated restore. Their local trust keys and images are developer fixtures; they
 are not published release artifacts or migration approval. Full-profile fresh
-bootstrap, multi-host bootstrap and real agent enrollment remain separate gates.
+bootstrap, multi-host bootstrap and remaining agent integrations are separate gates.
+
+Native Magnus artifact staging, authenticated heartbeat and a read-only command
+now have a separate disposable rehearsal. Other runtimes and complete suite agent
+identity wiring remain pending. See [native agents](NATIVE_AGENTS.md) for protected
+configuration, preflight, explicit acceptance and status.
 
 Deployment plans include a controller source fingerprint. Signed manifests may
 require it using `controllerSHA256`. A different controller cannot resume the same

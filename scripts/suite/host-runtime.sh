@@ -104,7 +104,10 @@ check_reconciliation() {
 case "$action" in
   adapters-preflight) assert_transaction; adapter_preflight;;
   adapters-stage) assert_transaction; adapter_stage_agents;;
-  adapters-accept) assert_transaction; adapter_inference_probe; adapter_register_inference; adapter_agents_service start;;
+  adapters-accept) assert_transaction; adapter_inference_probe; adapter_register_inference; adapter_agents_service start; adapter_accept_agents;;
+  agents-accept)
+    [[ $(jq -er .digest "$directory/receipt.json") == "$(jq -er .digest <<< "$input")" ]] || die 'Native acceptance requires the active signed release manifest'
+    adapter_accept_agents true;;
   prepare)
     if [[ -f "$transaction" && $(phase) != complete ]]; then
       if [[ $(jq -r .operation <<< "$input") == restore ]]; then

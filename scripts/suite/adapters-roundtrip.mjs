@@ -33,7 +33,10 @@ try {
     'EXAMPLE_SCOPED_CREDENTIAL=fixture-native-credential\n',
   );
   const launcher = join(temporary, 'bundle', 'bin', 'launcher');
-  put(launcher, '#!/usr/bin/env bash\nprintf "%s\\n" "$@"\n');
+  put(
+    launcher,
+    '#!/usr/bin/env bash\n[[ -z "${UNRELATED_INFRA_SECRET+x}" ]] || exit 41\nif [[ "$1" == --version ]]; then printf "2.0.0\\n"; elif [[ "$1" == --acceptance ]]; then if [[ -e .refuse-acceptance ]]; then printf "{\\"ok\\":false}\\n"; exit 1; fi; printf "{\\"ok\\":true,\\"version\\":\\"2.0.0\\"}\\n"; else printf "%s\\n" "$@"; fi\n',
+  );
   chmodSync(launcher, 0o700);
   run('tar', ['-czf', join(temporary, 'agent.tgz'), '-C', join(temporary, 'bundle'), 'bin']);
   const artifactSHA = createHash('sha256')
@@ -92,6 +95,7 @@ const server=https.createServer({key:fs.readFileSync(path.join(base,'server.key'
     'Authorization: Bearer obviously-fake-test-enrollment\n',
   );
   environment.CURL_CA_BUNDLE = join(temporary, 'server.crt');
+  environment.UNRELATED_INFRA_SECRET = 'obviously-fake-must-not-inherit';
   put(join(directory, 'installation.json'), {
     installation: 'fixture',
     host: 'control',
@@ -108,6 +112,8 @@ const server=https.createServer({key:fs.readFileSync(path.join(base,'server.key'
             sha256: artifactSHA,
             executable: 'bin/launcher',
             arguments: ['@PROFILE@', '@ENV_FILE@', 'literal $(must-not-run) argument'],
+            preflight: { arguments: ['--version'], expectedOutput: '2.0.0' },
+            acceptanceArguments: ['--acceptance'],
           },
         },
       },
@@ -154,6 +160,7 @@ const server=https.createServer({key:fs.readFileSync(path.join(base,'server.key'
   );
   assert.equal(installed.artifactSHA256, artifactSHA);
   assert.equal(installed.accepted, false);
+  assert.equal(installed.preflightPassed, true);
   assert.equal(
     readFileSync(join(temporary, 'profile', 'credential.env'), 'utf8'),
     'EXAMPLE_SCOPED_CREDENTIAL=fixture-native-credential\n',
@@ -162,6 +169,55 @@ const server=https.createServer({key:fs.readFileSync(path.join(base,'server.key'
     .trim()
     .split('\n');
   assert.equal(args[2], 'literal $(must-not-run) argument');
+  const syntheticModel = join(temporary, 'profile', 'synthetic.gguf');
+  put(syntheticModel, 'synthetic fixture, not model data');
+  action({ ...input, action: 'adapters-preflight' }, false);
+  assert.equal(readFileSync(syntheticModel, 'utf8'), 'synthetic fixture, not model data');
+  rmSync(syntheticModel);
+  const environmentFile = join(temporary, 'profile', 'credential.env');
+  put(environmentFile, 'EXAMPLE_SCOPED_CREDENTIAL=obviously-fake-changed\n');
+  action(input, false);
+  put(environmentFile, 'EXAMPLE_SCOPED_CREDENTIAL=fixture-native-credential\n');
+  const extracted = join(directory, 'agents/fixture-agent/artifacts', artifactSHA, 'bin/launcher'),
+    original = readFileSync(extracted);
+  put(extracted, Buffer.concat([original, Buffer.from('\n# tampered fixture\n')]));
+  action(input, false);
+  writeFileSync(extracted, original);
+  chmodSync(extracted, 0o700);
+  action(input);
+  const acceptedPlan = 'b'.repeat(64),
+    acceptedInput = {
+      ...input,
+      plan: acceptedPlan,
+      digest: 'c'.repeat(64),
+      agents: [{ ...input.agents[0], authorized: true }],
+    };
+  put(join(directory, 'manifest.' + acceptedPlan + '.json'), manifest);
+  put(join(directory, 'transaction.json'), {
+    plan: acceptedPlan,
+    phase: 'ready',
+    operation: 'install',
+  });
+  put(join(directory, 'receipt.json'), {
+    plan: acceptedPlan,
+    version: '0.1.0',
+    digest: acceptedInput.digest,
+  });
+  action(acceptedInput);
+  put(join(temporary, 'profile', '.refuse-acceptance'), 'synthetic refusal');
+  action({ ...acceptedInput, action: 'agents-accept' }, false);
+  assert.equal(
+    JSON.parse(readFileSync(join(directory, 'agents/fixture-agent/receipt.json'))).accepted,
+    false,
+  );
+  rmSync(join(temporary, 'profile', '.refuse-acceptance'));
+  action({ ...acceptedInput, action: 'agents-accept' });
+  assert.equal(
+    JSON.parse(readFileSync(join(directory, 'agents/fixture-agent/receipt.json'))).accepted,
+    true,
+  );
+  put(join(directory, 'transaction.json'), { plan, phase: 'ready', operation: 'install' });
+  put(join(directory, 'receipt.json'), { plan, version: '0.1.0' });
   input.agents = [];
   input.action = 'adapters-accept';
   const inference = {

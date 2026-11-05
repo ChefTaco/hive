@@ -30,6 +30,7 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|re
   --help                 Show this help
 
 init prepares protected configuration for an explicitly fresh installation.
+agents-accept verifies manually started agents without restarting suite services.
 No arguments starts interactive configuration. Planning does not contact hosts.
 Secrets belong in protected environment/configuration files, never CLI arguments.
 EOF
@@ -336,7 +337,7 @@ hive_main() {
       *) hive_die 'Unknown option';;
     esac
   done
-  case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse) ;; *) hive_die 'Unknown command';; esac
+  case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept) ;; *) hive_die 'Unknown command';; esac
   hive_need jq
   if [[ -z "$HIVE_CONFIG" ]]; then
     [[ "$interactive" == true ]] || hive_die '--config is required'
@@ -353,7 +354,14 @@ hive_main() {
         hive_host "$host" 'set -euo pipefail; read -r input; directory=$(jq -r .directory <<< "$input");
           test -f "$directory/installation.json";
           test "$(jq -r .installation "$directory/installation.json")" = "$(jq -r .installation <<< "$input")";
-          docker compose -f "$directory/compose.json" ps --format json'
+          test "$(jq -r .host "$directory/installation.json")" = "$(jq -r .host <<< "$input")";
+          containers=$(docker compose -f "$directory/compose.json" ps --format json | jq -s flatten);
+          agents=$(while IFS= read -r id; do
+            receipt="$directory/agents/$id/receipt.json";
+            if [[ -f "$receipt" && ! -L "$receipt" ]]; then jq --arg id "$id" "{id:\$id,runtime,version,installed:(.installed // false),preflightPassed:(.preflightPassed // false),accepted:(.accepted // false),operatorAuthorized:(.operatorAuthorized // false),acceptedAt}" "$receipt";
+            else jq -n --arg id "$id" "{id:\$id,installed:false,accepted:false}"; fi;
+          done < <(jq -r ".agents[].id" <<< "$input") | jq -s .);
+          jq -n --arg host "$(jq -r .host <<< "$input")" --argjson containers "$containers" --argjson agents "$agents" "{schema:1,host:\$host,containers:\$containers,nativeAgents:\$agents}"'
       done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG"); return;;
     doctor) hive_doctor; return;;
   esac
@@ -368,6 +376,6 @@ hive_main() {
   fi
   case "$command" in
     init) hive_initialize;;
-    install|upgrade|rollback|backup|adopt|restore|rehearse) hive_lifecycle "$command";;
+    install|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept) hive_lifecycle "$command";;
   esac
 }

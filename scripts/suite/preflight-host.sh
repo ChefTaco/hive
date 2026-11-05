@@ -3,7 +3,7 @@
 set -euo pipefail
 read -r input
 directory=$(jq -r .directory <<< "$input")
-for tool in docker jq flock openssl tar gzip sha256sum stat find sort curl df realpath; do
+for tool in docker jq flock openssl tar gzip sha256sum stat find sort curl df realpath timeout; do
   command -v "$tool" >/dev/null
 done
 docker info >/dev/null

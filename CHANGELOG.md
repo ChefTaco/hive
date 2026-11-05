@@ -8,6 +8,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Verify native artifact versions, bind extracted contents and credential files to
+  retries, isolate launcher environments and record explicit product acceptance.
+- Add native-agent acceptance and per-host status summaries; rehearse a packaged
+  Magnus agent with verified TLS, heartbeat and an authenticated read-only job.
 - Configure protected external-provider enrollment through standalone or suite
   ingress APIs, with interactive CA/credential references and explicit aliases.
 - Verify actual Emberpath enrollment and inference after external HTTPS acceptance,
