@@ -5,6 +5,7 @@ hive_need() { command -v "$1" >/dev/null || hive_die "Required tool missing: $1"
 hive_runtime_files() {
   printf '%s\n' LICENSE hive.sh deployment/Caddyfile \
     scripts/suite/controller.sh scripts/suite/lifecycle.sh scripts/suite/host-runtime.sh \
+    scripts/suite/skills-integration.sh scripts/suite/skills-integration-host.sh scripts/suite/skills-preparation-host.sh \
     scripts/suite/adapters.sh scripts/suite/native-initialization-host.sh scripts/suite/adapters-host.sh scripts/suite/inference-registration.sh \
     scripts/suite/public-runtime.sh scripts/suite/preflight-host.sh scripts/suite/initialize.sh \
     scripts/suite/initialize-host.sh scripts/suite/initialize-full-host.sh scripts/suite/initialize-migrations-host.sh scripts/suite/integrity-host.sh scripts/suite/input-artifacts-host.sh scripts/suite/check-data.mjs
@@ -16,7 +17,7 @@ hive_controller_digest() {
 }
 hive_usage() {
   cat <<'EOF'
-Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse]
+Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|skills-prepare]
   --config FILE          Installation JSON (required for unattended use)
   --release VERSION      Override the exact release version
   --manifest FILE        Signed release manifest (default releases/VERSION.json)
@@ -30,6 +31,7 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|re
   --help                 Show this help
 
 init prepares protected configuration for an explicitly fresh installation.
+skills-prepare stages only an explicit immutable Skills client and writes protected owner proposals; it never activates mappings.
 agents-accept verifies manually started agents without restarting suite services.
 No arguments starts interactive configuration. Planning does not contact hosts.
 Secrets belong in protected environment/configuration files, never CLI arguments.
@@ -177,7 +179,7 @@ hive_validate() {
   jq -e '
     def id: type=="string" and test("^[a-z][a-z0-9-]{0,47}$");
     def path: type=="string" and startswith("/") and test("^/[A-Za-z0-9_./-]+$") and (split("/") | all(. != ".."));
-    (keys-["schema","installation","release","configurationRevision","profile","origin","hosts","components","console","bootstrap","agents","inference"]|length==0) and
+    (keys-["schema","installation","release","configurationRevision","profile","origin","hosts","components","console","bootstrap","agents","inference","skillsDeployment"]|length==0) and
     ((.configurationRevision // "1")|type=="string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")) and
     .schema==1 and (.installation|id) and (.profile|IN("core","full","custom")) and
     (.origin|type=="string" and test("^https://[A-Za-z0-9.-]+(:[0-9]+)?$")) and
@@ -222,6 +224,7 @@ hive_validate() {
         (.=="::" or .=="::1" or (split(".")|length==4 and all(.[];test("^[0-9]{1,3}$") and (tonumber<=255)))))
     ' "$HIVE_CONFIG" >/dev/null || hive_die 'Invalid console placement: co-locate ingress and HiveXUI, supply an explicit listener and a public runtime file inside the protected installation config tree; HiveXUI cannot receive an environment file or backend configuration'
   fi
+  if declare -F hive_skills_validate >/dev/null; then hive_skills_validate; fi
   if declare -F hive_adapter_validate >/dev/null; then hive_adapter_validate; fi
 }
 
@@ -232,6 +235,7 @@ hive_manifest() {
   HIVE_TRUST_KEY=${HIVE_TRUST_KEY:-$HIVE_ROOT/trust/publisher.pub}
   [[ -f "$HIVE_MANIFEST" && -f "$HIVE_SIGNATURE" && -f "$HIVE_TRUST_KEY" ]] || hive_die 'Signed release manifest, signature and publisher key are required'
   openssl pkeyutl -verify -pubin -inkey "$HIVE_TRUST_KEY" -rawin -in "$HIVE_MANIFEST" -sigfile "$HIVE_SIGNATURE" >/dev/null 2>&1 || hive_die 'Release signature verification failed'
+  if declare -F hive_skills_manifest >/dev/null; then hive_skills_manifest; fi
   if declare -F hive_adapter_manifest >/dev/null; then hive_adapter_manifest; fi
   jq -e --arg version "$HIVE_VERSION" '
     .schema==1 and .version==$version and
@@ -299,8 +303,9 @@ hive_host() {
   payload=$(jq -c --arg host "$host" --arg installation "$HIVE_ID" --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" --arg plan "${HIVE_PLAN_DIGEST:-}" \
     --arg action "${HIVE_HOST_ACTION:-}" --arg operation "${HIVE_OPERATION:-}" --arg archive "${HIVE_ARCHIVE:-}" --argjson allowMigrations "${HIVE_ALLOW_MIGRATIONS:-false}" \
     --argjson serviceUsers "$bootstrap_users" --argjson images "$bootstrap_images" --argjson identityIds "${HIVE_BOOTSTRAP_IDENTITIES:-null}" --arg ingressTemplate "${HIVE_BOOTSTRAP_INGRESS:-}" --arg integrityScript "$(base64 -w0 "$HIVE_ROOT/scripts/suite/check-data.mjs")" \
+    --arg skillsManifest "${HIVE_SKILLS_MANIFEST:-}" --arg skillsSignature "${HIVE_SKILLS_SIGNATURE:-}" --arg skillsTrust "${HIVE_SKILLS_TRUST:-}" --arg skillsTokenSHA "${HIVE_SKILLS_TOKEN_SHA:-}" \
     --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" \
-    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
+    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
   if [[ "$target" == local ]]; then
     printf '%s\n' "$payload" | bash -c "$script"
   else
@@ -387,7 +392,7 @@ hive_main() {
       *) hive_die 'Unknown option';;
     esac
   done
-  case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept) ;; *) hive_die 'Unknown command';; esac
+  case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare) ;; *) hive_die 'Unknown command';; esac
   hive_need jq
   if [[ -z "$HIVE_CONFIG" ]]; then
     [[ "$interactive" == true ]] || hive_die '--config is required'
@@ -425,6 +430,7 @@ hive_main() {
     [[ "$answer" == y ]] || hive_die 'Cancelled'
   fi
   case "$command" in
+    skills-prepare) hive_skills_prepare;;
     init) hive_initialize;;
     install|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept) hive_lifecycle "$command";;
   esac

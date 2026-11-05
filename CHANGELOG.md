@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Prepare optional exact Skills host mappings with publisher-verified immutable native clients, protected owner proposals and read-only Magnus readiness checks; incomplete enrollment remains held without activating mappings or dispatching jobs.
+
 - Rehearse coordinated identity enrollment and native Hermes streaming with a
   separately scoped HiveMem plugin, preserving profile credentials through
   product-owned initialization, exact retry, backup and isolated restore.

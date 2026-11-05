@@ -143,6 +143,9 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$",
       "description": "Change deliberately after reviewing a new set of mounted configuration artifacts; interrupted runs retain the original input digests."
+    },
+    "skillsDeployment": {
+      "$ref": "#/$defs/skillsDeployment"
     }
   },
   "$defs": {
@@ -338,6 +341,106 @@
           "type": "string",
           "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]+)?$",
           "description": "Separate native client HTTPS listener, using the same certificate hostname as the administration endpoint."
+        }
+      }
+    },
+    "skillsDeployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "registryId",
+        "clientVersion",
+        "executor",
+        "targets"
+      ],
+      "properties": {
+        "registryId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}$"
+        },
+        "clientVersion": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "executor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "origin",
+            "credentialFile"
+          ],
+          "properties": {
+            "origin": {
+              "type": "string",
+              "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$"
+            },
+            "credentialFile": {
+              "$ref": "#/$defs/path"
+            },
+            "caFile": {
+              "$ref": "#/$defs/path"
+            }
+          }
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "target",
+              "host",
+              "nodeId",
+              "agentTarget",
+              "owner",
+              "home",
+              "hermesHome",
+              "environmentFile",
+              "clientDirectory",
+              "nodeBinary"
+            ],
+            "properties": {
+              "target": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{1,62}$"
+              },
+              "host": {
+                "$ref": "#/$defs/id"
+              },
+              "nodeId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,128}$"
+              },
+              "agentTarget": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{1,62}$"
+              },
+              "owner": {
+                "type": "string",
+                "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
+              },
+              "home": {
+                "$ref": "#/$defs/path"
+              },
+              "hermesHome": {
+                "$ref": "#/$defs/path"
+              },
+              "environmentFile": {
+                "$ref": "#/$defs/path"
+              },
+              "clientDirectory": {
+                "$ref": "#/$defs/path"
+              },
+              "nodeBinary": {
+                "$ref": "#/$defs/path"
+              },
+              "caFile": {
+                "$ref": "#/$defs/path"
+              }
+            }
+          }
         }
       }
     }
