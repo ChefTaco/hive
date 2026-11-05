@@ -357,6 +357,176 @@ grep -q "sudo -k -S -p ''" "$temporary/ssh.args" || fail 'The remote command mus
 chmod 644 "$temporary/sudo"
 refused 'must be owner-only' hive status "$temporary/remote.json"
 
+# ---- Cutover order: preservation runs before the suite starts, serving checks after. ----
+(
+  source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/migrate-native.sh"
+  HIVE_CONFIG="$temporary/config.json"
+  calls="$temporary/order.calls"
+  hive_native_action() { printf '%s\n' "$2" >> "$calls"; [[ "$2" != "${FAIL_AT:-none}" ]] || return 1; [[ "$2" != native-status ]] || printf '{"suiteActive":false}\n'; }
+  hive_action() { printf 'host-%s\n' "$2" >> "$calls"; }
+  hive_doctor() { :; }; hive_registry_begin() { printf 'registry-begin\n' >> "$calls"; }; hive_registry_complete() { :; }
+  hive_native_issue_token() { :; }
+  ordered() { tr '\n' ' ' < "$calls"; }
+  : > "$calls"; ( hive_native_cutover control false ) >/dev/null 2>&1 || fail 'A passing cutover'
+  [[ $(ordered) == 'native-stop native-capture native-migrate native-preserve native-status registry-begin host-activate host-complete native-verify ' ]] || fail "Preservation must run before the suite starts: $(ordered)"
+  : > "$calls"; if ( FAIL_AT=native-preserve hive_native_cutover control false ) > "$temporary/order.out" 2>&1; then fail 'A preservation failure was accepted'; fi
+  [[ $(ordered) == 'native-stop native-capture native-migrate native-preserve native-rollback ' ]] || fail "A preservation failure must roll back without serving: $(ordered)"
+  grep -q 'rolled back before any client reached the suite' "$temporary/order.out" || fail 'Preservation failure message'
+  : > "$calls"; if ( FAIL_AT=native-preserve hive_native_cutover control true ) >/dev/null 2>&1; then fail 'A held preservation failure was accepted'; fi
+  [[ $(ordered) == 'native-stop native-capture native-migrate native-preserve ' ]] || fail "--hold-on-failure must start nothing and roll nothing back: $(ordered)"
+  : > "$calls"; if ( FAIL_AT=native-verify hive_native_cutover control false ) >/dev/null 2>&1; then fail 'A serving failure was accepted'; fi
+  [[ $(ordered) == *'host-activate host-complete native-verify native-rollback ' ]] || fail "A serving failure must roll back: $(ordered)"
+) || exit 1
+grep -q 'verify) hive_native_action "$host" native-verify-live;;' "$ROOT/scripts/suite/migrate-native.sh" || fail 'The standalone verify must run the live checks'
+
+# ---- Preservation and serving checks on a fake migrated copy. The data helper really runs. ----
+vdir="$temporary/suite-verify"; vbin="$temporary/vbin"; stub="$temporary/vstub"
+mkdir -m 700 "$vbin" "$stub"
+cat > "$vbin/docker" <<'STUB'
+#!/usr/bin/env node
+// Runs the pinned data helper locally with its mounts mapped; datastores and compose are canned.
+const { spawnSync } = require('node:child_process');
+const { appendFileSync, readFileSync } = require('node:fs');
+const stub = process.env.VSTUB, args = process.argv.slice(2);
+appendFileSync(stub + '/docker.calls', args.join(' ') + '\n');
+if (args[0] === 'compose') {
+  if (args.includes('ps') && args.includes('--services')) process.stdout.write(readFileSync(stub + '/running', 'utf8'));
+  else if (args.includes('ps') && args.includes('-q')) process.stdout.write('fake-container\n');
+  process.exit(0);
+}
+if (args[0] !== 'run') process.exit(0);
+const mounts = [];
+for (let index = 0; index < args.length; index++) if (args[index] === '--mount') { const fields = Object.fromEntries(args[index + 1].split(',').map((field) => field.split('='))); mounts.push([fields.target, fields.source]); }
+const at = args.indexOf('-e'), code = args[at + 1], request = JSON.parse(args[at + 2]);
+if (request.command === 'qdrant-inventory') { process.stdout.write(readFileSync(stub + '/qdrant.json', 'utf8')); process.exit(0); }
+if (request.command === 'redis-compare') { process.stdout.write(readFileSync(stub + '/redis.json', 'utf8')); process.exit(0); }
+mounts.sort((a, b) => b[0].length - a[0].length);
+const local = (value) => { for (const [target, source] of mounts) if (value === target || value.startsWith(target + '/')) return source + value.slice(target.length); return value; };
+for (const [key, value] of Object.entries(request)) if (typeof value === 'string') request[key] = local(value);
+const result = spawnSync(process.execPath, ['--no-warnings', '--input-type=module', '-e', code, JSON.stringify(request)], { stdio: 'inherit' });
+process.exit(result.status ?? 1);
+STUB
+cat > "$vbin/curl" <<'STUB'
+#!/usr/bin/env bash
+url=${!#}
+case "$url" in
+  */api/v1/oauth/token) cat > /dev/null; printf '{"access_token":"%s"}' "$(cat "$VSTUB/token")";;
+  */v1/models) printf 401;;
+  *) printf 200;;
+esac
+STUB
+cat > "$vbin/openssl" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == s_client ]]; then
+  while [[ $# -gt 0 && "$1" != -connect ]]; do shift; done
+  cat "$VSTUB/served/${2##*:}.crt"; exit 0
+fi
+exec /usr/bin/openssl "$@"
+STUB
+chmod 700 "$vbin/docker" "$vbin/curl" "$vbin/openssl"
+export VSTUB="$stub"
+v_input() { input "$1" | jq -c --arg d "$vdir" '.directory=$d'; }
+v_action() { v_input "$1" | PATH="$vbin:$temporary/bin:$PATH" bash "$ROOT/scripts/suite/migrate-native-host.sh"; }
+v_action native-configure 2>/dev/null || fail 'configure the verification fixture'
+plan_id=$(printf 'a%.0s' {1..64})
+mkdir -p "$vdir/migration/steps"; printf '{}' > "$vdir/migration/steps/dry-run.json"
+jq -n '{services:{"oathweave-redis":{},"hivemem-qdrant":{},oathweave:{},emberpath:{},ingress:{ports:[{published:"443"}]}}}' > "$vdir/candidate.$plan_id.json"
+rm -f "$temporary/native-running"
+v_action native-stop 2>"$temporary/vstop.log" || { cat "$temporary/vstop.log" >&2; fail 'native-stop for the verification fixture'; }
+# The migrated copy: the native databases, with an Emberpath API key, and the native keys.
+mkdir -p "$vdir/data/oathweave/iam" "$vdir/data/oathweave/keyring/previous" "$vdir/data/emberpath/router" "$vdir/data/hiveskills" "$vdir/migration/baseline"
+sqlite3 "$source_root/opt/hive-iam/prisma/iam.db" ".backup '$vdir/data/oathweave/iam/iam.db'"
+sqlite3 "$vdir/data/oathweave/iam/iam.db" "PRAGMA journal_mode=DELETE; CREATE TABLE clients (id TEXT PRIMARY KEY, secretHash TEXT, redirectUris TEXT); INSERT INTO clients VALUES ('portal','fake-secret-hash','[]');" >/dev/null
+sqlite3 "$source_root/opt/hive-router/shared/data/router.db" ".backup '$vdir/data/emberpath/router/router.db'"
+sqlite3 "$vdir/data/emberpath/router/router.db" "CREATE TABLE ClientApiKey (id TEXT PRIMARY KEY, name TEXT, keyPrefix TEXT, keyHash TEXT, enabled INTEGER, metadataJson TEXT, lastUsedAt TEXT, createdAt TEXT, updatedAt TEXT, expiresAt TEXT);
+  INSERT INTO ClientApiKey VALUES ('key-1','portal','sk-fake1','fakesalt:fakehash',1,NULL,NULL,'2026-01-01T00:00:00.000+00:00','2026-01-01T00:00:00.000+00:00',NULL);"
+sqlite3 "$source_root/opt/hive-skills/shared/data/registry.sqlite" ".backup '$vdir/data/hiveskills/registry.sqlite'"
+cp "$source_root/var/lib/hive-iam-keyring/current/"active-*.pem "$vdir/data/oathweave/keyring/"
+for db in oathweave:oathweave/iam/iam.db emberpath:emberpath/router/router.db hiveskills:hiveskills/registry.sqlite; do
+  node --no-warnings --input-type=module -e "$(cat "$ROOT/scripts/suite/migrate-native-data.mjs")" "$(jq -nc --arg file "$vdir/data/${db#*:}" --arg output "$vdir/migration/baseline/${db%%:*}.json" '{command:"sqlite-state",file:$file,output:$output}')" >/dev/null
+done
+node --no-warnings --input-type=module -e "$(cat "$ROOT/scripts/suite/migrate-native-data.mjs")" "$(jq -nc --arg file "$vdir/data/oathweave/iam/iam.db" '{command:"accounts",file:$file}')" > "$vdir/migration/baseline/accounts.json"
+printf '{"prefix":"hive-iam","records":{}}\n' > "$vdir/migration/baseline/redis.json"
+jq -n '{schema:1,step:"captured",detail:{qdrant:{totalCollections:1,totalPoints:2,digest:"captured"},redis:{restored:0,expired:0}}}' > "$vdir/migration/steps/captured.json"
+printf '{}' > "$vdir/migration/steps/products-migrated.json"
+printf '{"totalCollections":1,"totalPoints":2,"digest":"captured"}\n' > "$stub/qdrant.json"
+printf '{"recorded":0,"present":0,"expiredSinceCapture":0,"missing":0,"changed":0,"unexpected":0,"unchanged":true}\n' > "$stub/redis.json"
+printf 'hivemem-qdrant\noathweave-redis\n' > "$stub/running"
+api_key() { sqlite3 "$vdir/data/emberpath/router/router.db" "UPDATE ClientApiKey SET $1"; }
+
+# Preservation is exact, and refuses to run beside a product.
+printf 'emberpath\nhivemem-qdrant\noathweave-redis\n' > "$stub/running"
+refused 'Only datastores may run' v_action native-preserve
+printf 'hivemem-qdrant\noathweave-redis\n' > "$stub/running"
+api_key "lastUsedAt='2026-01-02T00:00:00.000+00:00', updatedAt='2026-01-02T00:00:00.000+00:00'"
+refused 'ClientApiKey: 1 existing rows changed or removed' v_action native-preserve
+api_key "lastUsedAt=NULL, updatedAt='2026-01-01T00:00:00.000+00:00'"
+printf '{"totalCollections":1,"totalPoints":3,"digest":"live"}\n' > "$stub/qdrant.json"
+refused 'Vector counts or content differ' v_action native-preserve
+printf '{"totalCollections":1,"totalPoints":2,"digest":"captured"}\n' > "$stub/qdrant.json"
+printf '{"recorded":2,"present":1,"expiredSinceCapture":0,"missing":1,"changed":0,"unexpected":0,"unchanged":false}\n' > "$stub/redis.json"
+refused 'Redis records differ' v_action native-preserve
+printf '{"recorded":0,"present":0,"expiredSinceCapture":0,"missing":0,"changed":0,"unexpected":0,"unchanged":true}\n' > "$stub/redis.json"
+printf 'changed' >> "$vdir/data/oathweave/keyring/active-public.pem"
+refused 'The signing keys differ' v_action native-preserve
+cp "$source_root/var/lib/hive-iam-keyring/current/active-public.pem" "$vdir/data/oathweave/keyring/"
+sed -i "s/^JWT_ISSUER=.*/JWT_ISSUER='other-issuer'/" "$vdir/config/oathweave.env"
+refused 'The issuer differs' v_action native-preserve
+sed -i "s/^JWT_ISSUER=.*/JWT_ISSUER='hive-iam'/" "$vdir/config/oathweave.env"
+[[ ! -f "$vdir/migration/steps/preserved.json" ]] || fail 'A failed preservation must not be recorded'
+v_action native-preserve > "$temporary/preserve.out" 2>/dev/null || { cat "$temporary/preserve.out" >&2; fail 'Preservation of an unchanged copy'; }
+jq -e '.passed and .serving==false and .runningServices==["hivemem-qdrant","oathweave-redis"] and .accounts.passwordHashesUnchanged and .keyring.byteIdentical and .issuer.unchanged' "$vdir/migration/preserved.json" >/dev/null || fail 'Preservation receipt'
+[[ $(jq -r .detail.receiptSHA256 "$vdir/migration/steps/preserved.json") == $(sha256sum "$vdir/migration/preserved.json" | cut -d ' ' -f1) ]] || fail 'The step binds the receipt'
+v_action native-preserve 2>&1 | grep -q 'already verified' || fail 'A repeated preservation continues'
+rm "$vdir/migration/steps/preserved.json"; touch "$vdir/compose.json"
+refused 'Preservation is checked before the suite starts' v_action native-preserve
+rm "$vdir/compose.json"; v_action native-preserve >/dev/null 2>&1 || fail 'Preservation again'
+
+# Serving checks: live clients stamp their key and write memories; credentials stay exact.
+touch "$vdir/compose.json"
+mkdir -p "$stub/served"; cp "$vdir/config/ingress/native/"*.crt "$stub/served/"
+b64url() { base64 -w0 | tr '+/' '-_' | tr -d '='; }
+signed="$(printf '{"alg":"RS256","typ":"JWT"}' | b64url).$(printf '{"iss":"hive-iam","aud":"hive-router"}' | b64url)"
+printf '%s.%s' "$signed" "$(printf '%s' "$signed" | /usr/bin/openssl dgst -sha256 -sign "$source_root/var/lib/hive-iam-keyring/current/active-private.pem" | b64url)" > "$stub/token"
+api_key "lastUsedAt='2026-01-02T00:00:00.000+00:00', updatedAt='2026-01-02T00:00:00.000+00:00'"
+printf '{"totalCollections":1,"totalPoints":9,"digest":"live"}\n' > "$stub/qdrant.json"
+sqlite3 "$vdir/data/emberpath/router/router.db" "CREATE TABLE IF NOT EXISTS Trace (id TEXT); INSERT INTO Trace VALUES ('live-trace');"
+v_action native-verify > "$temporary/verify.out" 2>&1 || { cat "$temporary/verify.out" >&2; fail 'Serving checks must accept live client writes'; }
+jq -e '.passed and .mode=="cutover" and .receipt.valid and .invariants.nativeStoresUnchangedSinceStop and (.credentials.emberpath.changed.ClientApiKey==null)' "$vdir/migration/verification.json" >/dev/null || fail 'Serving verification receipt'
+[[ -f "$vdir/migration/steps/verified.json" ]] || fail 'The cutover check records its step'
+v_action native-verify-live >/dev/null 2>&1 || fail 'The standalone check must accept live client writes'
+jq -e '.passed and .mode=="live" and .credentials==null' "$vdir/migration/live-verification.json" >/dev/null || fail 'Standalone verification receipt'
+api_key "keyHash='fakesalt:replaced'"
+refused 'Credential records changed while serving' v_action native-verify
+v_action native-verify-live >/dev/null 2>&1 || fail 'The standalone check accepts an owner rotating a key after cutover'
+api_key "keyHash='fakesalt:fakehash'"
+sqlite3 "$vdir/data/oathweave/iam/iam.db" "UPDATE users SET passwordHash='fake-reset-hash' WHERE id='subject-admin'"
+refused 'Accounts or password hashes changed while serving' v_action native-verify
+v_action native-verify-live >/dev/null 2>&1 || fail 'The standalone check accepts the owner resetting a password'
+sqlite3 "$vdir/data/oathweave/iam/iam.db" "UPDATE users SET passwordHash='fake-hash-admin' WHERE id='subject-admin'"
+sqlite3 "$vdir/data/oathweave/iam/iam.db" "UPDATE clients SET secretHash='rotated'"
+refused 'Credential records changed while serving' v_action native-verify
+sqlite3 "$vdir/data/oathweave/iam/iam.db" "UPDATE clients SET secretHash='fake-secret-hash'"
+printf 'tampered' > "$stub/served/4200.crt"
+refused 'port 4200 does not present its native certificate' v_action native-verify-live
+cp "$vdir/config/ingress/native/4200.crt" "$stub/served/"
+cp "$source_root/opt/hive-skills/shared/data/registry.sqlite" "$temporary/registry.keep"
+sqlite3 "$source_root/opt/hive-skills/shared/data/registry.sqlite" "INSERT INTO releases VALUES ('native-write')"
+refused 'Native stores changed since cutover stopped them' v_action native-verify-live
+cp "$temporary/registry.keep" "$source_root/opt/hive-skills/shared/data/registry.sqlite"
+mv "$vdir/migration/steps/preserved.json" "$temporary/preserved.step"
+refused 'No valid preservation receipt' v_action native-verify-live
+mv "$temporary/preserved.step" "$vdir/migration/steps/preserved.json"
+printf '{"schema":1,"step":"captured","detail":{"qdrant":{}}}\n' > "$vdir/migration/steps/captured.json"
+refused 'No valid preservation receipt' v_action native-verify-live
+# A suite migrated by an earlier controller passed its exact verification after serving.
+rm "$vdir/migration/preserved.json" "$vdir/migration/steps/preserved.json"
+jq '.schema=1|.passed=true|.failures=[]' "$vdir/migration/verification.json" > "$temporary/legacy.json"; mv "$temporary/legacy.json" "$vdir/migration/verification.json"
+v_action native-verify-live >/dev/null 2>&1 || fail 'The standalone check accepts an exact verification by an earlier cutover'
+jq -e '.receipt.kind=="exact-cutover-verification"' "$vdir/migration/live-verification.json" >/dev/null || fail 'Legacy receipt kind'
+refused 'No valid preservation receipt' v_action native-verify
+unset VSTUB
+
 # The runtime bundle carries everything the host needs.
 for file in scripts/suite/migrate-native.sh scripts/suite/migrate-native-host.sh scripts/suite/migrate-native-data.mjs scripts/suite/set-admin-password.sh; do
   grep -q "$file" "$ROOT/scripts/suite/controller.sh" || fail "$file is not bundled"

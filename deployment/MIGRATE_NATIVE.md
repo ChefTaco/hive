@@ -123,7 +123,7 @@ Every step leaves a receipt in `<directory>/migration/steps`, and repeating a co
 | `plan` | Checks the installation binding, lists units, ports, certificates, sizes, accounts and missing decisions. Writes nothing | Running |
 | `prepare` | Renders configuration, stages images, copies data online, applies product migrations to the copy, boots it with no ports, compares records, removes the copy | Running |
 | `cutover` | See below | Stopped |
-| `verify` | Repeats every check against the running suite | Stopped |
+| `verify` | Checks the running suite while clients use it; see [Verification](#verification) | Stopped |
 | `status` | Lists the receipts | Any |
 | `rollback` | See below | Started |
 | `issue-admin-token` | Issues a new reset token for the configured administrator | Stopped |
@@ -141,14 +141,54 @@ the plan digest binds them. A configuration or link change requires `prepare` ag
 3. Takes the final copy with every writer stopped, restores vectors and Redis records, then stops
    the native Qdrant container.
 4. Applies product migrations to the copy, adds the browser clients and reviewed grants.
-5. Starts the suite, records it in the Hive Registry.
-6. Verifies: every port's status and certificate, a new machine-client token signed by the native
-   key with the native issuer, native memory credentials on both ports, preserved rows, password
-   hashes, vector counts and content.
-7. Issues the administrator reset token.
+5. Checks preservation on the copy, before the suite starts: see [Verification](#verification).
+6. Starts the suite on the native ports, records it in the Hive Registry.
+7. Runs the serving checks while clients reconnect.
+8. Issues the administrator reset token.
 
-If verification fails, the installation rolls back automatically, unless `--hold-on-failure` keeps
-the suite running for inspection.
+If either check fails, the installation rolls back automatically. With `--hold-on-failure`, a
+preservation failure leaves the suite unstarted and a serving failure leaves it running, for
+inspection; then run `rollback`.
+
+### Verification
+
+Clients reconnect as soon as the suite publishes the native ports, and their requests change data
+legitimately: an Emberpath API key records when it was last used, memories are written, the memory
+worker runs its pending jobs, tokens are issued and audited. So verification has two phases.
+
+**Preservation** runs on the migrated copy right after the product migrations, with only its Redis
+and Qdrant running. No product, memory worker or published port exists yet, so nothing but the
+migration has touched the data, and it is compared exactly with the copy taken when the native
+services stopped:
+
+- every row of every table of Oathweave, Emberpath and HiveSkills: no existing row may change or
+  disappear (the migrations only add rows, such as the browser clients and the `SUITE_ADMIN` grant);
+- every account, username and password hash;
+- the signing and verification keys, byte for byte, and the issuer;
+- every vector point: counts and content;
+- every Redis record under the identity namespace, by value, except those whose own expiry passed.
+
+The result is `<directory>/migration/preserved.json`, bound to the plan and to the capture receipt.
+
+**Serving checks** run once the suite serves, and accept client writes:
+
+- the preservation receipt is valid for this plan and this capture;
+- every native port answers and presents its exact native certificate;
+- a native machine client obtains a token signed by the native key, with the native issuer;
+- the native memory credential works on the memory port and on the console port;
+- the signing keys and the issuer are still the native ones, and the native stores still have the
+  exact bytes recorded at the stop, which rollback requires;
+- during cutover only, the credentials stay exact: account password hashes, and the existing rows
+  of Oathweave `clients`, `roles` and `user_role_assignments` and of Emberpath `ClientApiKey`. A
+  client using its API key may change only `ClientApiKey.lastUsedAt` and `updatedAt`. This list
+  is `LIVE_COLUMNS` in `scripts/suite/migrate-native-data.mjs`.
+
+The result is `<directory>/migration/verification.json`.
+
+`verify`, run later against the live suite, repeats the serving checks without the credential
+comparison, because by then the owner may have reset the administrator password or rotated a key.
+It never compares live rows or vectors with the capture: preservation already proved those, before
+any client could change them. Its result is `<directory>/migration/live-verification.json`.
 
 ### Rollback
 

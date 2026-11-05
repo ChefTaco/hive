@@ -79,11 +79,22 @@ hive_native_rollback() {
   if [[ -n "$file" && -e "$file" ]]; then mv -- "$file" "$file.void-$(date -u +%Y%m%dT%H%M%SZ)"; fi
 }
 
+# Verification runs in two phases. Preservation compares the migrated copy with the native copy
+# exactly, before the suite starts: no port is published, no product or worker runs, so no client
+# can have changed anything yet. Serving checks run once clients can connect, and accept their
+# writes: ports, certificates, tokens, credentials and the invariants no client can change.
 hive_native_cutover() {
   local host=$1 hold=$2
   hive_native_action "$host" native-stop || hive_die 'Native writers could not be stopped; see the message above. Repeat cutover, or run rollback.'
   hive_native_action "$host" native-capture || hive_die 'The final copy failed. Native data is untouched. Repeat cutover, or run rollback.'
   hive_native_action "$host" native-migrate || hive_die 'Product migrations failed on the copy. Native data is untouched. Run rollback.'
+  local result=0
+  hive_native_action "$host" native-preserve || result=$?
+  if ((result)); then
+    if [[ "$hold" == true ]]; then hive_die 'Preserved data differs from the native copy. The suite was not started; --hold-on-failure keeps the copy for inspection. Then run rollback.'; fi
+    hive_native_rollback "$host"
+    hive_die 'Preserved data differs from the native copy, so this installation was rolled back before any client reached the suite. Evidence is in the migration directory.'
+  fi
   # A repeated cutover continues from the last receipt.
   if [[ $(hive_native_action "$host" native-status | jq -r .suiteActive) != true ]]; then
     hive_doctor
@@ -92,7 +103,6 @@ hive_native_cutover() {
   fi
   hive_registry_complete || hive_registry_failed cutover
   hive_action "$host" complete
-  local result=0
   hive_native_action "$host" native-verify || result=$?
   if ((result)); then
     if [[ "$hold" == true ]]; then hive_die 'Verification failed. The suite is left running because of --hold-on-failure. Inspect it, then run rollback.'; fi
@@ -155,7 +165,7 @@ hive_native_migrate() {
       hive_native_action "$host" native-registry-logout
       printf 'Prepared. Native services were not stopped. Review plan output, then run cutover.\n';;
     cutover) hive_native_cutover "$host" "$hold";;
-    verify) hive_native_action "$host" native-verify;;
+    verify) hive_native_action "$host" native-verify-live;;
     rollback) hive_native_rollback "$host";;
     issue-admin-token) hive_native_issue_token "$host";;
     tls-refresh) hive_native_action "$host" native-tls-refresh;;

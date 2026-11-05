@@ -16,7 +16,24 @@ const rowText = (row) => JSON.stringify(row, (_, value) => (typeof value === 'bi
 // Rebuilt by the product on every start. It is never data a person or client wrote.
 const regenerated = (table, row) => table === 'RuntimeSetting' && row.key === 'openapi.document';
 
-export function databaseState(file, columnsByTable) {
+// The only columns a live client may change in a preserved credential row: using an Emberpath API
+// key stamps it. Everything else in these rows (hash, prefix, scopes, enabled, expiry) must stay
+// exactly as captured. Keep this list minimal and explicit: each entry weakens a live check.
+export const LIVE_COLUMNS = Object.freeze({ ClientApiKey: Object.freeze(['lastUsedAt', 'updatedAt']) });
+
+// Credential and registration tables that machine clients only read. While they use the suite,
+// these may gain rows but no existing row may change, except in LIVE_COLUMNS. Password hashes
+// are checked separately, by the accounts command, because a sign-in stamps the users row.
+export const CREDENTIAL_TABLES = Object.freeze({
+  oathweave: Object.freeze(['clients', 'roles', 'user_role_assignments']),
+  emberpath: Object.freeze(['ClientApiKey']),
+  hiveskills: Object.freeze([]),
+});
+
+const rowHashes = (table, rows, columns) => rows.filter((row) => !regenerated(table, row))
+  .map((row) => sha(rowText(Object.fromEntries(columns.map((column) => [column, row[column]])))).slice(0, 40)).sort();
+
+export function databaseState(file, columnsByTable, stableColumnsByTable) {
   const database = new DatabaseSync(file, { readOnly: true });
   try {
     const integrity = database.prepare('PRAGMA integrity_check').all().map((row) => Object.values(row)[0]);
@@ -27,22 +44,31 @@ export function databaseState(file, columnsByTable) {
     for (const name of names) {
       const columns = columnsByTable?.[name] ?? database.prepare('PRAGMA table_info(' + quote(name) + ')').all().map((row) => row.name);
       const rows = database.prepare('SELECT ' + columns.map(quote).join(',') + ' FROM ' + quote(name)).all();
-      const hashes = rows.filter((row) => !regenerated(name, row)).map((row) => sha(rowText(row)).slice(0, 40)).sort();
+      const hashes = rowHashes(name, rows, columns);
       tables[name] = { columns, count: hashes.length, digest: sha(hashes.join('\n')), hashes };
+      // Hashes without the live columns, so a live comparison can ignore exactly those.
+      const stable = stableColumnsByTable ? stableColumnsByTable[name] : LIVE_COLUMNS[name] && columns.filter((column) => !LIVE_COLUMNS[name].includes(column));
+      if (stable && stable.length < columns.length) Object.assign(tables[name], { stableColumns: stable, stableHashes: rowHashes(name, rows, stable) });
     }
     return { tables };
   } finally { database.close(); }
 }
 
-export function compareDatabases(before, after, allowedToChange = []) {
+// allowedToChange names tables whose existing rows may change. With tables, only those tables
+// are compared. With live, a table listed in LIVE_COLUMNS is compared without those columns.
+export function compareDatabases(before, after, allowedToChange = [], { tables, live = false } = {}) {
   const changed = {}, violations = [];
   for (const [name, state] of Object.entries(before.tables)) {
+    if (tables && !tables.includes(name)) continue;
     const current = after.tables[name];
     if (!current) { violations.push(name + ': table is gone'); continue; }
+    const useStable = live && (LIVE_COLUMNS[name] ?? []).some((column) => state.columns.includes(column));
+    if (useStable && !(state.stableHashes && current.stableHashes)) { violations.push(name + ': the capture has no live-tolerant hashes'); continue; }
+    const beforeHashes = useStable ? state.stableHashes : state.hashes, afterHashes = useStable ? current.stableHashes : current.hashes;
     const available = new Map();
-    for (const hash of current.hashes) available.set(hash, (available.get(hash) ?? 0) + 1);
+    for (const hash of afterHashes) available.set(hash, (available.get(hash) ?? 0) + 1);
     let missing = 0;
-    for (const hash of state.hashes) {
+    for (const hash of beforeHashes) {
       if ((available.get(hash) ?? 0) > 0) available.set(hash, available.get(hash) - 1);
       else missing++;
     }
@@ -151,10 +177,39 @@ async function redisExport(url, prefix, output) {
   return { keys: records.length };
 }
 
-async function redisImport(url, input) {
+// Each record under the namespace, by digest only: key, serialized value and absolute expiry.
+async function redisInventory(client, prefix) {
+  if (!/^[A-Za-z0-9:_-]+$/.test(prefix)) throw Error('Unsafe Redis namespace');
+  const records = {};
+  let cursor = '0';
+  do {
+    const [next, keys] = await client.command('SCAN', cursor, 'MATCH', prefix + '*', 'COUNT', 500);
+    cursor = next.toString();
+    for (const key of keys) {
+      const dump = await client.command('DUMP', key), ttl = await client.command('PTTL', key);
+      if (dump !== null) records[sha(key)] = { value: sha(dump), expiresAt: ttl > 0 ? Date.now() + ttl : null };
+    }
+  } while (cursor !== '0');
+  return records;
+}
+
+// Every record of the inventory taken at restore is still present with the same value, unless
+// its own expiry has passed since. No record was added or changed.
+export function compareRedis(before, current, now = Date.now()) {
+  let expired = 0, missing = 0, changed = 0, unexpected = 0;
+  for (const [key, record] of Object.entries(before)) {
+    const present = current[key];
+    if (!present) { if (record.expiresAt !== null && record.expiresAt <= now + 2000) expired++; else missing++; continue; }
+    if (present.value !== record.value) changed++;
+  }
+  for (const key of Object.keys(current)) if (!before[key]) unexpected++;
+  return { recorded: Object.keys(before).length, present: Object.keys(current).length, expiredSinceCapture: expired, missing, changed, unexpected, unchanged: missing === 0 && changed === 0 && unexpected === 0 };
+}
+
+async function redisImport(url, input, inventory) {
   const client = redisClient(url);
   if (client.password) await client.command('AUTH', client.password);
-  const { records } = JSON.parse(readFileSync(input, 'utf8'));
+  const { prefix, records } = JSON.parse(readFileSync(input, 'utf8'));
   let restored = 0, expired = 0;
   // Absolute expiry is kept: a restore can never extend the life of a record.
   for (const record of records) {
@@ -162,8 +217,22 @@ async function redisImport(url, input) {
     await client.command('RESTORE', Buffer.from(record.key, 'base64'), record.expiresAt ?? 0, Buffer.from(record.dump, 'base64'), 'REPLACE', ...(record.expiresAt ? ['ABSTTL'] : []));
     restored++;
   }
+  if (inventory) {
+    const recorded = await redisInventory(client, prefix);
+    writeFileSync(inventory, JSON.stringify({ prefix, records: recorded }), { mode: 0o600 });
+    if (Object.keys(recorded).length > restored) { client.close(); throw Error('Redis holds records that were not restored'); }
+  }
   client.close();
   return { restored, expired };
+}
+
+async function redisCompare(url, input) {
+  const before = JSON.parse(readFileSync(input, 'utf8'));
+  const client = redisClient(url);
+  if (client.password) await client.command('AUTH', client.password);
+  const current = await redisInventory(client, before.prefix);
+  client.close();
+  return compareRedis(before.records, current);
 }
 
 async function main(request) {
@@ -176,7 +245,10 @@ async function main(request) {
     case 'sqlite-compare': {
       const before = JSON.parse(readFileSync(request.before, 'utf8'));
       const columns = Object.fromEntries(Object.entries(before.tables).map(([name, table]) => [name, table.columns]));
-      return compareDatabases(before, databaseState(request.file, columns), request.allowedToChange ?? []);
+      const stable = Object.fromEntries(Object.entries(before.tables).filter(([, table]) => table.stableColumns).map(([name, table]) => [name, table.stableColumns]));
+      // credentials: only the credential tables of this component, tolerating LIVE_COLUMNS.
+      const tables = request.credentials === true ? CREDENTIAL_TABLES[request.component] ?? [] : request.tables;
+      return compareDatabases(before, databaseState(request.file, columns, stable), request.allowedToChange ?? [], { tables, live: request.credentials === true });
     }
     case 'accounts': return { accounts: accounts(request.file) };
     case 'qdrant-inventory': {
@@ -185,12 +257,14 @@ async function main(request) {
       return { totalCollections: inventory.totalCollections, totalPoints: inventory.totalPoints, digest: sha(JSON.stringify(canonical(inventory.collections))) };
     }
     case 'redis-export': return redisExport(request.url, request.prefix, request.output);
-    case 'redis-import': return redisImport(request.url, request.input);
+    case 'redis-import': return redisImport(request.url, request.input, request.inventory);
+    case 'redis-compare': return redisCompare(request.url, request.input);
     default: throw Error('Unknown data command');
   }
 }
 
-if (process.argv[1]) {
+// Run with a JSON request as the only argument; imported, it only exports its helpers.
+if (process.argv[1]?.startsWith('{')) {
   main(JSON.parse(process.argv[1])).then(
     (result) => { console.log(JSON.stringify(result)); process.exit(0); },
     (error) => { console.error('migrate-native data: ' + error.message); process.exit(1); },

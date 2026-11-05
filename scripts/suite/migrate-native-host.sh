@@ -508,8 +508,9 @@ restore_qdrant() {
   printf '%s\n' "$result"
 }
 restore_redis() {
-  local dump_file=$1 data=$2 name=$3 user image result attempt
-  user=$(service_user oathweave-redis); image=$(image_of oathweave-redis)
+  # restore_redis DUMP_FILE DATA_DIR CONTAINER INVENTORY_FILE. The inventory holds digests only.
+  local dump_file=$1 data=$2 name=$3 inventory=$4 user image result attempt work
+  user=$(service_user oathweave-redis); image=$(image_of oathweave-redis); work=$(dirname -- "$dump_file")
   install -d -m 700 -o "${user%:*}" -g "${user#*:}" "$data"
   docker rm -f "$name" >/dev/null 2>&1 || true
   docker run -d --name "$name" --network none --user "$user" --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp:mode=1777 \
@@ -517,15 +518,17 @@ restore_redis() {
   chmod 644 "$dump_file"
   result=''
   for attempt in $(seq 1 15); do
-    if result=$(data_tool_secret MIGRATE_REDIS_PASSWORD "$directory/config/.migration/secrets/redis-password" "container:$name" "$user" '{"command":"redis-import","url":"redis://127.0.0.1:6379","input":"/in/redis.json"}' --mount "type=bind,source=$dump_file,target=/in/redis.json,readonly" 2>/dev/null); then break; fi
+    if result=$(data_tool_secret MIGRATE_REDIS_PASSWORD "$directory/config/.migration/secrets/redis-password" "container:$name" "$user" "$(jq -nc --arg input "/work/$(basename -- "$dump_file")" '{command:"redis-import",url:"redis://127.0.0.1:6379",input:$input,inventory:"/work/inventory.json"}')" --mount "type=bind,source=$work,target=/work" 2>/dev/null); then break; fi
     result=''; sleep 1
   done
   rm -f -- "$dump_file"
   docker stop --time 30 "$name" >/dev/null; docker rm "$name" >/dev/null
   [[ -n "$result" ]] || die 'Redis records could not be restored'
+  mv -T -- "$work/inventory.json" "$inventory"
   printf '%s\n' "$result"
 }
 # Builds complete suite data under $1 from the native stores. Native files stay as they are.
+# The Redis inventory of the copy is written beside it, as redis-inventory.json.
 copy_stores() {
   local destination=$1 label=$2 iam user keyring previous redis_url prefix result_qdrant result_redis
   iam=$(iam_env)
@@ -572,7 +575,7 @@ copy_stores() {
   install -d -m 777 "$state/work-$label/redis"
   printf '%s' "$redis_url" > "$state/work-$label/source-url"
   data_tool_secret MIGRATE_REDIS_URL "$state/work-$label/source-url" "$(source_network)" "$(service_user oathweave-redis)" "$(jq -nc --arg prefix "$prefix" '{command:"redis-export",prefix:$prefix,output:"/out/redis.json"}')" --mount "type=bind,source=$state/work-$label/redis,target=/out" >/dev/null
-  result_redis=$(restore_redis "$state/work-$label/redis/redis.json" "$destination/oathweave-redis" "hive-migrate-$installation-redis-$label")
+  result_redis=$(restore_redis "$state/work-$label/redis/redis.json" "$destination/oathweave-redis" "hive-migrate-$installation-redis-$label" "$(dirname -- "$destination")/redis-inventory.json")
   rm -rf -- "$state/work-$label"
   jq -n --argjson qdrant "$result_qdrant" --argjson redis "$result_redis" '{qdrant:$qdrant,redis:$redis}'
 }
@@ -637,10 +640,11 @@ console.log(JSON.stringify({createdClients,grantsApplied,existingRecordsUnchange
   docker compose -f "$file" run --no-deps --rm -T --entrypoint node oathweave --input-type=module -e "$code" "$(jq -nc --argjson clients "$clients" --argjson grants "$grants" '{clients:$clients,grants:$grants}')" | grep '^{' | tail -1
 }
 compare_store() {
-  # compare_store DATA_ROOT BASELINE_DIR ALLOWED_JSON_ARRAY -> JSON per component
-  local data=$1 base=$2 allowed=$3 component path
+  # compare_store DATA_ROOT BASELINE_DIR ALLOWED_JSON_ARRAY [OPTIONS_JSON] -> JSON per component
+  # OPTIONS {"credentials":true} compares only credential tables, tolerating the live columns.
+  local data=$1 base=$2 allowed=$3 options=${4:-'{}'} component path
   while IFS=$'\t' read -r component path; do
-    data_tool none "$(service_user "$component")" "$(jq -nc --arg file "/db/$(basename -- "$path")" --argjson allowed "$allowed" '{command:"sqlite-compare",before:"/base/'"$component"'.json",file:$file,allowedToChange:$allowed}')" \
+    data_tool none "$(service_user "$component")" "$(jq -nc --arg file "/db/$(basename -- "$path")" --arg component "$component" --argjson allowed "$allowed" --argjson options "$options" '{command:"sqlite-compare",before:("/base/"+$component+".json"),file:$file,component:$component,allowedToChange:$allowed}+$options')" \
       --mount "type=bind,source=$(dirname -- "$data/$path"),target=/db" --mount "type=bind,source=$base,target=/base,readonly" | jq -c --arg component "$component" '{($component):.}'
   done < <(database_files) | jq -s add
 }
@@ -689,7 +693,7 @@ action_dry_run() {
   jq -e 'all(.[];(.violations|length)==0)' <<< "$compared" >/dev/null || { jq -c 'map_values(.violations)' <<< "$compared" >&2; die 'The dry run changed preserved records; see the violations above'; }
   jq -n --argjson copied "$copied" --argjson additions "$additions" --argjson compared "$compared" --argjson seconds "$(( $(date +%s)-started_at ))" '{copied:$copied,identityAdditions:$additions,comparison:$compared,seconds:$seconds}' | atomic "$state/dry-run.json"
   mark_step dry-run "$(jq -c '{seconds,copied}' "$state/dry-run.json")"
-  rm -rf -- "$staged/data"
+  rm -rf -- "$staged/data" "$staged/redis-inventory.json"
   log "Dry run passed in $(jq -r .seconds "$state/dry-run.json") seconds; staged copy removed"
 }
 
@@ -729,6 +733,7 @@ action_capture() {
     [[ ! -e "$target" ]] || die "Refusing to overwrite suite data: $component. Roll back first."
     mv -T -- "$work/data/$component" "$target"
   done
+  mv -T -- "$work/redis-inventory.json" "$work/baseline/redis.json"
   mv -T -- "$work/baseline" "$state/baseline"
   rm -rf -- "$work"
   mark_step captured "$copied"
@@ -744,6 +749,72 @@ action_migrate_products() {
   docker compose -f "$candidate" stop --timeout 45 >/dev/null 2>&1 || true
   mark_step products-migrated "$additions"
 }
+# ---- Preservation: checked on the copy before any client, port or worker can reach it. ----
+# Only the copy's datastores run here: no product, so no memory worker, and no published port.
+# Nothing but the migration has touched the data, so every preserved record is compared exactly.
+datastore_services() { jq -c '[.services|keys[]|select(.=="oathweave-redis" or .=="hivemem-qdrant")]' "$1"; }
+keyring_json() {
+  # The suite's signing and verification keys are the native files, byte for byte.
+  local native_keys copy name file same=true count=0
+  native_keys=$(native_path /var/lib/hive-iam-keyring/current); copy="$directory/data/oathweave/keyring"
+  for name in active-private.pem active-public.pem; do
+    count=$((count+1)); [[ -f "$copy/$name" && $(sha "$native_keys/$name") == "$(sha "$copy/$name")" ]] || same=false
+  done
+  if [[ -d "$native_keys/previous" ]]; then
+    for file in "$native_keys"/previous/*; do
+      [[ -f "$file" ]] || continue
+      count=$((count+1)); [[ -f "$copy/previous/${file##*/}" && $(sha "$file") == "$(sha "$copy/previous/${file##*/}")" ]] || same=false
+    done
+  fi
+  [[ $(find "$copy" -type f | wc -l) == "$count" ]] || same=false
+  jq -n --argjson files "$count" --argjson same "$same" '{files:$files,byteIdentical:$same}'
+}
+issuer_json() {
+  local native_issuer suite_issuer
+  native_issuer=$(iam_env | jq -r '.JWT_ISSUER // empty')
+  suite_issuer=$(sed -n "s/^JWT_ISSUER='\(.*\)'$/\1/p" "$directory/config/oathweave.env")
+  jq -n --arg native "$native_issuer" --arg suite "$suite_issuer" '{native:$native,unchanged:($native!="" and $native==$suite)}'
+}
+action_preserve() {
+  check_binding
+  step_done products-migrated || die 'Product migrations have not been applied to the copy'
+  if step_done preserved; then log 'Preservation already verified'; return; fi
+  [[ -f "$candidate" && ! -f "$directory/compose.json" ]] || die 'Preservation is checked before the suite starts; this suite is already active. Roll back, then repeat cutover.'
+  local datastores running failures=() compared accounts keyring issuer vectors redis='null' container
+  datastores=$(datastore_services "$candidate")
+  jq -e --argjson stores "$datastores" '. as $c|all($stores[]; $c.services[.].ports==null)' "$candidate" >/dev/null || die 'A datastore publishes a port'
+  mapfile -t stores < <(jq -r '.[]' <<< "$datastores")
+  docker compose -f "$candidate" up -d --wait --wait-timeout 120 "${stores[@]}" >&2
+  running=$(docker compose -f "$candidate" ps --status running --services | jq -Rsc 'split("\n")|map(select(length>0))|sort')
+  # The Hive Registry holds only its own catalog, so it may already run; no product may.
+  jq -e --argjson stores "$datastores" 'all(.[]; . as $name|($stores+["hive-registry"])|index($name)!=null)' <<< "$running" >/dev/null || die "Only datastores may run while preservation is checked, but these run: $running"
+  # Records: no existing row of any table changed or disappeared. Additions are the migrations'.
+  compared=$(compare_store "$directory/data" "$state/baseline" '[]')
+  jq -e 'all(.[];(.violations|length)==0)' <<< "$compared" >/dev/null || failures+=("Preserved records changed: $(jq -c 'map_values(.violations)' <<< "$compared")")
+  accounts=$(data_tool none "$(service_user oathweave)" '{"command":"accounts","file":"/db/iam.db"}' --mount "type=bind,source=$directory/data/oathweave/iam,target=/db")
+  jq -e --slurpfile before "$state/baseline/accounts.json" '.accounts==$before[0].accounts' <<< "$accounts" >/dev/null || failures+=('Accounts or password hashes differ from the native copy')
+  keyring=$(keyring_json); jq -e .byteIdentical <<< "$keyring" >/dev/null || failures+=('The signing keys differ from the native keys')
+  issuer=$(issuer_json); jq -e .unchanged <<< "$issuer" >/dev/null || failures+=('The issuer differs from the native issuer')
+  container=$(docker compose -f "$candidate" ps -q hivemem-qdrant)
+  vectors=$(qdrant_inventory "container:$container" "$(service_user hivemem-qdrant)")
+  jq -e --argjson copied "$(jq -c '.detail.qdrant' "$steps/captured.json")" '.totalPoints==$copied.totalPoints and .totalCollections==$copied.totalCollections and .digest==$copied.digest' <<< "$vectors" >/dev/null || failures+=('Vector counts or content differ from the native snapshots')
+  if [[ -f "$state/baseline/redis.json" ]]; then
+    container=$(docker compose -f "$candidate" ps -q oathweave-redis)
+    redis=$(data_tool_secret MIGRATE_REDIS_PASSWORD "$directory/config/.migration/secrets/redis-password" "container:$container" "$(service_user oathweave-redis)" '{"command":"redis-compare","url":"redis://127.0.0.1:6379","input":"/base/redis.json"}' --mount "type=bind,source=$state/baseline,target=/base,readonly")
+    jq -e .unchanged <<< "$redis" >/dev/null || failures+=("Redis records differ from the native records: $(jq -c '{missing,changed,unexpected}' <<< "$redis")")
+  else failures+=('The capture has no Redis inventory; repeat prepare and cutover with this controller'); fi
+  local result
+  result=$(jq -n --arg plan "$plan" --arg at "$(date -u +%FT%TZ)" --arg capture "$(sha "$steps/captured.json")" --argjson running "$running" --argjson compared "$compared" \
+    --argjson accounts "$(jq -c --slurpfile before "$state/baseline/accounts.json" '{count:(.accounts|length),passwordHashesUnchanged:(.accounts==$before[0].accounts)}' <<< "$accounts")" \
+    --argjson keyring "$keyring" --argjson issuer "$issuer" --argjson vectors "$vectors" --argjson redis "$redis" --argjson failures "$(printf '%s\n' "${failures[@]:-}" | jq -R . | jq -s 'map(select(length>0))')" \
+    '{schema:1,plan:$plan,checkedAt:$at,captureSHA256:$capture,serving:false,runningServices:$running,passed:($failures|length==0),failures:$failures,records:$compared,accounts:$accounts,keyring:$keyring,issuer:$issuer,vectors:$vectors,redis:$redis}')
+  jq . <<< "$result" | atomic "$state/preserved.json"
+  jq -c '{preserved:.passed,serving,failures,vectors,redis:(.redis|if .==null then null else {recorded,present,expiredSinceCapture} end)}' <<< "$result"
+  jq -e .passed <<< "$result" >/dev/null || exit 1
+  mark_step preserved "$(jq -nc --arg sha "$(sha "$state/preserved.json")" '{receiptSHA256:$sha}')"
+}
+
+# ---- Serving checks. Clients may already be writing, so these tolerate live data changes. ----
 # Each native certificate has its own names: a client uses the name its certificate carries.
 declare -A port_names=()
 curl_native() {
@@ -753,10 +824,28 @@ curl_native() {
   curl -sS -o /dev/null -w '%{http_code}' --max-time 20 --resolve "$name:$port:$(nget '.verifyAddress // "127.0.0.1"')" --cacert "$state/verify-trust.pem" "$@" "https://$name:$port$path" 2>/dev/null || printf '000'
 }
 b64url_decode() { local value=$1; value=${value//-/+}; value=${value//_//}; case $(( ${#value} % 4 )) in 2) value+='==';; 3) value+='=';; esac; base64 -d <<< "$value"; }
-action_verify() {
+# The receipt of the preservation check this suite was started from, bound to its capture.
+receipt_json() {
+  local mode=$1 kind=none valid=false
+  if [[ -f "$state/preserved.json" && -f "$steps/preserved.json" && -f "$steps/captured.json" ]]; then
+    kind=preservation
+    if jq -e --arg capture "$(sha "$steps/captured.json")" '.passed==true and .serving==false and .captureSHA256==$capture' "$state/preserved.json" >/dev/null &&
+      [[ $(jq -r .detail.receiptSHA256 "$steps/preserved.json") == "$(sha "$state/preserved.json")" ]]; then valid=true; fi
+  elif [[ "$mode" == live && -f "$state/verification.json" && -f "$steps/verified.json" ]] && jq -e '.schema==1 and .passed==true' "$state/verification.json" >/dev/null; then
+    # A 2.0.0 cutover compared the same records exactly, on a host quiet enough to pass.
+    kind=exact-cutover-verification; valid=true
+  fi
+  jq -n --arg kind "$kind" --argjson valid "$valid" --argjson receipt "$(if [[ "$kind" == preservation ]]; then jq -c '{checkedAt,serving,passed}' "$state/preserved.json"; else printf null; fi)" '{kind:$kind,valid:$valid,preserved:$receipt}'
+}
+verify_suite() {
+  # verify_suite cutover|live. cutover also compares the credential rows, while only machine
+  # clients can be connected; live is the standalone check, after the owner may have acted.
+  local mode=$1 listeners router iam failures=() probes='[]'
   check_binding
-  local listeners router iam failures=() probes='[]' failed_checks=''
+  [[ -f "$directory/compose.json" ]] || die 'The suite is not active here'
   router=$(router_env); iam=$(iam_env); listeners=$(listeners_json)
+  local receipt; receipt=$(receipt_json "$mode")
+  jq -e .valid <<< "$receipt" >/dev/null || failures+=('No valid preservation receipt: this suite was not started from a copy whose preserved data was verified before serving')
   # Native clients trust these exact roots, so verification uses nothing else.
   : > "$state/verify-trust.pem"
   chmod 600 "$state/verify-trust.pem"
@@ -831,21 +920,29 @@ action_verify() {
     done
     rm -f -- "$state/memory.header"
   fi
-  # Preserved records, against the copy taken with writers stopped.
-  local compared accounts vectors
-  compared=$(compare_store "$directory/data" "$state/baseline" '["sessions","refresh_tokens","audit_events","clients","roles","RuntimeSetting","AdminSession","registry_migrations","_prisma_migrations","Trace","QuotaBucket","QuotaLedgerState","QuotaReservation","ApiDocEntry","authorization_codes","user_role_assignments"]')
-  jq -e 'all(.[];(.violations|length)==0)' <<< "$compared" >/dev/null || failures+=("Preserved records changed: $(jq -c 'map_values(.violations)' <<< "$compared")")
-  accounts=$(data_tool none "$(service_user oathweave)" '{"command":"accounts","file":"/db/iam.db"}' --mount "type=bind,source=$directory/data/oathweave/iam,target=/db")
-  jq -e --slurpfile before "$state/baseline/accounts.json" '.accounts==$before[0].accounts' <<< "$accounts" >/dev/null || failures+=('Accounts or password hashes differ from the native copy')
-  vectors=$(qdrant_inventory "container:$(docker compose -f "$directory/compose.json" ps -q hivemem-qdrant)" "$(service_user hivemem-qdrant)")
-  jq -e --argjson copied "$(jq -c '.detail.qdrant' "$steps/captured.json")" '.totalPoints==$copied.totalPoints and .totalCollections==$copied.totalCollections and .digest==$copied.digest' <<< "$vectors" >/dev/null || failures+=('Vector counts or content differ from the native snapshots')
-  local result
-  result=$(jq -n --argjson probes "$probes" --argjson tls "$tls" --argjson tokens "$tokens" --argjson memory "$memory_checks" --argjson compared "$compared" --argjson accounts "$(jq '.accounts|length' <<< "$accounts")" --argjson vectors "$vectors" --argjson failures "$(printf '%s\n' "${failures[@]:-}" | jq -R . | jq -s 'map(select(length>0))')" \
-    '{schema:1,passed:($failures|length==0),failures:$failures,probes:$probes,tls:$tls,nativeToken:$tokens,memoryCredential:$memory,records:$compared,accountHashesUnchanged:$accounts,vectors:$vectors}')
-  jq . <<< "$result" | atomic "$state/verification.json"
-  jq -c '{passed,failures,vectors,probes:(.probes|map(select(.ok|not)))}' <<< "$result"
+  # Invariants that no client or product action changes: the signing keys and the issuer, and
+  # the native stores, which must keep the exact bytes rollback depends on.
+  local keyring issuer native_bytes=false invariants
+  keyring=$(keyring_json); jq -e .byteIdentical <<< "$keyring" >/dev/null || failures+=('The signing keys differ from the native keys')
+  issuer=$(issuer_json); jq -e .unchanged <<< "$issuer" >/dev/null || failures+=('The issuer differs from the native issuer')
+  if [[ -f "$state/native-stopped.json" ]] && jq -e --slurpfile before "$state/native-stopped.json" '.==$before[0]' <<< "$(native_hashes)" >/dev/null; then native_bytes=true; else failures+=('Native stores changed since cutover stopped them: a native service wrote, so rollback would refuse'); fi
+  invariants=$(jq -nc --argjson keyring "$keyring" --argjson issuer "$issuer" --argjson native "$native_bytes" '{keyring:$keyring,issuer:$issuer,nativeStoresUnchangedSinceStop:$native}')
+  # Credentials and registrations stay exact while serving, except the declared live columns.
+  local credentials=null accounts
+  if [[ "$mode" == cutover ]]; then
+    credentials=$(compare_store "$directory/data" "$state/baseline" '[]' '{"credentials":true}')
+    jq -e 'all(.[];(.violations|length)==0)' <<< "$credentials" >/dev/null || failures+=("Credential records changed while serving: $(jq -c 'map_values(.violations)' <<< "$credentials")")
+    accounts=$(data_tool none "$(service_user oathweave)" '{"command":"accounts","file":"/db/iam.db"}' --mount "type=bind,source=$directory/data/oathweave/iam,target=/db")
+    jq -e --slurpfile before "$state/baseline/accounts.json" '.accounts==$before[0].accounts' <<< "$accounts" >/dev/null || failures+=('Accounts or password hashes changed while serving')
+  fi
+  local result output
+  result=$(jq -n --arg mode "$mode" --arg at "$(date -u +%FT%TZ)" --argjson receipt "$receipt" --argjson probes "$probes" --argjson tls "$tls" --argjson tokens "$tokens" --argjson memory "$memory_checks" --argjson invariants "$invariants" --argjson credentials "$credentials" --argjson failures "$(printf '%s\n' "${failures[@]:-}" | jq -R . | jq -s 'map(select(length>0))')" \
+    '{schema:2,mode:$mode,checkedAt:$at,passed:($failures|length==0),failures:$failures,receipt:$receipt,probes:$probes,tls:$tls,nativeToken:$tokens,memoryCredential:$memory,invariants:$invariants,credentials:$credentials}')
+  if [[ "$mode" == cutover ]]; then output="$state/verification.json"; else output="$state/live-verification.json"; fi
+  jq . <<< "$result" | atomic "$output"
+  jq -c '{passed,mode,failures,receipt:.receipt.valid,probes:(.probes|map(select(.ok|not)))}' <<< "$result"
   jq -e .passed <<< "$result" >/dev/null || exit 1
-  mark_step verified
+  [[ "$mode" != cutover ]] || mark_step verified
 }
 action_issue_token() {
   check_binding
@@ -954,7 +1051,9 @@ case "$action" in
   native-stop) action_stop_native;;
   native-capture) action_capture;;
   native-migrate) action_migrate_products;;
-  native-verify) action_verify;;
+  native-preserve) action_preserve;;
+  native-verify) verify_suite cutover;;
+  native-verify-live) verify_suite live;;
   native-issue-token) action_issue_token;;
   native-tls-refresh) action_tls_refresh;;
   native-rollback) action_rollback;;
