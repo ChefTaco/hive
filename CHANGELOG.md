@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Rehearse explicitly captured existing security and chat stores in isolated candidate containers, retaining native account IDs, archives and protected credentials with exact row/file integrity checks and online-backup consistency limits.
+
 - Prepare optional exact Skills host mappings with publisher-verified immutable native clients, protected owner proposals and read-only Magnus readiness checks; incomplete enrollment remains held without activating mappings or dispatching jobs.
 
 - Rehearse coordinated identity enrollment and native Hermes streaming with a
