@@ -25,7 +25,7 @@ const { values: args } = parseArgs({
     credentials: { type: 'string' },
     output: { type: 'string' },
     origin: { type: 'string' },
-    matrix: { type: 'string', default: 'desktop-dark,desktop-light,mobile-dark,mobile-light' },
+    matrix: { type: 'string', default: 'desktop-dark,mobile-dark' },
     pages: { type: 'string' },
     fault: { type: 'string' },
     'ui-dist': { type: 'string' },
@@ -203,7 +203,7 @@ async function createSession(browser) {
       mains: document.querySelectorAll('main').length,
       overflow: document.documentElement.scrollWidth > innerWidth + 1,
       text: (document.querySelector('main')?.innerText ?? document.body.innerText ?? '').replace(/\s+/g, ' ').trim().length,
-      theme: document.documentElement.dataset.theme ?? null,
+      colorScheme: getComputedStyle(document.documentElement).colorScheme,
       contentText: document.querySelector('main')?.innerText ?? '',
       // A control another element covers cannot be used, however well it renders.
       obstructed: [...document.querySelectorAll('button, a[href], input, select, textarea')].flatMap((element) => {
@@ -244,7 +244,7 @@ async function createSession(browser) {
       ...(row.overflow ? ['horizontal overflow'] : []),
       ...(row.text > 0 ? [] : ['empty content']),
       ...(row.text > 60000 ? [`oversized content: ${row.text} characters`] : []),
-      ...(row.theme === theme ? [] : [`theme is ${row.theme}, expected ${theme}`]),
+      ...(row.colorScheme === 'dark' ? [] : [`color-scheme is ${row.colorScheme}, expected dark`]),
       ...(garbage ? [`garbage text: ${garbage}`] : []),
       ...row.obstructed.map((text) => `obstructed: ${text}`),
       ...row.alerts.map((text) => `alert: ${text}`),
@@ -272,30 +272,36 @@ async function createSession(browser) {
     try {
       await page.setViewportSize(VIEWPORTS[form]);
       await page.emulateMedia({ colorScheme: theme });
-      await page.evaluate(() => localStorage.removeItem('hivexui-theme'));
+      // A leftover choice from when there was a theme control must not matter.
+      await page.evaluate(() => localStorage.setItem('hivexui-theme', 'light'));
       await page.reload();
       await page.locator('nav.nav').waitFor({ state: 'attached', timeout: 30000 });
 
-      // Theme: the OS preference applies, and the control must change the rendered palette.
-      const palette = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-      const toggle = page.locator('button.theme-toggle:not(.theme-toggle--floating)');
-      const themeCheck = { toggleFound: (await toggle.count()) === 1, followsPreference: (await page.evaluate(() => document.documentElement.dataset.theme)) === theme };
-      if (themeCheck.toggleFound) {
-        const before = { label: await toggle.getAttribute('aria-label'), palette: await palette() };
-        await toggle.click();
-        await page.waitForTimeout(150);
-        const after = { label: await toggle.getAttribute('aria-label'), palette: await palette() };
-        themeCheck.changed = before.palette !== after.palette && before.label !== after.label;
-        await toggle.click();
-        await page.waitForTimeout(150);
-        themeCheck.restored = (await palette()) === before.palette;
-        await page.evaluate(() => localStorage.removeItem('hivexui-theme'));
-      }
+      // Theme: one dark theme, no control, whatever the OS prefers or the browser remembers.
+      const appearance = () => page.evaluate(() => ({ background: getComputedStyle(document.body).backgroundColor, scheme: getComputedStyle(document.documentElement).colorScheme }));
+      const themeCheck = { noToggle: (await page.locator('button.theme-toggle').count()) === 0, attribute: await page.evaluate(() => document.documentElement.dataset.theme ?? null) };
+      const shown = { [theme]: await appearance() };
+      const other = theme === 'dark' ? 'light' : 'dark';
+      await page.emulateMedia({ colorScheme: other });
+      await page.waitForTimeout(150);
+      shown[other] = await appearance();
+      await page.emulateMedia({ colorScheme: theme });
+      themeCheck.appearance = shown;
+      themeCheck.dark = Object.values(shown).every((look) => look.scheme === 'dark' && look.background === 'rgb(0, 0, 0)');
+      themeCheck.ignoresStored = await page.evaluate(() => localStorage.getItem('hivexui-theme') === 'light');
+      await page.evaluate(() => localStorage.removeItem('hivexui-theme'));
       const nav = page.locator('nav.nav button.nav-item');
+      // Product and section headings collapse: open them all, so every screen can be reached by index.
+      const expandNav = async () => {
+        const closed = page.locator('nav.nav button[aria-expanded="false"]');
+        while (await closed.count()) await closed.first().click();
+      };
       const openNav = async () => {
-        if (form !== 'mobile') return;
-        const menu = page.getByRole('button', { name: 'Toggle navigation', exact: true });
-        if ((await menu.getAttribute('aria-expanded')) !== 'true') await menu.click();
+        if (form === 'mobile') {
+          const menu = page.getByRole('button', { name: 'Toggle navigation', exact: true });
+          if ((await menu.getAttribute('aria-expanded')) !== 'true') await menu.click();
+        }
+        await expandNav();
       };
       await openNav();
       const labels = await nav.evaluateAll((elements) => elements.map((element) => element.querySelector('span')?.textContent?.trim() ?? ''));
@@ -353,7 +359,7 @@ await browser.close();
 
 const findings = results.flatMap((run) => [
   ...(run.crash ? [{ run: run.name, label: '(crash)', finding: run.crash }] : []),
-  ...(run.themeCheck && !(run.themeCheck.toggleFound && run.themeCheck.followsPreference && run.themeCheck.changed && run.themeCheck.restored) ? [{ run: run.name, label: '(theme)', finding: JSON.stringify(run.themeCheck) }] : []),
+  ...(run.themeCheck && !(run.themeCheck.noToggle && run.themeCheck.dark && run.themeCheck.ignoresStored && run.themeCheck.attribute === null) ? [{ run: run.name, label: '(theme)', finding: JSON.stringify(run.themeCheck) }] : []),
   ...run.offOrigin.map((value) => ({ run: run.name, label: '(off-origin)', finding: value })),
   ...run.rows.flatMap((row) => row.findings.map((finding) => ({ run: run.name, label: row.label, finding }))),
 ]);
