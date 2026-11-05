@@ -3,9 +3,19 @@
 // runs the real public native packages and the real controller against copies, on a local
 // Docker target, with no outbound network. Never selects or contacts a production host.
 // Usage: native-migration-rehearsal.mjs --config PRIVATE_JSON [--cleanup]
+//
+// Optional configuration:
+//   controllerRoot  the controller to rehearse, such as an extracted release tag; default this tree
+//   liveTraffic     {intervalMs, pendingJobs}: clients keep using the installation through the
+//                   cutover, as on a busy host, and the native memory queue holds pending jobs
+//                   at capture. The suite memory worker runs, as it does in production.
+//   expectRollback  the cutover must fail verification and roll back (a negative control)
+//   backupRehearsal run hive.sh backup on the migrated suite, measure its stop window, then
+//                   rehearse a restore of the archive
+//   signIn          false skips the sign-in fork, the reset rehearsal and the browser
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { createHash, randomBytes, scryptSync } from 'node:crypto';
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseEnv } from 'node:util';
@@ -17,6 +27,8 @@ const configStat = lstatSync(args[1]);
 assert(configStat.isFile() && configStat.uid === process.getuid() && (configStat.mode & 0o077) === 0, 'The configuration must be owner-only');
 const c = JSON.parse(readFileSync(args[1], 'utf8'));
 const root = resolve(import.meta.dirname, '../..');
+const controller = c.controllerRoot ? resolve(c.controllerRoot) : root;
+const hiveScript = join(controller, 'hive.sh');
 const out = c.output, prefix = 'hive-mn-' + c.host;
 const run = (program, argv, options = {}) => execFileSync(program, argv, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024, ...options });
 const docker = (...argv) => run('docker', argv).trim();
@@ -27,12 +39,14 @@ const native = join(out, 'native'), suite = join(out, 'suite'), fork = join(out,
 const nativeNames = ['router', 'iam', 'memory', 'skills', 'qdrant', 'redis', 'pause'].map((name) => prefix + '-native-' + name);
 const unitContainer = { 'hive-router': 'router', 'hive-iam': 'iam', hivemem: 'memory', 'hive-skills': 'skills', qdrant: 'qdrant' };
 const hasSkills = () => existsSync(join(c.restored, 'state/opt/hive-skills/shared/.env'));
-const hive = (subcommand, ...extra) => {
+const logName = (label) => { let name = 'hive-' + label + '.log'; for (let index = 2; existsSync(join(out, name)); index++) name = 'hive-' + label + '-' + index + '.log'; return name; };
+const suiteCommand = (argv, label) => {
   const started = Date.now();
-  const result = spawnSync(join(root, 'hive.sh'), ['migrate-native', subcommand, '--config', join(out, 'installation.json'), '--manifest', join(out, 'release.json'), '--trust-key', join(out, 'publisher.pub'), '--non-interactive', ...extra], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
-  writeFileSync(join(out, 'hive-' + subcommand + '.log'), result.stdout + '\n--- stderr\n' + result.stderr, { mode: 0o600 });
-  return { status: result.status, stdout: result.stdout, stderr: result.stderr, seconds: (Date.now() - started) / 1000 };
+  const result = spawnSync(hiveScript, [...argv, '--config', join(out, 'installation.json'), '--manifest', join(out, 'release.json'), '--trust-key', join(out, 'publisher.pub'), '--non-interactive'], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  writeFileSync(join(out, logName(label)), result.stdout + '\n--- stderr\n' + result.stderr, { mode: 0o600 });
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr, seconds: (Date.now() - started) / 1000, startedAt: new Date(started).toISOString(), finishedAt: new Date().toISOString() };
 };
+const hive = (subcommand, ...extra) => suiteCommand(['migrate-native', subcommand, ...extra], subcommand);
 const parseJSONLine = (text) => JSON.parse(text.split('\n').reverse().find((line) => line.startsWith('{')));
 
 function cleanup() {
@@ -40,9 +54,14 @@ function cleanup() {
   for (const project of [c.installation + '-control', 'dryrun-' + c.installation, c.installation + '-fork']) {
     for (const id of spawnSync('docker', ['ps', '-aq', '--filter', 'label=com.docker.compose.project=' + project], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean)) ids.push(id);
   }
+  // Isolated restore rehearsals of a backup archive run as their own projects.
+  for (const line of spawnSync('docker', ['ps', '-a', '--format', '{{.ID}} {{.Label "com.docker.compose.project"}}'], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean)) {
+    const [id, project] = line.split(' ');
+    if (project?.startsWith('rehearsal-' + c.installation + '-')) ids.push(id);
+  }
   if (ids.length) spawnSync('docker', ['rm', '-f', '-v', ...ids], { stdio: 'ignore' });
   for (const name of spawnSync('docker', ['network', 'ls', '--format', '{{.Name}}'], { encoding: 'utf8' }).stdout.split('\n')) {
-    if (name === prefix + '-native' || name.startsWith(c.installation + '-control_') || name.startsWith('dryrun-' + c.installation + '_') || name.startsWith(c.installation + '-fork_')) spawnSync('docker', ['network', 'rm', name], { stdio: 'ignore' });
+    if (name === prefix + '-native' || name.startsWith('rehearsal-' + c.installation + '-') || name.startsWith(c.installation + '-control_') || name.startsWith('dryrun-' + c.installation + '_') || name.startsWith(c.installation + '-fork_')) spawnSync('docker', ['network', 'rm', name], { stdio: 'ignore' });
   }
   spawnSync('docker', ['rm', '-f', prefix + '-images'], { stdio: 'ignore' });
 }
@@ -64,8 +83,11 @@ function release() {
   const revisions = {};
   for (const [name, image] of Object.entries(local)) {
     const tag = `${registry}/migrate/${name}:candidate`;
-    docker('tag', image, tag); docker('push', tag);
-    manifest.components[name].image = JSON.parse(docker('image', 'inspect', tag, '--format', '{{json .RepoDigests}}')).find((value) => value.startsWith(`${registry}/migrate/${name}@sha256:`));
+    docker('tag', image, tag);
+    // A pulled multi-platform release image holds only this platform's content, so the push
+    // carries that platform's manifest, under its own digest.
+    const pushed = /digest: (sha256:[a-f0-9]{64})/.exec(docker('push', tag))?.[1];
+    manifest.components[name].image = pushed ? `${registry}/migrate/${name}@${pushed}` : JSON.parse(docker('image', 'inspect', tag, '--format', '{{json .RepoDigests}}')).find((value) => value.startsWith(`${registry}/migrate/${name}@sha256:`));
     revisions[name] = docker('image', 'inspect', tag, '--format', '{{index .Config.Labels "org.opencontainers.image.revision"}}');
     docker('rmi', tag);
   }
@@ -109,6 +131,7 @@ function installRuntime(base, directory) {
 function startNative() {
   say('native: copying the restored tree and installing the archived native packages');
   cpSync(c.restored, native, { recursive: true, verbatimSymlinks: true });
+  if (c.liveTraffic) trafficKey = insertTrafficKey();
   installRuntime('opt/hive-npm');
   if (hasSkills()) {
     installRuntime('opt/hive-skills/npm');
@@ -165,6 +188,113 @@ function startNative() {
   const control = join(out, 'native-control.sh');
   writeFileSync(control, `#!/usr/bin/env bash\nset -euo pipefail\nverb=$1 unit=$2\ncase "$unit" in hive-router) c=router;; hive-iam) c=iam;; hivemem) c=memory;; hive-skills) c=skills;; qdrant) c=qdrant;; *) exit 1;; esac\nname=${prefix}-native-$c\ncase "$verb" in\n stop) docker stop --time 20 "$name" >/dev/null;;\n start) docker start "$name" >/dev/null;;\n is-active) [[ $(docker inspect -f '{{.State.Running}}' "$name") == true ]];;\n *) exit 1;;\nesac\n`, { mode: 0o700 });
   return { address, control, manifest };
+}
+
+// ---- Live traffic: a busy host keeps serving clients through the cutover. ----
+let trafficKey = null;
+// A client API key like the one a native client holds, so traffic can use the model port.
+function insertTrafficKey() {
+  const key = 'sk-' + randomBytes(36).toString('base64url');
+  const salt = randomBytes(16).toString('hex');
+  const now = new Date().toISOString().replace('Z', '+00:00');
+  const id = 'rehearsal' + randomBytes(8).toString('hex');
+  run('sqlite3', ['-cmd', '.timeout 15000', join(native, 'state/opt/hive-router/shared/data/router.db'), `INSERT INTO ClientApiKey (id,name,keyPrefix,keyHash,enabled,metadataJson,lastUsedAt,createdAt,updatedAt,expiresAt) VALUES ('${id}','rehearsal-traffic','${key.slice(0, 8)}','${salt}:${scryptSync(key, salt, 64).toString('hex')}',1,'{"consumer":"rehearsal-traffic"}',NULL,'${now}','${now}',NULL)`]);
+  return { key, id };
+}
+// The rehearsal configuration turns the suite memory worker off. A production host runs it, so
+// this run does too, and the deployment input receipt is pinned again for the edited file.
+function productionWorker() {
+  const file = join(suite, 'config/hivemem.env');
+  writeFileSync(file, readFileSync(file, 'utf8').split('\n').filter((line) => !line.startsWith('HIVEMEM_WORKER_ENABLED=')).join('\n'));
+  const candidate = readdirSync(suite).find((name) => /^candidate\.[a-f0-9]{64}\.json$/.test(name));
+  assert(candidate, 'prepare staged no candidate');
+  const digest = run('bash', ['-c', 'die() { exit 1; }; source "$1"; deployment_inputs_digest "$2"', '_', join(controller, 'scripts/suite/input-artifacts-host.sh'), join(suite, candidate)]).trim();
+  assert.match(digest, /^[a-f0-9]{64}$/);
+  writeFileSync(join(suite, 'deployment-inputs.' + candidate.slice(10, -5) + '.json'), JSON.stringify({ schema: 1, sha256: digest }), { mode: 0o600 });
+  return { workerEnabled: true };
+}
+function memoryRequest(address, trust, method, path, body) {
+  const header = join(out, 'memory-request.header');
+  writeFileSync(header, 'Authorization: Bearer ' + nativeEnv([join(native, 'state/opt/hivemem/.env')]).HIVEMEM_ADMIN_TOKEN + '\n', { mode: 0o600 });
+  const name = nameFor(memoryPort());
+  try {
+    const reply = spawnSync('curl', ['-sS', '-w', '\n%{http_code}', '--max-time', '20', '-X', method, '--resolve', `${name}:${memoryPort()}:${address}`, '--cacert', trust, '-H', '@' + header, ...(body ? ['-H', 'Content-Type: application/json', '--data-binary', '@-'] : []), `https://${name}:${memoryPort()}${path}`], { input: body ? JSON.stringify(body) : undefined, encoding: 'utf8' });
+    const lines = reply.stdout.trim().split('\n');
+    return { status: lines.pop(), body: lines.join('\n') };
+  } finally { rmSync(header, { force: true }); }
+}
+const queueState = (address, trust) => { const reply = memoryRequest(address, trust, 'GET', '/v1/queue/status?limit=1'); try { const body = JSON.parse(reply.body); return { status: reply.status, pending: body.worker?.pending_jobs ?? body.pending_count ?? null, workerEnabled: body.worker?.enabled ?? null, total: body.total ?? null }; } catch { return { status: reply.status }; } };
+// Shared memories written to the native service, whose worker is off, wait as queue jobs.
+function pendingJobs(address, trust, count) {
+  const statuses = [];
+  for (let index = 0; index < count; index++) statuses.push(memoryRequest(address, trust, 'POST', '/v1/memories', { content: `Native memory ${index} written before the cutover; its queue job is still pending at capture.`, type: 'semantic', scope: 'shared', source: 'observation', tags: ['pending-at-capture'] }).status);
+  assert(statuses.every((status) => status === '201'), 'Native memory writes: ' + statuses.join(','));
+  const queue = queueState(address, trust);
+  assert(queue.pending >= count, 'The native queue must hold pending jobs at capture: ' + JSON.stringify(queue));
+  return { written: count, queue };
+}
+function startTraffic(trust) {
+  const work = join(out, 'traffic');
+  mkdirSync(work, { mode: 0o700 });
+  const router = nativeEnv([join(native, 'state/opt/hive-router/shared/.env')]);
+  const file = join(work, 'traffic.json');
+  const log = join(out, 'traffic.jsonl');
+  const stopFile = join(work, 'stop');
+  writeFileSync(file, JSON.stringify({ work, log, stopFile, address: c.address, fqdn: c.fqdn, trust, apiKey: trafficKey.key, memoryToken: nativeEnv([join(native, 'state/opt/hivemem/.env')]).HIVEMEM_ADMIN_TOKEN, memoryName: nameFor(memoryPort()), memoryPort: memoryPort(), clientId: router.HIVE_ROUTER_IAM_CLIENT_ID, clientSecret: router.HIVE_ROUTER_IAM_CLIENT_SECRET, intervalMs: c.liveTraffic.intervalMs ?? 2000 }), { mode: 0o600 });
+  const child = spawn(process.execPath, [join(root, 'scripts/suite/native-migration-traffic.mjs'), file], { stdio: 'ignore' });
+  const exited = new Promise((done) => child.once('exit', done));
+  return {
+    log,
+    stop: async () => { writeFileSync(stopFile, ''); await Promise.race([exited, new Promise((done) => setTimeout(done, 20000))]); child.kill(); rmSync(file, { force: true }); },
+  };
+}
+const trafficEntries = (log) => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line)) : []);
+function trafficSummary(log, from, to) {
+  const summary = {};
+  for (const entry of trafficEntries(log)) {
+    if ((from && entry.at < from) || (to && entry.at > to)) continue;
+    const item = (summary[entry.kind] ??= { ok: 0, failed: 0, statuses: {} });
+    item[entry.ok ? 'ok' : 'failed']++;
+    item.statuses[entry.status] = (item.statuses[entry.status] ?? 0) + 1;
+  }
+  return summary;
+}
+// The longest time no request of a kind succeeded, between two instants.
+function outage(log, kind, from, to) {
+  const entries = trafficEntries(log).filter((entry) => entry.kind === kind && entry.at >= from && entry.at <= to).sort((a, b) => a.at.localeCompare(b.at));
+  let longest = 0, lastOk = from;
+  for (const entry of entries) if (entry.ok) { longest = Math.max(longest, Date.parse(entry.at) - Date.parse(lastOk)); lastOk = entry.at; }
+  return { seconds: longest / 1000, requests: entries.length, failed: entries.filter((entry) => !entry.ok).length };
+}
+function containerTimes() {
+  const ids = run('docker', ['compose', '-f', join(suite, 'compose.json'), 'ps', '-aq']).trim().split('\n').filter(Boolean);
+  return ids.map((id) => JSON.parse(docker('inspect', id, '--format', '{"name":{{json .Name}},"started":{{json .State.StartedAt}},"finished":{{json .State.FinishedAt}}}')));
+}
+async function backupRehearsal(trust, traffic) {
+  const archive = 'rehearsal-backup-' + randomBytes(3).toString('hex');
+  say('backup: hive.sh backup on the migrated suite' + (traffic ? ', with clients still connected' : ''));
+  const backup = suiteCommand(['backup', '--archive', archive], 'backup');
+  assert.equal(backup.status, 0, backup.stderr.slice(-3000));
+  const times = containerTimes();
+  const stopped = times.map((item) => Date.parse(item.finished)).filter((value) => value > Date.parse(backup.startedAt));
+  const started = times.map((item) => Date.parse(item.started)).filter((value) => value > Date.parse(backup.startedAt));
+  const ingress = times.find((item) => /ingress/.test(item.name));
+  const receipt = JSON.parse(readFileSync(join(suite, 'backups', archive, 'receipt.json'), 'utf8'));
+  const result = {
+    archive, commandSeconds: backup.seconds, archiveBytes: statSync(join(suite, 'backups', archive, 'state.tar.gz')).size,
+    receipt: { verified: receipt.verified, installation: receipt.installation, sha256: receipt.sha256, dataSHA256: receipt.dataSHA256, release: receipt.release?.version },
+    stopWindow: { allContainersSeconds: (Math.max(...started) - Math.min(...stopped)) / 1000, ingressSeconds: (Date.parse(ingress.started) - Date.parse(ingress.finished)) / 1000, firstStop: new Date(Math.min(...stopped)).toISOString(), lastStart: new Date(Math.max(...started)).toISOString() },
+  };
+  if (traffic) result.clientOutage = Object.fromEntries(['api-key', 'memory-write', 'client-token'].map((kind) => [kind, outage(traffic.log, kind, backup.startedAt, new Date(Date.now() + 1).toISOString())]));
+  result.probesAfterBackup = probes(c.address, trust);
+  say('restore check: hive.sh rehearse restores the archive into an isolated copy');
+  const restore = suiteCommand(['rehearse', '--archive', archive], 'rehearse');
+  assert.equal(restore.status, 0, restore.stderr.slice(-3000));
+  const restored = JSON.parse(readFileSync(join(suite, 'rehearsals', archive, 'result.json'), 'utf8'));
+  assert.equal(restored.result, 'passed');
+  assert.equal(restored.archiveSHA256, receipt.sha256);
+  result.restoreCheck = { seconds: restore.seconds, result: restored.result, isolated: restored.isolated, portsPublished: restored.portsPublished, archiveSHA256Matches: true };
+  return result;
 }
 
 // Native clients trust exactly these files, so probes use nothing else.
@@ -460,14 +590,14 @@ async function main() {
     {
       const wrong = JSON.parse(JSON.stringify(config)); wrong.nativeMigration.expectedHost = 'other-installation';
       const file = join(out, 'wrong-host.json'); writeFileSync(file, JSON.stringify(wrong), { mode: 0o600 });
-      const reply = spawnSync(join(root, 'hive.sh'), ['migrate-native', 'plan', '--config', file, '--manifest', join(out, 'release.json'), '--trust-key', join(out, 'publisher.pub'), '--non-interactive'], { encoding: 'utf8' });
+      const reply = spawnSync(hiveScript, ['migrate-native', 'plan', '--config', file, '--manifest', join(out, 'release.json'), '--trust-key', join(out, 'publisher.pub'), '--non-interactive'], { encoding: 'utf8' });
       assert.notEqual(reply.status, 0); assert.match(reply.stderr, /independent installations are never mixed/);
       const wrongLinks = JSON.parse(JSON.stringify(config)); const linksFile = join(out, 'wrong-links.json');
       writeFileSync(linksFile, JSON.stringify({ schema: 1, installation: 'other-installation', links: [], grants: [] }), { mode: 0o600 });
       wrongLinks.nativeMigration.reviewedLinksFile = linksFile; writeFileSync(file, JSON.stringify(wrongLinks), { mode: 0o600 });
-      const refused = spawnSync(join(root, 'hive.sh'), ['migrate-native', 'plan', '--config', file, '--manifest', join(out, 'release.json'), '--trust-key', join(out, 'publisher.pub'), '--non-interactive'], { encoding: 'utf8' });
+      const refused = spawnSync(hiveScript, ['migrate-native', 'plan', '--config', file, '--manifest', join(out, 'release.json'), '--trust-key', join(out, 'publisher.pub'), '--non-interactive'], { encoding: 'utf8' });
       assert.notEqual(refused.status, 0); assert.match(refused.stderr, /another installation/);
-      report.refusals = { wrongHostConfig: 'refused', wrongLinksFile: 'refused', ...(c.otherArchive ? (() => { const other = JSON.parse(JSON.stringify(config)); other.nativeMigration.source.archive = c.otherArchive; writeFileSync(file, JSON.stringify(other), { mode: 0o600 }); const answer = spawnSync(join(root, 'hive.sh'), ['migrate-native', 'plan', '--config', file, '--manifest', join(out, 'release.json'), '--trust-key', join(out, 'publisher.pub'), '--non-interactive'], { encoding: 'utf8' }); assert.notEqual(answer.status, 0); assert.match(answer.stderr, /another installation/); return { otherInstallationArchive: 'refused' }; })() : {}) };
+      report.refusals = { wrongHostConfig: 'refused', wrongLinksFile: 'refused', ...(c.otherArchive ? (() => { const other = JSON.parse(JSON.stringify(config)); other.nativeMigration.source.archive = c.otherArchive; writeFileSync(file, JSON.stringify(other), { mode: 0o600 }); const answer = spawnSync(hiveScript, ['migrate-native', 'plan', '--config', file, '--manifest', join(out, 'release.json'), '--trust-key', join(out, 'publisher.pub'), '--non-interactive'], { encoding: 'utf8' }); assert.notEqual(answer.status, 0); assert.match(answer.stderr, /another installation/); return { otherInstallationArchive: 'refused' }; })() : {}) };
     }
 
     say('plan');
@@ -484,14 +614,69 @@ async function main() {
     assert.deepEqual(report.nativeProbesAfterPrepare, report.nativeProbesBefore, 'Prepare must not disturb native services');
     assert(docker('inspect', prefix + '-native-iam', '--format', '{{.State.Running}}') === 'true');
 
-    say('cutover');
+    let traffic = null;
+    if (c.liveTraffic) {
+      say('live traffic: production memory worker, pending native queue jobs, clients through the cutover');
+      report.suiteMemoryWorker = productionWorker();
+      report.pendingAtCapture = pendingJobs(nativeState.address, trust, c.liveTraffic.pendingJobs ?? 5);
+      traffic = startTraffic(trust);
+    }
+
+    say('cutover' + (traffic ? ' with live traffic' : ''));
     const nativeHashesBefore = hashesOf(nativeDb());
     const cut = hive('cutover', '--yes');
     report.cutoverSeconds = cut.seconds;
+    report.controller = controller === root ? 'this tree' : c.controllerLabel ?? 'other';
+    if (c.expectRollback) {
+      // Negative control: this controller must fail verification under live traffic and roll back.
+      const text = cut.stdout + '\n' + cut.stderr;
+      const failed = text.split('\n').filter((line) => line.startsWith('{') && line.includes('"passed":false')).map((line) => JSON.parse(line));
+      report.negativeControl = {
+        exitStatus: cut.status, verificationFailures: failed.flatMap((item) => item.failures),
+        clientApiKeyFailure: /ClientApiKey: \d+ existing rows changed or removed/.test(text),
+        vectorFailure: /Vector counts or content differ from the native snapshots/.test(text),
+        rolledBack: /Verification failed, so this installation was rolled back/.test(text),
+        rollback: text.split('\n').filter((line) => line.startsWith('{"rolledBackAt"')).map((line) => JSON.parse(line))[0] ?? null,
+      };
+      if (traffic) { report.trafficDuringCutover = trafficSummary(traffic.log, cut.startedAt, cut.finishedAt); await traffic.stop(); }
+      put('report.partial.json', report);
+      assert.notEqual(cut.status, 0, 'The cutover was expected to fail verification');
+      assert(report.negativeControl.clientApiKeyFailure, 'The ClientApiKey failure did not reproduce');
+      assert(report.negativeControl.vectorFailure, 'The vector failure did not reproduce');
+      assert(report.negativeControl.rolledBack, 'The cutover did not roll back');
+      assert.equal(report.negativeControl.rollback?.nativeBytesUnchangedSinceStop, true);
+      report.nativeProbesAfterRollback = waitNative(nativeState.address, trust);
+      assert.deepEqual(report.nativeProbesAfterRollback, report.nativeProbesBefore, 'Native services answer as they did');
+      assert.deepEqual(hashesOf(nativeDb()).map((a) => a.passwordHash), nativeHashesBefore.map((a) => a.passwordHash), 'Native password hashes are unchanged');
+      report.result = 'passed';
+      return;
+    }
     assert.equal(cut.status, 0, cut.stderr.slice(-3000));
     const verification = JSON.parse(readFileSync(join(suite, 'migration/verification.json'), 'utf8'));
     assert(verification.passed);
-    report.verification = { failures: verification.failures, probes: verification.probes.map((p) => `${p.port}${p.path} ${p.status}`), tls: verification.tls, nativeToken: verification.nativeToken, memoryCredential: verification.memoryCredential, vectors: verification.vectors, accountHashes: verification.accountHashesUnchanged, recordChanges: Object.fromEntries(Object.entries(verification.records).map(([name, value]) => [name, value.changed])) };
+    const preserved = JSON.parse(readFileSync(join(suite, 'migration/preserved.json'), 'utf8'));
+    assert(preserved.passed);
+    report.preserved = { checkedAt: preserved.checkedAt, servingWhenChecked: preserved.serving, runningServices: preserved.runningServices, failures: preserved.failures, accounts: preserved.accounts, keyring: preserved.keyring, issuer: preserved.issuer, vectors: preserved.vectors, redis: preserved.redis, recordChanges: Object.fromEntries(Object.entries(preserved.records).map(([name, value]) => [name, value.changed])) };
+    report.verification = { failures: verification.failures, receipt: verification.receipt, probes: verification.probes.map((p) => `${p.port}${p.path} ${p.status}`), tls: verification.tls, nativeToken: verification.nativeToken, memoryCredential: verification.memoryCredential, credentials: verification.credentials, invariants: verification.invariants };
+    if (traffic) {
+      report.trafficDuringCutover = trafficSummary(traffic.log, cut.startedAt, cut.finishedAt);
+      assert(Object.values(report.trafficDuringCutover).some((item) => item.ok > 0), 'Traffic must reach the suite during the cutover');
+      say('verify: the standalone check against the live suite, with traffic still running');
+      const live = hive('verify');
+      assert.equal(live.status, 0, live.stdout.slice(-2000) + live.stderr.slice(-2000));
+      report.liveVerify = parseJSONLine(live.stdout);
+      report.trafficDuringLiveVerify = trafficSummary(traffic.log, live.startedAt, live.finishedAt);
+      report.suiteQueue = queueState(c.address, trust);
+    }
+    if (c.backupRehearsal) {
+      report.backupRehearsal = await backupRehearsal(trust, traffic);
+      if (traffic) {
+        const after = hive('verify');
+        assert.equal(after.status, 0, after.stdout.slice(-2000) + after.stderr.slice(-2000));
+        report.liveVerifyAfterBackup = parseJSONLine(after.stdout);
+      }
+    }
+    if (traffic) { await traffic.stop(); report.trafficTotal = trafficSummary(traffic.log); }
 
     say('suite: independent checks on the native ports');
     report.suiteProbes = probes(c.address, trust);
@@ -513,7 +698,7 @@ async function main() {
     if (hasSkills()) { report.rowCounts.nativeSkills = tableCounts(join(native, 'state/opt/hive-skills/shared/data/registry.sqlite')); report.rowCounts.suiteSkills = tableCounts(join(suite, 'data/hiveskills/registry.sqlite')); }
     report.auditFiles = (() => { const directory = join(native, 'state/opt/hive-iam/audit-logs'), result = { files: 0, identical: 0, grown: 0, bytes: 0 }; for (const name of readdirSync(directory)) { result.files++; result.bytes += statSync(join(directory, name)).size; const a = readFileSync(join(directory, name)), b = readFileSync(join(suite, 'data/oathweave/iam/audit-logs', name)); if (a.equals(b)) result.identical++; else if (b.subarray(0, a.length).equals(a)) result.grown++; else throw Error('An audit file changed: ' + name); } return result; })();
     report.auditChain = 'Native Oathweave, Emberpath, HiveMem and HiveSkills keep no hash chain. Audit rows and files are compared by content instead.';
-    const statusReply = spawnSync(join(root, 'hive.sh'), ['status', '--config', join(out, 'installation.json'), '--manifest', join(out, 'release.json'), '--trust-key', join(out, 'publisher.pub'), '--non-interactive'], { encoding: 'utf8' });
+    const statusReply = spawnSync(hiveScript, ['status', '--config', join(out, 'installation.json'), '--manifest', join(out, 'release.json'), '--trust-key', join(out, 'publisher.pub'), '--non-interactive'], { encoding: 'utf8' });
     assert.equal(statusReply.status, 0, statusReply.stderr.slice(-1500));
     const status = JSON.parse(statusReply.stdout);
     report.status = { containers: status.containers.map((container) => `${container.Service}: ${container.State}/${container.Health || '-'}`), registry: { state: status.registry.state, products: status.registry.products, drift: status.registry.drift } };
@@ -526,6 +711,7 @@ async function main() {
     const write = spawnSync('curl', ['-sS', '-w', '\n%{http_code}', '--max-time', '30', '--resolve', `${c.fqdn}:443:${c.address}`, '--cacert', trust, '-H', 'Authorization: Bearer ' + memoryToken, '-H', 'Content-Type: application/json', '-d', JSON.stringify({ content: 'A memory written to the suite during the rollback rehearsal.', type: 'semantic', scope: 'shared', source: 'observation', tags: ['rollback-rehearsal'] }), `https://${c.fqdn}:443/v1/memories`], { encoding: 'utf8' });
     report.postCutoverWriteStatus = write.stdout.trim().split('\n').pop();
 
+    if (c.signIn !== false) {
     say('sign-in fork');
     docker('compose', '-f', join(suite, 'compose.json'), 'stop', '--timeout', '45');
     const f = forkSuite(config);
@@ -540,6 +726,7 @@ async function main() {
     assert.equal(report.secretLeakScan.auditFileHits, 0);
     run('docker', ['compose', '-f', f.composeFile, 'down', '--timeout', '45']);
     rmSync(f.secrets, { force: true });
+    }
 
     say('rollback');
     docker('compose', '-f', join(suite, 'compose.json'), 'up', '-d', '--wait', '--wait-timeout', '180');
