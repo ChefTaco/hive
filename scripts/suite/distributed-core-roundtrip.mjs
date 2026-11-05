@@ -192,7 +192,7 @@ fi
   if (browserReview) {
     put(join(output, 'browser-credentials.json'), { origin: config.origin, username: credentials.SEED_ADMIN_USERNAME, password: credentials.SEED_ADMIN_PASSWORD, disposable: true });
     console.log('Disposable authenticated browser review ready; protected credentials retained in the selected evidence directory.');
-    const completion = join(output, 'browser-completion.json'), deadline = Date.now() + 45 * 60 * 1000;
+    const completion = join(output, 'browser-completion.json'), reviewMinutes = process.argv.includes('--browser-review-minutes') ? Number(process.argv[process.argv.indexOf('--browser-review-minutes') + 1]) : 45, deadline = Date.now() + reviewMinutes * 60 * 1000;
     while (!existsSync(completion)) { assert(Date.now() < deadline, 'Browser review did not complete within the protected review window'); await new Promise(done => setTimeout(done, 1000)); }
     const result = JSON.parse(readFileSync(completion, 'utf8')); assert.equal(result.result, 'passed', 'Authenticated browser review must pass before lifecycle rehearsal');
     // Long human reviews must not turn token expiry into false revocation proof.
