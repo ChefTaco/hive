@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Complete integrated native Codex acceptance through the signed Bash adapter and document existing-data rehearsal boundaries.
+
 - Rehearse explicitly captured existing security and chat stores in isolated candidate containers, retaining native account IDs, archives and protected credentials with exact row/file integrity checks and online-backup consistency limits.
 
 - Prepare optional exact Skills host mappings with publisher-verified immutable native clients, protected owner proposals and read-only Magnus readiness checks; incomplete enrollment remains held without activating mappings or dispatching jobs.

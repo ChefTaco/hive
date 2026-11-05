@@ -110,9 +110,10 @@ are not published release artifacts or migration approval. Full-profile fresh
 bootstrap, multi-host bootstrap and remaining agent integrations are separate gates.
 
 Native Magnus artifact staging, authenticated heartbeat and a read-only command
-now have a separate disposable rehearsal. Other runtimes and complete suite agent
-identity wiring remain pending. See [native agents](NATIVE_AGENTS.md) for protected
-configuration, preflight, explicit acceptance and status.
+now have a separate disposable rehearsal. Native Ardent model/memory, Codex
+Responses, Hermes streaming and its HiveMem plugin also have integrated core recovery proof. Optional consumers and existing
+provider authorization retain their own acceptance gates. See
+[native agents](NATIVE_AGENTS.md) for protected configuration, preflight, explicit acceptance and status.
 
 Deployment plans include a controller source fingerprint. Signed manifests may
 require it using `controllerSHA256`. A different controller cannot resume the same

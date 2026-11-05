@@ -64,8 +64,11 @@ an explicit operator step. A disposable core check runs the actual native Codex
 Responses client through Emberpath with a scoped key, alias resolution and streaming.
 It also rejects administration and cross-product use of that key. This proves the
 selected CLI generation workflow, not a persistent app-server supervisor or an
-existing account's provider authorization. A runtime without its own bounded JSON
-acceptance contract remains pending in installer status.
+existing account's provider authorization. Its bounded `--native-acceptance`
+contract uses an isolated temporary configuration and a one-request verification
+relay, refuses tools and redirects, and checks the expected streamed answer. Strict
+`agents-accept` records that proof against the signed artifact; it does not infer
+persistent supervision from a successful generation.
 
 Status emits one versioned object per host, with container state and native agent
 installation, preflight and acceptance state. Healthy containers do not imply
@@ -96,9 +99,9 @@ model. Existing services and agent profiles are never selected by this driver.
 Add `--external-provider --codex-artifact PATH_TO_PRIVATE_DESCRIPTOR` to
 `test:suite:core` for the pinned native Codex integration. Ardent and Codex can be
 checked together. The driver verifies the actual Bash artifact adapter, preserves
-private configuration bytes and uses only a developer-owned external protocol
-fixture. The fixture is outside deployment inventory and installs no inference
-service or model asset.
+private configuration bytes, completes strict product-owned acceptance, and uses
+only a developer-owned external protocol fixture. The fixture is outside deployment
+inventory and installs no inference service or model asset.
 
 Hermes uses the separately reviewed public upstream snapshot, bundled Python,
 locked dependencies and fixed SQLite from Magnus's `--product hermes` export.

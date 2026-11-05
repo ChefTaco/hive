@@ -18,9 +18,9 @@ source snapshot or passing unit test is not evidence of a production cutover.
 | Direct product authorization | Implemented; bounded regression tests pass | Resource audience, permissions, revocation and step-up regression tests |
 | Oathweave browser SSO | Disposable browser workflows pass; restored-account sign-in pending | PKCE, consent, MFA/passkeys, recovery, session/logout acceptance |
 | Memory and workspace workflows | Native advanced operations and suite browser session/webhook/graph checks pass | External webhook delivery and installation-specific acceptance |
-| Security and chat UI consolidation | Fresh suite files/sockets, investigations and native-session revocation pass; expanded chat workflows under browser review | Remaining workflow and migrated-account browser acceptance |
+| Security and chat UI consolidation | Fresh suite files/sockets, investigations and native-session revocation pass; expanded conversation and administration browser checks pass | Remaining workflow and migrated-account browser acceptance |
 | Shell suite lifecycle | Core, full and custom distributed SSH installation/recovery drills pass; compatible bundle upgrade/rollback pass | Separate physical-host and installation-specific acceptance |
-| Host agent enrollment | Native Magnus heartbeat/job, Ardent and Codex model access, Hermes streaming and memory plugin pass individually | Integrated recovery, optional consumer wiring and persistent supervision acceptance |
+| Host agent enrollment | Native Magnus heartbeat/job and integrated Ardent, Codex, Hermes/plugin core recovery pass | Optional consumer wiring, existing provider authorization and persistent supervision acceptance |
 | External inference | Verified HTTPS fixture and actual Emberpath enrollment/inference pass | Operator-owned endpoint acceptance through protected references; no inference provisioning |
 | Production adoption and migration | Pending | Installation-bound restored backup, single writer, acceptance and recovery proof |
 | Published release and branding | Product directory and guides updated; publication pending | Publisher trust key, reviewed compatibility lock and published immutable artifacts |
@@ -113,7 +113,7 @@ and delegates native execution to explicitly configured Magnus targets. A real
 packaged agent installs a publication into a disposable profile; duplicate grants
 and an interrupted effect cannot trigger an automatic second execution. Unknown
 outcomes require receipt reconciliation. Unconfigured deployments remain visible
-as unavailable. Full security/chat browser parity and real installation acceptance
+as unavailable. Installation-specific browser acceptance and any remaining parity gates
 still gate retirement of the retained frontends.
 
 The Bash controller verifies signed manifests and image digests, plans placement,
@@ -277,3 +277,17 @@ token expiry is not used as revocation evidence. Desktop/mobile checks include
 one main landmark, no horizontal overflow and automated accessibility checks.
 These fresh synthetic checks are distinct from authentication against restored
 historical accounts, and never authorize a production cutover.
+
+Existing security and chat data have a separate reusable rehearsal contract in
+`deployment/EXISTING_DATA_REHEARSALS.md`. Read-only online capture and isolated
+restores preserve product rows, files, runtime configuration and Redis expiry
+semantics. Existing native chat administrator/agent authentication and an attachment
+read pass without linking historical agent or test accounts. Security readiness,
+unauthenticated denial and disabled-dispatch checks pass. Missing current security
+operator credentials and expired identity passwords remain operator gates. These
+online captures do not substitute for a coordinated maintenance-window backup.
+
+Oathweave now preserves independently created sessions with the same IP address
+and user agent. Those signals are risk metadata, not session identities. Heuristic
+session deduplication refuses changes; operators select exact session IDs to revoke.
+Browser regression and restored-session checks remain part of candidate acceptance.

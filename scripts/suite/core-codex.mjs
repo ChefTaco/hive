@@ -45,7 +45,7 @@ export async function rehearseCodex({ root, output, origin, artifactFile, tokens
   put('installation/installation.json', { installation: input.installation, host: input.host });
   put('installation/transaction.json', { plan, operation: 'install', phase: 'ready' }); put('installation/receipt.json', { plan, digest });
   put('installation/manifest.' + plan + '.json', { agentArtifacts: { codex: { [descriptor.version]: { [descriptor.architecture]: {
-    url: 'https://localhost:' + assets.address().port + '/codex.tar.gz', sha256: descriptor.sha256, executable: descriptor.executable, arguments: descriptor.arguments, preflight: descriptor.preflight,
+    url: 'https://localhost:' + assets.address().port + '/codex.tar.gz', sha256: descriptor.sha256, executable: descriptor.executable, arguments: descriptor.arguments, preflight: descriptor.preflight, acceptanceArguments: [...descriptor.acceptanceArguments, '--expected-answer', 'OK'],
   } } } } });
   const code = ['native-initialization-host.sh', 'adapters-host.sh', 'inference-registration.sh', 'host-runtime.sh'].map(name => readFileSync(join(root, 'scripts/suite', name), 'utf8')).join('\n');
   const adapterEnv = { ...baseEnv, CURL_CA_BUNDLE: certificate, UNRELATED_INFRA_SECRET: 'obviously-fake-must-not-inherit' };
@@ -57,6 +57,8 @@ export async function rehearseCodex({ root, output, origin, artifactFile, tokens
   };
   try {
     await action('adapters-stage'); await action('adapters-stage');
+    await action('agents-accept');
+    assert.equal(JSON.parse(readFileSync(join(installation, 'agents/native-codex/receipt.json'), 'utf8')).accepted, true);
     const executable = join(installation, 'agents/native-codex/artifacts', descriptor.sha256, descriptor.executable);
     const args = ['--env-file', envFile, '--profile-path', profile];
     const result = await execute(executable, [...args, 'exec', '--json', '--ephemeral', '--skip-git-repo-check', '--cd', directory,
@@ -70,7 +72,7 @@ export async function rehearseCodex({ root, output, origin, artifactFile, tokens
     const run = readFileSync(join(installation, 'agents/native-codex/run.' + plan), 'utf8');
     assert(run.includes('env -i') && !run.includes('UNRELATED_INFRA_SECRET'));
     put('result.json', { schema: 1, result: 'passed', productionCutover: false, artifactSHA256: descriptor.sha256, version: descriptor.version,
-      checks: ['actual Bash adapter staging and unchanged retry', 'pinned native Codex compressed Responses request through Emberpath', 'verified HTTPS, scoped key, alias selection and streamed assistant answer', 'administration and cross-product credential rejection', 'original private profile and credential bytes retained'],
+      checks: ['actual Bash adapter staging, unchanged retry and strict product-owned native acceptance receipt', 'pinned native Codex compressed Responses request through Emberpath', 'verified HTTPS, scoped key, alias selection and streamed assistant answer', 'administration and cross-product credential rejection', 'original private profile and credential bytes retained'],
       limitations: ['one physical Linux AMD64 host', 'disposable external protocol fixture; no inference runtime or model asset installed', 'existing provider authorization and long-running app-server supervision remain operator-owned'] });
   } finally { assets.closeAllConnections(); await new Promise(done => assets.close(done)); }
 }
