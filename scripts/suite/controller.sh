@@ -11,6 +11,7 @@ hive_runtime_files() {
     scripts/suite/initialize-host.sh scripts/suite/initialize-full-host.sh scripts/suite/initialize-migrations-host.sh scripts/suite/integrity-host.sh scripts/suite/input-artifacts-host.sh scripts/suite/check-data.mjs \
     scripts/suite/registry.sh scripts/suite/registry-host.sh \
     scripts/suite/magnus-gateway.sh scripts/suite/magnus-gateway-host.sh
+    scripts/suite/migrate-native.sh scripts/suite/migrate-native-host.sh scripts/suite/migrate-native-data.mjs scripts/suite/set-admin-password.sh
 }
 hive_controller_digest() {
   local file
@@ -19,7 +20,7 @@ hive_controller_digest() {
 }
 hive_usage() {
   cat <<'EOF'
-Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|skills-prepare|registry|magnus-trust]
+Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|skills-prepare|registry|magnus-trust|migrate-native]
   --config FILE          Installation JSON (required for unattended use)
   --release VERSION      Override the exact release version
   --manifest FILE        Signed release manifest (default releases/VERSION.json)
@@ -45,6 +46,11 @@ is the separate skills registry): registry list|installed|summary|history|get ID
 add ID --file F|update ID --file F|remove ID. The installer records release products itself.
 magnus-trust approves SSH host keys for the optional Magnus fleet gateway, with a fingerprint read
 on the node itself: magnus-trust list|scan|add|rotate|extra|remove. See deployment/FULL.md.
+migrate-native moves one existing native (systemd) installation onto the suite on the same
+ports: migrate-native plan|prepare|cutover|verify|rollback|status|issue-admin-token|
+set-admin-password|tls-refresh. plan reads only, prepare stops nothing, and cutover and rollback
+act only when named. --hold-on-failure keeps a failed cutover running for inspection.
+See deployment/MIGRATE_NATIVE.md.
 No arguments starts interactive configuration. Planning does not contact hosts.
 Secrets belong in protected environment/configuration files, never CLI arguments.
 EOF
@@ -205,13 +211,14 @@ hive_validate() {
   jq -e '
     def id: type=="string" and test("^[a-z][a-z0-9-]{0,47}$");
     def path: type=="string" and startswith("/") and test("^/[A-Za-z0-9_./-]+$") and (split("/") | all(. != ".."));
-    (keys-["schema","installation","release","configurationRevision","profile","origin","hosts","components","console","bootstrap","agents","inference","skillsDeployment"]|length==0) and
+    (keys-["schema","installation","release","configurationRevision","profile","origin","hosts","components","console","bootstrap","agents","inference","skillsDeployment","nativeMigration"]|length==0) and
     ((.configurationRevision // "1")|type=="string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")) and
     .schema==1 and (.installation|id) and (.profile|IN("core","full","custom")) and
     (.origin|type=="string" and test("^https://[A-Za-z0-9.-]+(:[0-9]+)?$")) and
     (.hosts|type=="object" and length>0 and all(to_entries[];
       (.key|id) and (.value.directory|path) and (.value.directory|length>4) and
-      (.value|keys-["target","directory","architecture","minimumFreeMiB","sshConfig"]|length==0) and
+      (.value|keys-["target","directory","architecture","minimumFreeMiB","sshConfig","sudoPasswordFile"]|length==0) and
+      ((.value.sudoPasswordFile // "/dev/null")|path) and
       ((.value.sshConfig // "/dev/null")|path) and
       ((.value.architecture // "amd64")|IN("amd64","arm64")) and
       ((.value.minimumFreeMiB // 2048)|type=="number" and floor==. and .>=0) and
@@ -242,7 +249,7 @@ hive_validate() {
     jq -e '
       def path: type=="string" and test("^/[A-Za-z0-9_./-]+$") and (split("/")|all(.!=".."));
       . as $c | .console as $ui |
-      ($ui|type=="object" and (keys-["host","bindAddress","httpsPort","runtimeFile"]|length==0)) and
+      ($ui|type=="object" and (keys-["host","bindAddress","httpsPort","runtimeFile","nativeListeners","networkSubnet","edgeSubnet"]|length==0)) and
       ($c.hosts[$ui.host]!=null) and $c.components.hivexui.host==$ui.host and $c.components.ingress.host==$ui.host and
       ($c.components.hivexui|has("envFile") or has("configDirectory")|not) and
       ($c.components.ingress.envFile|path) and ($c.components.ingress.configDirectory|path) and
@@ -255,6 +262,7 @@ hive_validate() {
   if declare -F hive_registry_validate >/dev/null; then hive_registry_validate; fi
   if declare -F hive_skills_validate >/dev/null; then hive_skills_validate; fi
   if declare -F hive_adapter_validate >/dev/null; then hive_adapter_validate; fi
+  if declare -F hive_native_validate >/dev/null; then hive_native_validate; fi
 }
 
 hive_manifest() {
@@ -328,7 +336,7 @@ hive_plan() {
 
 # Arguments are transported as JSON over stdin. No configuration is sourced as shell.
 hive_host() {
-  local host=$1 script=$2 target payload bootstrap_users
+  local host=$1 script=$2 target payload bootstrap_users sudo_file
   local -a ssh_options
   hive_ssh_options "$host"
   bootstrap_users=${HIVE_BOOTSTRAP_USERS:-'{}'}
@@ -340,14 +348,34 @@ hive_host() {
     --arg skillsManifest "${HIVE_SKILLS_MANIFEST:-}" --arg skillsSignature "${HIVE_SKILLS_SIGNATURE:-}" --arg skillsTrust "${HIVE_SKILLS_TRUST:-}" --arg skillsTokenSHA "${HIVE_SKILLS_TOKEN_SHA:-}" \
     --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" --argjson registry "${HIVE_REGISTRY_INPUT:-null}" --argjson magnusTrust "${HIVE_MAGNUS_TRUST_INPUT:-null}" \
     '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,magnusTrust:$magnusTrust,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
+    --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" --argjson registry "${HIVE_REGISTRY_INPUT:-null}" \
+    --arg dataTool "${HIVE_NATIVE_DATA_TOOL:-}" --arg adminScript "${HIVE_NATIVE_ADMIN_SCRIPT:-}" --argjson reviewedLinks "${HIVE_NATIVE_LINKS:-null}" --arg tokenDigest "${HIVE_NATIVE_TOKEN_DIGEST:-}" --argjson tokenTtlSeconds "${HIVE_NATIVE_TOKEN_TTL:-null}" \
+    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,nativeMigration:(.nativeMigration // null),dataTool:$dataTool,adminScript:$adminScript,reviewedLinks:$reviewedLinks,tokenDigest:$tokenDigest,tokenTtlSeconds:$tokenTtlSeconds,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
+  sudo_file=$(hive_sudo_file "$host")
   if [[ "$target" == local ]]; then
     printf '%s\n' "$payload" | bash -c "$script"
   else
     # The remote command is fixed. Dynamic data is base64 stdin, never shell code.
     local encoded
     encoded=$(printf '%s' "$script" | base64 -w0)
-    printf '%s\n' "$payload" | ssh "${ssh_options[@]}" -- "$target" "bash -c \"\$(printf '%s' '$encoded' | base64 -d)\""
+    if [[ -n "$sudo_file" ]]; then
+      # sudo reads exactly its password line from standard input; the payload follows it.
+      { cat -- "$sudo_file"; printf '%s\n' "$payload"; } | ssh "${ssh_options[@]}" -- "$target" "sudo -k -S -p '' bash -c \"\$(printf '%s' '$encoded' | base64 -d)\""
+    else
+      printf '%s\n' "$payload" | ssh "${ssh_options[@]}" -- "$target" "bash -c \"\$(printf '%s' '$encoded' | base64 -d)\""
+    fi
   fi
+}
+
+# A protected file on the controller, never a command-line value. Hosts without it use
+# the SSH account directly.
+hive_sudo_file() {
+  local file
+  file=$(jq -r --arg host "$1" '.hosts[$host].sudoPasswordFile // empty' "$HIVE_CONFIG")
+  [[ -n "$file" ]] || return 0
+  [[ -f "$file" && ! -L "$file" && -r "$file" && $(stat -c %u "$file") == "$(id -u)" ]] || hive_die 'The sudo password file must be an operator-owned regular file'
+  (( (8#$(stat -c %a "$file") & 077)==0 )) || hive_die 'The sudo password file must be owner-only'
+  printf '%s\n' "$file"
 }
 
 hive_ssh_options() {
@@ -384,14 +412,17 @@ hive_render() {
         volumes:((if $kind=="static-ui" then [{type:"bind",source:$c.console.runtimeFile,target:"/usr/share/nginx/html/runtime.json",read_only:true}] else [{type:"bind",source:($c.hosts[$host].directory+"/data/"+$name),target:"/data"}] end) +
           (if $placement.configDirectory then [{type:"bind",source:$placement.configDirectory,target:"/config",read_only:true}] else [] end))
       } + (if $placement.envFile then {env_file:[$placement.envFile]} else {} end) +
+        (if $c.nativeMigration.dataAliases[$name] then {volumes:((if $kind=="static-ui" then [] else [{type:"bind",source:($c.hosts[$host].directory+"/data/"+$name),target:"/data"}] end)+[{type:"bind",source:($c.hosts[$host].directory+"/data/"+$name),target:$c.nativeMigration.dataAliases[$name]}]+(if $placement.configDirectory then [{type:"bind",source:$placement.configDirectory,target:"/config",read_only:true}] else [] end))} else {} end) +
         (if $kind=="application" then {environment:(($r.components[$name].service.environment // {})+{HIVE_AUTO_MIGRATE:"false",HIVE_AUTO_UPGRADE:"false",HIVE_UPDATE_CHECK:"false",HIVE_UI_UPGRADE:"false"} + (if $name=="magnus" then {MAGNUS_AUTO_MIGRATE:"false"} else {} end) + (if $relax then ($relaxedEnvironment[$name] // {}) else {} end))} else {} end) +
-        (if $kind=="ingress" then {ports:[{target:8443,published:($c.console.httpsPort|tostring),host_ip:$c.console.bindAddress,protocol:"tcp"}]}
+        (if $kind=="ingress" then {ports:([{target:8443,published:($c.console.httpsPort|tostring),host_ip:$c.console.bindAddress,protocol:"tcp"}]+(($c.console.nativeListeners // [])|map({target:.port,published:(.port|tostring),host_ip:$c.console.bindAddress,protocol:"tcp"})))} + (if $c.nativeMigration.rehearsal==true then {networks:["default","edge"]} else {} end)
          elif $c.bootstrap.productEndpoints[$name] then $c.bootstrap.productEndpoints[$name] as $endpoint |
           {ports:([{target:({oathweave:4200,emberpath:9443,hivemem:18790,hiveskills:4030,magnus:4000,"magnus-gateway":4310,cindertrace:4101,chattermost:8065}[$name]),published:($endpoint.origin|capture("^https://[^:]+(?::(?<port>[0-9]+))?$")|.port // "443"),host_ip:$endpoint.bindAddress,protocol:"tcp"}] +
             (if $name=="emberpath" then [{target:4020,published:($endpoint.inferenceOrigin|capture("^https://[^:]+(?::(?<port>[0-9]+))?$")|.port // "443"),host_ip:$endpoint.bindAddress,protocol:"tcp"}] else [] end))}
          else {} end) +
         # The registry starts first on its host, before the products it records.
-        (if $name!="hive-registry" and $kind!="datastore" and $c.components["hive-registry"].host==$host then {depends_on:((($r.components[$name].service.depends_on // {})|if type=="array" then map({key:.,value:{condition:"service_started"}})|from_entries else . end)+{"hive-registry":{condition:"service_healthy"}})} else {} end))})|from_entries),networks:({default:{driver:"bridge"}}+($r.networks // {}))}'
+        (if $name!="hive-registry" and $kind!="datastore" and $c.components["hive-registry"].host==$host then {depends_on:((($r.components[$name].service.depends_on // {})|if type=="array" then map({key:.,value:{condition:"service_started"}})|from_entries else . end)+{"hive-registry":{condition:"service_healthy"}})} else {} end))})|from_entries),networks:({default:({driver:"bridge"}+(if $c.console.networkSubnet then {ipam:{config:[{subnet:$c.console.networkSubnet}]}} else {} end)+(if $c.nativeMigration.rehearsal==true then {internal:true} else {} end))}+($r.networks // {})+(if $c.nativeMigration.rehearsal==true then {edge:{driver:"bridge",ipam:{config:[{subnet:$c.console.edgeSubnet}]}}} else {} end))} |
+    # An explicit address plan for hosts whose Docker address pools are limited.
+    reduce (($c.nativeMigration.networkSubnets // {})|to_entries[]) as $net (.; if .networks[$net.key] then .networks[$net.key].ipam={config:[{subnet:$net.value}]} else . end)'
 }
 
 hive_transfer() {
@@ -400,8 +431,12 @@ hive_transfer() {
   hive_ssh_options "$host"
   target=$(jq -r --arg host "$host" '.hosts[$host].target' "$HIVE_CONFIG")
   directory=$(jq -r --arg host "$host" '.hosts[$host].directory' "$HIVE_CONFIG")
+  local sudo_file
+  sudo_file=$(hive_sudo_file "$host")
   if [[ "$target" == local ]]; then
     install -m 600 -- "$file" "$directory/$relative"
+  elif [[ -n "$sudo_file" ]]; then
+    { cat -- "$sudo_file"; cat -- "$file"; } | ssh "${ssh_options[@]}" -- "$target" "sudo -k -S -p '' sh -c 'umask 077; cat > \"$directory/$relative\"'"
   else
     scp -q -p "${ssh_options[@]}" -- "$file" "$target:$directory/$relative"
   fi
@@ -409,7 +444,7 @@ hive_transfer() {
 
 
 hive_main() {
-  local command=install confirmed=false interactive=true
+  local command=install confirmed=false interactive=true hold_on_failure=false
   HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_ALLOW_MIGRATIONS=false HIVE_RELAX_AUTH_LIMITS=false
   HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY=''
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
@@ -423,6 +458,7 @@ hive_main() {
       --allow-migrations) HIVE_ALLOW_MIGRATIONS=true; shift;;
       --relax-auth-limits) HIVE_RELAX_AUTH_LIMITS=true; shift;;
       --non-interactive) interactive=false; shift;;
+      --hold-on-failure) hold_on_failure=true; shift;;
       --file)
         [[ "$command" == registry ]] || hive_die '--file applies only to registry'
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
@@ -448,6 +484,11 @@ hive_main() {
     esac
   done
   case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust) ;; *) hive_die 'Unknown command';; esac
+        [[ ( "$command" == registry || "$command" == migrate-native ) && "$1" != --* ]] || hive_die 'Unknown option'
+        registry_arguments+=("$1"); shift;;
+    esac
+  done
+  case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry|migrate-native) ;; *) hive_die 'Unknown command';; esac
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
     case "$command" in plan|install|upgrade) ;; *) hive_die '--relax-auth-limits applies only to plan, install and upgrade';; esac
   fi
@@ -504,6 +545,7 @@ hive_main() {
       hive_registry_preflight; hive_registry_doctor; return;;
     registry) hive_registry_command "${registry_arguments[@]}"; return;;
     magnus-trust) hive_magnus_trust "${trust_arguments[@]}"; return;;
+    migrate-native) hive_native_migrate "${registry_arguments[0]:-}" "$confirmed" "$hold_on_failure"; return;;
   esac
   hive_need openssl; hive_need sha256sum; hive_manifest
   hive_plan

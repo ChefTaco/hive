@@ -74,13 +74,25 @@ if jq -e '.console!=null' <<< "$input" >/dev/null; then
   [[ "$certificate_key" == "$private_key" ]] || { printf 'Console certificate and private key do not match\n' >&2; exit 1; }
   openssl crl2pkcs7 -nocrl -certfile "$config/backend-ca.pem" | openssl pkcs7 -print_certs -noout >/dev/null
   port=$(jq -r .console.httpsPort <<< "$input")
-  if [[ -n $(ss -H -lnt "sport = :$port") ]]; then
+  bind=$(jq -r .console.bindAddress <<< "$input")
+  # A listener on another specific address does not conflict with this one.
+  occupied() {
+    if [[ "$bind" == 0.0.0.0 || "$bind" == :: ]]; then ss -H -lnt "sport = :$1"
+    else ss -H -lnt "sport = :$1" | awk -v bind="$bind" '{split($4,a,":"); if (a[1]==bind || a[1]=="0.0.0.0" || a[1]=="*" || a[1]=="[::]") print}'; fi
+  }
+  if [[ -n $(occupied "$port") ]]; then
     [[ -f "$directory/compose.json" ]] || { printf 'Requested HTTPS port is already occupied\n' >&2; exit 1; }
     container=$(docker compose -f "$directory/compose.json" ps -q ingress)
     [[ -n "$container" ]] || { printf 'HTTPS listener is not owned by this installation\n' >&2; exit 1; }
-    docker inspect "$container" | jq -e --arg port "$port" --arg bind "$(jq -r .console.bindAddress <<< "$input")" \
+    docker inspect "$container" | jq -e --arg port "$port" --arg bind "$bind" \
       '.[0].HostConfig.PortBindings["8443/tcp"]|any(.[];.HostPort==$port and .HostIp==$bind)' >/dev/null
   fi
+  # Native clients' ports must be free as well, or owned by this installation's ingress.
+  while IFS= read -r port; do
+    if [[ -n $(occupied "$port") ]]; then
+      [[ -f "$directory/compose.json" && -n $(docker compose -f "$directory/compose.json" ps -q ingress) ]] || { printf 'Native listener port %s is still occupied by another process\n' "$port" >&2; exit 1; }
+    fi
+  done < <(jq -r '.console.nativeListeners[]?.port' <<< "$input")
 fi
 if jq -e '.placements["hive-registry"]!=null' <<< "$input" >/dev/null; then
   config=$(jq -r '.placements["hive-registry"].configDirectory' <<< "$input")

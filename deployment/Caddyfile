@@ -75,6 +75,9 @@
 	handle /_hive/ready {
 		respond "ready" 200
 	}
+	# Present only on an installation migrated from native services (hive.sh migrate-native):
+	# the paths its clients already use on this port. Imported first, so these win.
+	import /config/native-routes*.caddy
 	@magnus_ready {
 		method GET
 		path /api/magnus/health/ready
@@ -469,6 +472,9 @@
 		respond "Service unavailable" 503
 	}
 }
+
+# Present only on a migrated installation: the native listeners its clients already use.
+import /config/native-listeners*.caddy
 
 # Container-local readiness only; never published on the host.
 http://127.0.0.1:8081 {
