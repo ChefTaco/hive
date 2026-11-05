@@ -42,7 +42,7 @@
     "audit:deployments": "node --experimental-strip-types scripts/audit-deployments.ts",
     "verify:iam-hardening": "node --experimental-strip-types scripts/verify-iam-hardening.ts",
     "audit:production": "npm --prefix packages/hive-release audit --omit=dev --audit-level=high && npm --prefix services/hive-router audit --omit=dev --audit-level=high && npm --prefix services/hive-iam audit --workspace @hivemagnus/hive-iam-server --omit=dev --audit-level=high && npm --prefix services/hive-iam/apps/iam-core audit --omit=dev --audit-level=high && npm --prefix services/hive-iam audit --workspace @hivemagnus/hive-iam-sdk --omit=dev --audit-level=high && npm --prefix services/hive-mem/ts-core audit --omit=dev --audit-level=high && npm --prefix services/hive-skills audit --omit=dev --audit-level=high && npm --prefix services/hive-registry audit --omit=dev --audit-level=high && npm --prefix packages/hive audit --omit=dev --audit-level=high",
-    "scripts:check": "bash -n scripts/*.sh services/hive-iam/scripts/*.sh services/hive-iam/apps/iam-core/scripts/*.sh services/hive-mem/scripts/*.sh services/hive-router/scripts/*.sh services/hive-skills/scripts/*.sh scripts/suite/*.sh",
+    "scripts:check": "bash -n scripts/*.sh services/hive-iam/scripts/*.sh services/hive-iam/apps/iam-core/scripts/*.sh services/hive-mem/scripts/*.sh services/hive-router/scripts/*.sh services/hive-skills/scripts/*.sh scripts/suite/*.sh scripts/release/*.sh",
     "tls:check": "bash scripts/check-tls-bypasses.sh",
     "deploy:router": "bash services/hive-router/scripts/deploy-hive-router.sh",
     "deploy:iam": "bash services/hive-iam/scripts/deploy-iam-core.sh",
@@ -82,7 +82,7 @@
     "deploy:npm": "node --experimental-strip-types scripts/deploy-npm.ts",
     "test:deploy-npm": "node --experimental-strip-types --test scripts/deploy-npm.test.ts && python3 scripts/npm-deploy-host.test.py",
     "test:e2e:fresh": "node -- scripts/fresh-npm-e2e.mjs",
-    "test:suite": "bash scripts/suite/controller.test.sh && node --test scripts/suite/skills-integration.test.mjs scripts/suite/existing-products-archive.test.mjs scripts/suite/native-consumer-contract.test.mjs scripts/suite/native-user-service.test.mjs && bash scripts/suite/console.test.sh && bash scripts/suite/preflight.test.sh && bash scripts/suite/status.test.sh && bash scripts/suite/registry.test.sh && bash scripts/suite/migrate-native.test.sh && bash scripts/suite/initialize.test.sh && bash scripts/suite/initialize-distributed.test.sh && bash scripts/suite/initialize-migrations.test.sh && bash scripts/suite/initialize-full.test.sh && bash scripts/suite/initialize-custom.test.sh && bash scripts/suite/native-initialization.test.sh && bash scripts/suite/integrity-host.test.sh && bash scripts/suite/input-artifacts.test.sh && python3 scripts/suite/interactive.test.py && bash scripts/suite/external-inference.test.sh && node --test scripts/suite/browser-rehearsal.test.mjs scripts/suite/check-data.test.mjs",
+    "test:suite": "bash scripts/release/build-suite-manifest.test.sh && bash scripts/suite/controller.test.sh && node --test scripts/suite/skills-integration.test.mjs scripts/suite/existing-products-archive.test.mjs scripts/suite/native-consumer-contract.test.mjs scripts/suite/native-user-service.test.mjs && bash scripts/suite/console.test.sh && bash scripts/suite/preflight.test.sh && bash scripts/suite/status.test.sh && bash scripts/suite/registry.test.sh && bash scripts/suite/migrate-native.test.sh && bash scripts/suite/initialize.test.sh && bash scripts/suite/initialize-distributed.test.sh && bash scripts/suite/initialize-migrations.test.sh && bash scripts/suite/initialize-full.test.sh && bash scripts/suite/initialize-custom.test.sh && bash scripts/suite/native-initialization.test.sh && bash scripts/suite/integrity-host.test.sh && bash scripts/suite/input-artifacts.test.sh && python3 scripts/suite/interactive.test.py && bash scripts/suite/external-inference.test.sh && node --test scripts/suite/browser-rehearsal.test.mjs scripts/suite/check-data.test.mjs",
     "test:suite:sso": "node scripts/suite/sso-roundtrip.mjs",
     "test:suite:ingress": "node scripts/suite/ingress-roundtrip.mjs",
     "test:suite:containers": "node scripts/suite/sso-roundtrip.mjs --containers",
@@ -96,6 +96,8 @@
     "test:suite:registry-upgrade": "node scripts/suite/registry-upgrade-roundtrip.mjs",
     "test:suite:distributed-core": "node scripts/suite/distributed-core-roundtrip.mjs",
     "test:suite:full": "node scripts/suite/distributed-core-roundtrip.mjs --full",
-    "test:suite:custom": "node scripts/suite/distributed-core-roundtrip.mjs --components hive-registry,oathweave,oathweave-redis,hivexui,ingress,hiveskills"
+    "test:suite:custom": "node scripts/suite/distributed-core-roundtrip.mjs --components hive-registry,oathweave,oathweave-redis,hivexui,ingress,hiveskills",
+    "release:suite": "node scripts/release/build-suite-manifest.mjs",
+    "release:suite:check": "bash scripts/release/check-suite-release.sh"
   }
 }
