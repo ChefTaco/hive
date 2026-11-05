@@ -14,6 +14,8 @@ All notable changes to this project are documented in this file. The format is b
 
 - Route `GET /api/magnus/docs/openapi.json` to Magnus's public API document.
 
+- Add `hive.sh migrate-native`, which moves an existing native installation onto the suite on its native ports with its issuers, keys, accounts and data, with `plan`, `prepare`, `cutover`, `verify` and `rollback`, and a one-use token for setting the administrator password. See `deployment/MIGRATE_NATIVE.md`.
+- Add `backup-hive.sh --online`, a capture for rehearsals that never stops a service. It is not a coordinated recovery point.
 - Add the Hive Registry, a mandatory container in every installation: a SQLite install catalog and read-only lookup API at `/api/registry`, written by `hive.sh` from the signed manifest and observed state. `hive.sh registry` looks up entries and manages externally managed products, `status` and `doctor` report drift, and upgrade and adoption add it to existing installations. Not related to the HiveSkills skills registry.
 
 - Publish `ghcr.io/cheftaco/hive-registry` and `ghcr.io/cheftaco/hive-ingress` from the tag-driven release.

@@ -82,6 +82,8 @@ This bounded acceptance does not certify a fresh core/full installer or migratio
 Inference is external: see [external provider configuration](INFERENCE.md).
 No inference image, model volume, GPU matrix or model artifact belongs in a Hive release.
 
+**Existing native installation?** Use [`hive.sh migrate-native`](MIGRATE_NATIVE.md): it keeps every native port, certificate, issuer, key and account. `adopt` takes over existing Compose stacks only.
+
 ## Fresh core setup
 
 Run `./hive.sh` for terminal setup with a signed manifest and publisher key, or

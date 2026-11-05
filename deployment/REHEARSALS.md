@@ -11,6 +11,9 @@ not import native legacy installations or certify interactive core/full installs
 
 ## Existing native installations
 
+To move an installation onto the suite, use [`hive.sh migrate-native`](MIGRATE_NATIVE.md). The
+rehearsals below prove recovery only.
+
 Prefer direct application export from a native schema-version-2 archive: provide
 its original SHA256 and reviewed external-path exclusions. The harness verifies
 ownership and member safety before exporting application state, without extracting
