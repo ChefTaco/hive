@@ -35,8 +35,17 @@ chmod 700 "$temporary/bin/systemctl"
 PATH="$temporary/bin:$PATH" "$ROOT/hive.sh" status --config "$temporary/user-services.json" > "$temporary/user-status.json"
 jq -e '[.nativeAgents[].serviceState]==["active","inactive","failed","unavailable","unavailable","unavailable"] and all(.nativeAgents[]; .accepted==true and .acceptedAt=="2026-01-01T00:00:00Z" and (has("privateExtra")|not))' "$temporary/user-status.json" >/dev/null
 jq -e '.nativeAgents[0].serviceState=="manual"' "$temporary/status.json" >/dev/null
+# Relaxed limits are reported from the active Compose definition, never from a candidate.
+jq -e '.authLimits=={relaxed:false,products:[]}' "$temporary/status.json" >/dev/null
+printf '{"services":{"oathweave":{"environment":{"RELAX_AUTH_LIMITS":"true"}},"chattermost":{"environment":{"RELAX_AUTH_LIMITS":"true"}},"emberpath":{"environment":{}},"oathweave-redis":{}}}' > "$directory/compose.json"
+printf '{"services":{"cindertrace":{"environment":{"RELAX_AUTH_LIMITS":"true"}}}}' > "$directory/candidate.synthetic.json"
+PATH="$temporary/bin:$PATH" "$ROOT/hive.sh" status --config "$temporary/config.json" > "$temporary/relaxed-status.json"
+jq -e '.authLimits=={relaxed:true,products:["chattermost","oathweave"]}' "$temporary/relaxed-status.json" >/dev/null
+printf '{"services":{"oathweave":{"environment":{"RELAX_AUTH_LIMITS":"false"}}}}' > "$directory/compose.json"
+PATH="$temporary/bin:$PATH" "$ROOT/hive.sh" status --config "$temporary/config.json" > "$temporary/restored-status.json"
+jq -e '.authLimits=={relaxed:false,products:[]}' "$temporary/restored-status.json" >/dev/null
 rm -- "$temporary/called"
 printf '{"installation":"status-proof","host":"different","uuid":"synthetic-installation"}' > "$directory/installation.json"
 if PATH="$temporary/bin:$PATH" "$ROOT/hive.sh" status --config "$temporary/config.json" > "$temporary/result" 2>&1; then printf 'FAIL: status read another host inventory\n' >&2; exit 1; fi
 [[ ! -f "$temporary/called" ]]
-printf 'Passed: native acceptance stays explicit beside healthy containers, private fields are excluded and host ownership precedes Docker reads.\n'
+printf 'Passed: native acceptance stays explicit beside healthy containers, private fields are excluded, active relaxed limits are reported and host ownership precedes Docker reads.\n'

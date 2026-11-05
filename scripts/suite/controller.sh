@@ -27,6 +27,10 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|re
   --yes                  Apply the displayed plan without an interactive prompt
   --archive ID           Protected installation backup ID
   --allow-migrations     Execute exact signed, explicitly planned migrations
+  --relax-auth-limits    Testing only (plan, install, upgrade): greatly relax sign-in and
+                         password attempt limits in Oathweave, Cindertrace and ChatterMost.
+                         Part of the plan digest; omitting it on a later upgrade restores
+                         normal limits. plan and status report the state as authLimits.
   --reconciliation FILE  Protected acknowledgement of writes before restore
   --help                 Show this help
 
@@ -279,12 +283,14 @@ hive_manifest() {
   if jq -e 'has("controllerSHA256")' "$HIVE_MANIFEST" >/dev/null; then
     [[ $(jq -er .controllerSHA256 "$HIVE_MANIFEST") == "$HIVE_CONTROLLER_DIGEST" ]] || hive_die 'Signed release requires different controller source; use its original verified installer bundle'
   fi
-  HIVE_PLAN_DIGEST=$( { sha256sum "$HIVE_CONFIG" | cut -d ' ' -f1; printf '%s\n' "$HIVE_MANIFEST_DIGEST" "$HIVE_CONTROLLER_DIGEST"; } | sha256sum | cut -d ' ' -f1)
+  # Rendering depends on the relaxed limits choice, so it must select a distinct plan. Plans without it keep their digest.
+  HIVE_PLAN_DIGEST=$( { sha256sum "$HIVE_CONFIG" | cut -d ' ' -f1; printf '%s\n' "$HIVE_MANIFEST_DIGEST" "$HIVE_CONTROLLER_DIGEST"; if [[ "${HIVE_RELAX_AUTH_LIMITS:-false}" == true ]]; then printf 'relax-auth-limits\n'; fi; } | sha256sum | cut -d ' ' -f1)
 }
 
 hive_plan() {
   local released=${HIVE_RELEASE_SUMMARY:-'{}'}
-  jq --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --argjson released "$released" '{schema,installation,release:$version,configurationRevision:(.configurationRevision // "1"),manifestDigest:$digest,controllerSourceSHA256:$controller,profile,origin,
+  jq --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg plan "${HIVE_PLAN_DIGEST:-}" --argjson released "$released" --argjson relax "${HIVE_RELAX_AUTH_LIMITS:-false}" '{schema,installation,release:$version,configurationRevision:(.configurationRevision // "1"),planDigest:$plan,manifestDigest:$digest,controllerSourceSHA256:$controller,profile,origin,
+    authLimits:{relaxed:$relax,products:(if $relax then [.components|keys[]|select(IN("oathweave","cindertrace","chattermost"))] else [] end)},
     hosts:(.hosts|map_values({target,directory})),
     console:(if .console then {host:.console.host,bindAddress:.console.bindAddress,httpsPort:.console.httpsPort,publicRuntimeConfigured:true} else null end),
     components:(.components|with_entries(.key as $name|.value=({host:.value.host,environmentConfigured:(.value|has("envFile")),configurationMounted:(.value|has("configDirectory"))}+($released[$name] // {})))),
@@ -337,8 +343,10 @@ hive_doctor() {
 
 hive_render() {
   local host=$1
-  jq -n --slurpfile config "$HIVE_CONFIG" --slurpfile release "$HIVE_MANIFEST" --arg host "$host" '
+  jq -n --slurpfile config "$HIVE_CONFIG" --slurpfile release "$HIVE_MANIFEST" --arg host "$host" --argjson relax "${HIVE_RELAX_AUTH_LIMITS:-false}" '
     $config[0] as $c | $release[0] as $r |
+    # ChatterMost already has login limit settings. Every product carries the marker status reads.
+    {oathweave:{RELAX_AUTH_LIMITS:"true"},cindertrace:{RELAX_AUTH_LIMITS:"true"},chattermost:{RELAX_AUTH_LIMITS:"true",RATE_LIMIT_LOGIN_SOURCE_MAX:"10000",RATE_LIMIT_LOGIN_ACCOUNT_MAX:"10000"}} as $relaxedEnvironment |
     {name:($c.installation+"-"+$host),services:($c.components|to_entries|map(select(.value.host==$host)|
       .key as $name | .value as $placement |
       ($r.components[$name].kind // "application") as $kind |
@@ -348,7 +356,7 @@ hive_render() {
         volumes:((if $kind=="static-ui" then [{type:"bind",source:$c.console.runtimeFile,target:"/usr/share/nginx/html/runtime.json",read_only:true}] else [{type:"bind",source:($c.hosts[$host].directory+"/data/"+$name),target:"/data"}] end) +
           (if $placement.configDirectory then [{type:"bind",source:$placement.configDirectory,target:"/config",read_only:true}] else [] end))
       } + (if $placement.envFile then {env_file:[$placement.envFile]} else {} end) +
-        (if $kind=="application" then {environment:(($r.components[$name].service.environment // {})+{HIVE_AUTO_MIGRATE:"false",HIVE_AUTO_UPGRADE:"false",HIVE_UPDATE_CHECK:"false",HIVE_UI_UPGRADE:"false"} + (if $name=="magnus" then {MAGNUS_AUTO_MIGRATE:"false"} else {} end))} else {} end) +
+        (if $kind=="application" then {environment:(($r.components[$name].service.environment // {})+{HIVE_AUTO_MIGRATE:"false",HIVE_AUTO_UPGRADE:"false",HIVE_UPDATE_CHECK:"false",HIVE_UI_UPGRADE:"false"} + (if $name=="magnus" then {MAGNUS_AUTO_MIGRATE:"false"} else {} end) + (if $relax then ($relaxedEnvironment[$name] // {}) else {} end))} else {} end) +
         (if $kind=="ingress" then {ports:[{target:8443,published:($c.console.httpsPort|tostring),host_ip:$c.console.bindAddress,protocol:"tcp"}]}
          elif $c.bootstrap.productEndpoints[$name] then $c.bootstrap.productEndpoints[$name] as $endpoint |
           {ports:([{target:({oathweave:4200,emberpath:9443,hivemem:18790,hiveskills:4030,magnus:4000,cindertrace:4101,chattermost:8065}[$name]),published:($endpoint.origin|capture("^https://[^:]+(?::(?<port>[0-9]+))?$")|.port // "443"),host_ip:$endpoint.bindAddress,protocol:"tcp"}] +
@@ -372,7 +380,7 @@ hive_transfer() {
 
 hive_main() {
   local command=install confirmed=false interactive=true
-  HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_ALLOW_MIGRATIONS=false
+  HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_ALLOW_MIGRATIONS=false HIVE_RELAX_AUTH_LIMITS=false
   HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY=''
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
   HIVE_RELEASE_SUMMARY=''
@@ -382,6 +390,7 @@ hive_main() {
       --help|-h) hive_usage; return;;
       --yes) confirmed=true; shift;;
       --allow-migrations) HIVE_ALLOW_MIGRATIONS=true; shift;;
+      --relax-auth-limits) HIVE_RELAX_AUTH_LIMITS=true; shift;;
       --non-interactive) interactive=false; shift;;
       --config|--release|--manifest|--signature|--trust-key|--archive|--reconciliation)
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
@@ -393,12 +402,19 @@ hive_main() {
     esac
   done
   case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare) ;; *) hive_die 'Unknown command';; esac
+  if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
+    case "$command" in plan|install|upgrade) ;; *) hive_die '--relax-auth-limits applies only to plan, install and upgrade';; esac
+  fi
   hive_need jq
   if [[ -z "$HIVE_CONFIG" ]]; then
     [[ "$interactive" == true ]] || hive_die '--config is required'
     hive_configure
   fi
   hive_validate
+  if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
+    jq -e '.components|has("oathweave") or has("cindertrace") or has("chattermost")' "$HIVE_CONFIG" >/dev/null || hive_die '--relax-auth-limits needs Oathweave, Cindertrace or ChatterMost in this installation'
+    printf 'WARNING: this plan relaxes sign-in and password attempt limits. For testing only.\n' >&2
+  fi
   case "$command" in
     plan)
       if [[ -n "$HIVE_MANIFEST" || -n "$HIVE_SIGNATURE" || -n "$HIVE_TRUST_KEY" ]]; then hive_need openssl; hive_need sha256sum; hive_manifest; fi
@@ -428,7 +444,9 @@ hive_main() {
             if [[ -f "$receipt" && ! -L "$receipt" ]]; then jq --arg id "$id" --arg serviceState "$service_state" "{id:\$id,runtime,version,installed:(.installed // false),preflightPassed:(.preflightPassed // false),accepted:(.accepted // false),operatorAuthorized:(.operatorAuthorized // false),acceptedAt,serviceState:\$serviceState}" "$receipt";
             else jq -n --arg id "$id" --arg serviceState "$service_state" "{id:\$id,installed:false,accepted:false,serviceState:\$serviceState}"; fi;
           done < <(jq -r ".agents[].id" <<< "$input") | jq -s .);
-          jq -n --arg host "$(jq -r .host <<< "$input")" --argjson containers "$containers" --argjson agents "$agents" "{schema:1,host:\$host,containers:\$containers,nativeAgents:\$agents}"'
+          authLimits="{\"relaxed\":false,\"products\":[]}";
+          if [[ -f "$directory/compose.json" ]]; then authLimits=$(jq -c "[.services|to_entries[]|select(.value.environment.RELAX_AUTH_LIMITS==\"true\")|.key]|sort|{relaxed:(length>0),products:.}" "$directory/compose.json"); fi;
+          jq -n --arg host "$(jq -r .host <<< "$input")" --argjson containers "$containers" --argjson agents "$agents" --argjson authLimits "$authLimits" "{schema:1,host:\$host,authLimits:\$authLimits,containers:\$containers,nativeAgents:\$agents}"'
       done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG"); return;;
     doctor) hive_doctor; return;;
   esac

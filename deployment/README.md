@@ -113,6 +113,17 @@ strict SSH inventories on one physical host. Full setup includes both an actual
 terminal wizard and unattended installation, plus authenticated restored peers.
 Separate physical machines and existing installations retain their own gates.
 
+## Relaxed authentication limits for testing
+
+`./hive.sh install --relax-auth-limits` and `./hive.sh upgrade --relax-auth-limits`
+render testing settings for each selected product: `RELAX_AUTH_LIMITS=true` for
+Oathweave and Cindertrace, and `RATE_LIMIT_LOGIN_SOURCE_MAX=10000` with
+`RATE_LIMIT_LOGIN_ACCOUNT_MAX=10000` for ChatterMost. Use `./hive.sh plan
+--relax-auth-limits` to review it first. The choice is part of the plan digest, so
+toggling it is a new reviewed plan that recreates only changed services, and an
+upgrade without the flag restores normal limits. The plan and `./hive.sh status`
+report the state as `authLimits`. Never use it on an internet-facing installation.
+
 Native Magnus artifact staging, authenticated heartbeat and a read-only command
 now have a separate disposable rehearsal. Native Ardent model/memory, Codex
 Responses, Hermes streaming and its HiveMem plugin also have integrated core

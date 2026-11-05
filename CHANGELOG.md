@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Add `hive.sh install|upgrade --relax-auth-limits` for testing. It renders the setting for Oathweave, Cindertrace and ChatterMost, is part of the plan digest, and is reported as `authLimits` by the plan and `hive.sh status`.
+
 - Document isolated temporary-account authentication forks and central public-client authorization without weakening existing-account acceptance or changing production identity.
 
 - Verify immutable product-owned browser contract integration, native memory
