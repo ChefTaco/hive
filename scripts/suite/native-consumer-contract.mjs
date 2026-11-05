@@ -40,3 +40,29 @@ export function consumerModelReply(body, skillText) {
     ],
   };
 }
+
+export function validateHermesConsumerArtifact(descriptor, architecture) {
+  assert.equal(descriptor.product, 'hermes-agent');
+  assert.equal(
+    descriptor.published,
+    false,
+    'Only reviewed local developer artifacts are supported',
+  );
+  assert.equal(descriptor.architecture, architecture);
+  assert(/^[a-f0-9]{64}$/.test(descriptor.sha256));
+  assert(/^[A-Za-z0-9._-]+\.tar\.gz$/.test(descriptor.archive));
+  assert.equal(descriptor.executable, 'bin/hermes');
+  assert.equal(descriptor.provenance?.source, 'https://github.com/NousResearch/hermes-agent');
+  assert(/^[a-f0-9]{40}$/.test(descriptor.provenance?.revision));
+  assert.equal(descriptor.provenance?.installMode, 'frozen-public-source-no-install-project');
+  assert.equal(descriptor.provenance?.inference, 'external-only');
+  return descriptor;
+}
+
+export function requireHermesMessaging(descriptor) {
+  assert.deepEqual(
+    descriptor.provenance?.extras,
+    ['messaging'],
+    'Native Hermes Chat requires a reviewed artifact built with --extras messaging; the headless archive is preserved and runtime dependency installs are forbidden',
+  );
+}

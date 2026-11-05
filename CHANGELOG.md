@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Verify immutable Skills list/view and scoped Chat adapter consumption with a separately selected public native Hermes messaging artifact, retaining protected profile bytes and explicit gateway supervision limits.
+
 - Rehearse packaged native agent consumption of immutable Skills, scoped Chat WebSockets and the embedded Emberfold SDK in disposable HTTPS fixtures with source-preserving checkpoint recovery.
 
 - Complete integrated native Codex acceptance through the signed Bash adapter and document existing-data rehearsal boundaries.

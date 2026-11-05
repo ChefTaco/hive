@@ -19,20 +19,22 @@ import { pathToFileURL } from 'node:url';
 import { createHash, randomBytes, createHmac } from 'node:crypto';
 import { createServer, request as tlsRequest } from 'node:https';
 import { createServer as tcpServer } from 'node:net';
+import { rehearseHermesSkills } from './native-hermes-consumer.mjs';
 import { validateConsumerArtifact, consumerModelReply } from './native-consumer-contract.mjs';
 const execute = promisify(execFile),
   options = {};
 for (let index = 2; index < process.argv.length; index += 2) {
   const key = process.argv[index];
   assert(
-    ['--ardent-artifact', '--skills-root', '--chat-root', '--output'].includes(key) &&
-      process.argv[index + 1],
+    ['--ardent-artifact', '--skills-root', '--chat-root', '--output', '--hermes-artifact'].includes(
+      key,
+    ) && process.argv[index + 1],
   );
   assert(!options[key]);
   options[key] = resolve(process.argv[index + 1]);
 }
 assert(
-  Object.keys(options).length === 4,
+  ['--ardent-artifact', '--skills-root', '--chat-root', '--output'].every((key) => options[key]),
   'Required: --ardent-artifact DESCRIPTOR --skills-root BUILT_SOURCE --chat-root BUILT_SOURCE --output NEW_PRIVATE_DIRECTORY',
 );
 assert.notEqual(process.getuid?.(), 0, 'Run the disposable native proof as an ordinary user');
@@ -111,9 +113,12 @@ const minimalEnv = Object.fromEntries(
     .filter((name) => process.env[name])
     .map((name) => [name, process.env[name]]),
 );
+mkdirSync(join(output, 'home'), { mode: 0o700 });
+minimalEnv.HOME = join(output, 'home');
 const child = (name, command, args, env) => {
   const log = openSync(put(name + '.log', ''), 'a');
   const process = spawn(command, args, {
+    cwd: output,
     env: { ...minimalEnv, ...env },
     stdio: ['ignore', log, log],
   });
@@ -300,8 +305,10 @@ try {
       HIVE_SKILLS_ADMIN_USERS: 'admin',
       HIVE_SKILLS_TLS_KEY_FILE: privateKey,
       HIVE_SKILLS_TLS_CERT_FILE: certificate,
-      HIVE_SKILLS_TARGETS: 'consumer-fixture=deploy@client.example.com',
+      HIVE_SKILLS_TARGETS:
+        'consumer-fixture=deploy@client.example.com,hermes-consumer-fixture=deploy@client.example.com',
       HIVE_AUTO_MIGRATE: 'true',
+      HIVE_SKILLS_DEPLOYMENT_WORKER_ENABLED: 'false',
       HIVE_UPDATE_CHECK: 'false',
     }),
   );
@@ -473,13 +480,14 @@ try {
   // The native sync client writes only the fresh profile, before its gateway starts.
   const syncRunner = put(
     'sync.mjs',
-    `import {syncSkills} from ${JSON.stringify(pathToFileURL(join(skillsRoot, 'scripts/hermes-sync.mjs')).href)};\nimport{readFileSync}from'node:fs';\nconst input=JSON.parse(readFileSync(process.argv[2]));await syncSkills({...input,hermesVersion:null,restart:()=>{}});\n`,
+    `import {syncSkills} from ${JSON.stringify(pathToFileURL(join(skillsRoot, 'scripts/hermes-sync.mjs')).href)};\nimport{readFileSync}from'node:fs';\nconst input=JSON.parse(readFileSync(process.argv[2]));await syncSkills({...input,restart:()=>{}});\n`,
   );
   const syncInput = put('sync-input.json', {
     registry: skillsOrigin,
     hermesHome: profile,
     target: 'consumer-fixture',
     token: enroll.body.token,
+    hermesVersion: null,
   });
   const syncEnv = { ...minimalEnv, NODE_EXTRA_CA_CERTS: certificate };
   await execute(nativeNode, [syncRunner, syncInput], { env: syncEnv, timeout: 30000 });
@@ -560,14 +568,107 @@ try {
   assert.equal(continuations, 1);
   assert.deepEqual(readFileSync(join(profile, '.env')), originalProfileEnv);
   assert.equal(digest(readFileSync(skillPath)), skillDigest);
+  let hermes;
+  if (options['--hermes-artifact']) {
+    const enrollment = await admin('/admin/targets/hermes-consumer-fixture/enroll', {
+      channel: 'stable',
+      skills: ['consumer-fixture'],
+    });
+    assert.equal(enrollment.status, 201);
+    const hermesGroup = await request(chatOrigin, '/api/v4/channels/group', {
+      method: 'POST',
+      headers,
+      body: [chatLogin.body.id, forbidden.body.id, bot.body.id],
+    });
+    assert.equal(hermesGroup.status, 200);
+    hermes = await rehearseHermesSkills({
+      output,
+      artifactFile: options['--hermes-artifact'],
+      skillsOrigin,
+      targetToken: enrollment.body.token,
+      syncRunner,
+      certificate,
+      architecture: { x64: 'amd64', arm64: 'arm64' }[process.arch],
+      chat: {
+        origin: chatOrigin,
+        token: botToken,
+        botId: bot.body.id,
+        allowedUser: chatLogin.body.id,
+        forbiddenUser: forbidden.body.id,
+        waitReady: (path, failure) =>
+          wait(async () => {
+            if (failure()) throw failure();
+            return existsSync(path);
+          }),
+        sendEvents: async () => {
+          assert.equal(
+            (
+              await request(chatOrigin, '/api/v4/posts', {
+                method: 'POST',
+                headers: { authorization: 'Bearer ' + forbiddenLogin.headers.token },
+                body: {
+                  channel_id: hermesGroup.body.id,
+                  message: '@consumer-bot HERMES-FORBIDDEN-CONSUMER',
+                },
+              })
+            ).status,
+            201,
+          );
+          assert.equal(
+            (
+              await request(chatOrigin, '/api/v4/posts', {
+                method: 'POST',
+                headers,
+                body: {
+                  channel_id: hermesGroup.body.id,
+                  message: '@consumer-bot HERMES-ALLOWED-CONSUMER',
+                },
+              })
+            ).status,
+            201,
+          );
+        },
+      },
+    });
+    const delivered = await request(
+      chatOrigin,
+      '/api/v4/channels/' + hermesGroup.body.id + '/posts',
+      { headers },
+    );
+    assert.equal(delivered.status, 200);
+    assert.equal(
+      Object.values(delivered.body.posts).filter(
+        (post) => post.user_id === bot.body.id && post.message === 'HERMES-CONSUMER-SKILL-VERIFIED',
+      ).length,
+      1,
+    );
+  }
   put('result.json', {
     schema: 1,
     result: 'passed',
     productionCutover: false,
+    hermes: hermes
+      ? {
+          accepted: true,
+          version: hermes.version,
+          artifactSHA256: hermes.artifactSHA256,
+          skills: true,
+          chat: hermes.mattermost.accepted,
+        }
+      : { accepted: false, selected: false },
     artifact: { sha256: descriptor.sha256, version: descriptor.version },
     runtimeDigests: {
       driver: digest(readFileSync(import.meta.filename)),
       worker: digest(readFileSync(join(import.meta.dirname, 'native-consumer-worker.mjs'))),
+      ...(hermes
+        ? Object.fromEntries(
+            [
+              'native-hermes-consumer.mjs',
+              'native-hermes-consumer.py',
+              'native-hermes-chat.py',
+            ].map((name) => [name, digest(readFileSync(join(import.meta.dirname, name)))]),
+          )
+        : {}),
       skillsBuild: treeDigest(join(skillsRoot, 'dist')),
       chatBuild: treeDigest(join(chatRoot, 'dist')),
       skillsSync: digest(readFileSync(join(skillsRoot, 'scripts/hermes-sync.mjs'))),
@@ -591,7 +692,7 @@ try {
       'fresh native-profile fixtures; no existing production profile or account migration',
       'external model protocol and summarizer are synthetic; no inference engine or assets installed',
       'Emberfold is the embedded released SDK, not its optional HTTP service; current-format reader only',
-      'generic skill transport with no Hermes compatibility bounds; no Hermes gateway restart or Hermes Skills certification',
+      'generic skill fixture declares no version bounds; native Hermes proof applies only to the selected reviewed artifact, not a persistent gateway rollout',
     ],
   });
   console.log(
@@ -619,7 +720,8 @@ try {
   const protect = (directory) => {
     chmodSync(directory, 0o700);
     for (const name of readdirSync(directory)) {
-      if (directory === output && name === 'artifact') continue;
+      if (name === 'artifact' && [output, join(output, 'hermes-proof')].includes(directory))
+        continue;
       const path = join(directory, name),
         stat = lstatSync(path);
       if (stat.isSymbolicLink()) continue;

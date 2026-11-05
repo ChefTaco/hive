@@ -63,7 +63,24 @@ checkpoint rollback, or certify the optional HTTP service.
 
 The generic skill fixture declares no Hermes version compatibility bounds. Its sync
 client explicitly skips Hermes detection and uses a no-op restart only because the
-fresh Ardent profile has not started. This does not certify Hermes Skills activation
-or modify a real Hermes service. Native Hermes model and HiveMem plugin acceptance
+fresh Ardent profile has not started. The default Ardent-only proof does not certify Hermes Skills activation
+or modify a real Hermes service; the optional proof below exercises native Hermes
+consumption separately. Native Hermes model and HiveMem plugin acceptance
 have their own [agent rehearsal](NATIVE_AGENTS.md) contract. ARM64 and existing-profile
 adoption require their own selected artifacts and isolated acceptance.
+
+Add `--hermes-artifact PRIVATE_MESSAGING_DESCRIPTOR` to exercise the public native
+Hermes Skills loader and Mattermost adapter in the same disposable services. The
+selected artifact must be built with Magnus's explicit `--extras messaging` option
+from the unchanged frozen upstream lock. The headless artifact remains available;
+plugin source presence alone does not supply its optional runtime dependencies.
+Runtime dependency installation remains disabled.
+
+The optional proof runs Hermes's own CLI Skills list and actual `skills_list` and
+`skill_view` tools against an independently enrolled target and fresh profile.
+It verifies the exact installed immutable content and unchanged profile credentials
+and configuration. The bundled Mattermost adapter authenticates as the native bot,
+receives actual WebSocket messages, uses the unchanged gateway authorization mixin
+to accept only the selected synthetic user, consumes the synced skill and sends its
+reply over the native REST API. This component acceptance does not start a production
+gateway, call a model through Hermes, or certify persistent gateway supervision.

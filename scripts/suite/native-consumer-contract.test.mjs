@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateConsumerArtifact, consumerModelReply } from './native-consumer-contract.mjs';
+import {
+  validateConsumerArtifact,
+  validateHermesConsumerArtifact,
+  requireHermesMessaging,
+  consumerModelReply,
+} from './native-consumer-contract.mjs';
 const artifact = {
   product: '@hivemagnus/ardent',
   published: false,
@@ -45,4 +50,40 @@ test('synthetic model requires a real advertised tool then exact skill content b
     ).content,
     'CONSUMER-SKILL-VERIFIED',
   );
+});
+
+test('optional Hermes consumer requires immutable reviewed public-source provenance', () => {
+  const hermes = {
+    ...artifact,
+    product: 'hermes-agent',
+    executable: 'bin/hermes',
+    provenance: {
+      source: 'https://github.com/NousResearch/hermes-agent',
+      revision: 'b'.repeat(40),
+      installMode: 'frozen-public-source-no-install-project',
+      inference: 'external-only',
+    },
+  };
+  assert.equal(validateHermesConsumerArtifact(hermes, 'amd64'), hermes);
+  for (const patch of [
+    { source: 'https://example.com/private' },
+    { revision: 'floating' },
+    { installMode: 'editable' },
+    { inference: 'managed' },
+  ])
+    assert.throws(() =>
+      validateHermesConsumerArtifact(
+        { ...hermes, provenance: { ...hermes.provenance, ...patch } },
+        'amd64',
+      ),
+    );
+});
+
+test('native Chat capability refuses headless Hermes without adding runtime dependencies', () => {
+  assert.throws(() => requireHermesMessaging({ provenance: {} }), /--extras messaging/);
+  assert.throws(
+    () => requireHermesMessaging({ provenance: { extras: ['all'] } }),
+    /runtime dependency installs are forbidden/,
+  );
+  assert.doesNotThrow(() => requireHermesMessaging({ provenance: { extras: ['messaging'] } }));
 });
