@@ -2,10 +2,10 @@ name: Suite release
 
 # Hive suite releases (2.0.0 and later), installed by hive.sh from a signed manifest.
 # The legacy npm packages keep their v1.x tags and publish.yml; nothing here publishes to npm.
-# 1. Run by hand from main with an image version (normally the suite version): builds,
-#    executes and publishes the hive-registry and hive-ingress images at that exact version
-#    (linux/amd64 and linux/arm64, provenance, SBOM and an attestation). An existing tag is
-#    never rebuilt; a fixed image takes a new version, which releases/VERSION.inputs.json names.
+# 1. Run by hand from main: builds, executes and publishes the suite images listed in
+#    deployment/images.json (the Hive Registry, the ingress and the hardened datastores), each
+#    at its own exact version, for linux/amd64 and linux/arm64 with provenance, an SBOM and an
+#    attestation. An existing tag is never rebuilt: a changed image takes a new version.
 # 2. Offline: build releases/VERSION.json from the published digests, sign it, commit it.
 # 3. Push the tag vVERSION: verifies the signed manifest against the tagged controller and
 #    every published image tag it was built from, then publishes the GitHub release.
@@ -14,14 +14,10 @@ name: Suite release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: Suite image version (X.Y.Z, 2.0.0 or later)
+      image:
+        description: "Image to publish from deployment/images.json (NAME:VERSION), or all"
         required: true
         type: string
-      component:
-        description: Suite image to publish
-        type: choice
-        options: [all, hive-registry, hive-ingress]
         default: all
       dry_run:
         description: Build and execute only; publish nothing
@@ -38,22 +34,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  images:
-    name: Publish suite image (${{ matrix.component }})
+  plan:
+    name: Select suite images
     if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Select from deployment/images.json
+        id: select
+        env:
+          SELECTED: ${{ inputs.image }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+        run: |
+          if [[ "$DRY_RUN" != true && "$GITHUB_REF" != refs/heads/main ]]; then echo "::error::Publish suite images from main"; exit 1; fi
+          matrix=$(jq -c --arg selected "$SELECTED" '
+            [.images[] | select($selected=="all" or ($selected==(.image+":"+.version)))
+             | select(.version|test("^[0-9]+\\.[0-9]+(\\.[0-9]+)?(-[0-9]+)?$"))
+             | . + {check: (.check|join(" ")), buildArgs: ((.buildArgs // {})|to_entries|map(.key+"="+.value)|join("\n"))}]' deployment/images.json)
+          [[ $(jq length <<< "$matrix") -gt 0 ]] || { echo "::error::No image in deployment/images.json matches $SELECTED"; exit 1; }
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  images:
+    name: Publish ${{ matrix.image }}:${{ matrix.version }}
+    needs: plan
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - component: hive-registry
-            context: services/hive-registry
-            file: services/hive-registry/Dockerfile
-            check: node /app/dist/cli.js --version
-          - component: hive-ingress
-            context: deployment
-            file: deployment/ingress.Dockerfile
-            check: caddy version
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     permissions:
       contents: read
       packages: write
@@ -61,13 +71,9 @@ jobs:
       attestations: write
     env:
       DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
-      VERSION: ${{ inputs.version }}
-      IMAGE: ghcr.io/cheftaco/${{ matrix.component }}
+      IMAGE: ghcr.io/cheftaco/${{ matrix.image }}
+      VERSION: ${{ matrix.version }}
     steps:
-      - name: Require an exact suite version from main
-        run: |
-          [[ "$VERSION" =~ ^([0-9]+)\.[0-9]+\.[0-9]+$ ]] && (( BASH_REMATCH[1] >= 2 )) || { echo "::error::$VERSION is not a suite image version (X.Y.Z, 2.0.0 or later)"; exit 1; }
-          if [[ "$DRY_RUN" != true && "$GITHUB_REF" != refs/heads/main ]]; then echo "::error::Publish suite images from main"; exit 1; fi
       - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
@@ -76,27 +82,25 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Selected image and immutable tag
+      - name: Immutable tag
         id: meta
-        env:
-          SELECTED: ${{ inputs.component }}
         run: |
-          if [[ "$SELECTED" != all && "$SELECTED" != "${{ matrix.component }}" ]]; then
-            echo "::notice::${{ matrix.component }} is not selected"
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          elif digest=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest.Digest}}' 2>/dev/null); then
+          if digest=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest.Digest}}' 2>/dev/null); then
             echo "::notice::$IMAGE:$VERSION already exists ($digest); it is never rebuilt"
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "$IMAGE@${digest//\"/} (existing)" >> "$GITHUB_STEP_SUMMARY"
+            echo "$IMAGE:$VERSION@${digest//\"/} (existing)" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Build and execute each architecture before publication
         if: steps.meta.outputs.exists == 'false'
+        env:
+          BUILD_ARGS: ${{ matrix.buildArgs }}
         run: |
+          args=(); while IFS= read -r line; do [[ -n "$line" ]] && args+=(--build-arg "$line"); done <<< "$BUILD_ARGS"
           for arch in amd64 arm64; do
-            docker buildx build --load --platform "linux/$arch" -f "${{ matrix.file }}" -t "suite-image-check:$arch" "${{ matrix.context }}"
-            docker run --rm --platform "linux/$arch" --read-only --cap-drop ALL --security-opt no-new-privileges:true "suite-image-check:$arch" ${{ matrix.check }}
+            docker buildx build --load --platform "linux/$arch" "${args[@]}" -f "${{ matrix.file }}" -t "suite-image-check:$arch" "${{ matrix.context }}"
+            docker run --rm --platform "linux/$arch" --read-only --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true --entrypoint "$(cut -d' ' -f1 <<< '${{ matrix.check }}')" "suite-image-check:$arch" $(cut -s -d' ' -f2- <<< '${{ matrix.check }}')
           done
       - name: Publish immutable image with provenance and SBOM
         id: build
@@ -108,6 +112,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: ${{ env.DRY_RUN != 'true' }}
           tags: ${{ env.IMAGE }}:${{ env.VERSION }}
+          build-args: ${{ matrix.buildArgs }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -125,7 +130,7 @@ jobs:
         if: env.DRY_RUN != 'true' && steps.meta.outputs.exists == 'false'
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: echo "$IMAGE@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+        run: echo "$IMAGE:$VERSION@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
 
   release:
     name: Verify and publish the signed release
