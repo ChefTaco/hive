@@ -531,7 +531,7 @@ async function main() {
     const f = forkSuite(config);
     const reset = resetRehearsal(f, trust);
     report.adminReset = reset.result;
-    const identitySections = [['users', 'Oathweave', 'Users', 'rehearsal-operator'], ['audit', 'Oathweave', 'Audit', 'auth\.|login|token'], ['routing', 'Emberpath', 'Routing', null]];
+    const identitySections = [['users', 'Oathweave', 'Users', 'rehearsal-operator'], ['audit', 'Oathweave', 'Audit', 'auth\\.|login|token'], ['routing', 'Emberpath', 'Routing', null]];
     report.adminBrowser = await browserSignIn(f, c.adminAccount.username, f.adminPassword, identitySections);
     report.operatorBrowser = await browserSignIn(f, 'rehearsal-operator', f.operatorPassword, [...identitySections, ['memories', 'HiveMem', 'Memories', null], ['workspaces', 'HiveMem', 'Workspaces', null], ...(hasSkills() ? [['skills', 'HiveSkills', 'HiveSkills', 'hivemem']] : [])]);
     report.secretLeakScan = secretsAbsent([f.adminPassword, f.operatorPassword, reset.token, reset.short]);
