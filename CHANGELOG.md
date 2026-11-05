@@ -4,9 +4,17 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.0.0] - 2026-11-05
+
+The first Hive suite release. `./hive.sh --release 2.0.0` installs the core or full profile from
+the signed manifest `releases/2.0.0.json`, which pins Oathweave 2.0.0, Emberpath 2.0.0, HiveMem
+1.3.0, HiveSkills 1.3.0, HiveXUI 0.1.0, Magnus 2.1.0 (with the optional fleet gateway), Cindertrace
+0.2.0, ChatterMost 0.4.0, Emberfold 0.2.0, the Hive Registry and the ingress by image digest. No npm
+package is published for this release; the legacy npm packages stay on their 1.x line.
 
 ### Added
+
+- Publish signed suite releases: `releases/X.Y.Z.json` with its Ed25519 signature and the publisher key `trust/publisher.pub`, built by `scripts/release/build-suite-manifest.mjs` from the service contracts in `scripts/suite/release-contracts.mjs` (which the developer proofs now share) and checked by `scripts/release/check-suite-release.sh`. The *Suite release* workflow publishes the suite images from `main` and the GitHub release from the tag. See `docs/RELEASING.md`.
 
 - Add the Magnus fleet gateway as an optional suite component, `magnus-gateway`, with the ingress routes for the browser terminal under `/api/magnus/terminal/*`. It is off by default, and no release profile can select it. `bootstrap.magnusGateway.grantTerminalToInitialOperator` is the separate choice that lists `magnus:terminal` in the `hivexui-magnus` client, which a fresh install no longer does. `hive.sh magnus-trust` approves each node's host key with a fingerprint read on the node.
 
@@ -18,7 +26,7 @@ All notable changes to this project are documented in this file. The format is b
 - Add `backup-hive.sh --online`, a capture for rehearsals that never stops a service. It is not a coordinated recovery point.
 - Add the Hive Registry, a mandatory container in every installation: a SQLite install catalog and read-only lookup API at `/api/registry`, written by `hive.sh` from the signed manifest and observed state. `hive.sh registry` looks up entries and manages externally managed products, `status` and `doctor` report drift, and upgrade and adoption add it to existing installations. Not related to the HiveSkills skills registry.
 
-- Publish `ghcr.io/cheftaco/hive-registry` and `ghcr.io/cheftaco/hive-ingress` from the tag-driven release.
+- Publish `ghcr.io/cheftaco/hive-registry` and `ghcr.io/cheftaco/hive-ingress` (linux/amd64 and linux/arm64) at the suite version from the *Suite release* workflow. `publish.yml` now runs only for legacy `v1.*` tags and no longer builds them.
 
 - Wire Magnus into the suite with HiveXUI as its console: an Oathweave browser client and explicit ADMIN link for the fresh operator, and an `/api/magnus` ingress mapping limited to Magnus's browser-facing routes that forwards no machine credential. `bootstrap.magnusConsoleOrigin` is removed, and a configuration that still sets it is refused with a clear message.
 
@@ -290,6 +298,6 @@ The first public release.
   server yourself, pass `--allow-scripts=better-sqlite3,argon2` to `npx` or `npm install -g`, or
   list them under `allowScripts` in your project's `package.json`.
 
-[Unreleased]: https://github.com/ChefTaco/hive/compare/v1.0.1...HEAD
+[2.0.0]: https://github.com/ChefTaco/hive/releases/tag/v2.0.0
 [1.0.1]: https://github.com/ChefTaco/hive/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/ChefTaco/hive/releases/tag/v1.0.0

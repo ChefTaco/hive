@@ -5,19 +5,65 @@
 [![CI](https://github.com/ChefTaco/hive/actions/workflows/hive-ci.yml/badge.svg)](https://github.com/ChefTaco/hive/actions/workflows/hive-ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-**Hive is a self-hosted control plane for AI agents.** It gives a fleet of agents a shared identity
-provider, long-term memory, and a model gateway, and manages all three from one web console.
+**Hive is a self-hosted control plane for AI agents, installed as one suite.** `hive.sh`, the
+suite controller in this repository, installs a set of independent products from a signed release
+manifest that pins every container image by digest, and manages their whole lifecycle: plan,
+install, status, doctor, backup, restore rehearsal, upgrade and rollback. It needs only Bash, jq,
+openssl and Docker Compose on the controller; no Node.js runtime.
 
-| Component | What it does |
+| Product | What it does |
 |---|---|
-| [**Hive Router**](services/hive-router) | OpenAI-compatible model gateway with provider discovery, adaptive and objective-based routing, streaming-aware failover, per-key quotas, and tracing. It also serves the unified Hive console. |
-| [**Hive IAM**](services/hive-iam) | OAuth 2.0 / OIDC identity service for users, service accounts, and agents. It issues signed JWTs, supports scoped client credentials, keeps an audit log, and runs with a hardened systemd sandbox. |
-| [**HiveMem**](services/hive-mem) | Long-term memory API for agents, persisted to Qdrant. It supports semantic and filtered search, a knowledge graph, temporal (as-of) queries, consolidation and reasoning jobs, webhooks, and peer conclusions. |
-| [**Hive Skills**](services/hive-skills) | Optional HTTPS registry that distributes versioned, checksummed skills to [Hermes Agent](https://github.com/NousResearch/hermes-agent) installations. |
+| [**Oathweave**](https://github.com/ChefTaco/Oathweave) | OAuth 2.0 / OIDC identity: one sign-in and resource-scoped tokens for every product |
+| [**Emberpath**](https://github.com/ChefTaco/Emberpath) | OpenAI-compatible model gateway with routing, failover, quotas and tracing |
+| [**HiveMem**](https://github.com/ChefTaco/HiveMem) | Long-term memory API for agents, persisted to Qdrant |
+| [**HiveSkills**](https://github.com/ChefTaco/HiveSkills) | Registry of versioned, checksummed skills for agents |
+| [**HiveXUI**](https://github.com/ChefTaco/HiveXUI) | The web console for the whole suite, Magnus included |
+| [**Magnus**](https://github.com/ChefTaco/magnus) | Fleet management for agent hosts, with an optional web terminal gateway |
+| [**Cindertrace**](https://github.com/ChefTaco/cindertrace) | Security event collection and response |
+| [**ChatterMost**](https://github.com/ChefTaco/ChatterMost) | Mattermost-compatible team chat for people and agents |
+| [**Emberfold**](https://github.com/ChefTaco/emberfold) | Context engine HTTP service |
+| [**Hive Registry**](services/hive-registry) | Mandatory per-installation install catalog and lookup API (not the skills registry) |
+| **Hive Ingress** | The single HTTPS entry point, with explicit browser and native path mappings |
 
-Everything is strict TypeScript on Node.js 24 or 26. The only exception is the HiveMem plugin for Hermes Agent, which is written in Python.
+The `core` profile installs Oathweave, Emberpath, HiveMem, HiveSkills, HiveXUI, the ingress and the
+Registry with their private Redis and Qdrant stores. The `full` profile adds Magnus, Cindertrace,
+ChatterMost (each with its own private PostgreSQL) and Emberfold. The Magnus web terminal gateway is
+offered by every release but never selected by a profile. Inference stays external.
 
-## Quick start with npm
+## Install the suite
+
+On a Linux host with Docker Engine and Compose, from a checkout of the release tag:
+
+```bash
+git clone --branch v2.0.0 https://github.com/ChefTaco/hive.git
+cd hive
+./hive.sh --release 2.0.0          # terminal setup, then review and apply the plan
+```
+
+`hive.sh` verifies `releases/2.0.0.json` against `releases/2.0.0.json.sig` with the publisher key
+in `trust/publisher.pub` before it reads anything else, and refuses a manifest pinned to a different
+controller. The setup writes a protected installation file that the same commands accept
+unattended:
+
+```bash
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 2.0.0
+./hive.sh install --config ~/.config/hive/ID/installation.json --release 2.0.0 --non-interactive --yes
+./hive.sh status  --config ~/.config/hive/ID/installation.json
+./hive.sh doctor  --config ~/.config/hive/ID/installation.json
+```
+
+See the [deployment guide](deployment/README.md) for fresh setup, the [full profile](deployment/FULL.md),
+[distributed](deployment/DISTRIBUTED.md) and [custom](deployment/CUSTOM.md) placements, existing
+installations ([`hive.sh migrate-native`](deployment/MIGRATE_NATIVE.md)) and native agents. Suite
+releases are listed on the [releases page](https://github.com/ChefTaco/hive/releases); how they are
+built and signed is in [docs/RELEASING.md](docs/RELEASING.md).
+
+## Legacy npm packages (1.x)
+
+Before the suite, this repository shipped Router, IAM, HiveMem and Skills as npm packages with an
+`npx` launcher. They are superseded by the products above (Hive Router by Emberpath, Hive IAM by
+Oathweave, and so on), stay on npm, and still receive maintenance releases on the v1 line. Their
+source remains under `services/` and `packages/`, and the sections below describe them.
 
 On Linux or macOS with Node.js 24 or 26 and openssl (Docker is optional; it runs Qdrant and Redis
 for you):
@@ -35,8 +81,6 @@ Include the Skills registry with `npx @hivemagnus/hive init --services all`.
 Skills uses your OS/PAM login independently of IAM; see the
 [launcher Skills setup](packages/hive/README.md#include-hive-skills).
 
-## Packages on npm
-
 | Package | Description |
 |---|---|
 | [`@hivemagnus/hive`](packages/hive) | The `hive` launcher: installs, configures and runs the core servers plus optional Skills (`--services all`) (`npx @hivemagnus/hive init`) |
@@ -47,7 +91,7 @@ Skills uses your OS/PAM login independently of IAM; see the
 | [`@hivemagnus/hive-iam-server`](services/hive-iam/apps/iam-core) | The Hive IAM server (`npx --allow-scripts=better-sqlite3,argon2 @hivemagnus/hive-iam-server --env-file iam.env`); also published as the Docker image `ghcr.io/cheftaco/hive-iam-server` |
 | [`@hivemagnus/hive-skills`](services/hive-skills) | Optional HTTPS Skills registry (`npx @hivemagnus/hive-skills --env-file skills.env`), with the Hermes bridge and bundled seed source |
 
-## Quick start (local development)
+## Legacy services: local development
 
 Requirements: Node.js 24 (`>=24.22.1`) or 26 (`>=26.13.0`); `.nvmrc` pins the development version. Docker with Compose is optional and only
 needed to run Redis and Qdrant locally.
@@ -99,7 +143,10 @@ Docker prerequisites, Qwen/llama.cpp settings and automatic installation cleanup
 The OpenAPI specifications for all three HTTP APIs live in [`docs/openapi/`](docs/openapi). Run
 `npm run generate:openapi` after an intentional route or schema change.
 
-## Architecture
+## Legacy architecture
+
+The legacy npm services fit together like this. Suite products are independent services behind
+the Hive Ingress; see [deployment/README.md](deployment/README.md).
 
 ```
             Agents / apps                     Operators (browser)
@@ -120,9 +167,9 @@ The browser holds only a Router session. Router calls IAM and HiveMem server-sid
 scoped credentials, so neither an IAM nor a HiveMem token is ever exposed to the browser. See
 [docs/HIVE_ARCHITECTURE.md](docs/HIVE_ARCHITECTURE.md) for details.
 
-## Deployment
+## Legacy systemd deployment
 
-Hive deploys to Linux hosts as systemd services under `/opt`. The deploy scripts are driven entirely
+The legacy services deploy to Linux hosts as systemd services under `/opt`. The deploy scripts are driven entirely
 by environment variables, which you keep in an ignored `.env` file:
 
 ```bash
@@ -163,6 +210,11 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Upgrading
+
+A suite installation upgrades to a newer signed release with `./hive.sh upgrade --config FILE
+--release X.Y.Z` from that release's checkout, and returns with `./hive.sh rollback`; see
+[deployment/README.md](deployment/README.md). The rest of this section covers the legacy npm
+installations.
 
 Existing systemd installations using public npm packages can use the environment-configured
 `npm run deploy:npm -- --env-file .env.npm-deploy --to X.Y.Z --apply` command. It keeps

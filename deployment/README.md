@@ -5,8 +5,28 @@ host's Compose project. The signed manifest identifies their `ingress` and
 `static-ui` service kinds; installation JSON supplies the console host, explicit
 bind address/port and public runtime file. See `examples/installation.schema.json`
 and `examples/installation.json`. `console.compose.json` remains a standalone
-reference fragment. No certified suite manifest has been published, and no
-production entrypoint is switched by these candidate checks.
+reference fragment. The candidate checks below switch no production entrypoint.
+
+## Published releases
+
+Each suite release is a tag `vX.Y.Z` (2.0.0 and later) whose tree holds the signed manifest
+`releases/X.Y.Z.json`, its detached Ed25519 signature `releases/X.Y.Z.json.sig` and the publisher
+key `trust/publisher.pub`; the same three files are attached to its
+[GitHub release](https://github.com/ChefTaco/hive/releases). The manifest pins every product,
+datastore and initialization image by multi-architecture digest (linux/amd64 and linux/arm64),
+lists the `core` and `full` profiles, the mandatory Hive Registry and the optional
+`magnus-gateway`, and pins the controller source with `controllerSHA256`, so install it from a
+checkout of the same tag:
+
+```bash
+git clone --branch v2.0.0 https://github.com/ChefTaco/hive.git && cd hive
+./hive.sh --release 2.0.0
+```
+
+The signed services run as UID/GID 1000 (HiveXUI as 101), so run fresh setup as that account or as
+a host administrator. To install from separately downloaded files, pass `--manifest`, `--signature`
+and `--trust-key`; check the key's fingerprint against the one in the release notes first.
+[docs/RELEASING.md](../docs/RELEASING.md) describes how a release is built, signed and verified.
 
 Caddy and the static HiveXUI service run separately as non-root users, with read-only
 root filesystems and no host control credentials. Prepare the protected ingress
