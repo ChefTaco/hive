@@ -35,6 +35,26 @@ done < <(jq -r '.placements[].configDirectory // empty' <<< "$input")
 if [[ -e "$directory/installation.json" ]]; then
   [[ $(jq -r .installation "$directory/installation.json") == "$(jq -r .installation <<< "$input")" ]]
 fi
+if jq -e '.bootstrap.productEndpoints!=null' <<< "$input" >/dev/null; then
+  command -v ss >/dev/null
+  while IFS=$'\t' read -r component target port bind hostname; do
+    config=$(jq -er --arg name "$component" '.placements[$name].configDirectory' <<< "$input")
+    for file in tls.crt tls.key authority.pem; do [[ -f "$config/$file" && ! -L "$config/$file" && -r "$config/$file" ]]; done
+    permissions=$(stat -c %a "$config/tls.key"); (( (8#$permissions & 077)==0 ))
+    openssl x509 -in "$config/tls.crt" -noout -checkend 86400 >/dev/null
+    hostname_option=-verify_hostname; [[ ! "$hostname" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || hostname_option=-verify_ip
+    openssl verify -CAfile "$config/authority.pem" "$hostname_option" "$hostname" "$config/tls.crt" >/dev/null
+    certificate_key=$(openssl x509 -in "$config/tls.crt" -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum)
+    private_key=$(openssl pkey -in "$config/tls.key" -pubout -outform DER 2>/dev/null | sha256sum)
+    [[ "$certificate_key" == "$private_key" ]] || { printf 'Product certificate and private key do not match\n' >&2; exit 1; }
+    if [[ -n $(ss -H -lnt "sport = :$port") ]]; then
+      [[ -f "$directory/compose.json" ]] || { printf 'Requested product HTTPS port is already occupied\n' >&2; exit 1; }
+      container=$(docker compose -f "$directory/compose.json" ps -q "$component")
+      [[ -n "$container" ]] || { printf 'Product HTTPS listener is not owned by this installation\n' >&2; exit 1; }
+      docker inspect "$container" | jq -e --arg target "$target/tcp" --arg port "$port" --arg bind "$bind" '.[0].HostConfig.PortBindings[$target]|any(.[];.HostPort==$port and .HostIp==$bind)' >/dev/null
+    fi
+  done < <(jq -r '. as $input | .placements|keys[]|. as $name|$input.bootstrap.productEndpoints[$name]|select(.!=null)|. as $endpoint| [{name:$name,url:.origin,target:({oathweave:4200,emberpath:9443,hivemem:18790,hiveskills:4030}[$name])}] + (if $name=="emberpath" then [{name:$name,url:.inferenceOrigin,target:4020}] else [] end)|.[]|. as $listener|(.url|capture("^https://(?<hostname>[^:]+)(?::(?<port>[0-9]+))?$"))|[$name,($listener.target|tostring),(.port // "443"),$endpoint.bindAddress,.hostname]|@tsv' <<< "$input")
+fi
 if jq -e '.console!=null' <<< "$input" >/dev/null; then
   command -v ss >/dev/null
   runtime=$(jq -r .console.runtimeFile <<< "$input")

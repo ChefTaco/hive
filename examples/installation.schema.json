@@ -95,6 +95,35 @@
         },
         "privateKeyFile": {
           "$ref": "#/$defs/path"
+        },
+        "productEndpoints": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "oathweave",
+            "emberpath",
+            "hivemem",
+            "hiveskills"
+          ],
+          "properties": {
+            "oathweave": {
+              "$ref": "#/$defs/productEndpoint"
+            },
+            "emberpath": {
+              "$ref": "#/$defs/modelEndpoint"
+            },
+            "hivemem": {
+              "$ref": "#/$defs/productEndpoint"
+            },
+            "hiveskills": {
+              "$ref": "#/$defs/productEndpoint"
+            }
+          },
+          "description": "Explicit verified HTTPS listeners for fresh distributed core setup. Datastores stay co-located and private."
+        },
+        "trustBundleFile": {
+          "$ref": "#/$defs/path",
+          "description": "PEM trust bundle available at this protected local reference on every configured host."
         }
       }
     },
@@ -239,6 +268,64 @@
         },
         "authorized": {
           "type": "boolean"
+        }
+      }
+    },
+    "productEndpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "bindAddress",
+        "certificateFile",
+        "privateKeyFile"
+      ],
+      "properties": {
+        "origin": {
+          "type": "string",
+          "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]+)?$"
+        },
+        "bindAddress": {
+          "type": "string",
+          "description": "Explicit bind address for this product HTTPS listener."
+        },
+        "certificateFile": {
+          "$ref": "#/$defs/path"
+        },
+        "privateKeyFile": {
+          "$ref": "#/$defs/path"
+        }
+      }
+    },
+    "modelEndpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "bindAddress",
+        "certificateFile",
+        "privateKeyFile",
+        "inferenceOrigin"
+      ],
+      "properties": {
+        "origin": {
+          "type": "string",
+          "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]+)?$"
+        },
+        "bindAddress": {
+          "type": "string",
+          "description": "Explicit bind address for this product HTTPS listener."
+        },
+        "certificateFile": {
+          "$ref": "#/$defs/path"
+        },
+        "privateKeyFile": {
+          "$ref": "#/$defs/path"
+        },
+        "inferenceOrigin": {
+          "type": "string",
+          "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]+)?$",
+          "description": "Separate native client HTTPS listener, using the same certificate hostname as the administration endpoint."
         }
       }
     }

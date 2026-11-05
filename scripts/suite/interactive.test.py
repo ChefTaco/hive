@@ -104,3 +104,35 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     plan = json.loads(subprocess.check_output([*arguments[:2], '--config', str(output), *arguments[2:]], text=True))
     assert plan['installation'] == 'interactive-proof' and plan['manifestDigest']
     print('Passed: real terminal setup, complete core inventory, protected output, identical unattended planning and no host changes.')
+
+    distributed_output = base / 'inventory' / 'distributed.json'
+    distributed_questions = [(label, 'distributed' if label == 'Configuration mode' else answer) for label, answer in questions[:-1]]
+    distributed_questions += [('Product trust bundle file available on every host', '/opt/certificates/product-ca.pem')]
+    for index, product in enumerate(['oathweave', 'emberpath', 'hivemem', 'hiveskills']):
+        distributed_questions += [(f'Inventory host for {product}', 'identity' if product == 'oathweave' else 'control')]
+        if product == 'oathweave':
+            distributed_questions += [('SSH target for identity', 'deploy@identity.example.com'),
+                                      ('Installation directory on identity', '/opt/hive-identity'),
+                                      ('Architecture for identity', architecture),
+                                      ('Protected SSH configuration for identity', '')]
+        distributed_questions += [(f'Verified HTTPS origin for {product}', f'https://{product}.example.com:{65421+index}'),
+                                  (f'HTTPS bind address for {product}', '127.0.0.1'),
+                                  (f'Certificate file on the {product} host', f'/opt/certificates/{product}.crt'),
+                                  (f'Protected private key file on the {product} host', f'/opt/certificates/{product}.key')]
+        if product == 'emberpath':
+            distributed_questions += [('Distinct native model API HTTPS origin for Emberpath', 'https://emberpath.example.com:65425')]
+    distributed_questions += [('Write protected installation configuration to', str(distributed_output))]
+    review = base / 'distributed-driver.json'
+    review.write_text(json.dumps({'command': arguments, 'questions': distributed_questions,
+                                 'transcriptFile': str(base / 'distributed-transcript.log'), 'timeoutSeconds': 30}))
+    subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
+    distributed = json.loads(distributed_output.read_text())
+    assert distributed['components']['oathweave']['host'] == 'identity'
+    assert distributed['components']['oathweave-redis']['host'] == 'identity'
+    assert distributed['components']['oathweave']['envFile'] == '/opt/hive-identity/config/oathweave.env'
+    assert distributed['components']['hivemem']['host'] == 'control'
+    assert len(distributed['bootstrap']['productEndpoints']) == 4
+    assert distributed['bootstrap']['trustBundleFile'] == '/opt/certificates/product-ca.pem'
+    assert not (base / 'deployment').exists(), 'Distributed planning contacted a host'
+    subprocess.run([*arguments[:2], '--config', str(distributed_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
+    print('Passed: interactive distributed product placement, local datastore placement, explicit TLS references and identical unattended planning.')
