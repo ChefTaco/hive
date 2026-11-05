@@ -12,8 +12,8 @@
       ]
     },
     "ingress": {
-      "image": "ghcr.io/cheftaco/hive-ingress:2.0.0",
-      "version": "2.0.0",
+      "image": "ghcr.io/cheftaco/hive-ingress:2.0.1",
+      "version": "2.0.1",
       "platforms": [
         "linux/amd64",
         "linux/arm64"
@@ -84,16 +84,16 @@
       ]
     },
     "chattermost": {
-      "image": "ghcr.io/cheftaco/chattermost:0.4.0",
-      "version": "0.4.0",
+      "image": "ghcr.io/cheftaco/chattermost:0.4.1",
+      "version": "0.4.1",
       "platforms": [
         "linux/amd64",
         "linux/arm64"
       ]
     },
     "chat-migrator": {
-      "image": "ghcr.io/cheftaco/chattermost-migrator:0.4.0",
-      "version": "0.4.0",
+      "image": "ghcr.io/cheftaco/chattermost-migrator:0.4.1",
+      "version": "0.4.1",
       "platforms": [
         "linux/amd64",
         "linux/arm64"
