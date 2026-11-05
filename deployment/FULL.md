@@ -76,6 +76,8 @@ pinned SSH inventories on one physical developer host. Optional `--browser-revie
 pauses before revocation and backups, creates a protected disposable browser
 credential file, and waits for a protected `browser-completion.json` containing
 `{"result":"passed"}`. Keep credentials and evidence outside Git.
+Add `--release-live-networks` on a host short of Docker address pools: a rehearsal needs a
+second set of private networks, so this takes the disposable stack down first.
 
 A passing disposable run is not production cutover approval, physical multi-host
 certification, ARM64 certification, or proof that every existing installation's
