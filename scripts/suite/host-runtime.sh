@@ -169,6 +169,9 @@ case "$action" in
     done < <(jq -r '.services[].volumes[]? | select(.target=="/usr/share/nginx/html/runtime.json") | .source' "$candidate")
     pin_deployment_inputs "$candidate"
     docker compose -f "$candidate" pull --quiet
+    if [[ $(jq -r .operation <<< "$input") == install && $(jq -r '.bootstrap!=null' <<< "$input") == true ]]; then
+      while IFS= read -r image; do docker pull --quiet "$image" >/dev/null; done < <(jq -r --slurpfile candidate "$candidate" '.components|to_entries[]|select(.value.initialization!=null and $candidate[0].services[.key]!=null)|.value.initialization.image' "$directory/manifest.$plan.json")
+    fi
     docker pull --quiet "$recovery_image" >/dev/null
     ;;
   quiesce)
@@ -246,9 +249,13 @@ case "$action" in
           HIVE_AUTO_MIGRATE:"true",HIVE_AUTO_UPGRADE:"false",HIVE_UPDATE_CHECK:"false",
           HIVEMEM_WORKER_ENABLED:"false",HIVE_SKILLS_DEPLOYMENT_WORKER_ENABLED:"false",
           SECURITY_FUSION_DISPATCH_ENABLED:"false",SECURITY_FUSION_COLLECTOR_ENABLED:"false"
+          ,SECURITY_DISPATCH_ENABLED:"false",SECURITY_INGEST_ENABLED:"false",SECURITY_RETENTION_ENABLED:"false",SECURITY_NOTIFICATIONS_ENABLED:"false"
         })))
     ' "$candidate" > "$bootstrap_compose"
     docker compose -f "$bootstrap_compose" config --quiet
+    mapfile -t datastores < <(jq -r --slurpfile release "$directory/manifest.$plan.json" '.services|keys[]|. as $name|select($release[0].components[$name].kind=="datastore")' "$bootstrap_compose")
+    if ((${#datastores[@]})); then docker compose -f "$bootstrap_compose" up -d --wait --wait-timeout 180 "${datastores[@]}"; fi
+    hive_initialization_migrations "$candidate" "$bootstrap_compose" "$initial_receipt"
     # Only private backends/datastores start. Ingress, UI and native agents wait
     # until initialized data is ready with automatic migrations disabled again.
     docker compose -f "$bootstrap_compose" up -d --wait --wait-timeout 180
@@ -302,7 +309,7 @@ case "$action" in
         select((.key|test("collector|dispatcher|agent"))|not) |
         .value |= (del(.ports,.network_mode,.external_links,.links,.restart) |
           (if has("depends_on") then .depends_on |= (if type=="array" then map(select(. as $name|$selected|index($name)!=null)) else with_entries(select(.key as $name|$selected|index($name)!=null)) end) else . end) |
-          .environment=((.environment // {}) + {HIVE_REHEARSAL:"true",SECURITY_FUSION_DISPATCH_ENABLED:"false",SECURITY_FUSION_COLLECTOR_ENABLED:"false"}) |
+          .environment=((.environment // {}) + {HIVE_REHEARSAL:"true",SECURITY_FUSION_DISPATCH_ENABLED:"false",SECURITY_FUSION_COLLECTOR_ENABLED:"false",SECURITY_DISPATCH_ENABLED:"false",SECURITY_INGEST_ENABLED:"false",SECURITY_RETENTION_ENABLED:"false",SECURITY_NOTIFICATIONS_ENABLED:"false",SECURITY_WRITES_ENABLED:"false",MAGNUS_AUTO_MIGRATE:"false"}) |
           .volumes |= map(if .source|startswith($base+"/") then .source=($restored+.source[($base|length):]) else error("Unowned restore mount") end) |
           if has("env_file") then .env_file |= map(if type=="string" and startswith($base+"/") then $restored+.[($base|length):] else error("Unowned restore environment") end) else . end)) |
       .networks=((.networks // {default:{}})|map_values({internal:true,driver:"bridge"}))' "$candidate" > "$rehearsal/isolated.json"

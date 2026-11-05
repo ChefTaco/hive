@@ -1,4 +1,4 @@
-# Distributed fresh core setup
+# Distributed fresh setup
 
 The core initializer supports one installation spread across host inventories.
 Each host has its own Compose project, deployment ownership UUID, transaction
@@ -7,8 +7,8 @@ inventories; never share their databases, accounts, credentials or recovery file
 
 Use `./hive.sh` and select configuration mode `distributed`, or supply the same
 versioned JSON configuration with `bootstrap.productEndpoints`. Select the host
-for each core product. The wizard keeps Oathweave's Redis and HiveMem's Qdrant on
-their product's host. Ingress and static HiveXUI remain together on the console
+for each selected product. The wizard keeps Oathweave's Redis, HiveMem's Qdrant, and optional products'
+PostgreSQL/Redis datastores on their owning product's host. Ingress and static HiveXUI remain together on the console
 host. Every inventory host must have a selected component.
 
 The endpoint object must contain `oathweave`, `emberpath`, `hivemem` and
@@ -53,9 +53,11 @@ is supplied by ingress.
 
 The original `fresh` mode remains available for a co-located core installation,
 with private product certificates generated for its local Compose network.
-Full-profile fresh configuration and additional product setup have separate
-product migration and enrollment contracts; selecting `full` does not imply that
-all those acceptance gates have passed.
+The optional full profile adds explicit product-owned migration and account
+bootstrap contracts described in [full setup](FULL.md). Selected Magnus,
+Cindertrace and ChatterMost require their own verified HTTPS endpoints in a
+distributed inventory. Selecting `full` does not imply that every installation or
+hardware acceptance gate has passed.
 
 ## Developer evidence
 

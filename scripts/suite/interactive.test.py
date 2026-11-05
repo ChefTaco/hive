@@ -136,3 +136,34 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     assert not (base / 'deployment').exists(), 'Distributed planning contacted a host'
     subprocess.run([*arguments[:2], '--config', str(distributed_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
     print('Passed: interactive distributed product placement, local datastore placement, explicit TLS references and identical unattended planning.')
+
+    # Full setup writes the identical config consumed by unattended execution;
+    # this terminal test plans only and never installs its synthetic images.
+    for name in ['magnus', 'cindertrace', 'chattermost', 'emberfold', 'magnus-postgres', 'magnus-redis', 'cindertrace-postgres', 'cindertrace-redis', 'chattermost-postgres']:
+        manifest['components'][name] = {'image': 'example.com/synthetic@sha256:' + '0' * 64,
+                                        'kind': 'datastore' if name.endswith(('-postgres', '-redis')) else 'application',
+                                        'service': {'user': f'{os.getuid()}:{os.getgid()}', 'healthcheck': {'test': ['CMD', 'true']}}}
+    for name in ['magnus', 'cindertrace', 'chattermost']:
+        manifest['components'][name]['initialization'] = {'image': 'example.com/migrator@sha256:' + '1' * 64,
+                                                          'command': ['apply'], 'verificationCommand': ['verify-current']}
+    manifest['profiles']['full'] = sorted(manifest['components'])
+    release.write_text(json.dumps(manifest))
+    openssl('pkeyutl', '-sign', '-inkey', base / 'publisher.key', '-rawin', '-in', release, '-out', str(release) + '.sig')
+    full_output = base / 'inventory' / 'full.json'
+    full_questions = []
+    for label, answer in questions:
+        if label == 'Product profile': answer = 'full'
+        if label == 'Write protected installation configuration to': answer = str(full_output)
+        full_questions.append((label, answer))
+        if label == 'Protected console private key file':
+            full_questions.append(('Existing Magnus console HTTPS URL', 'https://fleet.example.com'))
+    review.write_text(json.dumps({'command': arguments, 'questions': full_questions,
+                                 'transcriptFile': str(base / 'full-transcript.log'), 'timeoutSeconds': 30}))
+    subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
+    full_config = json.loads(full_output.read_text())
+    assert full_config['profile'] == 'full' and len(full_config['components']) == 17
+    assert full_config['bootstrap']['magnusConsoleOrigin'] == 'https://fleet.example.com'
+    assert full_output.stat().st_mode & 0o077 == 0
+    assert not (base / 'deployment').exists(), 'Full planning contacted a host'
+    subprocess.run([*arguments[:2], '--config', str(full_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
+    print('Passed: interactive full profile, explicit existing Magnus console link, protected config and identical unattended planning.')

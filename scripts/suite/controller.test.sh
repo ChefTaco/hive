@@ -36,9 +36,14 @@ jq '.components.emberpath.service.volumes=["/var/run/docker.sock:/var/run/docker
 mv "$temporary/unsafe.json" "$temporary/release.json"
 openssl pkeyutl -sign -inkey "$temporary/private" -rawin -in "$temporary/release.json" -out "$temporary/release.sig"
 reject hive_manifest
-for patch in '.controllerSHA256=("0"*64)' '.components.emberpath.service.user="0:0"' '.components.emberpath.service.cap_add=["SYS_ADMIN"]' '.components.emberpath.service.healthcheck=null' '.components.emberpath.service.post_start=[{command:"true",user:"root",privileged:true}]' '.components.emberpath.service.healthcheck.disable=true' '.networks={unsafe:{driver:"host"}}'; do
+for patch in '.controllerSHA256=("0"*64)' '.components.emberpath.service.user="0:0"' '.components.emberpath.service.cap_add=["SYS_ADMIN"]' '.components.emberpath.service.healthcheck=null' '.components.emberpath.service.post_start=[{command:"true",user:"root",privileged:true}]' '.components.emberpath.service.healthcheck.disable=true' '.components.emberpath.service.tmpfs=["/etc"]' '.components.emberpath.service.tmpfs=["/run/docker.sock:rw"]' '.components.emberpath.service.tmpfs=["/var/run/../secrets"]' '.components.emberpath.service.tmpfs=["/run/product","/run/product"]' '.networks={unsafe:{driver:"host"}}' '.components.emberpath.initialization={image:"example.com/migrator:latest",command:["apply"],verificationCommand:["verify"]}' '.components.emberpath.initialization={image:("example.com/migrator@sha256:"+("0"*64)),command:["apply"]}' '.components.emberpath.initialization={image:("example.com/migrator@sha256:"+("0"*64)),command:["apply"],verificationCommand:[]}'; do
   jq "$patch" "$temporary/valid.json" > "$temporary/release.json"
   openssl pkeyutl -sign -inkey "$temporary/private" -rawin -in "$temporary/release.json" -out "$temporary/release.sig"
   reject hive_manifest
 done
+jq '.components.emberpath.service.tmpfs=["/var/run/product"]' "$temporary/valid.json" > "$temporary/release.json"
+openssl pkeyutl -sign -inkey "$temporary/private" -rawin -in "$temporary/release.json" -out "$temporary/release.sig"
+hive_manifest
+hive_render control > "$temporary/tmpfs.compose.json"
+jq -e '.services.emberpath.tmpfs==["/tmp:mode=1777","/var/run/product:uid=1000,gid=1000,mode=700"]' "$temporary/tmpfs.compose.json" >/dev/null
 printf 'Passed: planning, unattended guards, input injection, signature tampering, pinned rendering and privileged-mount rejection.\n'

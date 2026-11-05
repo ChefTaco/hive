@@ -48,7 +48,7 @@ if [[ "$distributed" == true ]]; then
     check_certificate "$certificate" "$private_key" "$hostname"
     hostname_option=-verify_hostname; [[ ! "$hostname" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || hostname_option=-verify_ip
     openssl verify -CAfile "$trust_bundle" "$hostname_option" "$hostname" "$certificate" >/dev/null || die 'Product certificate is not trusted by the configured bundle'
-  done < <(jq -r '.placements|keys[]|select(IN("oathweave","emberpath","hivemem","hiveskills"))' <<< "$input")
+  done < <(jq -r '.placements|keys[]|select(IN("oathweave","emberpath","hivemem","hiveskills","magnus","cindertrace","chattermost"))' <<< "$input")
 fi
 while IFS= read -r user; do
   uid=${user%:*}; gid=${user#*:}
@@ -110,8 +110,11 @@ ensure_secret() {
   [[ "$value" =~ ^[a-f0-9]+$ && ${#value} == "$length" ]] || die 'Invalid protected initialization secret'
   record_file "$path"
 }
-for name in identity-id model-id memory-id; do
-  length=64; [[ "$name" != memory-id ]] || length=32
+identity_names=(identity-id model-id memory-id)
+jq -e '.bootstrapServiceUsers.cindertrace!=null' <<< "$input" >/dev/null && identity_names+=(security-id)
+jq -e '.bootstrapServiceUsers.chattermost!=null' <<< "$input" >/dev/null && identity_names+=(chat-id)
+for name in "${identity_names[@]}"; do
+  length=64; [[ "$name" != memory-id ]] || length=32; [[ "$name" != chat-id ]] || length=26
   shared_name=${name%-id}
   shared_id=$(jq -r --arg name "$shared_name" '.bootstrapIdentityIds[$name] // empty' <<< "$input")
   if [[ -n "$shared_id" ]]; then
@@ -130,6 +133,10 @@ if has_component oathweave; then for name in admin-password oath-cookie oath-age
 if has_component emberpath; then ensure_secret router-key; fi
 if has_component hivemem; then for name in memory-key memory-renewal qdrant-key; do ensure_secret "$name"; done; fi
 if has_component hiveskills; then ensure_secret skills-session; fi
+if has_component magnus; then for name in magnus-db magnus-redis magnus-api magnus-jwt magnus-manager magnus-audit magnus-result magnus-log magnus-rotation magnus-metrics magnus-webhook; do ensure_secret "$name"; done; fi
+if has_component cindertrace; then for name in security-db security-redis security-admin-password security-session security-console security-audit security-receipt security-backup security-rate; do ensure_secret "$name"; done; fi
+if has_component chattermost; then for name in chat-db chat-cookie chat-token chat-admin-password chat-bot; do ensure_secret "$name"; done; fi
+if has_component emberfold; then ensure_secret context-api; fi
 secret() { cat "$state/secrets/$1"; }
 ensure_key() {
   local path="$state/keys/$1.pem" pending="$state/keys/$1.pending"
@@ -150,7 +157,8 @@ if [[ ! -e "$ca" ]]; then
 fi
 openssl verify -CAfile "$ca" "$ca" >/dev/null || die 'Initialization authority verification failed'
 record_file "$ca"
-for component in oathweave emberpath hivemem hiveskills; do
+for component in oathweave emberpath hivemem hiveskills magnus cindertrace chattermost; do
+  has_component "$component" || continue
   ensure_key "$component"
   leaf="$state/certificates/$component.pem"
   if [[ ! -e "$leaf" ]]; then
@@ -177,7 +185,7 @@ publish_file() {
   else chown "$uid:$gid" "$temporary"; sync -f "$temporary"; mv -T -- "$temporary" "$path"; fi
   record_file "$path"
 }
-for component in oathweave emberpath hivemem hiveskills; do
+for component in oathweave emberpath hivemem hiveskills magnus cindertrace chattermost; do
   has_component "$component" || continue
   if [[ "$distributed" == true ]]; then
     key_reference=$(jq -er --arg name "$component" '.bootstrap.productEndpoints[$name].privateKeyFile' <<< "$input")
@@ -198,11 +206,13 @@ email=$(jq -er .bootstrap.adminEmail <<< "$input")
 subject=$(secret identity-id); model_id=$(secret model-id); memory_id=$(secret memory-id)
 issuer="$origin/api/oathweave"
 if has_component oathweave; then
-jq -n --arg id "$subject" --arg redirect "$origin/auth/callback" '{schema:1,adminId:$id,clients:[
+jq -n --arg id "$subject" --arg redirect "$origin/auth/callback" --argjson selection "$(jq -c .bootstrapServiceUsers <<< "$input")" '{schema:1,adminId:$id,clients:[
  {id:"hivexui-oathweave",audience:"oathweave",permissions:["iam:users:read","iam:users:write","iam:users:delete","iam:roles:read","iam:roles:write","iam:sa:read","iam:sa:write","iam:sa:delete","iam:clients:read","iam:clients:write","iam:sessions:revoke","iam:audit:read","iam:system:login","iam:policy:write"],redirectUris:[$redirect],firstParty:true},
  {id:"hivexui-emberpath",audience:"emberpath",permissions:["router:providers:read","router:providers:write","router:routing:read","router:routing:write","router:testing:read","router:testing:write","router:keys:read","router:keys:write","router:settings:read","router:settings:write","router:admin:read","router:admin:write"],redirectUris:[$redirect],firstParty:true},
  {id:"hivexui-hivemem",audience:"hivemem",permissions:["hivemem:admin:all"],redirectUris:[$redirect],firstParty:true},
- {id:"hivexui-hiveskills",audience:"hiveskills",permissions:["hiveskills:admin"],redirectUris:[$redirect],firstParty:true}]}' | publish_file oathweave "$directory/config/oathweave/suite-bootstrap.json"
+ {id:"hivexui-hiveskills",audience:"hiveskills",permissions:["hiveskills:admin"],redirectUris:[$redirect],firstParty:true}]} |
+ .clients += ((if $selection.cindertrace then [{id:"hivexui-cindertrace",audience:"cindertrace",permissions:["cindertrace:view","cindertrace:investigate","cindertrace:admin"],redirectUris:[$redirect],firstParty:true}] else [] end) +
+ (if $selection.chattermost then [{id:"hivexui-chattermost",audience:"chattermost",permissions:["chattermost:session"],redirectUris:[$redirect],firstParty:true}] else [] end))' | publish_file oathweave "$directory/config/oathweave/suite-bootstrap.json"
 policies=$(jq -c '.clients|map({key:.id,value:{audience,permissions}})|from_entries' "$directory/config/oathweave/suite-bootstrap.json")
 fi
 if has_component hivemem; then
@@ -283,13 +293,23 @@ if has_component ingress; then
     hostname=${endpoint#https://}; hostname=${hostname%%:*}
     line "${label}_ENDPOINT" "$endpoint"; line "${label}_TLS_NAME" "$hostname"
   done
+  for mapping in cindertrace:CINDERTRACE:4101 chattermost:CHATTERMOST:8065; do
+    component=${mapping%%:*}; tail=${mapping#*:}; label=${tail%%:*}; port=${tail##*:}
+    jq -e --arg name "$component" '.bootstrapServiceUsers[$name]!=null' <<< "$input" >/dev/null || continue
+    endpoint=$(product_endpoint "$component" "https://$component:$port"); hostname=${endpoint#https://}; hostname=${hostname%%:*}
+    line "${label}_ENDPOINT" "$endpoint"; line "${label}_TLS_NAME" "$hostname"
+  done
   endpoint=$(product_endpoint emberpath https://emberpath:4020 inferenceOrigin)
   hostname=${endpoint#https://}; hostname=${hostname%%:*}
   line EMBERPATH_API_ENDPOINT "$endpoint"; line EMBERPATH_API_TLS_NAME "$hostname"
 } | publish_file ingress "$directory/config/ingress.env"
 fi
+hive_full_configuration
 if has_component hivexui; then
-jq -n --arg issuer "$issuer" '{schema:1,mode:"suite",products:{oathweave:"/api/oathweave",emberpath:"/api/emberpath",hivemem:"/api/hivemem",hiveskills:"/api/hiveskills"},identity:{issuer:$issuer,apiPrefix:"/api/oathweave",clients:{oathweave:"hivexui-oathweave",emberpath:"hivexui-emberpath",hivemem:"hivexui-hivemem",hiveskills:"hivexui-hiveskills"}}}' | publish_file hivexui "$directory/config/runtime.json" 644
+jq -n --arg issuer "$issuer" --arg installation "$installation" --arg magnusConsole "$(jq -r '.bootstrap.magnusConsoleOrigin // empty' <<< "$input")" --argjson selection "$(jq -c .bootstrapServiceUsers <<< "$input")" '{schema:1,mode:"suite",enrollmentInstallationId:$installation,products:{oathweave:"/api/oathweave",emberpath:"/api/emberpath",hivemem:"/api/hivemem",hiveskills:"/api/hiveskills"},identity:{issuer:$issuer,apiPrefix:"/api/oathweave",clients:{oathweave:"hivexui-oathweave",emberpath:"hivexui-emberpath",hivemem:"hivexui-hivemem",hiveskills:"hivexui-hiveskills"}}} |
+ if $selection.cindertrace then .products.cindertrace="/api/cindertrace" | .identity.clients.cindertrace="hivexui-cindertrace" else . end |
+ if $selection.chattermost then .products.chattermost="/api/chattermost" | .identity.clients.chattermost="hivexui-chattermost" else . end |
+ if $magnusConsole!="" then .links.magnus=$magnusConsole else . end' | publish_file hivexui "$directory/config/runtime.json" 644
 fi
 if has_component oathweave; then
 {

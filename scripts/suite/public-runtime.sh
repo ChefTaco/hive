@@ -7,7 +7,8 @@ hive_check_public_runtime() {
   jq -e '
 
         .schema==1 and (.mode // "suite")=="suite" and
-        (keys-["schema","mode","products","identity","links"]|length==0) and
+        (keys-["schema","mode","products","identity","links","enrollmentInstallationId"]|length==0) and
+        (if has("enrollmentInstallationId") then .enrollmentInstallationId|type=="string" and test("^[a-z][a-z0-9-]{0,47}$") else true end) and
         (.products|type=="object" and has("oathweave") and
           (keys-["emberpath","oathweave","hivemem","hiveskills","cindertrace","chattermost"]|length==0) and
           all(to_entries[];.value==("/api/"+.key))) and

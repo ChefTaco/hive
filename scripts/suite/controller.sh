@@ -7,7 +7,7 @@ hive_runtime_files() {
     scripts/suite/controller.sh scripts/suite/lifecycle.sh scripts/suite/host-runtime.sh \
     scripts/suite/adapters.sh scripts/suite/adapters-host.sh scripts/suite/inference-registration.sh \
     scripts/suite/public-runtime.sh scripts/suite/preflight-host.sh scripts/suite/initialize.sh \
-    scripts/suite/initialize-host.sh scripts/suite/integrity-host.sh scripts/suite/input-artifacts-host.sh scripts/suite/check-data.mjs
+    scripts/suite/initialize-host.sh scripts/suite/initialize-full-host.sh scripts/suite/initialize-migrations-host.sh scripts/suite/integrity-host.sh scripts/suite/input-artifacts-host.sh scripts/suite/check-data.mjs
 }
 hive_controller_digest() {
   local file
@@ -48,7 +48,7 @@ hive_configure() {
   local id directory origin profile output endpoint model credential engine protocol target bind port architecture selected mode certificate private_key username email
   local inference='[]' agents='[]' temporary config selected_json runtime version agent_id agent_profile agent_environment agent_service authorized
   local external_ca enrollment_endpoint enrollment_prefix enrollment_credential enrollment_ca provider_slug provider_aliases
-  local product product_host product_origin product_bind product_certificate product_key product_inference trust_bundle ssh_config
+  local product product_host product_origin product_bind product_certificate product_key product_inference trust_bundle ssh_config magnus_console
   if [[ -z "$HIVE_VERSION" ]]; then hive_prompt HIVE_VERSION 'Exact suite release version'; fi
   if [[ -z "$HIVE_MANIFEST" ]]; then
     HIVE_MANIFEST="$HIVE_ROOT/releases/$HIVE_VERSION.json"
@@ -87,6 +87,8 @@ hive_configure() {
     hive_prompt certificate 'Existing console certificate file on the selected host (absolute)'
     hive_prompt private_key 'Protected console private key file on the selected host (absolute)'
   elif [[ "$mode" != prepared ]]; then hive_die 'Choose fresh, distributed or prepared configuration'; fi
+  magnus_console=''
+  if [[ "$mode" == fresh || "$mode" == distributed ]] && jq -e 'index("magnus")!=null' <<< "$selected_json" >/dev/null; then hive_prompt magnus_console 'Existing Magnus console HTTPS URL (blank to leave unconfigured)'; fi
   printf 'Inference services remain external. Hive verifies their APIs and registers providers only with an explicit Emberpath credential reference.\n'
   hive_prompt endpoint 'Existing external inference HTTPS endpoint (blank to skip)'
   if [[ -n "$endpoint" ]]; then
@@ -122,15 +124,16 @@ hive_configure() {
   done
   temporary=$(mktemp -d)
   config="$temporary/installation.json"
-  jq -n --arg id "$id" --arg directory "$directory" --arg target "$target" --arg architecture "$architecture" --arg origin "$origin" --arg profile "$profile" --arg version "$HIVE_VERSION" --arg bind "$bind" --arg port "$port" --arg mode "$mode" --arg username "${username:-}" --arg email "${email:-}" --arg certificate "${certificate:-}" --arg key "${private_key:-}" --argjson selected "$selected_json" --argjson agents "$agents" --argjson inference "$inference" --slurpfile release "$HIVE_MANIFEST" '
+  jq -n --arg id "$id" --arg directory "$directory" --arg target "$target" --arg architecture "$architecture" --arg origin "$origin" --arg profile "$profile" --arg version "$HIVE_VERSION" --arg bind "$bind" --arg port "$port" --arg mode "$mode" --arg username "${username:-}" --arg email "${email:-}" --arg certificate "${certificate:-}" --arg key "${private_key:-}" --arg magnusConsole "${magnus_console:-}" --argjson selected "$selected_json" --argjson agents "$agents" --argjson inference "$inference" --slurpfile release "$HIVE_MANIFEST" '
     {schema:1,installation:$id,release:$version,profile:$profile,origin:$origin,hosts:{control:{target:$target,directory:$directory,architecture:$architecture}},components:($selected|map(. as $name|{key:$name,value:({host:"control"}+(if $release[0].components[$name].kind=="static-ui" then {} elif $release[0].components[$name].kind=="datastore" then {configDirectory:($directory+"/config/"+$name)} else {envFile:($directory+"/config/"+$name+".env"),configDirectory:($directory+"/config/"+$name)} end))})|from_entries),agents:$agents,inference:$inference} +
     (if ($selected|index("hivexui"))!=null or ($selected|index("ingress"))!=null then {console:{host:"control",bindAddress:$bind,httpsPort:($port|tonumber),runtimeFile:($directory+"/config/runtime.json")}} else {} end) +
-    (if $mode=="fresh" or $mode=="distributed" then {bootstrap:{adminUsername:$username,adminEmail:$email,certificateFile:$certificate,privateKeyFile:$key}} else {} end)' > "$config"
+    (if $mode=="fresh" or $mode=="distributed" then {bootstrap:({adminUsername:$username,adminEmail:$email,certificateFile:$certificate,privateKeyFile:$key}+(if $magnusConsole!="" then {magnusConsoleOrigin:$magnusConsole} else {} end))} else {} end)' > "$config"
   if [[ "$mode" == distributed ]]; then
     printf 'Place products within this installation. Each product keeps its private datastore on its selected host. Every host must trust the explicit HTTPS certificate bundle.\n'
     hive_prompt trust_bundle 'Product trust bundle file available on every host (absolute)'
     jq --arg trust "$trust_bundle" '.bootstrap.trustBundleFile=$trust | .bootstrap.productEndpoints={}' "$config" > "$temporary/next.json"; mv "$temporary/next.json" "$config"
-    for product in oathweave emberpath hivemem hiveskills; do
+    for product in oathweave emberpath hivemem hiveskills magnus cindertrace chattermost; do
+      jq -e --arg name "$product" '.components[$name]!=null' "$config" >/dev/null || continue
       hive_prompt product_host "Inventory host for $product (existing or new host ID)" control
       [[ "$product_host" =~ ^[a-z][a-z0-9-]{0,47}$ ]] || { rm -rf -- "$temporary"; hive_die 'Invalid inventory host ID'; }
       if ! jq -e --arg host "$product_host" '.hosts[$host]!=null' "$config" >/dev/null; then
@@ -142,7 +145,7 @@ hive_configure() {
       fi
       jq --arg host "$product_host" --arg product "$product" '
         .hosts[$host].directory as $directory |
-        ([$product] + (if $product=="oathweave" then ["oathweave-redis"] elif $product=="hivemem" then ["hivemem-qdrant"] else [] end)) as $names |
+        ([$product] + (if $product=="oathweave" then ["oathweave-redis"] elif $product=="hivemem" then ["hivemem-qdrant"] elif ($product|IN("magnus","cindertrace")) then [$product+"-postgres",$product+"-redis"] elif $product=="chattermost" then ["chattermost-postgres"] else [] end)) as $names |
         reduce $names[] as $name (.; .components[$name].host=$host | .components[$name].configDirectory=($directory+"/config/"+$name) | if .components[$name].envFile then .components[$name].envFile=($directory+"/config/"+$name+".env") else . end)' "$config" > "$temporary/next.json"; mv "$temporary/next.json" "$config"
       hive_prompt product_origin "Verified HTTPS origin for $product"
       hive_prompt product_bind "HTTPS bind address for $product" 127.0.0.1
@@ -194,10 +197,11 @@ hive_validate() {
   if jq -e 'has("bootstrap")' "$HIVE_CONFIG" >/dev/null; then
     jq -e '
       def path: type=="string" and test("^/[A-Za-z0-9_./-]+$") and (split("/")|all(.!=".."));
-      .bootstrap|type=="object" and (keys-["adminUsername","adminEmail","certificateFile","privateKeyFile","productEndpoints","trustBundleFile"]|length==0) and
+      .bootstrap|type=="object" and (keys-["adminUsername","adminEmail","certificateFile","privateKeyFile","productEndpoints","trustBundleFile","magnusConsoleOrigin"]|length==0) and
       (.adminUsername|type=="string" and test("^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$")) and
       (.adminEmail|type=="string" and length<=254 and test("^[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")) and
-      (.certificateFile|path) and (.privateKeyFile|path)
+      (.certificateFile|path) and (.privateKeyFile|path) and
+      (if has("magnusConsoleOrigin") then .magnusConsoleOrigin|type=="string" and test("^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[-A-Za-z0-9._~]+)*$") else true end)
     ' "$HIVE_CONFIG" >/dev/null || hive_die 'Invalid fresh-install bootstrap configuration; provide initial operator labels and protected console certificate/key references'
     if declare -F hive_bootstrap_validate >/dev/null; then hive_bootstrap_validate; fi
   fi
@@ -234,11 +238,19 @@ hive_manifest() {
       (if .value.kind=="static-ui" then .key=="hivexui" and ((.value.service.environment // {})|length==0) else true end) and
       (if .value.kind=="ingress" then .key=="ingress" else true end) and
       (.value.image|test("^[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}$")) and
-      (.value.service|type=="object" and (keys-["user","command","entrypoint","healthcheck","environment","depends_on","networks","expose","working_dir","labels","mem_limit","cpus","ulimits"]|length==0)) and
+      (.value.service|type=="object" and (keys-["user","command","entrypoint","healthcheck","environment","depends_on","networks","expose","working_dir","labels","mem_limit","cpus","ulimits","tmpfs"]|length==0)) and
       ((.value.service.environment // {})|type=="object" and all(to_entries[];(.key|test("^[A-Z][A-Z0-9_]*$")) and (.value|type=="string"))) and
       (.value.service.user|type=="string" and test("^[1-9][0-9]*:[1-9][0-9]*$")) and
       (.value.service.healthcheck.test|type=="array" and length>0) and
       (.value.service.healthcheck.disable != true) and
+      ((.value.service.tmpfs // [])|type=="array" and length<=8 and (unique|length)==length and all(.[];type=="string" and length<=256 and test("^/(var/)?run/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$"))) and
+      (if .value.initialization then .value.initialization|
+        type=="object" and (keys-["image","command","entrypoint","verificationCommand","workingDirectory"]|length==0) and
+        (.image|test("^[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}$")) and
+        all([.command,.verificationCommand][];type=="array" and length>0 and all(.[];type=="string" and length>0 and (contains("\u0000")|not))) and
+        (if has("entrypoint") then .entrypoint|type=="array" and length>0 and all(.[];type=="string" and length>0) else true end) and
+        (if has("workingDirectory") then .workingDirectory|type=="string" and test("^/[A-Za-z0-9_./-]+$") and (split("/")|all(.!="..")) else true end)
+       else true end) and
       (.value.service|has("cap_add") or has("pid") or has("ipc") or has("uts") or has("cgroup") or has("volumes_from") or has("external_links")|not) and
       (.value.service|has("image")|not) and
       (.value.service|has("build") or has("privileged") or has("network_mode") or has("devices") or has("volumes") or has("ports") or has("env_file")|not))) and
@@ -279,12 +291,13 @@ hive_host() {
   local -a ssh_options
   hive_ssh_options "$host"
   bootstrap_users=${HIVE_BOOTSTRAP_USERS:-'{}'}
+  local bootstrap_images=${HIVE_BOOTSTRAP_IMAGES:-'{}'}
   target=$(jq -r --arg host "$host" '.hosts[$host].target' "$HIVE_CONFIG")
   payload=$(jq -c --arg host "$host" --arg installation "$HIVE_ID" --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" --arg plan "${HIVE_PLAN_DIGEST:-}" \
     --arg action "${HIVE_HOST_ACTION:-}" --arg operation "${HIVE_OPERATION:-}" --arg archive "${HIVE_ARCHIVE:-}" --argjson allowMigrations "${HIVE_ALLOW_MIGRATIONS:-false}" \
-    --argjson serviceUsers "$bootstrap_users" --argjson identityIds "${HIVE_BOOTSTRAP_IDENTITIES:-null}" --arg ingressTemplate "${HIVE_BOOTSTRAP_INGRESS:-}" --arg integrityScript "$(base64 -w0 "$HIVE_ROOT/scripts/suite/check-data.mjs")" \
+    --argjson serviceUsers "$bootstrap_users" --argjson images "$bootstrap_images" --argjson identityIds "${HIVE_BOOTSTRAP_IDENTITIES:-null}" --arg ingressTemplate "${HIVE_BOOTSTRAP_INGRESS:-}" --arg integrityScript "$(base64 -w0 "$HIVE_ROOT/scripts/suite/check-data.mjs")" \
     --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" \
-    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
+    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
   if [[ "$target" == local ]]; then
     printf '%s\n' "$payload" | bash -c "$script"
   else
@@ -323,14 +336,14 @@ hive_render() {
       ($r.components[$name].kind // "application") as $kind |
       {key:$name,value:($r.components[$name].service + {
         image:$r.components[$name].image, restart:"unless-stopped",
-        security_opt:["no-new-privileges:true"],cap_drop:["ALL"],read_only:true,init:true,stop_grace_period:"45s",tmpfs:(["/tmp:mode=1777"] + (if $kind=="static-ui" then ($r.components[$name].service.user|split(":")) as $user | ["/var/cache/nginx:uid="+$user[0]+",gid="+$user[1]+",mode=700","/var/run:uid="+$user[0]+",gid="+$user[1]+",mode=700"] else [] end)),
+        security_opt:["no-new-privileges:true"],cap_drop:["ALL"],read_only:true,init:true,stop_grace_period:"45s",tmpfs:(["/tmp:mode=1777"] + (($r.components[$name].service.tmpfs // []) | map(. as $path | ($r.components[$name].service.user|split(":")) as $owner | $path+":uid="+$owner[0]+",gid="+$owner[1]+",mode=700")) + (if $kind=="static-ui" then ($r.components[$name].service.user|split(":")) as $user | ["/var/cache/nginx:uid="+$user[0]+",gid="+$user[1]+",mode=700","/var/run:uid="+$user[0]+",gid="+$user[1]+",mode=700"] else [] end)),
         volumes:((if $kind=="static-ui" then [{type:"bind",source:$c.console.runtimeFile,target:"/usr/share/nginx/html/runtime.json",read_only:true}] else [{type:"bind",source:($c.hosts[$host].directory+"/data/"+$name),target:"/data"}] end) +
           (if $placement.configDirectory then [{type:"bind",source:$placement.configDirectory,target:"/config",read_only:true}] else [] end))
       } + (if $placement.envFile then {env_file:[$placement.envFile]} else {} end) +
-        (if $kind=="application" then {environment:(($r.components[$name].service.environment // {})+{HIVE_AUTO_MIGRATE:"false",HIVE_AUTO_UPGRADE:"false",HIVE_UPDATE_CHECK:"false",HIVE_UI_UPGRADE:"false"})} else {} end) +
+        (if $kind=="application" then {environment:(($r.components[$name].service.environment // {})+{HIVE_AUTO_MIGRATE:"false",HIVE_AUTO_UPGRADE:"false",HIVE_UPDATE_CHECK:"false",HIVE_UI_UPGRADE:"false"} + (if $name=="magnus" then {MAGNUS_AUTO_MIGRATE:"false"} else {} end))} else {} end) +
         (if $kind=="ingress" then {ports:[{target:8443,published:($c.console.httpsPort|tostring),host_ip:$c.console.bindAddress,protocol:"tcp"}]}
          elif $c.bootstrap.productEndpoints[$name] then $c.bootstrap.productEndpoints[$name] as $endpoint |
-          {ports:([{target:({oathweave:4200,emberpath:9443,hivemem:18790,hiveskills:4030}[$name]),published:($endpoint.origin|capture("^https://[^:]+(?::(?<port>[0-9]+))?$")|.port // "443"),host_ip:$endpoint.bindAddress,protocol:"tcp"}] +
+          {ports:([{target:({oathweave:4200,emberpath:9443,hivemem:18790,hiveskills:4030,magnus:4000,cindertrace:4101,chattermost:8065}[$name]),published:($endpoint.origin|capture("^https://[^:]+(?::(?<port>[0-9]+))?$")|.port // "443"),host_ip:$endpoint.bindAddress,protocol:"tcp"}] +
             (if $name=="emberpath" then [{target:4020,published:($endpoint.inferenceOrigin|capture("^https://[^:]+(?::(?<port>[0-9]+))?$")|.port // "443"),host_ip:$endpoint.bindAddress,protocol:"tcp"}] else [] end))}
          else {} end))})|from_entries),networks:({default:{driver:"bridge"}}+($r.networks // {}))}'
 }
