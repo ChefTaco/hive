@@ -76,7 +76,7 @@ export async function rehearseExternalProvider({
   chmodSync(cert, 0o600);
   chmodSync(csr, 0o600);
   let failGeneration = true;
-  const calls = { discovery: 0, generation: 0, streaming: 0, unexpected: 0 };
+  const calls = { discovery: 0, generation: 0, streaming: 0, responses: 0, unexpected: 0 };
   const server = createServer(
     { key: readFileSync(key), cert: readFileSync(cert) },
     async (req, res) => {
@@ -87,17 +87,46 @@ export async function rehearseExternalProvider({
           res.end(JSON.stringify({ data: [{ id: 'synthetic-external-model', object: 'model' }] }));
           return;
         }
-        if (req.method === 'POST' && req.url === '/v1/chat/completions') {
+        if (req.method === 'POST' && req.url === '/v1/responses') {
           let raw = '';
-          for await (const chunk of req) raw += chunk;
+          for await (const chunk of req) { raw += chunk; assert(raw.length < 1024 * 1024); }
           const body = JSON.parse(raw);
           assert.equal(body.model, 'synthetic-external-model');
+          assert.equal(body.stream, true);
+          assert.equal(req.headers.authorization, undefined, 'Client resource credential escaped Emberpath');
+          calls.responses++;
+          const item = { id: 'msg_synthetic_' + calls.responses, type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: 'OK', annotations: [] }] };
+          const response = { id: 'resp_synthetic_' + calls.responses, object: 'response', created_at: Math.floor(Date.now() / 1000), status: 'completed', model: body.model,
+            output: [item], usage: { input_tokens: 8, output_tokens: 1, total_tokens: 9, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 0 } } };
+          res.setHeader('Content-Type', 'text/event-stream');
+          const event = (type, extra) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...extra })}\n\n`);
+          event('response.created', { response: { ...response, status: 'in_progress', output: [] } });
+          event('response.output_item.added', { output_index: 0, item: { ...item, status: 'in_progress', content: [] } });
+          event('response.content_part.added', { item_id: item.id, output_index: 0, content_index: 0, part: { type: 'output_text', text: '', annotations: [] } });
+          event('response.output_text.delta', { item_id: item.id, output_index: 0, content_index: 0, delta: 'OK' });
+          event('response.output_text.done', { item_id: item.id, output_index: 0, content_index: 0, text: 'OK' });
+          event('response.content_part.done', { item_id: item.id, output_index: 0, content_index: 0, part: item.content[0] });
+          event('response.output_item.done', { output_index: 0, item });
+          event('response.completed', { response });
+          res.end();
+          return;
+        }
+        if (req.method === 'POST' && req.url === '/v1/chat/completions') {
+          let raw = '';
+          for await (const chunk of req) { raw += chunk; assert(raw.length < 1024 * 1024); }
+          const body = JSON.parse(raw);
+          assert.equal(body.model, 'synthetic-external-model');
+          assert.equal(req.headers.authorization, undefined, 'Client resource credential escaped Emberpath');
           if (body.stream) {
             calls.streaming++;
             res.setHeader('Content-Type', 'text/event-stream');
-            res.write(
-              'data: ' + JSON.stringify({ choices: [{ delta: { content: 'OK' } }] }) + '\n\n',
-            );
+            const event = (delta, finish_reason = null) => res.write('data: ' + JSON.stringify({
+              id: 'chatcmpl_synthetic_' + calls.streaming, object: 'chat.completion.chunk',
+              created: Math.floor(Date.now() / 1000), model: body.model,
+              choices: [{ index: 0, delta, finish_reason }],
+            }) + '\n\n');
+            event({ role: 'assistant', content: '' }); event({ content: 'O' });
+            await new Promise(done => setTimeout(done, 25)); event({ content: 'K' }); event({}, 'stop');
             res.end('data: [DONE]\n\n');
           } else {
             calls.generation++;
@@ -170,7 +199,7 @@ export async function rehearseExternalProvider({
         },
       ],
     };
-    const code = ['adapters-host.sh', 'inference-registration.sh', 'host-runtime.sh']
+    const code = ['native-initialization-host.sh', 'adapters-host.sh', 'inference-registration.sh', 'host-runtime.sh']
       .map((file) => readFileSync(join(root, 'scripts/suite', file), 'utf8'))
       .join('\n');
     async function action(expected) {

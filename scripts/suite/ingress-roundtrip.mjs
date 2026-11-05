@@ -50,14 +50,16 @@ try {
   writeFileSync(
     join(temporary, 'backend.cjs'),
     `
-const https=require('https'),fs=require('fs'),crypto=require('crypto');
+const https=require('https'),http=require('http'),fs=require('fs'),crypto=require('crypto');
+const names=['__Host-oathweave_sso','iam_refresh','hive_router_admin','hivemem_dash','hive_skills_session','cindertrace_session','MMSID','MMUSERID','MMCSRF'];
 const server=https.createServer({key:fs.readFileSync('/config/console.key'),cert:fs.readFileSync('/config/console.crt')},(req,res)=>{
  if(req.url==='/v1/stream'){res.writeHead(200,{'Content-Type':'text/event-stream'});res.write('data: first\\n\\n');setTimeout(()=>res.end('data: last\\n\\n'),350);return;}
- res.setHeader('Set-Cookie',['__Host-oathweave_sso=obviously-fake-forged; Path=/; Secure; HttpOnly','iam_refresh=obviously-fake-forged; Path=/; Secure; HttpOnly','MMSID=obviously-fake-native; Path=/; Secure; HttpOnly']);
+ res.setHeader('Set-Cookie',names.map(name=>name+'=obviously-fake-native; Path=/; Secure; HttpOnly'));
  res.setHeader('Content-Type','application/json');res.end(JSON.stringify({path:req.url,authorization:req.headers.authorization,cookie:req.headers.cookie,origin:req.headers.origin}));
 });
 server.on('upgrade',(req,socket)=>{const accept=crypto.createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');socket.write('HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\nSec-WebSocket-Accept: '+accept+'\\r\\nX-Fixture-Cookie: '+req.headers.cookie+'\\r\\n\\r\\n');socket.write(Buffer.from([129,2,111,107]));setTimeout(()=>socket.destroy(),2000);});
 server.listen(9443,'0.0.0.0');
+http.createServer((req,res)=>{res.setHeader('Set-Cookie','MMSID=obviously-fake-forged');res.setHeader('Content-Type','application/json');res.end(JSON.stringify({path:req.url,authorization:req.headers.authorization,cookie:req.headers.cookie,origin:req.headers.origin}));}).listen(8096,'0.0.0.0');
 `,
     { mode: 0o600 },
   );
@@ -85,6 +87,8 @@ server.listen(9443,'0.0.0.0');
     network,
     '--network-alias',
     'backend',
+    '--network-alias',
+    'emberfold',
     ...restrictions,
     '-v',
     `${temporary}:/config:ro`,
@@ -216,48 +220,39 @@ server.listen(9443,'0.0.0.0');
   }
   assert(ready, 'Ingress did not become ready');
   assert.match((await request('/')).body, /HiveXUI/);
+  const cookieNames = ['__Host-oathweave_sso', 'iam_refresh', 'hive_router_admin', 'hivemem_dash', 'hive_skills_session', 'cindertrace_session', 'MMSID', 'MMUSERID', 'MMCSRF'];
   const headers = {
     Authorization: 'Bearer obviously-fake-transport-fixture',
-    Cookie:
-      '__Host-oathweave_sso=obviously-fake-sso; MMSID=obviously-fake-cookie; iam_refresh=obviously-fake-refresh',
+    Cookie: cookieNames.map(name => `${name}=obviously-fake-cookie`).join('; '),
     Origin: 'https://console.example.com',
   };
-  for (const [input, expected] of [
-    ['/api/emberpath/providers?limit=1', '/api/providers?limit=1'],
-    ['/api/emberpath/health/ready', '/health/ready'],
-    ['/api/cindertrace/health/ready', '/ready'],
-    ['/api/oathweave/users', '/api/v1/users'],
-    ['/api/hivemem/memories', '/v1/memories'],
-    ['/api/cindertrace/security-fusion/cases', '/api/v1/security-fusion/cases'],
-    ['/api/chattermost/api/v4/users/me', '/api/v4/users/me'],
-    ['/v1/models', '/v1/models'],
-    ['/memory/v1/memories', '/v1/memories'],
-    ['/api/v4/users/me', '/api/v4/users/me'],
-    ['/api/v1/security-fusion/events', '/api/v1/security-fusion/events'],
+  const cookieKeys = value => (value || '').split(';').map(part => part.trim().split('=')[0]).filter(Boolean).sort();
+  const chatCookies = ['MMSID', 'MMUSERID', 'MMCSRF'].sort();
+  for (const [input, expected, allowed] of [
+    ['/api/emberpath/providers?limit=1', '/api/providers?limit=1', ['hive_router_admin']],
+    ['/api/emberpath/health/ready', '/health/ready', []],
+    ['/api/cindertrace/health/ready', '/ready', []],
+    ['/api/oathweave/users', '/api/v1/users', ['__Host-oathweave_sso', 'iam_refresh']],
+    ['/api/hivemem/memories', '/v1/memories', ['hivemem_dash']],
+    ['/api/cindertrace/security-fusion/cases', '/api/v1/security-fusion/cases', ['cindertrace_session']],
+    ['/api/chattermost/api/v4/users/me', '/api/v4/users/me', chatCookies],
+    ['/api/emberfold/v1/health', '/v1/health', []],
+    ['/v1/models', '/v1/models', []],
+    ['/memory/v1/memories', '/v1/memories', ['hivemem_dash']],
+    ['/api/v4/users/me', '/api/v4/users/me', chatCookies],
+    ['/api/v1/security-fusion/events', '/api/v1/security-fusion/events', ['cindertrace_session']],
   ]) {
     const result = await request(input, headers);
     assert.equal(result.status, 200, input);
-    assert.deepEqual(JSON.parse(result.body), {
-      path: expected,
-      authorization: headers.Authorization,
-      cookie: input.startsWith('/api/oathweave/')
-        ? headers.Cookie
-        : '; MMSID=obviously-fake-cookie;',
-      origin: headers.Origin,
-    });
-    const cookies = result.cookies.filter(Boolean);
-    assert.equal(
-      cookies.some((cookie) => cookie.startsWith('__Host-oathweave_sso=')),
-      input.startsWith('/api/oathweave/'),
-    );
-    assert.equal(
-      cookies.some((cookie) => cookie.startsWith('iam_refresh=')),
-      input.startsWith('/api/oathweave/'),
-    );
-    assert(
-      cookies.some((cookie) => cookie.startsWith('MMSID=')),
-      'Native product cookies must survive',
-    );
+    const body = JSON.parse(result.body);
+    assert.equal(body.path, expected);
+    assert.equal(body.authorization, headers.Authorization);
+    assert.equal(body.origin, headers.Origin);
+    assert.deepEqual(cookieKeys(body.cookie), [...allowed].sort(), input + ' forwarded another product session');
+    const cookies = (result.cookies || []).filter(Boolean);
+    assert.deepEqual(cookies.map(cookie => cookie.split('=')[0]).sort(), [...allowed].sort(), input + ' accepted another product Set-Cookie');
+    const withoutCookies = JSON.parse((await request(input, { Authorization: headers.Authorization })).body);
+    assert.equal(withoutCookies.cookie, undefined, 'Ingress introduced a cookie for a native bearer client');
   }
   assert.equal(
     (await request('/api/hiveskills/admin/skills', headers)).status,
@@ -286,7 +281,7 @@ server.listen(9443,'0.0.0.0');
     });
     req.on('upgrade', (res, socket, head) => {
       assert.equal(res.statusCode, 101);
-      assert.equal(res.headers['x-fixture-cookie'], '; MMSID=obviously-fake-cookie;');
+      assert.deepEqual(cookieKeys(res.headers['x-fixture-cookie']), chatCookies);
       const done = (buffer) => {
         try {
           assert.equal(buffer.subarray(0, 4).toString('hex'), '81026f6b');
@@ -307,7 +302,7 @@ server.listen(9443,'0.0.0.0');
   });
   passed = true;
   console.log(
-    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, SSO cookie isolation, native sessions, streaming and WebSocket transport.',
+    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming and WebSocket transport.',
   );
 } catch (error) {
   for (const container of containers) {

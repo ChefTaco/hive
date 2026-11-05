@@ -13,12 +13,19 @@
 	}
 }
 
-# The identity session belongs exclusively to Oathweave. Resource APIs receive
-# their audience-bound bearer or native product session, never the SSO cookie.
+# Product session cookies stay within their owning API, including responses.
+# The second argument lists the other products' published credential cookies.
+# Authorization headers are always supplied by the caller, never by ingress.
 (product_backend) {
 	import verified_backend {args[0]}
-	header_up Cookie "(^|;)[ \t]*(__Host-oathweave_sso|iam_refresh)=[^;]*" "$1"
-	header_down Set-Cookie "^[ \t]*(__Host-oathweave_sso|iam_refresh)=.*$" ""
+	header_up Cookie "(^|;)[ \t]*({args[1]})=[^;]*" "$1"
+	header_down Set-Cookie "^[ \t]*({args[1]})=.*$" ""
+}
+
+(stateless_backend) {
+	import verified_backend {args[0]}
+	header_up -Cookie
+	header_down -Set-Cookie
 }
 
 {$HIVE_CONSOLE_HOST} {
@@ -29,68 +36,76 @@
 	handle /api/emberpath/health/ready {
 		rewrite * /health/ready
 		reverse_proxy {$EMBERPATH_ENDPOINT:https://unconfigured.invalid} {
-			import product_backend {$EMBERPATH_TLS_NAME:unconfigured.invalid}
+			import stateless_backend {$EMBERPATH_TLS_NAME:unconfigured.invalid}
 		}
 	}
 	handle /api/cindertrace/health/ready {
 		rewrite * /ready
 		reverse_proxy {$CINDERTRACE_ENDPOINT:https://unconfigured.invalid} {
-			import product_backend {$CINDERTRACE_TLS_NAME:unconfigured.invalid}
+			import stateless_backend {$CINDERTRACE_TLS_NAME:unconfigured.invalid}
 		}
 	}
 	handle_path /api/emberpath/* {
 		rewrite * /api{uri}
 		reverse_proxy {$EMBERPATH_ENDPOINT:https://unconfigured.invalid} {
-			import product_backend {$EMBERPATH_TLS_NAME:unconfigured.invalid}
+			import product_backend {$EMBERPATH_TLS_NAME:unconfigured.invalid} "__Host-oathweave_sso|iam_refresh|hivemem_dash|hive_skills_session|cindertrace_session|MMSID|MMUSERID|MMCSRF"
 		}
 	}
 	handle_path /api/oathweave/* {
 		rewrite * /api/v1{uri}
 		reverse_proxy {$OATHWEAVE_ENDPOINT:https://unconfigured.invalid} {
-			import verified_backend {$OATHWEAVE_TLS_NAME:unconfigured.invalid}
+			import product_backend {$OATHWEAVE_TLS_NAME:unconfigured.invalid} "hive_router_admin|hivemem_dash|hive_skills_session|cindertrace_session|MMSID|MMUSERID|MMCSRF"
 		}
 	}
 	handle_path /api/hivemem/* {
 		rewrite * /v1{uri}
 		reverse_proxy {$HIVEMEM_ENDPOINT:https://unconfigured.invalid} {
-			import product_backend {$HIVEMEM_TLS_NAME:unconfigured.invalid}
+			import product_backend {$HIVEMEM_TLS_NAME:unconfigured.invalid} "__Host-oathweave_sso|iam_refresh|hive_router_admin|hive_skills_session|cindertrace_session|MMSID|MMUSERID|MMCSRF"
 		}
 	}
 	handle_path /api/hiveskills/* {
 		reverse_proxy {$HIVESKILLS_ENDPOINT:https://unconfigured.invalid} {
-			import product_backend {$HIVESKILLS_TLS_NAME:unconfigured.invalid}
+			import product_backend {$HIVESKILLS_TLS_NAME:unconfigured.invalid} "__Host-oathweave_sso|iam_refresh|hive_router_admin|hivemem_dash|cindertrace_session|MMSID|MMUSERID|MMCSRF"
 		}
 	}
 	handle_path /api/cindertrace/* {
 		rewrite * /api/v1{uri}
 		reverse_proxy {$CINDERTRACE_ENDPOINT:https://unconfigured.invalid} {
-			import product_backend {$CINDERTRACE_TLS_NAME:unconfigured.invalid}
+			import product_backend {$CINDERTRACE_TLS_NAME:unconfigured.invalid} "__Host-oathweave_sso|iam_refresh|hive_router_admin|hivemem_dash|hive_skills_session|MMSID|MMUSERID|MMCSRF"
 		}
 	}
 	handle_path /api/chattermost/* {
 		reverse_proxy {$CHATTERMOST_ENDPOINT:https://unconfigured.invalid} {
-			import product_backend {$CHATTERMOST_TLS_NAME:unconfigured.invalid}
+			import product_backend {$CHATTERMOST_TLS_NAME:unconfigured.invalid} "__Host-oathweave_sso|iam_refresh|hive_router_admin|hivemem_dash|hive_skills_session|cindertrace_session"
+		}
+	}
+	# Emberfold has an optional co-located HTTP listener. HTTPS terminates here;
+	# its own bearer token remains mandatory and is supplied by the native client.
+	handle_path /api/emberfold/* {
+		reverse_proxy http://emberfold:8096 {
+			header_up -Cookie
+			header_down -Set-Cookie
 		}
 	}
 	# Preserve explicit native model, memory, chat and signed security paths.
 	handle /v1/* {
 		reverse_proxy {$EMBERPATH_API_ENDPOINT:https://unconfigured.invalid} {
-			import product_backend {$EMBERPATH_API_TLS_NAME:unconfigured.invalid}
+			import stateless_backend {$EMBERPATH_API_TLS_NAME:unconfigured.invalid}
 		}
 	}
 	handle_path /memory/* {
 		reverse_proxy {$HIVEMEM_ENDPOINT:https://unconfigured.invalid} {
-			import product_backend {$HIVEMEM_TLS_NAME:unconfigured.invalid}
+			import product_backend {$HIVEMEM_TLS_NAME:unconfigured.invalid} "__Host-oathweave_sso|iam_refresh|hive_router_admin|hive_skills_session|cindertrace_session|MMSID|MMUSERID|MMCSRF"
 		}
 	}
 	handle /api/v4/* {
 		reverse_proxy {$CHATTERMOST_ENDPOINT:https://unconfigured.invalid} {
-			import product_backend {$CHATTERMOST_TLS_NAME:unconfigured.invalid}
+			import product_backend {$CHATTERMOST_TLS_NAME:unconfigured.invalid} "__Host-oathweave_sso|iam_refresh|hive_router_admin|hivemem_dash|hive_skills_session|cindertrace_session"
 		}
 	}
 	handle /api/v1/security-fusion/* {
 		reverse_proxy {$CINDERTRACE_ENDPOINT:https://unconfigured.invalid} {
-			import product_backend {$CINDERTRACE_TLS_NAME:unconfigured.invalid}
+			import product_backend {$CINDERTRACE_TLS_NAME:unconfigured.invalid} "__Host-oathweave_sso|iam_refresh|hive_router_admin|hivemem_dash|hive_skills_session|MMSID|MMUSERID|MMCSRF"
 		}
 	}
 	@unknown_api path /api/* /api-docs/*

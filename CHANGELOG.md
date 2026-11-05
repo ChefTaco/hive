@@ -8,6 +8,20 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Rehearse coordinated identity enrollment and native Hermes streaming with a
+  separately scoped HiveMem plugin, preserving profile credentials through
+  product-owned initialization, exact retry, backup and isolated restore.
+- Bootstrap custom product selections without allocating unselected backend
+  credentials; journal native profile setup before invoking product-owned writes.
+- Expand fresh full-suite browser verification for security investigations,
+  evidence, native chat sessions, attachments, WebSockets and unexpired revocation.
+
+- Verify scoped native Codex Responses streaming through Emberpath, including
+  compressed requests, aliases, protected profiles and cross-product rejection.
+- Keep every product's native session cookies at its owning API; preserve bearer
+  clients, streaming and chat WebSocket transport at shared HTTPS ingress.
+- Rehearse a packaged native Ardent gateway with distinct scoped model and memory
+  identities, private CA verification, preserved profiles and isolated recovery.
 - Verify native artifact versions, bind extracted contents and credential files to
   retries, isolate launcher environments and record explicit product acceptance.
 - Add native-agent acceptance and per-host status summaries; rehearse a packaged

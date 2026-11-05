@@ -13,17 +13,17 @@ source snapshot or passing unit test is not evidence of a production cutover.
 | Gate | State | Evidence required to close |
 | --- | --- | --- |
 | Public source inventory and provenance | Implemented | Per-product provenance.json records source revision and original file hashes |
-| Independent backend builds and tests | In progress | Clean installation, typecheck, build, existing regression suites |
+| Independent backend builds and tests | Local required gates pass | Published images and released contract artifacts remain separate gates |
 | Static HiveXUI extraction | Build/container and synthetic render checks pass | No backend imports; browser render and workflow acceptance |
 | Direct product authorization | Implemented; bounded regression tests pass | Resource audience, permissions, revocation and step-up regression tests |
 | Oathweave browser SSO | Disposable browser workflows pass; restored-account sign-in pending | PKCE, consent, MFA/passkeys, recovery, session/logout acceptance |
-| Memory and workspace workflows | Disposable create/edit/search/delete, policy/membership and archive/restore pass | Remaining advanced memory, queue and integration parity |
-| Security and chat UI consolidation | Candidate modules build; full parity pending | Existing route/workflow parity including files, sockets and approvals |
-| Shell suite lifecycle | Fresh co-located core and lifecycle drills pass; full/multi-host gates pending | Unattended/interactive, resume, multi-host, backup/restore, upgrade tests |
-| Host agent enrollment | Native Magnus artifact/heartbeat/job proof passes; other runtimes pending | Scoped model-agent identities, existing profile preservation and per-runtime acceptance |
+| Memory and workspace workflows | Native advanced operations and suite browser session/webhook/graph checks pass | External webhook delivery and installation-specific acceptance |
+| Security and chat UI consolidation | Fresh suite files/sockets, investigations and native-session revocation pass; expanded chat workflows under browser review | Remaining workflow and migrated-account browser acceptance |
+| Shell suite lifecycle | Core, full and custom distributed SSH installation/recovery drills pass; compatible bundle upgrade/rollback pass | Separate physical-host and installation-specific acceptance |
+| Host agent enrollment | Native Magnus heartbeat/job, Ardent and Codex model access, Hermes streaming and memory plugin pass individually | Integrated recovery, optional consumer wiring and persistent supervision acceptance |
 | External inference | Verified HTTPS fixture and actual Emberpath enrollment/inference pass | Operator-owned endpoint acceptance through protected references; no inference provisioning |
 | Production adoption and migration | Pending | Installation-bound restored backup, single writer, acceptance and recovery proof |
-| Published release and branding | Pending | Verified artifacts, compatibility lock and accurate walkthroughs |
+| Published release and branding | Product directory and guides updated; publication pending | Publisher trust key, reviewed compatibility lock and published immutable artifacts |
 
 ## Source inventory and ownership
 
@@ -40,7 +40,9 @@ recovery engine as build tooling so it does not import another checkout.
 
 Existing Hive services, public packages, tags and recovery procedures remain
 available. Do not remove or reseed an existing deployment to demonstrate progress.
-Independent installations must never share credentials, databases or backups.
+Independent installations must never share product credentials, databases or backups.
+An explicitly selected identity authority may coordinate them through separate
+installation namespaces, with reviewed subjects and product-account links.
 
 ## Workflow parity
 
@@ -97,9 +99,22 @@ candidate images as described in `deployment/README.md` first.
 
 The console has candidate security and chat modules, locally bundled brand fonts,
 light/dark themes and lazy loading. The original Hive console pages are retained
-as a porting baseline. Actor coordination, complete Skills deployment,
-advanced chat administration and all permission/visual/accessibility parity still
-need completion. Existing frontends remain active until those gates pass.
+as a porting baseline. Oathweave now owns installation-scoped actor coordination and product-owned
+atomic credential receipts. Real native enrollment tests now cover exact retry,
+credential rotation, original expiry, old-generation refusal, containment and
+one-time receipt acknowledgement. The migration proposal explicitly retains
+installation namespaces and approved ownership links. Source journals that contain
+no enrollment records are reported empty; synthetic legacy receipts have separate
+import/reseal/expiry checks. Existing-account browser sign-in remains a separate
+operator gate and does not trigger password resets or policy changes.
+
+The Skills API now freezes exact publications, grants expiring one-use approvals
+and delegates native execution to explicitly configured Magnus targets. A real
+packaged agent installs a publication into a disposable profile; duplicate grants
+and an interrupted effect cannot trigger an automatic second execution. Unknown
+outcomes require receipt reconciliation. Unconfigured deployments remain visible
+as unavailable. Full security/chat browser parity and real installation acceptance
+still gate retirement of the retained frontends.
 
 The Bash controller verifies signed manifests and image digests, plans placement,
 checks hosts and applies constrained Compose definitions. Candidate lifecycle
@@ -120,7 +135,15 @@ The core drill also verifies signed bundle upgrade and compatible rollback with
 independent recovery gates and preserved credentials/account links. This proves
 bundle activation with unchanged application/storage versions; it does not certify
 untested application migrations.
-Full/multi-host bootstrap and remaining native runtime integrations remain open.
+Distributed fresh core bootstrap now passes across two real pinned SSH inventories,
+with explicit verified HTTPS endpoints, interrupted activation, stable retry and
+separate recovery. Both inventories use one physical developer host. Full-profile
+bootstrap also passes explicit per-product migrations, an interrupted migration
+whose committed outcome is verified without replay, interrupted activation,
+stable retry, independent backups and isolated restores. Custom selection proves
+that unselected model/memory services and their credentials are omitted, including
+on an ingress-only host. The full drill includes offline integrity checks of all
+three PostgreSQL stores and preservation of a chat post and account links.
 No official suite manifest or publisher trust key has been released.
 This is not an installation or migration release.
 
@@ -170,8 +193,14 @@ registration ordering, idempotence and unknown-outcome handling. Native artifact
 launcher checks preserve existing profiles; they do not prove real agent enrollment.
 The separate `test:suite:agents` rehearsal stages a real packaged Magnus agent,
 verifies authenticated health and a recent heartbeat, and completes an authenticated
-read-only command against a disposable Magnus API. Other runtime acceptance remains
-pending. See `deployment/NATIVE_AGENTS.md` for explicit manual startup and acceptance.
+read-only command against a disposable Magnus API. The core driver additionally proves native Ardent model/memory operations and
+pinned Codex Responses streaming through actual Emberpath. The public Hermes bundle
+has read-only preflight, separately journaled profile initialization and actual
+streaming acceptance. Its product-owned HiveMem plugin proves native provider
+registration and workspace-scoped write/search/delete through an explicit HTTPS
+memory ingress prefix. Remaining integrations retain their own acceptance gates.
+See `deployment/NATIVE_AGENTS.md`
+for explicit manual startup and acceptance.
 `npm run test:suite:lifecycle` exercises the isolated candidate/recovery lifecycle.
 None of these tests contacts or modifies a production installation.
 
@@ -202,26 +231,31 @@ mobile navigation disclosure, Escape focus restoration, reduced-motion preferenc
 and horizontal overflow. Their API/WebSocket fixtures are synthetic. They do not
 establish authenticated browser parity against real migrated product data.
 
-Cindertrace's full workspace privacy walk encounters a pre-existing ignored
-recovery tree. A fresh isolated export matching every indexed source file passes
-the complete `npm run verify` suite, including its privacy walk, with zero findings.
-The exact staged-byte scan also passes. Original recovery state is retained; the
-operational checkout's broad filesystem scan still includes it. These candidate
-checks are not migration or publication approval.
+Cindertrace's workspace privacy walk now excludes its ignored local recovery tree,
+matching the existing runtime-directory exclusions. The separately reviewed
+correction preserves exact staged-index and publication-artifact scans, including
+forbidden recovery paths. Its complete verification suite passes while the original
+recovery state remains retained. The API owns optional local browser sessions and
+preserves existing Redis session keys, revocation generations and throttling; the
+retained console can delegate to it. Real API/console browser interoperability and
+revocation pass in fresh disposable containers. These checks do not authorize
+production identity migration or cutover.
 
 Direct Emberpath browser credentials cannot use retained IAM/Memory/Hive proxy or
 coordinator routes or the legacy documentation paths, even with overly broad
 permission claims. Protected documentation exposes only provider identity fields.
 Browser skill
-deployment mutations return an explicit unavailable state until the Magnus job
-adapter exists. HiveXUI points suite lifecycle work to the controller. Native
+deployment mutations require an explicitly configured Magnus adapter, exact target
+grants and publication approval; absent capabilities remain unavailable.
+HiveXUI points suite lifecycle work to the controller. Native
 compatibility flows remain available for recovery while those replacements are
 completed.
 
 HiveMem account links require an existing active identity and an explicit reviewed
 credential-generation pin for rotated identities. Regressions cover missing and
-disabled accounts, stale pins and native-token rotation. Workspace administration
-and installation-specific mapping acceptance remain pending.
+disabled accounts, stale pins and native-token rotation. Workspace administration and native advanced memory workflows have independent
+regression and browser proof. Installation-specific mapping and real-data acceptance
+remain separate gates.
 
 
 Isolated native-backup candidate acceptance now has a dedicated developer harness
@@ -233,3 +267,13 @@ links stay private. Historical snapshot success does not replace fresh backup,
 complete browser parity, native agent or real external-provider acceptance gates.
 Startup seeding now preserves existing Emberpath provider credentials and routing
 edits; generated documentation synchronization avoids needless writes.
+
+Fresh full-suite browser checks exercise native chat WebSockets, message/thread
+writes, reactions, authenticated attachments, and credential-free file URLs. They
+also exercise signed security ingestion, an investigation revision and preserved
+evidence with dispatch and retention disabled. An unexpired security bearer and
+an existing native chat session work immediately before logout and fail afterward;
+token expiry is not used as revocation evidence. Desktop/mobile checks include
+one main landmark, no horizontal overflow and automated accessibility checks.
+These fresh synthetic checks are distinct from authentication against restored
+historical accounts, and never authorize a production cutover.

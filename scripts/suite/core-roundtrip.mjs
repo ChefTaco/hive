@@ -19,6 +19,10 @@ import { createServer } from 'node:net';
 import { parseEnv } from 'node:util';
 import https from 'node:https';
 import { rehearseExternalProvider } from './core-external-provider.mjs';
+import { rehearseArdent } from './core-ardent.mjs';
+import { rehearseEnrollment } from './core-enrollment.mjs';
+import { rehearseCodex } from './core-codex.mjs';
+import { rehearseHermes } from './core-hermes.mjs';
 const root = resolve(import.meta.dirname, '../..');
 const outputIndex = process.argv.indexOf('--output');
 assert(
@@ -266,23 +270,13 @@ try {
   config.bootstrap.certificateFile = join(output, 'console.crt');
   config.bootstrap.privateKeyFile = join(output, 'console.key');
   config.bootstrap.adminEmail = 'alice@example.com';
-  execute('openssl', [
-    'req',
-    '-x509',
-    '-newkey',
-    'rsa:2048',
-    '-nodes',
-    '-keyout',
-    config.bootstrap.privateKeyFile,
-    '-out',
-    config.bootstrap.certificateFile,
-    '-subj',
-    '/CN=localhost',
-    '-addext',
-    'subjectAltName=DNS:localhost',
-    '-days',
-    '2',
-  ]);
+  const consoleAuthority = join(output, 'console-authority.pem'), consoleAuthorityKey = join(output, 'console-authority.key');
+  execute('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', consoleAuthorityKey, '-out', consoleAuthority, '-subj', '/CN=Synthetic console authority', '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign', '-days', '2']);
+  execute('openssl', ['req', '-new', '-newkey', 'rsa:2048', '-nodes', '-keyout', config.bootstrap.privateKeyFile, '-out', join(output, 'console.csr'), '-subj', '/CN=localhost']);
+  put(join(output, 'console.extensions'), 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\nsubjectAltName=DNS:localhost\n');
+  execute('openssl', ['x509', '-req', '-in', join(output, 'console.csr'), '-CA', consoleAuthority, '-CAkey', consoleAuthorityKey, '-set_serial', '0x' + randomBytes(16).toString('hex'), '-out', config.bootstrap.certificateFile, '-days', '2', '-extfile', join(output, 'console.extensions')]);
+  put(config.bootstrap.certificateFile, readFileSync(config.bootstrap.certificateFile, 'utf8') + readFileSync(consoleAuthority, 'utf8'));
+  chmodSync(consoleAuthorityKey, 0o600);
   chmodSync(config.bootstrap.privateKeyFile, 0o600);
   execute('openssl', ['genpkey', '-algorithm', 'ED25519', '-out', join(output, 'publisher.key')]);
   execute('openssl', [
@@ -465,6 +459,31 @@ try {
       environment,
       docker,
     });
+  const ardentIndex = process.argv.indexOf('--ardent-artifact');
+  if (process.argv.includes('--enrollment')) {
+    assert(process.argv.includes('--external-provider'), 'Coordinated identity acceptance requires the selected external provider fixture');
+    await rehearseEnrollment({ output, origin: config.origin, tokens, certificate: config.bootstrap.certificateFile, disposable: true });
+  }
+  if (ardentIndex >= 0) {
+    assert(process.argv.includes('--external-provider'), 'Native Ardent proof requires the selected external provider fixture');
+    assert(process.argv[ardentIndex + 1], 'A protected Ardent artifact descriptor is required');
+    await rehearseArdent({ root, output, owned, origin: config.origin, artifactFile: resolve(process.argv[ardentIndex + 1]),
+      tokens, request, certificate: config.bootstrap.certificateFile, privateKey: config.bootstrap.privateKeyFile, environment });
+  }
+  const codexIndex = process.argv.indexOf('--codex-artifact');
+  if (codexIndex >= 0) {
+    assert(process.argv.includes('--external-provider'), 'Native Codex proof requires the selected external provider fixture');
+    assert(process.argv[codexIndex + 1], 'A protected Codex artifact descriptor is required');
+    await rehearseCodex({ root, output, origin: config.origin, artifactFile: resolve(process.argv[codexIndex + 1]), tokens, request, certificate: config.bootstrap.certificateFile, privateKey: config.bootstrap.privateKeyFile, environment });
+  }
+  const hermesIndex = process.argv.indexOf('--hermes-artifact');
+  if (hermesIndex >= 0) {
+    assert(process.argv.includes('--external-provider'), 'Native Hermes proof requires the selected external provider fixture');
+    assert(process.argv[hermesIndex + 1], 'A protected Hermes artifact descriptor is required');
+    if (process.argv.includes('--hivemem-plugin-artifact')) assert(process.argv[process.argv.indexOf('--hivemem-plugin-artifact') + 1], 'A protected HiveMem plugin descriptor is required');
+    await rehearseHermes({ root, output, origin: config.origin, artifactFile: resolve(process.argv[hermesIndex + 1]),
+      ...(process.argv.includes('--hivemem-plugin-artifact') ? { pluginArtifactFile: resolve(process.argv[process.argv.indexOf('--hivemem-plugin-artifact') + 1]) } : {}), tokens, request, certificate: config.bootstrap.certificateFile, privateKey: config.bootstrap.privateKeyFile, environment });
+  }
   for (const [product, path] of Object.entries(routes)) {
     const result = await request(path, null, { Authorization: 'Bearer ' + tokens[product] });
     assert.equal(result.status, 200, 'Fresh receiving product authorization failed: ' + product);
@@ -613,6 +632,9 @@ try {
       ...(process.argv.includes('--external-provider')
         ? ['external HTTPS verification and real Emberpath enrollment/inference']
         : []),
+      ...(process.argv.includes('--ardent-artifact') ? ['native Ardent authenticated gateway, scoped inference and memory identity'] : []),
+      ...(process.argv.includes('--codex-artifact') ? ['native Codex scoped Responses streaming through Emberpath'] : []),
+      ...(process.argv.includes('--hermes-artifact') ? ['native Hermes scoped ChatCompletions streaming through Emberpath'] : []),
       ...(process.argv.includes('--lifecycle')
         ? ['signed bundle upgrade and compatible rollback with stable identities']
         : []),
@@ -652,7 +674,11 @@ try {
 } finally {
   if (closeExternalProvider) await closeExternalProvider();
   for (const file of [
-    join(owned, 'rehearsals/core-proof/isolated.json'),
+    ...(existsSync(join(owned, 'rehearsals'))
+      ? readdirSync(join(owned, 'rehearsals'))
+          .filter(name => /^[a-z0-9][a-z0-9-]*$/.test(name))
+          .map(name => join(owned, 'rehearsals', name, 'isolated.json'))
+      : []),
     ...(existsSync(owned)
       ? readdirSync(owned)
           .filter((name) => /^bootstrap\..*\.compose\.json$/.test(name))
