@@ -1,0 +1,24 @@
+{
+  "name": "hive-registry",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Hive Registry: the per-installation install catalog and lookup API. Not the HiveSkills skills registry.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": "^24.22.1 || ^26.13.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --disable-warning=ExperimentalWarning --test dist/*.test.js",
+    "start": "node --disable-warning=ExperimentalWarning dist/server.js"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}
