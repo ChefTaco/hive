@@ -22,6 +22,17 @@ HiveXUI is the single browser UI for every Hive:Magnus product.
   without changing stored policy. Throttling stays enabled at a high ceiling, and the
   relaxed state is visible in the plan, status and console.
 
+Decisions on the Magnus console port:
+
+- Web terminal: a separate gateway holds the SSH key, never the browser. Access requires
+  an administrator link, `magnus:terminal` and fresh identity verification, and gets a
+  security review before release.
+- Removed: switching between multiple control nodes (each installation has one API and
+  its own console) and the embedded Hermes dashboard.
+- Skills: HiveSkills is the only registry. The Magnus module shows installed Skills per node.
+- The standalone Magnus console is deprecated after the HiveXUI module passes browser
+  acceptance. Published versions stay available.
+
 The operator has authorized publishing, restarting services and production impact.
 Passing tests do not by themselves establish acceptance; review what the screens show.
 
