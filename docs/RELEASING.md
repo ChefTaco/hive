@@ -26,9 +26,11 @@ when run from any other controller source, so install from a checkout of the rel
    lists the platforms each image must provide.
 2. **Publish the suite images.** The Hive Registry and the ingress are built from this repository.
    Merge the release candidate to `main`, then run *Actions > Suite release > Run workflow* on
-   `main` with the version and `dry_run` off. It builds and executes both architectures, then
-   publishes `ghcr.io/cheftaco/hive-registry:X.Y.Z` and `ghcr.io/cheftaco/hive-ingress:X.Y.Z` with
-   provenance, an SBOM and an attestation. An existing tag is never rebuilt.
+   `main` with an image version and `dry_run` off. It builds and executes both architectures, then
+   publishes `ghcr.io/cheftaco/hive-registry:V` and `ghcr.io/cheftaco/hive-ingress:V` with
+   provenance, an SBOM and an attestation. The image version is normally the suite version. An
+   existing tag is never rebuilt: an image fixed before the suite tag takes the next patch version,
+   and the inputs file names that tag.
 3. **Build the manifest.** With every controller runtime change committed:
 
    ```bash
@@ -54,7 +56,7 @@ when run from any other controller source, so install from a checkout of the rel
    profiles, and with `--registry` resolves every pinned digest.
 6. **Commit and tag.** Commit the manifest, the signature and any documentation, and let CI pass
    on `main`. Then push the tag `vX.Y.Z`. The *Suite release* workflow checks the tagged tree again
-   and checks the suite image digests against the published tags. Then it publishes the GitHub
+   and checks every pinned digest against the published tag named in the inputs file. Then it publishes the GitHub
    release with the manifest, the signature and the publisher key attached.
 7. **Make new packages public.** A first push to GitHub Container Registry creates a private
    package. Set every new package to public before announcing the release.
