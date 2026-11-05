@@ -211,7 +211,8 @@ async function createSession(browser) {
         const x = box.left + box.width / 2, y = box.top + box.height / 2;
         if (!element.checkVisibility({ visibilityProperty: true, contentVisibilityAuto: true }) || !box.width || !box.height || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return [];
         const top = document.elementFromPoint(x, y);
-        if (!top || element === top || element.contains(top) || top.contains(element)) return [];
+        // A visually hidden input is operated through its label.
+        if (!top || element === top || element.contains(top) || top.contains(element) || element.closest('label')?.contains(top)) return [];
         return [`${element.tagName.toLowerCase()} "${(element.getAttribute('aria-label') ?? element.textContent ?? '').trim().slice(0, 30)}" under ${top.tagName.toLowerCase()}.${String(top.className).slice(0, 30)}`];
       }),
     }));
