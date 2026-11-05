@@ -20,6 +20,9 @@ const execute = promisify(execFile), root = resolve(import.meta.dirname, '../..'
 function argument(name) { const index = process.argv.indexOf(name); assert(index >= 0 && process.argv[index + 1], name + ' is required'); return resolve(process.argv[index + 1]); }
 // --template-release is optional: by default the core contract comes from release-contracts.mjs.
 const output = argument('--output'), template = process.argv.includes('--template-release') ? argument('--template-release') : null;
+// --published-release installs an already published, signed manifest (FILE, FILE.sig and the
+// trust key given by --published-trust-key) exactly as released: no local registry or candidate images.
+const published = process.argv.includes('--published-release') ? argument('--published-release') : null, publishedTrust = published ? argument('--published-trust-key') : null;
 assert(!existsSync(output), 'Select a new protected evidence directory');
 assert(/^\/[A-Za-z0-9_./-]+$/.test(output));
 assert.notEqual(process.getuid(), 0, 'Use an unprivileged operator with Docker access');
@@ -52,22 +55,28 @@ async function hive(command, ...args) {
 try {
   const gateway = JSON.parse(docker('network', 'inspect', 'bridge'))[0].IPAM.Config[0].Gateway;
   assert(/^\d+\.\d+\.\d+\.\d+$/.test(gateway));
-  const manifest = template ? JSON.parse(readFileSync(template, 'utf8')) : coreRelease({ version: '0.1.0', images: Object.fromEntries(CORE_PRODUCTS.map(name => [name, 'pending'])), user: `${process.getuid()}:${process.getgid()}` });
-  delete manifest.components['hive-registry'];
-  const expected = ['emberpath', 'hivemem', 'hivemem-qdrant', 'hiveskills', 'hivexui', 'ingress', 'oathweave', 'oathweave-redis'];
-  assert.deepEqual(Object.keys(manifest.components).sort(), expected, 'Template must contain the reviewed eight-component core fixture contract only');
-  if (selection) assert(selection.every(name=>[...expected,'hive-registry'].includes(name)),'This custom developer fixture accepts reviewed core product components only');
-  manifest.version = '0.1.0'; manifest.profiles = { core: [...expected,'hive-registry'], full: [...expected,'hive-registry'] };
-  docker('run', '-d', '--name', registryName, '--user', `${process.getuid()}:${process.getgid()}`, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--tmpfs', '/var/lib/registry:uid=' + process.getuid() + ',gid=' + process.getgid() + ',mode=700', '-p', '127.0.0.1:' + registryPort + ':5000', 'registry@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373');
-  manifest.components['hive-registry'] = hiveRegistryComponent('pending', `${process.getuid()}:${process.getgid()}`);
-  for (const product of ['oathweave', 'emberpath', 'hivemem', 'hiveskills', 'hivexui', 'ingress', 'hive-registry']) {
-    const tag = registry + '/' + id + '/' + product + ':candidate'; tags.push(tag);
-    docker('tag', product === 'ingress' ? 'hive-ingress:candidate' : product + ':candidate', tag); docker('push', tag);
-    manifest.components[product].image = JSON.parse(docker('image', 'inspect', tag, '--format', '{{json .RepoDigests}}')).find(value => value.startsWith(registry + '/' + id + '/' + product + '@sha256:'));
-    assert(manifest.components[product].image);
+  let manifest;
+  if (published) {
+    assert(!interactive && !selection, 'A published release is installed unattended with a profile');
+    manifest = JSON.parse(readFileSync(published, 'utf8'));
+  } else {
+    manifest = template ? JSON.parse(readFileSync(template, 'utf8')) : coreRelease({ version: '0.1.0', images: Object.fromEntries(CORE_PRODUCTS.map(name => [name, 'pending'])), user: `${process.getuid()}:${process.getgid()}` });
+    delete manifest.components['hive-registry'];
+    const expected = ['emberpath', 'hivemem', 'hivemem-qdrant', 'hiveskills', 'hivexui', 'ingress', 'oathweave', 'oathweave-redis'];
+    assert.deepEqual(Object.keys(manifest.components).sort(), expected, 'Template must contain the reviewed eight-component core fixture contract only');
+    if (selection) assert(selection.every(name=>[...expected,'hive-registry'].includes(name)),'This custom developer fixture accepts reviewed core product components only');
+    manifest.version = '0.1.0'; manifest.profiles = { core: [...expected,'hive-registry'], full: [...expected,'hive-registry'] };
+    docker('run', '-d', '--name', registryName, '--user', `${process.getuid()}:${process.getgid()}`, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--tmpfs', '/var/lib/registry:uid=' + process.getuid() + ',gid=' + process.getgid() + ',mode=700', '-p', '127.0.0.1:' + registryPort + ':5000', 'registry@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373');
+    manifest.components['hive-registry'] = hiveRegistryComponent('pending', `${process.getuid()}:${process.getgid()}`);
+    for (const product of ['oathweave', 'emberpath', 'hivemem', 'hiveskills', 'hivexui', 'ingress', 'hive-registry']) {
+      const tag = registry + '/' + id + '/' + product + ':candidate'; tags.push(tag);
+      docker('tag', product === 'ingress' ? 'hive-ingress:candidate' : product + ':candidate', tag); docker('push', tag);
+      manifest.components[product].image = JSON.parse(docker('image', 'inspect', tag, '--format', '{{json .RepoDigests}}')).find(value => value.startsWith(registry + '/' + id + '/' + product + '@sha256:'));
+      assert(manifest.components[product].image);
+    }
+    if (full) extendFullFixture({ manifest, registry, id, tags, docker, user: `${process.getuid()}:${process.getgid()}` });
+    applySuiteCatalog(manifest);
   }
-  if (full) extendFullFixture({ manifest, registry, id, tags, docker, user: `${process.getuid()}:${process.getgid()}` });
-  applySuiteCatalog(manifest);
   for (const name of ['host', 'client', 'wrong-host']) run('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', join(output, name)]);
   put(join(output, 'authorized_keys'), readFileSync(join(output, 'client.pub')));
   const known = '[127.0.0.1]:' + sshPort + ' ' + readFileSync(join(output, 'host.pub'), 'utf8'); put(join(output, 'known_hosts'), known);
@@ -111,8 +120,15 @@ fi
   }
   for (const product of ['oathweave', 'emberpath', 'hivemem', 'hiveskills', ...(full ? ['magnus', 'cindertrace', 'chattermost'] : []), ...(magnusGateway ? ['magnus-gateway'] : [])].filter(selected)) config.bootstrap.productEndpoints[product] = { origin: 'https://' + gateway + ':' + await port(), bindAddress: gateway, certificateFile: join(output, 'server.crt'), privateKeyFile: join(output, 'server.key'), ...(product === 'emberpath' ? { inferenceOrigin: 'https://' + gateway + ':' + await port() } : {}) };
   run('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', config.bootstrap.privateKeyFile, '-out', config.bootstrap.certificateFile, '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:' + gateway, '-days', '2']); chmodSync(config.bootstrap.privateKeyFile, 0o600);
+  if (published) {
+    // The signed bytes, signature and publisher key exactly as released.
+    config.release = manifest.version;
+    put(join(output, 'publisher.pub'), readFileSync(publishedTrust)); put(manifestFile, readFileSync(published)); put(manifestFile + '.sig', readFileSync(published + '.sig'));
+    put(configFile, config);
+  } else {
   run('openssl', ['genpkey', '-algorithm', 'ED25519', '-out', join(output, 'publisher.key')]); run('openssl', ['pkey', '-in', join(output, 'publisher.key'), '-pubout', '-out', join(output, 'publisher.pub')]);
   if(!interactive)put(configFile, config); put(manifestFile, manifest); run('openssl', ['pkeyutl', '-sign', '-inkey', join(output, 'publisher.key'), '-rawin', '-in', manifestFile, '-out', manifestFile + '.sig']);
+  }
   if(interactive) {
     assert(full && !selection,'Interactive developer acceptance selects the full profile');
     const questions=[['Installation name',id],['Installation directory on the selected host',consoleDirectory],['Host SSH target',username+'@control.example.com'],['Host architecture',process.arch==='arm64'?'arm64':'amd64'],['Console HTTPS origin',config.origin],['Product profile','full'],['HTTPS bind address','127.0.0.1'],['HTTPS listener port',String(consolePort)],['Configuration mode','distributed'],['Initial operator username','admin'],['Initial operator email','alice@example.com'],['Existing console certificate file',config.bootstrap.certificateFile],['Protected console private key file',config.bootstrap.privateKeyFile],['Deploy the Magnus web terminal gateway','no'],['Existing external inference HTTPS endpoint',''],['Opt-in native agent runtime',''],['Product trust bundle file available on every host',config.bootstrap.trustBundleFile]];
