@@ -15,7 +15,7 @@
 //
 // FILE is JSON holding {origin, username, password}. TLS verification is relaxed
 // only for the browser under test, and only for the explicit origin's certificate.
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -32,6 +32,8 @@ const { values: args } = parseArgs({
     'playwright-from': { type: 'string' },
     'settle-timeout': { type: 'string', default: '45000' },
     'quiet-ms': { type: 'string', default: '900' },
+    products: { type: 'string' },
+    'deep-links': { type: 'string' },
   },
 });
 if (!args.credentials || !args.output) {
@@ -45,6 +47,11 @@ mkdirSync(output, { recursive: true, mode: 0o700 });
 const require = createRequire(resolve(args['playwright-from'] ?? process.cwd()) + '/');
 const { chromium } = require('@playwright/test');
 
+const productSets = (args.products ?? 'all').split(';').map((entry) => {
+  const [name, list] = entry.split('=');
+  return { name, products: list === undefined ? null : list.split(',') };
+});
+let activeProducts = null;
 const VIEWPORTS = { desktop: { width: 1440, height: 1000 }, mobile: { width: 390, height: 844 } };
 const SETTLE_TIMEOUT = Number(args['settle-timeout']);
 const QUIET_MS = Number(args['quiet-ms']);
@@ -77,6 +84,15 @@ async function createSession(browser) {
       return route.fulfill({ path: file.startsWith(root) && existsSync(file) && !statSync(file).isDirectory() ? file : join(root, 'index.html') });
     });
   }
+  await context.route(`${origin}/runtime.json`, async (route) => {
+    const response = await route.fetch();
+    const config = await response.json();
+    if (activeProducts) {
+      config.products = Object.fromEntries(Object.entries(config.products).filter(([name]) => activeProducts.includes(name)));
+      config.identity.clients = Object.fromEntries(Object.entries(config.identity.clients).filter(([name]) => activeProducts.includes(name)));
+    }
+    return route.fulfill({ response, json: config, headers: { ...response.headers(), 'cache-control': 'no-store' } });
+  });
   if (args.fault)
     await context.route(`**${args.fault}/**`, (route) => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"INJECTED_FAULT"}' }));
   page.on('pageerror', (error) => events.pageErrors.push(String(error)));
@@ -85,7 +101,12 @@ async function createSession(browser) {
     if (message.type() === 'error' && !/Failed to load resource/.test(message.text()))
       events.consoleErrors.push(message.text().slice(0, 400));
   });
+  const apiCalls = new Set();
   page.on('request', (request) => {
+    // A document being replaced can never report completion of its in-flight requests.
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) { state.inflight.clear(); }
+    const { pathname } = new URL(request.url());
+    if (pathname.startsWith('/api/')) apiCalls.add(pathname.split('/').slice(0, 3).join('/'));
     state.inflight.set(request, request.url());
     state.lastActivity = Date.now();
   });
@@ -175,7 +196,9 @@ async function createSession(browser) {
     const settled = await settle();
     const facts = await page.evaluate(() => ({
       title: document.querySelector('.topbar .title')?.textContent?.trim() ?? document.querySelector('h1')?.textContent?.trim() ?? '',
-      alerts: [...document.querySelectorAll('[role="alert"], .error-banner')].map((element) => element.textContent?.trim().slice(0, 300)).filter(Boolean),
+      nav: [...document.querySelectorAll('nav.nav .nav-group')].map((group) => [group.querySelector('.nav-group-label')?.textContent?.trim(), ...[...group.querySelectorAll('.nav-item span:first-of-type')].map((item) => item.textContent?.trim())].join(': ')),
+      url: location.pathname + location.search,
+      alerts: [...document.querySelectorAll('[role="alert"], .error-banner, .sync-warning')].map((element) => element.textContent?.trim().slice(0, 300)).filter(Boolean),
       unavailable: [...document.querySelectorAll('h2, h3, .panel-title')].map((element) => element.textContent?.trim()).filter((text) => /unconfigured|unavailable|not configured/i.test(text ?? '')),
       mains: document.querySelectorAll('main').length,
       overflow: document.documentElement.scrollWidth > innerWidth + 1,
@@ -186,7 +209,7 @@ async function createSession(browser) {
       obstructed: [...document.querySelectorAll('button, a[href], input, select, textarea')].flatMap((element) => {
         const box = element.getBoundingClientRect();
         const x = box.left + box.width / 2, y = box.top + box.height / 2;
-        if (!box.width || !box.height || getComputedStyle(element).visibility === 'hidden' || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return [];
+        if (!element.checkVisibility({ visibilityProperty: true, contentVisibilityAuto: true }) || !box.width || !box.height || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return [];
         const top = document.elementFromPoint(x, y);
         if (!top || element === top || element.contains(top) || top.contains(element)) return [];
         return [`${element.tagName.toLowerCase()} "${(element.getAttribute('aria-label') ?? element.textContent ?? '').trim().slice(0, 30)}" under ${top.tagName.toLowerCase()}.${String(top.className).slice(0, 30)}`];
@@ -289,14 +312,35 @@ async function createSession(browser) {
       return { name, crash: String(error), rows, offOrigin: [...events.offOrigin] };
     }
   }
-  return { signIn, walk, stepUps, close: () => context.close() };
+  async function deepLink(name, theme, url) {
+    return capture(name, theme, 'link' + url, () => page.goto(origin + url));
+  }
+  return { signIn, walk, deepLink, stepUps, apiCalls, close: () => context.close() };
 }
 
-const browser = await chromium.launch({ headless: true });
+// Pages fulfilled by --ui-dist have no network address space, so Chromium would treat
+// their same-origin WebSocket as a local network request. Real deployments are unaffected.
+const browser = await chromium.launch({ headless: true, args: args['ui-dist'] ? ['--disable-features=LocalNetworkAccessChecks'] : [] });
 const session = await createSession(browser);
 await session.signIn();
 const results = [];
-for (const name of args.matrix.split(',')) results.push(await session.walk(name));
+const sets = [];
+for (const set of productSets) {
+  activeProducts = set.products;
+  session.apiCalls.clear();
+  for (const name of args.matrix.split(',')) {
+    const run = await session.walk(name);
+    run.name = `${set.name}-${name}`;
+    for (const row of run.rows) { const from = join(output, row.screenshot); const to = `${set.name}-${row.screenshot}`; renameSync(from, join(output, to)); row.screenshot = to; }
+    results.push(run);
+    const [, theme] = name.split('-');
+    for (const url of args['deep-links']?.split(',') ?? []) {
+      const row = await session.deepLink(`${set.name}-${name}`, theme, url);
+      run.rows.push(row);
+    }
+  }
+  sets.push({ set: set.name, products: set.products, apiCalls: [...session.apiCalls].sort() });
+}
 await session.close();
 await browser.close();
 
@@ -313,6 +357,7 @@ const summary = {
   views: results.reduce((total, run) => total + run.rows.length, 0),
   findings,
   stepUps: session.stepUps.length,
+  sets,
   runs: results,
 };
 writeFileSync(join(output, 'walkthrough.json'), JSON.stringify(summary, null, 2) + '\n', { mode: 0o600 });
