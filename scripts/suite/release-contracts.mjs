@@ -5,14 +5,16 @@
 // Callers supply only exact image references and the service owner.
 import { hiveRegistryComponent } from './suite-catalog.mjs';
 
-// Upstream datastore images, pinned to the multi-architecture index digest the proofs ran.
+// Datastore images: the hardened builds in deployment/datastores (deployment/images.json),
+// published from this repository and pinned to their multi-architecture index digests.
+// Each is the upstream image at an exact digest with unused, vulnerable tooling removed.
 export const DATASTORE_IMAGES = Object.freeze({
-  redis: 'redis@sha256:5fa2edb1e408fa8235e6db8fab01d1afaaae96c9403ba67b70feceb8661e8621', // 8.2.1
-  qdrant: 'qdrant/qdrant@sha256:45f8e3ddc2570a4d029877e1b5ec1045c19b3852b4e22a55c7f43b05aea0ca89', // v1.18.1
-  postgres17: 'postgres@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f', // 17.11
-  postgres18: 'postgres@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336', // 18.6
+  redis: 'ghcr.io/cheftaco/hive-redis@sha256:91cbdfcaf13a1c9c06fc168ddf0a1fafc5d4a1efadfc9b613ca7a366407880f2', // 8.2.10-1
+  qdrant: 'ghcr.io/cheftaco/hive-qdrant@sha256:31c04aefc86c20c52dfb8916ba5b3327a04ad32dc6303485dde18f1a48d0b20a', // 1.18.3-1
+  postgres17: 'ghcr.io/cheftaco/hive-postgres@sha256:3afbd9fd4bac38bb0336462a02bd9013a61e10a1d682f75267ba3b765bee7a8d', // 17.11-1
+  postgres18: 'ghcr.io/cheftaco/hive-postgres@sha256:83aa72178c7bdb4b056249985447fcb36aa0cf5137b98344d85ccd99e40cd0e0', // 18.6-1
 });
-export const DATASTORE_VERSIONS = Object.freeze({ redis: '8.2.1', qdrant: '1.18.1', postgres17: '17.11', postgres18: '18.6' });
+export const DATASTORE_VERSIONS = Object.freeze({ redis: '8.2.10', qdrant: '1.18.3', postgres17: '17.11', postgres18: '18.6' });
 
 // Product images each profile needs. chat-migrator is ChatterMost's initialization image.
 export const CORE_PRODUCTS = Object.freeze(['hive-registry', 'oathweave', 'emberpath', 'hivemem', 'hiveskills', 'hivexui', 'ingress']);

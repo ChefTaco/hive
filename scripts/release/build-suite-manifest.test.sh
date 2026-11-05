@@ -19,7 +19,7 @@ jq -e '
   (.profiles.full|length)==18 and (.profiles.core|length)==9 and
   .components.chattermost.initialization.image==("ghcr.io/example/chattermost-migrator@"+("sha256:"+("0"*63)+"7")) and
   .components["magnus-postgres"].version=="17.11" and .components["cindertrace-postgres"].version=="18.6" and
-  .components["oathweave-redis"].version=="8.2.1" and .components["hivemem-qdrant"].version=="1.18.1" and
+  .components["oathweave-redis"].version=="8.2.10" and .components["hivemem-qdrant"].version=="1.18.3" and
   all(.components[]; .catalog!=null and (.image|test("@sha256:[a-f0-9]{64}$")))
 ' "$temporary/release.json" >/dev/null || { echo 'Generated manifest misses a reviewed contract' >&2; exit 1; }
 openssl genpkey -algorithm ED25519 -out "$temporary/publisher.key" 2>/dev/null
