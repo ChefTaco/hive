@@ -1,0 +1,174 @@
+// The reviewed service contracts of a suite release manifest: services, private networks,
+// datastores, storage formats and initialization commands. Published releases
+// (scripts/release/build-suite-manifest.mjs) and the disposable developer proofs build
+// their manifests from here, so the contract a proof exercises is the one that ships.
+// Callers supply only exact image references and the service owner.
+import { hiveRegistryComponent } from './suite-catalog.mjs';
+
+// Upstream datastore images, pinned to the multi-architecture index digest the proofs ran.
+export const DATASTORE_IMAGES = Object.freeze({
+  redis: 'redis@sha256:5fa2edb1e408fa8235e6db8fab01d1afaaae96c9403ba67b70feceb8661e8621', // 8.2.1
+  qdrant: 'qdrant/qdrant@sha256:45f8e3ddc2570a4d029877e1b5ec1045c19b3852b4e22a55c7f43b05aea0ca89', // v1.18.1
+  postgres17: 'postgres@sha256:31ba9c94a03ada9988f2bb493a22a75eef3a185884533e5cdbcd498ea835b08f', // 17.11
+  postgres18: 'postgres@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336', // 18.6
+});
+export const DATASTORE_VERSIONS = Object.freeze({ redis: '8.2.1', qdrant: '1.18.1', postgres17: '17.11', postgres18: '18.6' });
+
+// Product images each profile needs. chat-migrator is ChatterMost's initialization image.
+export const CORE_PRODUCTS = Object.freeze(['hive-registry', 'oathweave', 'emberpath', 'hivemem', 'hiveskills', 'hivexui', 'ingress']);
+export const FULL_PRODUCTS = Object.freeze(['magnus', 'cindertrace', 'chattermost', 'chat-migrator', 'emberfold', 'magnus-gateway']);
+// HiveXUI's nginx image runs as its own unprivileged account.
+export const STATIC_UI_USER = '101:101';
+
+const health = (command) => ({ test: ['CMD', ...command], interval: '2s', timeout: '5s', retries: 40, start_period: '5s' });
+const need = (images, name) => images[name] ?? (() => { throw Error('Release contract needs an image for ' + name); })();
+
+function redisComponent(image, user, network) {
+  return {
+    image,
+    kind: 'datastore',
+    storageFormat: 'redis-aof-v1',
+    service: {
+      user,
+      command: ['redis-server', '/config/redis.conf'],
+      networks: [network],
+      healthcheck: {
+        test: ['CMD-SHELL', 'REDISCLI_AUTH="$(sed -n "s/^requirepass //p" /config/redis.conf)" redis-cli --no-auth-warning ping | grep -q PONG'],
+        interval: '2s',
+        timeout: '3s',
+        retries: 20,
+      },
+    },
+  };
+}
+
+// The nine core components: the mandatory registry, identity, models, memory, skills,
+// the console and ingress, and the private identity and memory stores.
+export function coreRelease({ version, images, user, registryVersion }) {
+  const app = (name, network, dependencies) => ({
+    image: need(images, name),
+    storageFormat: name + '-v1',
+    kind: 'application',
+    service: {
+      user,
+      healthcheck: { test: ['CMD', 'node', '/app/healthcheck.mjs'], interval: '2s', timeout: '4s', start_period: '2s', retries: 30 },
+      networks: ['default', ...(network ? [network] : [])],
+      ...(dependencies ? { depends_on: Object.fromEntries(dependencies.map((name) => [name, { condition: 'service_healthy' }])) } : {}),
+    },
+    ...(dependencies ? { requiresLocal: dependencies } : {}),
+  });
+  const components = {
+    'hive-registry': hiveRegistryComponent(need(images, 'hive-registry'), user, ...(registryVersion ? [registryVersion] : [])),
+    oathweave: app('oathweave', 'identity-data', ['oathweave-redis']),
+    emberpath: app('emberpath'),
+    hivemem: app('hivemem', 'memory-data', ['hivemem-qdrant']),
+    hiveskills: app('hiveskills'),
+    hivexui: {
+      image: need(images, 'hivexui'),
+      kind: 'static-ui',
+      service: {
+        user: STATIC_UI_USER,
+        healthcheck: { test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8080/'], interval: '2s', timeout: '3s', retries: 20 },
+      },
+    },
+    ingress: {
+      image: need(images, 'ingress'),
+      kind: 'ingress',
+      requiresLocal: ['hivexui'],
+      service: {
+        user,
+        command: ['caddy', 'run', '--config', '/config/Caddyfile', '--adapter', 'caddyfile'],
+        healthcheck: { test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8081/ready'], interval: '2s', timeout: '3s', retries: 20 },
+        depends_on: { hivexui: { condition: 'service_healthy' } },
+      },
+    },
+    'oathweave-redis': redisComponent(images['oathweave-redis'] ?? DATASTORE_IMAGES.redis, user, 'identity-data'),
+    'hivemem-qdrant': {
+      image: images['hivemem-qdrant'] ?? DATASTORE_IMAGES.qdrant,
+      kind: 'datastore',
+      storageFormat: 'qdrant-v1.18.1',
+      service: {
+        user,
+        working_dir: '/data',
+        entrypoint: ['/qdrant/qdrant'],
+        command: ['--config-path', '/config/qdrant.yaml'],
+        networks: ['memory-data'],
+        healthcheck: {
+          test: ['CMD', 'bash', '-ec', 'exec 3<>/dev/tcp/127.0.0.1/6333; printf "GET /readyz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n" >&3; IFS= read -r status <&3; [[ "$$status" == *" 200 "* ]]'],
+          interval: '2s',
+          timeout: '3s',
+          retries: 20,
+        },
+      },
+    },
+  };
+  const names = Object.keys(components).sort();
+  return {
+    schema: 1,
+    version,
+    profiles: { core: names, full: [...names] },
+    networks: { 'identity-data': { driver: 'bridge', internal: true }, 'memory-data': { driver: 'bridge', internal: true } },
+    components,
+  };
+}
+
+// Adds Magnus, Cindertrace, ChatterMost (each with private PostgreSQL, and Redis for the
+// first two), the Emberfold service and the optional Magnus fleet gateway, which is
+// offered but never part of a profile.
+export function addFullComponents(manifest, { images, user }) {
+  for (const [product, database, role, postgres, major] of [
+    ['magnus', 'magnus', 'magnus', images['magnus-postgres'] ?? DATASTORE_IMAGES.postgres17, '17'],
+    ['cindertrace', 'cindertrace', 'cindertrace', images['cindertrace-postgres'] ?? DATASTORE_IMAGES.postgres18, '18'],
+    ['chattermost', 'chattermost', 'chattermost_app', images['chattermost-postgres'] ?? DATASTORE_IMAGES.postgres17, '17'],
+  ]) {
+    const network = product + '-data';
+    manifest.networks[network] = { driver: 'bridge', internal: true };
+    manifest.components[product + '-postgres'] = {
+      image: postgres,
+      kind: 'datastore',
+      storageFormat: product + '-postgres-' + major,
+      service: {
+        user,
+        tmpfs: ['/var/run/postgresql'],
+        environment: { PGDATA: '/data/pgdata', POSTGRES_DB: database, POSTGRES_USER: role, POSTGRES_PASSWORD_FILE: '/config/password', POSTGRES_INITDB_ARGS: '--data-checksums' },
+        // ChatterMost's container expects the database at the DNS name postgres.
+        networks: product === 'chattermost' ? { [network]: { aliases: ['postgres'] } } : [network],
+        healthcheck: health(['pg_isready', '-h', '127.0.0.1', '-U', role, '-d', database]),
+      },
+    };
+    if (product !== 'chattermost') manifest.components[product + '-redis'] = redisComponent(images[product + '-redis'] ?? manifest.components['oathweave-redis'].image, user, network);
+    const dependencies = { [product + '-postgres']: { condition: 'service_healthy' }, ...(product === 'chattermost' ? {} : { [product + '-redis']: { condition: 'service_healthy' } }) };
+    const healthcheck = product === 'chattermost'
+      ? health(['node', 'dist/scripts/container.js', 'health'])
+      : health(['node', '-e', `fetch('https://localhost:${product === 'magnus' ? 4000 : 4101}/${product === 'cindertrace' ? 'ready' : ''}').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))`]);
+    const initialization = product === 'magnus'
+      ? { image: need(images, 'magnus'), command: ['migrate'], verificationCommand: ['verify-initialization'] }
+      : product === 'cindertrace'
+        ? { image: need(images, 'cindertrace'), command: ['node', 'scripts/apply-migrations.mjs'], verificationCommand: ['node', 'scripts/apply-migrations.mjs', '--verify-current'], workingDirectory: '/app/services/security-fusion' }
+        : { image: need(images, 'chat-migrator'), command: ['migrate'], verificationCommand: ['validate-current'] };
+    manifest.components[product] = {
+      image: need(images, product),
+      kind: 'application',
+      storageFormat: product + '-v1',
+      requiresLocal: Object.keys(dependencies),
+      service: { user, networks: ['default', network], depends_on: dependencies, healthcheck },
+      initialization,
+    };
+  }
+  manifest.components.emberfold = {
+    image: need(images, 'emberfold'),
+    kind: 'application',
+    storageFormat: 'emberfold-stateless-v1',
+    service: { user, healthcheck: health(['node', '-e', "fetch('http://127.0.0.1:8096/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]) },
+  };
+  // Offered, but no profile selects it: the web terminal is an explicit opt-in.
+  manifest.components['magnus-gateway'] = {
+    image: need(images, 'magnus-gateway'),
+    kind: 'application',
+    storageFormat: 'magnus-gateway-known-hosts-v1',
+    requiresLocal: ['magnus'],
+    service: { user, depends_on: { magnus: { condition: 'service_healthy' } }, healthcheck: health(['magnus-fleet-gateway', 'healthcheck']) },
+  };
+  manifest.profiles.full = Object.keys(manifest.components).filter((name) => name !== 'magnus-gateway').sort();
+  return manifest;
+}

@@ -23,7 +23,8 @@ import { rehearseArdent } from './core-ardent.mjs';
 import { rehearseEnrollment } from './core-enrollment.mjs';
 import { rehearseCodex } from './core-codex.mjs';
 import { rehearseHermes } from './core-hermes.mjs';
-import { applySuiteCatalog, hiveRegistryComponent } from './suite-catalog.mjs';
+import { applySuiteCatalog } from './suite-catalog.mjs';
+import { coreRelease } from './release-contracts.mjs';
 import { proveRegistry, proveRestoredRegistry, registryCall } from './registry-proof.mjs';
 const root = resolve(import.meta.dirname, '../..');
 const outputIndex = process.argv.indexOf('--output');
@@ -141,125 +142,8 @@ try {
   images.ingress = JSON.parse(
     docker('image', 'inspect', ingressTag, '--format', '{{json .RepoDigests}}'),
   ).find((value) => value.startsWith(registry + '/' + id + '/ingress@sha256:'));
-  images['oathweave-redis'] =
-    'redis@sha256:5fa2edb1e408fa8235e6db8fab01d1afaaae96c9403ba67b70feceb8661e8621';
-  images['hivemem-qdrant'] =
-    'qdrant/qdrant@sha256:45f8e3ddc2570a4d029877e1b5ec1045c19b3852b4e22a55c7f43b05aea0ca89';
   const user = `${process.getuid()}:${process.getgid()}`;
-  const health = {
-    test: ['CMD', 'node', '/app/healthcheck.mjs'],
-    interval: '2s',
-    timeout: '4s',
-    start_period: '2s',
-    retries: 30,
-  };
-  const app = (name, dependencies = {}) => ({
-    image: images[name],
-    storageFormat: name + '-candidate-v1',
-    kind: 'application',
-    service: {
-      user,
-      healthcheck: health,
-      networks: [
-        'default',
-        ...(name === 'oathweave' ? ['identity-data'] : name === 'hivemem' ? ['memory-data'] : []),
-      ],
-      ...(Object.keys(dependencies).length ? { depends_on: dependencies } : {}),
-    },
-  });
-  const manifest = {
-    schema: 1,
-    version: '0.1.0',
-    profiles: { core: Object.keys(images).sort(), full: Object.keys(images).sort() },
-    networks: {
-      'identity-data': { driver: 'bridge', internal: true },
-      'memory-data': { driver: 'bridge', internal: true },
-    },
-    components: {
-      'hive-registry': hiveRegistryComponent(images['hive-registry'], user),
-      oathweave: {
-        ...app('oathweave', { 'oathweave-redis': { condition: 'service_healthy' } }),
-        requiresLocal: ['oathweave-redis'],
-      },
-      emberpath: app('emberpath'),
-      hivemem: {
-        ...app('hivemem', { 'hivemem-qdrant': { condition: 'service_healthy' } }),
-        requiresLocal: ['hivemem-qdrant'],
-      },
-      hiveskills: app('hiveskills'),
-      hivexui: {
-        image: images.hivexui,
-        kind: 'static-ui',
-        service: {
-          user: '101:101',
-          healthcheck: {
-            test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8080/'],
-            interval: '2s',
-            timeout: '3s',
-            retries: 20,
-          },
-        },
-      },
-      ingress: {
-        image: images.ingress,
-        kind: 'ingress',
-        requiresLocal: ['hivexui'],
-        service: {
-          user,
-          command: ['caddy', 'run', '--config', '/config/Caddyfile', '--adapter', 'caddyfile'],
-          healthcheck: {
-            test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8081/ready'],
-            interval: '2s',
-            timeout: '3s',
-            retries: 20,
-          },
-          depends_on: { hivexui: { condition: 'service_healthy' } },
-        },
-      },
-      'oathweave-redis': {
-        image: images['oathweave-redis'],
-        kind: 'datastore',
-        storageFormat: 'redis-aof-v1',
-        service: {
-          user,
-          command: ['redis-server', '/config/redis.conf'],
-          networks: ['identity-data'],
-          healthcheck: {
-            test: [
-              'CMD-SHELL',
-              'REDISCLI_AUTH="$(sed -n "s/^requirepass //p" /config/redis.conf)" redis-cli --no-auth-warning ping | grep -q PONG',
-            ],
-            interval: '2s',
-            timeout: '3s',
-            retries: 20,
-          },
-        },
-      },
-      'hivemem-qdrant': {
-        image: images['hivemem-qdrant'],
-        kind: 'datastore',
-        storageFormat: 'qdrant-v1.18.1',
-        service: {
-          user,
-          working_dir: '/data',
-          entrypoint: ['/qdrant/qdrant'],
-          command: ['--config-path', '/config/qdrant.yaml'],
-          networks: ['memory-data'],
-          healthcheck: {
-            test: [
-              'CMD',
-              'bash',
-              '-ec',
-              'exec 3<>/dev/tcp/127.0.0.1/6333; printf \"GET /readyz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3; IFS= read -r status <&3; [[ \"$$status\" == *\" 200 \"* ]]',
-            ],
-            interval: '2s',
-            timeout: '3s',
-            retries: 20,
-          },
-        },
-      },
-    },
-  };
+  const manifest = coreRelease({ version: '0.1.0', images, user });
   applySuiteCatalog(manifest);
   config = JSON.parse(readFileSync(join(root, 'examples/installation.json'), 'utf8'));
   config.installation = id;
@@ -649,7 +533,7 @@ try {
         ? ['signed bundle upgrade and compatible rollback with stable identities']
         : []),
     ],
-    images,
+    images: Object.fromEntries(Object.entries(manifest.components).map(([name, value]) => [name, value.image])),
   });
   passed = true;
   console.log(

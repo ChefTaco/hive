@@ -13,11 +13,13 @@ import https from 'node:https';
 import { extendFullFixture } from './full-release-fixture.mjs';
 import { restoredPeerRehearsal } from './restored-peer-rehearsal.mjs';
 import { applySuiteCatalog, hiveRegistryComponent } from './suite-catalog.mjs';
+import { coreRelease, CORE_PRODUCTS } from './release-contracts.mjs';
 import { hostStatuses, proveRegistry, proveRestoredRegistry, registryCall } from './registry-proof.mjs';
 import { proveTerminal, proveTerminalOff } from './terminal-proof.mjs';
 const execute = promisify(execFile), root = resolve(import.meta.dirname, '../..');
 function argument(name) { const index = process.argv.indexOf(name); assert(index >= 0 && process.argv[index + 1], name + ' is required'); return resolve(process.argv[index + 1]); }
-const output = argument('--output'), template = argument('--template-release');
+// --template-release is optional: by default the core contract comes from release-contracts.mjs.
+const output = argument('--output'), template = process.argv.includes('--template-release') ? argument('--template-release') : null;
 assert(!existsSync(output), 'Select a new protected evidence directory');
 assert(/^\/[A-Za-z0-9_./-]+$/.test(output));
 assert.notEqual(process.getuid(), 0, 'Use an unprivileged operator with Docker access');
@@ -50,7 +52,8 @@ async function hive(command, ...args) {
 try {
   const gateway = JSON.parse(docker('network', 'inspect', 'bridge'))[0].IPAM.Config[0].Gateway;
   assert(/^\d+\.\d+\.\d+\.\d+$/.test(gateway));
-  const manifest = JSON.parse(readFileSync(template, 'utf8'));
+  const manifest = template ? JSON.parse(readFileSync(template, 'utf8')) : coreRelease({ version: '0.1.0', images: Object.fromEntries(CORE_PRODUCTS.map(name => [name, 'pending'])), user: `${process.getuid()}:${process.getgid()}` });
+  delete manifest.components['hive-registry'];
   const expected = ['emberpath', 'hivemem', 'hivemem-qdrant', 'hiveskills', 'hivexui', 'ingress', 'oathweave', 'oathweave-redis'];
   assert.deepEqual(Object.keys(manifest.components).sort(), expected, 'Template must contain the reviewed eight-component core fixture contract only');
   if (selection) assert(selection.every(name=>[...expected,'hive-registry'].includes(name)),'This custom developer fixture accepts reviewed core product components only');
