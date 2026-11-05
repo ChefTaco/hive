@@ -1,2 +1,5 @@
 *
 !ingress.Dockerfile
+!caddy/go.mod
+!caddy/go.sum
+!caddy/main.go
