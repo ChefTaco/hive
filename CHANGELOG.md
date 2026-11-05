@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Rehearse packaged native agent consumption of immutable Skills, scoped Chat WebSockets and the embedded Emberfold SDK in disposable HTTPS fixtures with source-preserving checkpoint recovery.
+
 - Complete integrated native Codex acceptance through the signed Bash adapter and document existing-data rehearsal boundaries.
 
 - Rehearse explicitly captured existing security and chat stores in isolated candidate containers, retaining native account IDs, archives and protected credentials with exact row/file integrity checks and online-backup consistency limits.
