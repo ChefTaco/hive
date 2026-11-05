@@ -247,9 +247,12 @@ fi
     assert.equal((await request('/api/cindertrace/security-fusion/overview', null, { Authorization:'Bearer '+tokens.cindertrace })).status, 401, 'Revoked security resource token accepted');
     assert.equal((await request('/api/v4/users/me', null, { Cookie:boundChatCookie, Origin:config.origin })).status, 401, 'Chat suite cookie ignored identity session revocation');
   }
-  put(join(output, 'backup.log'), await hive('backup', '--archive', 'distributed'));
-  put(join(output, 'rehearse.log'), await hive('rehearse', '--archive', 'distributed'));
   const registryLive = JSON.parse(await hive('registry', 'list'));
+  put(join(output, 'backup.log'), await hive('backup', '--archive', 'distributed'));
+  // A rehearsal needs a second set of private networks. On a host short of Docker address
+  // pools, this flag takes this disposable stack down first; its data stays on disk.
+  if (process.argv.includes('--release-live-networks')) for (const directory of Object.values(addresses)) docker('compose', '-f', join(directory, 'compose.json'), 'down', '--remove-orphans');
+  put(join(output, 'rehearse.log'), await hive('rehearse', '--archive', 'distributed'));
   proveRestoredRegistry({ directory: consoleDirectory, archive: 'distributed', live: registryLive, docker });
   const restoreResults = Object.fromEntries(Object.entries(addresses).map(([host, directory]) => [host, JSON.parse(readFileSync(join(directory, 'rehearsals/distributed/result.json'), 'utf8'))]));
   assert(restoreResults.identity.installationUUID !== restoreResults[consoleHost].installationUUID);

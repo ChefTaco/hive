@@ -6,7 +6,8 @@ const digestFields = new Set(['manifestDigest', 'planDigest', 'imageDigest']);
 const forbiddenValue: RegExp[] = [
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY/, // PEM private key
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*/, // JSON Web Token
-  /\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}/i, // Authorization header value
+  /\bbearer\s+[A-Za-z0-9._~+/=-]{16,}/i, // Authorization header value
+  /\bbasic\s+[A-Za-z0-9+/]{16,}={0,2}/i,
   /[a-z][a-z0-9+.-]*:\/\/[^/\s@]*:[^/\s@]*@/i, // URL with an embedded password
   /[?&](token|secret|password|key|api[-_]?key|access[-_]?token)=/i, // credential in a query
   /\b(sk|pk|rk)-[A-Za-z0-9_-]{16,}/, // common API key prefixes

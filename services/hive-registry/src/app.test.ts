@@ -123,6 +123,7 @@ describe('Hive Registry API', () => {
         pem('RSA '),
         'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmYWtlIn0.c2lnbmF0dXJlLWZha2U',
         'Bearer obviously-fake-value',
+        'Basic b2J2aW91c2x5OmZha2VmYWtl',
         'see https://admin:obviously-fake@example.com/path',
         'https://example.com/?token=obviously-fake',
         ['sk', 'obviouslyfakevalue0123456789'].join('-'),
@@ -148,6 +149,7 @@ describe('Hive Registry API', () => {
       assert.equal(findSecret(syncBody('complete', 'installed')), null);
       assert.equal(findSecret({ documentation: 'https://github.com/example/hive/tree/main/services/hive-registry-and-more/docs' }), null);
       assert.equal(findSecret({ id: 'a-long-installation-name-2026-11-05-primary-site-1' }), null);
+      assert.equal(findSecret({ description: 'Basic authentication and bearer credentials are handled elsewhere; signed tokens never appear here.' }), null);
     });
     it('refuses unknown fields and URLs carrying a query', async () => {
       assert.equal((await call('PUT', '/v1/products/external', { token: writeToken, body: external({ surprise: true }) })).status, 422);

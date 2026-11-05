@@ -76,7 +76,9 @@ async function assertIngressBoundary({ call, directory, config, product }) {
   const connection = await call('GET', `/api/registry/v1/products/${product}/connection`);
   assert.equal(connection.status, 200);
   for (const response of [summary, list, connection, await call('GET', `/api/registry/v1/products/${product}`)]) assert.doesNotMatch(response.text, privateFields);
-  for (const host of Object.keys(config.hosts)) assert(!list.text.includes('"' + host + '"') || Object.keys(config.components).includes(host), 'Inventory host name reached the public view');
+  // A console section may share a word with a host ID; no other public value may.
+  const publicValues = JSON.stringify(list.json().products.map(({ consoleSection, ...rest }) => rest)) + connection.text;
+  for (const host of Object.keys(config.hosts)) assert(!publicValues.includes('"' + host + '"'), 'Inventory host name reached the public view');
   assert.equal((await call('GET', '/api/registry/v1/products/oathweave-redis')).status, 404, 'A datastore reached the public view');
   // A read credential reaches private fields; history and health internals stay private.
   const detail = await call('GET', `/api/registry/v1/products/${product}`, { Authorization: 'Bearer ' + read });
