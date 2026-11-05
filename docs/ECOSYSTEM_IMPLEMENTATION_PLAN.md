@@ -36,6 +36,14 @@ Decisions on the Magnus console port:
 - The standalone Magnus console is deprecated after the HiveXUI module passes browser
   acceptance. Published versions stay available.
 
+Decisions on the theme and first sign-in:
+
+- The console has one dark theme, in the Magnus style, for now. Light mode returns later.
+- First production sign-in uses a one-time password reset token. The operator runs the
+  provided script with the token and sets the administrator password. No agent sees the
+  password, and only that administrator account changes. This supersedes the statements
+  below that resets are not authorized, for this path only.
+
 The operator has authorized publishing, restarting services and production impact.
 Passing tests do not by themselves establish acceptance; review what the screens show.
 
