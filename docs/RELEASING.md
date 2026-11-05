@@ -24,13 +24,14 @@ when run from any other controller source, so install from a checkout of the rel
 1. **Release the products.** Each product repository publishes its own multi-architecture image
    from its own version tag. Record the exact tags in `releases/X.Y.Z.inputs.json`. The input file
    lists the platforms each image must provide.
-2. **Publish the suite images.** The Hive Registry and the ingress are built from this repository.
+2. **Publish the suite images.** The Hive Registry, the ingress and the hardened datastores are built
+   from this repository; `deployment/images.json` gives each one's version and base.
    Merge the release candidate to `main`, then run *Actions > Suite release > Run workflow* on
-   `main` with an image version and `dry_run` off. It builds and executes both architectures, then
-   publishes `ghcr.io/cheftaco/hive-registry:V` and `ghcr.io/cheftaco/hive-ingress:V` with
-   provenance, an SBOM and an attestation. The image version is normally the suite version. An
-   existing tag is never rebuilt: an image fixed before the suite tag takes the next patch version,
-   and the inputs file names that tag.
+   `main` with `image` set to `all` (or one `NAME:VERSION`) and `dry_run` off. It builds and executes
+   both architectures, then publishes each image with provenance, an SBOM and an attestation. An
+   existing tag is never rebuilt: a changed image takes a new version in `deployment/images.json`.
+   The registry and ingress tags named in the inputs file, and the datastore digests in
+   `scripts/suite/release-contracts.mjs`, must match what was published.
 3. **Build the manifest.** With every controller runtime change committed:
 
    ```bash
@@ -54,6 +55,10 @@ when run from any other controller source, so install from a checkout of the rel
    This verifies the signature, rebuilds the manifest from its pinned digests and compares the bytes,
    runs `hive.sh plan` (the controller's own `hive_manifest` checks) for the core and full
    profiles, and with `--registry` resolves every pinned digest.
+   Then run the image gate, `scripts/release/scan-suite-images.sh releases/X.Y.Z.json`. It requires
+   that no pinned image, on either architecture, has a CRITICAL or HIGH finding with a fix
+   available. Exceptions go in `deployment/trivy/IMAGE.trivyignore.yaml`, one advisory per entry
+   with its justification. List the unfixed findings it prints in the release notes.
 6. **Commit and tag.** Commit the manifest, the signature and any documentation, and let CI pass
    on `main`. Then push the tag `vX.Y.Z`. The *Suite release* workflow checks the tagged tree again
    and checks every pinned digest against the published tag named in the inputs file. Then it publishes the GitHub

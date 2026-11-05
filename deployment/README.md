@@ -28,6 +28,47 @@ a host administrator. To install from separately downloaded files, pass `--manif
 and `--trust-key`; check the key's fingerprint against the one in the release notes first.
 [docs/RELEASING.md](../docs/RELEASING.md) describes how a release is built, signed and verified.
 
+### Suite images and their provenance
+
+The Hive Registry, the ingress and the datastores are built from this repository by the
+*Suite release* workflow from `deployment/images.json`, which names each image's exact version,
+Dockerfile and upstream base digest. Every image is published for linux/amd64 and linux/arm64
+with an SBOM, maximum provenance and a GitHub build attestation
+(`gh attestation verify oci://ghcr.io/cheftaco/IMAGE@DIGEST --owner ChefTaco`). An image tag is
+never rebuilt; a change takes a new version.
+
+| Image | Built from | Changes from upstream |
+|---|---|---|
+| `hive-registry` | `services/hive-registry/Dockerfile` on `node:24.22.1-bookworm-slim` | npm, npx, corepack, yarn and apt removed |
+| `hive-ingress` | `deployment/ingress.Dockerfile` | Caddy 2.11.7 compiled from its module with Go 1.26.10, `golang.org/x/net` v0.60.0 and go-jose v4.1.6 (`deployment/caddy/go.mod` and `go.sum`), on the official Caddy 2.11.7 Alpine image with curl removed and Alpine packages upgraded |
+| `hive-postgres` 17.11-1, 18.6-1 | `deployment/datastores/postgres.Dockerfile` | gosu and apt removed. The suite runs PostgreSQL as its non-root service owner, so the entrypoint never reaches its root-only gosu step; initdb and data checksums are unchanged |
+| `hive-redis` 8.2.10-1 | `deployment/datastores/redis.Dockerfile` | pending Debian security updates applied, apt removed |
+| `hive-qdrant` 1.18.3-1 | `deployment/datastores/qdrant.Dockerfile` | pending Debian security updates applied, apt and the unused web dashboard (`/qdrant/static`) removed; the Qdrant binary and its storage format are upstream's |
+
+To rebuild one locally, pass the base digest from `deployment/images.json`, for example
+`docker build -f deployment/datastores/postgres.Dockerfile --build-arg
+POSTGRES_IMAGE=postgres:17.11-trixie@sha256:... deployment/datastores`. Images that apply
+pending distribution updates are pinned by the digest that was published, not reproduced
+byte for byte.
+
+Qdrant stays on 1.18.x so existing storage opens unchanged. A copy of 1.18.1-written production
+storage opened with `hive-qdrant` 1.18.3-1 returned the same collections, point counts and exact
+vector query results as upstream 1.18.1.
+
+`scripts/release/scan-suite-images.sh releases/X.Y.Z.json` is the release gate: every pinned
+image, on both architectures, has no CRITICAL or HIGH finding with a fix available. Accepted
+exceptions are kept per image in `deployment/trivy/`, each scoped to one advisory and package:
+
+- `hive-qdrant`: GHSA-36hh-v3qg-5jq4 (pyo3) and GHSA-4w2j-m93h-cj5j (quinn-proto) appear in
+  Qdrant's bundled SBOM `/qdrant/qdrant.spdx.json`, which lists the whole Cargo workspace. Neither
+  crate is linked into the binary: none of the 218 crate source paths embedded in the 1.18.3 binary
+  is pyo3 or quinn-proto. The SBOM is kept unmodified.
+- `hive-ingress`: CVE-2026-116587 in go-jose v3, which has no fixed release. It reaches Caddy only
+  through the PKI app (`caddypki`), which the suite never enables (`admin off`, no ACME, static
+  certificates).
+
+Findings with no fix available upstream are listed in each release's notes.
+
 Caddy and the static HiveXUI service run separately as non-root users, with read-only
 root filesystems and no host control credentials. Prepare the protected ingress
 environment and an owner-readable `/config` directory containing the Caddyfile,
