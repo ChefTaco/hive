@@ -1,5 +1,10 @@
 # Candidate workflow parity
 
+See the [current plan](ECOSYSTEM_IMPLEMENTATION_PLAN.md) for
+unfinished work and verification limits. In particular, loading placeholders and
+navigation scripts that finish before background requests settle do not establish
+screen parity.
+
 This checklist records product ownership and the available candidate checks. A
 fresh fixture, an existing-data restore and a production migration are separate
 acceptance decisions. Keep retained native clients, legacy consoles and release

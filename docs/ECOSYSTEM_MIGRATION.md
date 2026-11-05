@@ -1,5 +1,10 @@
 # Ecosystem separation
 
+The current [implementation plan and pause checkpoint](ECOSYSTEM_IMPLEMENTATION_PLAN.md)
+records superseding scope corrections, unfinished UI authentication work and
+remaining acceptance gates. Historical checks below do not close the current
+restored-data browser walkthrough gate.
+
 The target is a Bash-controlled Docker suite with independently released products:
 Emberpath (models), Oathweave (identity), HiveMem (memory), HiveSkills (registry),
 HiveXUI (static browser application), Magnus/Ardent (fleet/runtime), Cindertrace
