@@ -55,6 +55,47 @@ class RecoveryTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'missing package-lock.json'):
                 backup.deployment_paths(['hive-router'], root)
 
+    def test_online_capture_uses_a_consistent_database_copy_and_skips_models(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'state-root'
+            root.mkdir()
+            database = root / 'store.db'
+            writer = sqlite3.connect(database)
+            writer.execute('PRAGMA journal_mode=WAL')
+            writer.execute('CREATE TABLE fixture (value TEXT)')
+            writer.execute("INSERT INTO fixture VALUES ('committed')")
+            writer.commit()
+            self.assertTrue((root / 'store.db-wal').exists())
+            (root / 'audit.jsonl').write_text('{}\n')
+            (root / 'model.gguf').write_text('weights')
+            (root / 'backups').mkdir()
+            (root / 'backups/old.txt').write_text('old')
+            stage = Path(directory) / 'stage'
+            stage.mkdir()
+            archive = Path(directory) / 'archive.tar.gz'
+            with tarfile.open(archive, 'w:gz') as tar:
+                files, changed, databases = backup.archive_online([str(root)], stage, tar)
+            writer.close()
+            self.assertEqual(databases, 1)
+            self.assertEqual(changed, [])
+            names = list(files)
+            prefix = 'state/' + str(root).lstrip('/')
+            self.assertIn(prefix + '/store.db', names)
+            self.assertIn(prefix + '/audit.jsonl', names)
+            self.assertFalse([name for name in names if name.endswith(('-wal', '-shm', '.gguf', 'old.txt'))])
+            with tarfile.open(archive) as tar:
+                content = tar.extractfile(prefix + '/store.db').read()
+                self.assertEqual(hashlib.sha256(content).hexdigest(), files[prefix + '/store.db'])
+            copy = Path(directory) / 'copy.db'
+            copy.write_bytes(content)
+            reader = sqlite3.connect(copy)
+            self.assertEqual(reader.execute('SELECT value FROM fixture').fetchall(), [('committed',)])
+            reader.close()
+
+    def test_relative_audit_directory_resolves_from_the_service_directory(self):
+        source = Path(__file__).with_name('hive-state-backup.py').read_text()
+        self.assertIn("Path('/opt/hive-iam') / iam.get('AUDIT_LOG_DIR'", source)
+
     def fixture(self, directory):
         database = Path(directory) / 'fixture.db'
         connection = sqlite3.connect(database)

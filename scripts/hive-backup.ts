@@ -14,12 +14,14 @@ interface BackupOptions {
   backupFile?: string;
   apply: boolean;
   json: boolean;
+  online: boolean;
 }
 
 interface BackupPlan {
   mode: BackupMode;
   host: HiveHostTarget;
   stamp: string;
+  online: boolean;
   outputFile?: string;
   backupFile?: string;
   services: Array<{ service: string; paths: string[] }>;
@@ -53,6 +55,7 @@ function parseArgs(argv: string[], mode: BackupMode): BackupOptions {
   let backupFile: string | undefined;
   let apply = false;
   let json = false;
+  let online = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--host') host = parseHost(argv[++index] ?? '');
@@ -66,9 +69,10 @@ function parseArgs(argv: string[], mode: BackupMode): BackupOptions {
     else if (arg === '--apply') apply = true;
     else if (arg === '--dry-run') apply = false;
     else if (arg === '--json') json = true;
+    else if (arg === '--online') online = true;
     else if (arg === '--help' || arg === '-h') {
       const script = mode === 'backup' ? 'scripts/backup-hive.sh' : 'scripts/restore-hive.sh';
-      console.log(`Usage: ${script} [--host host:fqdn] [--stamp id] [--output-dir dir] [--backup-file file] [--apply] [--json]`);
+      console.log(`Usage: ${script} [--host host:fqdn] [--stamp id] [--output-dir dir] [--backup-file file] [--apply] [--json] [--online]\n\nBackup stops the Hive services while it captures state, then restarts them. --online never stops or restarts a service:\nit is for rehearsals on a running installation and is not a coordinated recovery point.`);
       process.exit(0);
     } else {
       throw new Error(`Unknown argument: ${arg}`);
@@ -76,8 +80,9 @@ function parseArgs(argv: string[], mode: BackupMode): BackupOptions {
   }
   host ??= defaultHost();
   if (!/^[a-zA-Z0-9_-]+$/.test(stamp)) throw new Error('--stamp must be a safe archive identifier');
+  if (online && mode !== 'backup') throw new Error('--online applies only to backups');
   if (mode === 'restore' && !backupFile) backupFile = resolve(outputDir, `hive-${host.host}-${stamp}.tar.gz`);
-  return { mode, host, stamp, outputDir, ...(backupFile ? { backupFile } : {}), apply, json };
+  return { mode, host, stamp, outputDir, ...(backupFile ? { backupFile } : {}), apply, json, online };
 }
 
 function readRootEnv(): Map<string, string> {
@@ -144,7 +149,7 @@ function buildPlan(options: BackupOptions): BackupPlan {
   const allPaths = services.flatMap((service) => service.paths);
   const quotedPaths = allPaths.map(quoteShell).join(' ');
   const commands = options.mode === 'backup'
-    ? [`ssh <configured-ssh-target> sudo python3 hive-state-backup.py backup --host ${options.host.host} --archive <protected-remote-archive> > ${quoteShell(outputFile)}`]
+    ? [`ssh <configured-ssh-target> sudo python3 hive-state-backup.py ${options.online ? 'online-backup' : 'backup'} --host ${options.host.host} --archive <protected-remote-archive> > ${quoteShell(outputFile)}`]
     : [
       `python3 scripts/hive-state-backup.py restore-isolated --host ${options.host.host} --archive ${quoteShell(options.backupFile ?? outputFile)} --root ${quoteShell(resolve(options.outputDir, 'recovery-' + options.host.host + '-' + options.stamp))}`,
     ];
@@ -152,11 +157,15 @@ function buildPlan(options: BackupOptions): BackupPlan {
     mode: options.mode,
     host: options.host,
     stamp: options.stamp,
+    online: options.online,
     ...(options.mode === 'backup' ? { outputFile } : {}),
     ...(options.mode === 'restore' ? { backupFile: options.backupFile ?? outputFile, outputFile: resolve(options.outputDir, 'recovery-' + options.host.host + '-' + options.stamp) } : {}),
     services,
     commands,
     warnings: [
+      ...(options.mode === 'backup' ? [options.online
+        ? 'Online capture: no service is stopped. Each store is consistent on its own; they are not coordinated, so this is not a recovery point.'
+        : 'This backup stops the Hive services for the capture and restarts them afterwards.'] : []),
       'Backup archives contain secrets and service state. Store them outside git and restrict permissions.',
       'Restore is intentionally opt-in with --apply and should be run during a maintenance window.',
     ],
@@ -190,19 +199,28 @@ function runApply(plan: BackupPlan): void {
   if (plan.mode === 'backup') {
     if (!plan.outputFile) throw new Error('Backup output file is missing.');
     mkdirSync(dirname(plan.outputFile), { recursive: true, mode: 0o700 });
-    const remoteDirectory = `/tmp/hive-backup-${plan.host.host}-${plan.stamp}`;
-    const prepare = runRemoteScript(target, options, `umask 077; mkdir ${quoteShell(remoteDirectory)}`);
+    // An online capture is kept on its host too; the quiesced flow removes its staging copy.
+    const remoteDirectory = plan.online ? `/var/backups/hive/online-${plan.stamp}` : `/tmp/hive-backup-${plan.host.host}-${plan.stamp}`;
+    const sshUser = target.split('@')[0];
+    const prepare = plan.online
+      ? runRemoteScript(target, options, `${shellAssignment('BACKUP_SUDO_SECRET', password)}
+set -euo pipefail
+command=${quoteShell(`install -d -m 700 -o ${sshUser} ${quoteShell(remoteDirectory)}`)}
+if [[ -n "$BACKUP_SUDO_SECRET" ]]; then printf '%s\\n' "$BACKUP_SUDO_SECRET" | sudo -S -p '' bash -c "$command"; else sudo -n bash -c "$command"; fi
+`)
+      : runRemoteScript(target, options, `umask 077; mkdir ${quoteShell(remoteDirectory)}`);
     if (prepare.status !== 0) throw new Error('Unable to create protected remote staging directory');
     try {
       const upload = spawnSync('scp', [...options, 'scripts/hive-state-backup.py', `${target}:${remoteDirectory}/engine.py`], { encoding: 'utf8' });
       if (upload.status !== 0) throw new Error('Unable to stage backup engine');
-      const backupCommand = `python3 ${quoteShell(remoteDirectory + '/engine.py')} backup --host ${quoteShell(plan.host.host)} --archive ${quoteShell(remoteDirectory + '/state.tar.gz')}`;
+      const niceness = plan.online ? 'nice -n 10 ionice -c 3 ' : '';
+      const backupCommand = `${niceness}python3 ${quoteShell(remoteDirectory + '/engine.py')} ${plan.online ? 'online-backup' : 'backup'} --host ${quoteShell(plan.host.host)} --archive ${quoteShell(remoteDirectory + '/state.tar.gz')}`;
       const command = `bash -c ${quoteShell(backupCommand + '; result=$?; chown ' + sshTarget(plan.host.host).split('@')[0] + ' ' + quoteShell(remoteDirectory + '/state.tar.gz') + '; exit $result')}`;
       const remote = runRemoteScript(target, options, `${shellAssignment('BACKUP_SUDO_SECRET', password)}
 set -euo pipefail
 if [[ -n "$BACKUP_SUDO_SECRET" ]]; then printf '%s\\n' "$BACKUP_SUDO_SECRET" | sudo -S -p '' ${command}; else sudo -n ${command}; fi
 `);
-      if (remote.status !== 0) throw new Error(`Quiesced backup failed: ${remote.stderr.trim()}`);
+      if (remote.status !== 0) throw new Error(`${plan.online ? 'Online' : 'Quiesced'} backup failed: ${remote.stderr.trim()}`);
       const fd = openSync(plan.outputFile, 'wx', 0o600);
       try {
         const download = spawnSync('ssh', [...options, target, 'cat', remoteDirectory + '/state.tar.gz'], { stdio: ['ignore', fd, 'pipe'] });
@@ -211,8 +229,9 @@ if [[ -n "$BACKUP_SUDO_SECRET" ]]; then printf '%s\\n' "$BACKUP_SUDO_SECRET" | s
       const verify = spawnSync('python3', ['scripts/hive-state-backup.py', 'verify', '--host', plan.host.host, '--archive', plan.outputFile], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
       if (verify.status !== 0) { unlinkSync(plan.outputFile); throw new Error('Downloaded backup validation failed'); }
     } finally {
+      const removed = quoteShell(plan.online ? remoteDirectory + '/engine.py' : remoteDirectory);
       runRemoteScript(target, options, `${shellAssignment('BACKUP_SUDO_SECRET', password)}
-if [[ -n "$BACKUP_SUDO_SECRET" ]]; then printf '%s\\n' "$BACKUP_SUDO_SECRET" | sudo -S -p '' rm -rf ${quoteShell(remoteDirectory)}; else sudo -n rm -rf ${quoteShell(remoteDirectory)}; fi
+if [[ -n "$BACKUP_SUDO_SECRET" ]]; then printf '%s\\n' "$BACKUP_SUDO_SECRET" | sudo -S -p '' rm -rf ${removed}; else sudo -n rm -rf ${removed}; fi
 `);
     }
     return;

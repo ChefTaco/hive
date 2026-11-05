@@ -139,7 +139,8 @@ def inventory():
         db_path = Path(database[5:].split('?')[0])
         if not db_path.is_absolute(): db_path = Path(root) / db_path
         paths.append(str(db_path.resolve().parent))
-    audit = iam.get('AUDIT_LOG_DIR', '/opt/hive-iam/audit-logs')
+    # IAM resolves a relative audit directory from its working directory, not the caller's.
+    audit = str((Path('/opt/hive-iam') / iam.get('AUDIT_LOG_DIR', 'audit-logs')).resolve())
     if Path(audit).exists(): paths.append(audit)
     units = ['hive-router', 'hive-iam', 'hivemem']
     if Path('/opt/hive-skills/shared/.env').exists():
@@ -201,6 +202,108 @@ def backup(host, archive):
     print(json.dumps({'host': host, 'seconds': round(time.time()-started, 2), 'archive': archive, 'qdrantCollections': len(snapshots), 'redisKeys': len(records)}))
 
 
+SKIPPED_NAMES = ('writer.lock', 'node_modules', 'backups')
+MODEL_SUFFIXES = ('.gguf', '.ggml', '.safetensors', '.pt', '.pth')
+
+
+def is_sqlite(path):
+    try:
+        with open(path, 'rb') as file: return file.read(16) == b'SQLite format 3\x00'
+    except OSError:
+        return False
+
+
+def online_members(paths):
+    """Yield (path, arcname) for live state. Model weights stay outside the archive."""
+    for root in paths:
+        queue = [Path(root)]
+        while queue:
+            path = queue.pop()
+            if path.name in SKIPPED_NAMES or path.suffix.lower() in MODEL_SUFFIXES: continue
+            yield path, 'state/' + str(path).lstrip('/')
+            if path.is_dir() and not path.is_symlink(): queue.extend(sorted(path.iterdir(), reverse=True))
+
+
+def archive_online(paths, stage, tar):
+    """Capture every store without stopping it. Each SQLite database comes from the
+    online backup API, so it is internally consistent. Files can still change between
+    reads, and stores are not coordinated with each other: this is not a recovery point."""
+    copies = stage / 'online-copies'
+    copies.mkdir(mode=0o700)
+    files, changed, databases = {}, [], 0
+    members = list(online_members(paths))
+    live_databases = {str(path) for path, _ in members if path.is_file() and not path.is_symlink() and is_sqlite(path)}
+    for index, (path, name) in enumerate(members):
+        if str(path).endswith(('-wal', '-shm')) and str(path).rsplit('-', 1)[0] in live_databases: continue
+        info = tar.gettarinfo(str(path), arcname=name)
+        if path.is_symlink() or path.is_dir():
+            tar.addfile(info)
+            continue
+        if not path.is_file(): continue
+        copy = copies / str(index)
+        before = path.stat().st_mtime_ns
+        if str(path) in live_databases:
+            source = sqlite3.connect('file:' + str(path) + '?mode=ro', uri=True)
+            target = sqlite3.connect(copy)
+            try:
+                source.backup(target)
+            finally:
+                target.close()
+                source.close()
+            databases += 1
+        else:
+            shutil.copyfile(path, copy)
+            if path.stat().st_mtime_ns != before: changed.append(name)
+        info.size = copy.stat().st_size
+        with copy.open('rb') as content: tar.addfile(info, content)
+        with copy.open('rb') as content: files[name] = hashlib.file_digest(content, 'sha256').hexdigest()
+        copy.unlink()
+    return files, changed, databases
+
+
+def backup_online(host, archive):
+    """Read-only for the services: no unit is stopped, restarted or reconfigured. Qdrant
+    creates and removes its own snapshot files and Redis is only read."""
+    if socket.gethostname().split('.')[0].lower() != host.lower(): raise RuntimeError('Target hostname does not match requested installation')
+    paths, units, iam, memory = inventory()
+    active = [unit for unit in units if subprocess.run(['systemctl', 'is-active', '--quiet', unit]).returncode == 0]
+    started = time.time()
+    with tempfile.TemporaryDirectory(prefix='hive-state-', dir=str(Path(archive).parent)) as temporary:
+        stage = Path(temporary)
+        os.chmod(stage, 0o700)
+        snapshots = []
+        collections = qdrant_collection_names(json.load(qdrant(memory, 'GET', '/collections')))
+        for index, name in enumerate(collections):
+            route = '/collections/' + urllib.parse.quote(name, safe='') + '/snapshots'
+            snapshot = json.load(qdrant(memory, 'POST', route))['result']
+            file = 'qdrant-%d.snapshot' % index
+            with qdrant(memory, 'GET', route + '/' + urllib.parse.quote(snapshot['name'], safe='')) as response, (stage / file).open('wb') as output:
+                shutil.copyfileobj(response, output, 1024 * 1024)
+            with (stage / file).open('rb') as content: digest = hashlib.file_digest(content, 'sha256').hexdigest()
+            if snapshot.get('checksum') and snapshot['checksum'] != digest: raise RuntimeError('Qdrant checksum mismatch')
+            snapshots.append({'collection': name, 'file': file, 'sha256': digest})
+            qdrant(memory, 'DELETE', route + '/' + urllib.parse.quote(snapshot['name'], safe='')).close()
+        redis = Redis(iam['REDIS_URL'])
+        prefix = iam.get('REDIS_PREFIX', 'hive-iam')
+        if not prefix or any(c in prefix for c in '*?[]'): raise RuntimeError('Unsafe Redis namespace')
+        records = []
+        for key in redis.keys(prefix):
+            payload = redis.command('DUMP', key)
+            ttl = redis.command('PTTL', key)
+            if payload is not None: records.append({'key': base64.b64encode(key).decode(), 'dump': base64.b64encode(payload).decode(), 'expiresAt': int(time.time()*1000) + ttl if ttl > 0 else None})
+        (stage / 'recovery').mkdir(mode=0o700)
+        for snapshot in snapshots: (stage / snapshot['file']).rename(stage / 'recovery' / snapshot['file'])
+        (stage / 'recovery/redis.json').write_text(json.dumps({'prefix': prefix, 'records': records}))
+        with tarfile.open(archive, 'w:gz', dereference=False) as tar:
+            files, changed, databases = archive_online(paths, stage, tar)
+            with (stage / 'recovery/redis.json').open('rb') as content: files['recovery/redis.json'] = hashlib.file_digest(content, 'sha256').hexdigest()
+            manifest = {'schemaVersion': 2, 'captureMode': 'online', 'host': host, 'machineId': Path('/etc/machine-id').read_text().strip(), 'createdAt': time.time(), 'paths': paths, 'activeUnits': active, 'qdrant': snapshots, 'redisKeys': len(records), 'files': files, 'filesChangedDuringCapture': changed, 'sqliteOnlineBackups': databases}
+            (stage / 'recovery/manifest.json').write_text(json.dumps(manifest, indent=2))
+            tar.add(stage / 'recovery', arcname='recovery')
+        os.chmod(archive, 0o600)
+    print(json.dumps({'host': host, 'captureMode': 'online', 'unitsStopped': 0, 'seconds': round(time.time()-started, 2), 'archive': archive, 'qdrantCollections': len(snapshots), 'redisKeys': len(records), 'sqliteOnlineBackups': databases, 'filesChangedDuringCapture': len(changed)}))
+
+
 def verify(archive, host):
     with tarfile.open(archive) as tar:
         manifest = json.load(tar.extractfile('recovery/manifest.json'))
@@ -260,12 +363,13 @@ def restore_isolated(archive, host, root):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=['backup', 'verify', 'restore-isolated'])
+    parser.add_argument('mode', choices=['backup', 'online-backup', 'verify', 'restore-isolated'])
     parser.add_argument('--host', required=True)
     parser.add_argument('--archive', required=True)
     parser.add_argument('--root')
     args = parser.parse_args()
     if args.mode == 'backup': backup(args.host, args.archive)
+    elif args.mode == 'online-backup': backup_online(args.host, args.archive)
     elif args.mode == 'verify': print(json.dumps(verify(args.archive, args.host)))
     else:
         if not args.root: parser.error('--root is required for isolated recovery')
