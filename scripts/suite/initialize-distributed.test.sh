@@ -16,6 +16,7 @@ jq --arg root "$temporary" '.origin="https://localhost:65420" | .hosts={identity
   .bootstrap.certificateFile=($root+"/server.crt") | .bootstrap.privateKeyFile=($root+"/server.key") | .bootstrap.trustBundleFile=($root+"/server.crt") |
   .bootstrap.productEndpoints=(["oathweave","emberpath","hivemem","hiveskills"]|to_entries|map(.key as $index|.value as $name|{key:$name,value:({origin:("https://127.0.0.1:"+((65421+$index)|tostring)),bindAddress:"127.0.0.1",certificateFile:($root+"/server.crt"),privateKeyFile:($root+"/server.key")} + (if $name=="emberpath" then {inferenceOrigin:"https://127.0.0.1:65425"} else {} end))})|from_entries)' "$ROOT/examples/installation.json" > "$temporary/config.json"
 jq -n --slurpfile c "$temporary/config.json" --arg user "$(id -u):$(id -g)" '{schema:1,version:"0.1.0",profiles:{core:($c[0].components|keys),full:($c[0].components|keys)},components:($c[0].components|map_values({image:("example.com/synthetic@sha256:"+("0"*64)),service:{user:$user,healthcheck:{test:["CMD","true"]}}}))} | .components.hivexui.kind="static-ui" | .components.hivexui.service.user="101:101" | .components.ingress.kind="ingress"' > "$temporary/release.json"
+source "$ROOT/scripts/suite/test-catalog.sh"; hive_test_catalog "$temporary/release.json"
 openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/release.json" -out "$temporary/release.json.sig"
 mkdir -m 700 "$temporary/bin"
 cat > "$temporary/bin/docker" <<'DOCKER'

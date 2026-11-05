@@ -6,7 +6,9 @@ trap 'rm -rf -- "$temporary"' EXIT
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 reject() { if ( "$@" ) > "$temporary/result" 2>&1; then fail 'Unsafe preflight was accepted'; fi; [[ ! -e "$temporary/install/installation.json" && ! -e "$temporary/install/transaction.json" ]] || fail 'Preflight created deployment state'; }
 mkdir -m 700 "$temporary/bin" "$temporary/install"
-mkdir -p "$temporary/install/config/ingress"
+mkdir -p "$temporary/install/config/ingress" "$temporary/install/config/hive-registry"
+for credential in read-token write-token; do printf '%064d\n' 0 > "$temporary/install/config/hive-registry/$credential"; chmod 600 "$temporary/install/config/hive-registry/$credential"; done
+printf 'HIVE_REGISTRY_INSTALLATION=example-suite\n' > "$temporary/install/config/hive-registry.env"; chmod 600 "$temporary/install/config/hive-registry.env"
 cat > "$temporary/bin/docker" <<'SH'
 #!/usr/bin/env bash
 case "$*" in 'info'|'compose version') exit 0;; *) exit 99;; esac
@@ -22,7 +24,7 @@ chmod 600 "$temporary/install/config/ingress.env"
 cat > "$temporary/install/config/runtime.json" <<'JSON'
 {"schema":1,"products":{"oathweave":"/api/oathweave"},"identity":{"issuer":"https://identity.example.com","apiPrefix":"/api/oathweave","clients":{"oathweave":"hivexui-oathweave"}}}
 JSON
-jq --arg directory "$temporary/install" '.profile="custom" | .hosts.control.directory=$directory | .components={ingress:{host:"control",envFile:($directory+"/config/ingress.env"),configDirectory:($directory+"/config/ingress")},hivexui:{host:"control"}} | .console={host:"control",bindAddress:"127.0.0.1",httpsPort:65431,runtimeFile:($directory+"/config/runtime.json")}' "$ROOT/examples/installation.json" > "$temporary/config.json"
+jq --arg directory "$temporary/install" '.profile="custom" | .hosts.control.directory=$directory | .components={"hive-registry":{host:"control",envFile:($directory+"/config/hive-registry.env"),configDirectory:($directory+"/config/hive-registry")},ingress:{host:"control",envFile:($directory+"/config/ingress.env"),configDirectory:($directory+"/config/ingress")},hivexui:{host:"control"}} | .console={host:"control",bindAddress:"127.0.0.1",httpsPort:65431,runtimeFile:($directory+"/config/runtime.json")}' "$ROOT/examples/installation.json" > "$temporary/config.json"
 # Avoid a system-dependent port assumption in this read-only test.
 while [[ -n $(ss -H -lnt "sport = :$(jq -r .console.httpsPort "$temporary/config.json")") ]]; do
   jq '.console.httpsPort-=1' "$temporary/config.json" > "$temporary/next.json"

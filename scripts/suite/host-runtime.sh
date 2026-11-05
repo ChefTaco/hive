@@ -37,6 +37,9 @@ save_release_artifacts() {
     cp -- "$directory/deployment-inputs.$plan.json" "$directory/releases/$version/configuration-inputs.json"
 }
 compose() { docker compose -f "$directory/compose.json" "$@"; }
+# A release that adds the mandatory Hive Registry to an existing installation starts it
+# empty. That is a new store, not a migration of existing data.
+registry_is_new() { [[ "$1" == hive-registry && "$2" == unversioned ]]; }
 [[ "$directory" =~ ^/[A-Za-z0-9_./-]+$ && "$directory" != *'/../'* && "$directory" != */.. && ${#directory} -gt 4 ]] || die 'Invalid installation path'
 [[ "$installation" =~ ^[a-z][a-z0-9-]{0,47}$ && "$host" =~ ^[a-z][a-z0-9-]{0,47}$ && "$plan" =~ ^[a-f0-9]{64}$ ]] || die 'Invalid installation identity'
 [[ ! -L "$directory" ]] || die 'Installation root cannot be a symlink'
@@ -137,6 +140,9 @@ case "$action" in
       current=$(jq -r --arg name "$component" '.[$name] // "unversioned"' "$directory/data-formats.json" 2>/dev/null || printf 'unversioned\n')
       target=$(jq -r --arg name "$component" '.components[$name].storageFormat // "unversioned"' "$directory/manifest.$plan.json")
       if [[ "$operation" == install && ! -f "$directory/receipt.json" ]]; then continue; fi
+      # Adoption verifies the exact running images, so their data is this release's format.
+      if [[ "$operation" == adopt && ! -f "$directory/receipt.json" ]]; then continue; fi
+      if registry_is_new "$component" "$current"; then continue; fi
       if [[ "$current" != "$target" ]]; then
         if [[ "$operation" == rollback ]]; then
           jq -e --arg name "$component" --arg current "$current" '.components[$name].readableFormats | index($current)!=null' "$directory/manifest.$plan.json" >/dev/null || die 'Binary rollback cannot read the current storage format; use rehearsed restore'
@@ -215,7 +221,7 @@ case "$action" in
     while IFS= read -r component; do
       format=$(jq -r --arg component "$component" '.components[$component].storageFormat // "unversioned"' "$manifest")
       current=$(jq -r --arg component "$component" '.[$component] // "unversioned"' "$directory/data-formats.json" 2>/dev/null || printf 'unversioned\n')
-      if [[ "$current" != "$format" ]]; then
+      if [[ "$current" != "$format" ]] && ! registry_is_new "$component" "$current"; then
         jq -e --arg name "$component" --arg from "$current" '.components[$name].migration | .from==$from and (.command|type=="array" and length>0 and all(.[];type=="string"))' "$manifest" >/dev/null || die 'An explicit migration is required'
         [[ $(jq -r .allowMigrations <<< "$input") == true ]] || die 'Migration execution requires --allow-migrations'
         record migration-started
@@ -276,6 +282,9 @@ case "$action" in
     if [[ ! -f "$directory/data-formats.json" ]]; then
       jq '.components|map_values(.storageFormat // "unversioned")' "$directory/manifest.$plan.json" | atomic_json "$directory/data-formats.json"
     fi
+    if jq -e --slurpfile formats "$directory/data-formats.json" '.services["hive-registry"]!=null and $formats[0]["hive-registry"]==null' "$candidate" >/dev/null; then
+      jq --slurpfile release "$directory/manifest.$plan.json" '.+{"hive-registry":$release[0].components["hive-registry"].storageFormat}' "$directory/data-formats.json" | atomic_json "$directory/data-formats.json"
+    fi
     prepare_data_directories "$candidate"
     record activating
     docker compose -f "$candidate" up -d --wait --wait-timeout 180
@@ -307,9 +316,13 @@ case "$action" in
     tar --extract --gzip --file "$backup/state.tar.gz" --directory "$rehearsal" --same-owner --same-permissions
     candidate="$directory/candidate.$plan.json"
     [[ -f "$candidate" ]] || candidate="$rehearsal/compose.json"
+    # An archive from before the mandatory Hive Registry has nothing of it to restore.
+    registry_restored=false
+    [[ ! -f "$rehearsal/config/hive-registry.env" || ! -d "$rehearsal/data/hive-registry" ]] || registry_restored=true
     # No production env, network, port, external volume, dispatcher or collector is
     # reachable. The original protected files stay byte-exact in the restored tree.
-    jq --arg base "$directory" --arg restored "$rehearsal" --arg name "rehearsal-$installation-$host-$archive" '
+    jq --arg base "$directory" --arg restored "$rehearsal" --arg name "rehearsal-$installation-$host-$archive" --argjson registryRestored "$registry_restored" '
+      (if $registryRestored then . else del(.services["hive-registry"]) end) |
       (.services|keys|map(select(test("collector|dispatcher|agent")|not))) as $selected |
       .name=$name | .services |= with_entries(
         select((.key|test("collector|dispatcher|agent"))|not) |
@@ -318,6 +331,8 @@ case "$action" in
           .environment=((.environment // {}) + {HIVE_REHEARSAL:"true",SECURITY_FUSION_DISPATCH_ENABLED:"false",SECURITY_FUSION_COLLECTOR_ENABLED:"false",SECURITY_DISPATCH_ENABLED:"false",SECURITY_INGEST_ENABLED:"false",SECURITY_RETENTION_ENABLED:"false",SECURITY_NOTIFICATIONS_ENABLED:"false",SECURITY_WRITES_ENABLED:"false",MAGNUS_AUTO_MIGRATE:"false"}) |
           .volumes |= map(if .source|startswith($base+"/") then .source=($restored+.source[($base|length):]) else error("Unowned restore mount") end) |
           if has("env_file") then .env_file |= map(if type=="string" and startswith($base+"/") then $restored+.[($base|length):] else error("Unowned restore environment") end) else . end)) |
+      # Read-only in rehearsals, at the mount as well as in the service.
+      (if .services["hive-registry"] then .services["hive-registry"].volumes |= map(if .target=="/data" then .read_only=true else . end) else . end) |
       .networks=((.networks // {default:{}})|map_values({internal:true,driver:"bridge"}))' "$candidate" > "$rehearsal/isolated.json"
     docker compose -f "$rehearsal/isolated.json" config --quiet
     [[ $(tree_digest "$rehearsal/data") == "$(jq -er .dataSHA256 "$backup/receipt.json")" ]] || die 'Restored data differs from the backup receipt'
@@ -329,6 +344,7 @@ case "$action" in
       while IFS= read -r component; do
         from=$(jq -r --arg name "$component" '.[$name] // "unversioned"' "$rehearsal/data-formats.json" 2>/dev/null || printf 'unversioned\n')
         target=$(jq -r --arg name "$component" '.components[$name].storageFormat // "unversioned"' "$directory/manifest.$plan.json")
+        if registry_is_new "$component" "$from"; then continue; fi
         if [[ "$from" != "$target" && $(jq -r .operation <<< "$input") != rollback ]]; then
           mapfile -t arguments < <(jq -r --arg name "$component" '.components[$name].migration.command[]' "$directory/manifest.$plan.json")
           if ((${#arguments[@]}==0)) || ! docker compose -f "$rehearsal/isolated.json" run --no-deps --rm -T "$component" "${arguments[@]}"; then result=failed; break; fi
@@ -376,7 +392,10 @@ case "$action" in
     ;;
   adopt-check)
     [[ -f "$directory/compose.json" && -f "$directory/adoption.$plan.json" ]] || die 'Explicit existing and expected Compose definitions are required'
-    [[ $(jq -Sc . "$directory/compose.json") == "$(jq -Sc . "$directory/adoption.$plan.json")" ]] || die 'Existing Compose differs from the reviewed deployment plan'
+    # The mandatory Hive Registry joins an adopted project, so it and its start ordering
+    # are the only difference allowed from the reviewed existing definition.
+    without_registry='del(.services["hive-registry"]) | .services |= map_values(if .depends_on then (.depends_on |= del(.["hive-registry"])) | (if .depends_on=={} then del(.depends_on) else . end) else . end)'
+    [[ $(jq -Sc "$without_registry" "$directory/compose.json") == "$(jq -Sc "$without_registry" "$directory/adoption.$plan.json")" ]] || die 'Existing Compose differs from the reviewed deployment plan'
     expected=$(jq -r '.services|keys[]' "$directory/compose.json" | sort)
     [[ $(compose ps --status running --services | sort) == "$expected" ]] || die 'Every adopted service must already be running'
     while IFS= read -r component; do

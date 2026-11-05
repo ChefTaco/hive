@@ -82,3 +82,13 @@ if jq -e '.console!=null' <<< "$input" >/dev/null; then
       '.[0].HostConfig.PortBindings["8443/tcp"]|any(.[];.HostPort==$port and .HostIp==$bind)' >/dev/null
   fi
 fi
+if jq -e '.placements["hive-registry"]!=null' <<< "$input" >/dev/null; then
+  config=$(jq -r '.placements["hive-registry"].configDirectory' <<< "$input")
+  for file in read-token write-token; do
+    [[ -f "$config/$file" && ! -L "$config/$file" && -r "$config/$file" ]] || { printf 'Hive Registry credentials are missing\n' >&2; exit 1; }
+    permissions=$(stat -c %a "$config/$file"); (( (8#$permissions & 077)==0 )) || { printf 'Hive Registry credentials must be owner-only\n' >&2; exit 1; }
+  done
+  if jq -e '.console!=null' <<< "$input" >/dev/null; then
+    grep -q 'hive-registry:8095' "$(jq -r .placements.ingress.configDirectory <<< "$input")/Caddyfile" || { printf 'The ingress Caddyfile predates the Hive Registry; use deployment/Caddyfile from this release\n' >&2; exit 1; }
+  fi
+fi

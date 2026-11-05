@@ -8,7 +8,8 @@ hive_runtime_files() {
     scripts/suite/skills-integration.sh scripts/suite/skills-integration-host.sh scripts/suite/skills-preparation-host.sh \
     scripts/suite/adapters.sh scripts/suite/native-initialization-host.sh scripts/suite/adapters-host.sh scripts/suite/inference-registration.sh \
     scripts/suite/public-runtime.sh scripts/suite/preflight-host.sh scripts/suite/initialize.sh \
-    scripts/suite/initialize-host.sh scripts/suite/initialize-full-host.sh scripts/suite/initialize-migrations-host.sh scripts/suite/integrity-host.sh scripts/suite/input-artifacts-host.sh scripts/suite/check-data.mjs
+    scripts/suite/initialize-host.sh scripts/suite/initialize-full-host.sh scripts/suite/initialize-migrations-host.sh scripts/suite/integrity-host.sh scripts/suite/input-artifacts-host.sh scripts/suite/check-data.mjs \
+    scripts/suite/registry.sh scripts/suite/registry-host.sh
 }
 hive_controller_digest() {
   local file
@@ -17,7 +18,7 @@ hive_controller_digest() {
 }
 hive_usage() {
   cat <<'EOF'
-Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|skills-prepare]
+Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|skills-prepare|registry]
   --config FILE          Installation JSON (required for unattended use)
   --release VERSION      Override the exact release version
   --manifest FILE        Signed release manifest (default releases/VERSION.json)
@@ -32,11 +33,15 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|re
                          Part of the plan digest; omitting it on a later upgrade restores
                          normal limits. plan and status report the state as authLimits.
   --reconciliation FILE  Protected acknowledgement of writes before restore
+  --file FILE            Entry for registry add/update; entries never contain credentials
   --help                 Show this help
 
 init prepares protected configuration for an explicitly fresh installation.
 skills-prepare stages only an explicit immutable Skills client and writes protected owner proposals; it never activates mappings.
 agents-accept verifies manually started agents without restarting suite services.
+registry looks up and edits this installation's Hive Registry (the install catalog; HiveSkills
+is the separate skills registry): registry list|installed|summary|history|get ID|connection ID|
+add ID --file F|update ID --file F|remove ID. The installer records release products itself.
 No arguments starts interactive configuration. Planning does not contact hosts.
 Secrets belong in protected environment/configuration files, never CLI arguments.
 EOF
@@ -67,6 +72,7 @@ hive_configure() {
   fi
   [[ -f "$HIVE_MANIFEST" && -f "$HIVE_SIGNATURE" && -f "$HIVE_TRUST_KEY" ]] || hive_die 'A signed release and publisher key are required before setup'
   openssl pkeyutl -verify -pubin -inkey "$HIVE_TRUST_KEY" -rawin -in "$HIVE_MANIFEST" -sigfile "$HIVE_SIGNATURE" >/dev/null 2>&1 || hive_die 'Release signature verification failed'
+  jq -e '.components["hive-registry"]!=null' "$HIVE_MANIFEST" >/dev/null || hive_die 'This release has no Hive Registry. The registry is mandatory: use a release whose signed manifest includes hive-registry.'
   jq -e --arg version "$HIVE_VERSION" '.schema==1 and .version==$version and (.components|keys|all(.[];test("^[a-z][a-z0-9-]{0,47}$")))' "$HIVE_MANIFEST" >/dev/null || hive_die 'Release metadata does not match the requested version'
   hive_prompt id 'Installation name'
   hive_prompt directory 'Installation directory on the selected host (absolute)'
@@ -83,6 +89,8 @@ hive_configure() {
   selected_json=$(jq -nc --argjson selected "$selected_json" --slurpfile release "$HIVE_MANIFEST" '
     def dependencies: . as $before | ((. + [ .[] as $name|$release[0].components[$name].requiresLocal[]? ])|unique) as $after | if $after==$before then . else $after|dependencies end;
     $selected|dependencies')
+  # Mandatory in every selection, including a prepared custom one.
+  selected_json=$(jq -nc --argjson selected "$selected_json" '$selected+["hive-registry"]|unique')
   jq -e --argjson selected "$selected_json" '.components as $components|all($selected[];$components[.]!=null)' "$HIVE_MANIFEST" >/dev/null || hive_die 'Unknown selected component'
   hive_prompt bind 'HTTPS bind address' 127.0.0.1
   hive_prompt port 'HTTPS listener port' 443
@@ -228,6 +236,7 @@ hive_validate() {
         (.=="::" or .=="::1" or (split(".")|length==4 and all(.[];test("^[0-9]{1,3}$") and (tonumber<=255)))))
     ' "$HIVE_CONFIG" >/dev/null || hive_die 'Invalid console placement: co-locate ingress and HiveXUI, supply an explicit listener and a public runtime file inside the protected installation config tree; HiveXUI cannot receive an environment file or backend configuration'
   fi
+  if declare -F hive_registry_validate >/dev/null; then hive_registry_validate; fi
   if declare -F hive_skills_validate >/dev/null; then hive_skills_validate; fi
   if declare -F hive_adapter_validate >/dev/null; then hive_adapter_validate; fi
 }
@@ -239,6 +248,7 @@ hive_manifest() {
   HIVE_TRUST_KEY=${HIVE_TRUST_KEY:-$HIVE_ROOT/trust/publisher.pub}
   [[ -f "$HIVE_MANIFEST" && -f "$HIVE_SIGNATURE" && -f "$HIVE_TRUST_KEY" ]] || hive_die 'Signed release manifest, signature and publisher key are required'
   openssl pkeyutl -verify -pubin -inkey "$HIVE_TRUST_KEY" -rawin -in "$HIVE_MANIFEST" -sigfile "$HIVE_SIGNATURE" >/dev/null 2>&1 || hive_die 'Release signature verification failed'
+  if declare -F hive_registry_release >/dev/null; then hive_registry_release; fi
   if declare -F hive_skills_manifest >/dev/null; then hive_skills_manifest; fi
   if declare -F hive_adapter_manifest >/dev/null; then hive_adapter_manifest; fi
   jq -e --arg version "$HIVE_VERSION" '
@@ -310,8 +320,8 @@ hive_host() {
     --arg action "${HIVE_HOST_ACTION:-}" --arg operation "${HIVE_OPERATION:-}" --arg archive "${HIVE_ARCHIVE:-}" --argjson allowMigrations "${HIVE_ALLOW_MIGRATIONS:-false}" \
     --argjson serviceUsers "$bootstrap_users" --argjson images "$bootstrap_images" --argjson identityIds "${HIVE_BOOTSTRAP_IDENTITIES:-null}" --arg ingressTemplate "${HIVE_BOOTSTRAP_INGRESS:-}" --arg integrityScript "$(base64 -w0 "$HIVE_ROOT/scripts/suite/check-data.mjs")" \
     --arg skillsManifest "${HIVE_SKILLS_MANIFEST:-}" --arg skillsSignature "${HIVE_SKILLS_SIGNATURE:-}" --arg skillsTrust "${HIVE_SKILLS_TRUST:-}" --arg skillsTokenSHA "${HIVE_SKILLS_TOKEN_SHA:-}" \
-    --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" \
-    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
+    --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" --argjson registry "${HIVE_REGISTRY_INPUT:-null}" \
+    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
   if [[ "$target" == local ]]; then
     printf '%s\n' "$payload" | bash -c "$script"
   else
@@ -361,7 +371,9 @@ hive_render() {
          elif $c.bootstrap.productEndpoints[$name] then $c.bootstrap.productEndpoints[$name] as $endpoint |
           {ports:([{target:({oathweave:4200,emberpath:9443,hivemem:18790,hiveskills:4030,magnus:4000,cindertrace:4101,chattermost:8065}[$name]),published:($endpoint.origin|capture("^https://[^:]+(?::(?<port>[0-9]+))?$")|.port // "443"),host_ip:$endpoint.bindAddress,protocol:"tcp"}] +
             (if $name=="emberpath" then [{target:4020,published:($endpoint.inferenceOrigin|capture("^https://[^:]+(?::(?<port>[0-9]+))?$")|.port // "443"),host_ip:$endpoint.bindAddress,protocol:"tcp"}] else [] end))}
-         else {} end))})|from_entries),networks:({default:{driver:"bridge"}}+($r.networks // {}))}'
+         else {} end) +
+        # The registry starts first on its host, before the products it records.
+        (if $name!="hive-registry" and $kind!="datastore" and $c.components["hive-registry"].host==$host then {depends_on:((($r.components[$name].service.depends_on // {})|if type=="array" then map({key:.,value:{condition:"service_started"}})|from_entries else . end)+{"hive-registry":{condition:"service_healthy"}})} else {} end))})|from_entries),networks:({default:{driver:"bridge"}}+($r.networks // {}))}'
 }
 
 hive_transfer() {
@@ -383,7 +395,8 @@ hive_main() {
   HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_ALLOW_MIGRATIONS=false HIVE_RELAX_AUTH_LIMITS=false
   HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY=''
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
-  HIVE_RELEASE_SUMMARY=''
+  HIVE_RELEASE_SUMMARY='' HIVE_REGISTRY_FILE='' HIVE_REGISTRY_ORIGINAL_CONFIG='' HIVE_REGISTRY_TEMPORARY='' HIVE_OPERATION=''
+  local -a registry_arguments=()
   if (($#)) && [[ "$1" != --* ]]; then command=$1; shift; fi
   while (($#)); do
     case $1 in
@@ -392,16 +405,22 @@ hive_main() {
       --allow-migrations) HIVE_ALLOW_MIGRATIONS=true; shift;;
       --relax-auth-limits) HIVE_RELAX_AUTH_LIMITS=true; shift;;
       --non-interactive) interactive=false; shift;;
+      --file)
+        [[ "$command" == registry ]] || hive_die '--file applies only to registry'
+        (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
+        HIVE_REGISTRY_FILE=$2; shift 2;;
       --config|--release|--manifest|--signature|--trust-key|--archive|--reconciliation)
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
         case $1 in
           --config) HIVE_CONFIG=$2;; --release) HIVE_VERSION=$2;; --manifest) HIVE_MANIFEST=$2;;
           --signature) HIVE_SIGNATURE=$2;; --trust-key) HIVE_TRUST_KEY=$2;; --archive) HIVE_ARCHIVE=$2;; --reconciliation) HIVE_RECONCILIATION=$2;;
         esac; shift 2;;
-      *) hive_die 'Unknown option';;
+      *)
+        [[ "$command" == registry && "$1" != --* ]] || hive_die 'Unknown option'
+        registry_arguments+=("$1"); shift;;
     esac
   done
-  case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare) ;; *) hive_die 'Unknown command';; esac
+  case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry) ;; *) hive_die 'Unknown command';; esac
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
     case "$command" in plan|install|upgrade) ;; *) hive_die '--relax-auth-limits applies only to plan, install and upgrade';; esac
   fi
@@ -410,6 +429,9 @@ hive_main() {
     [[ "$interactive" == true ]] || hive_die '--config is required'
     hive_configure
   fi
+  HIVE_OPERATION=$command
+  trap 'if [[ -n "${HIVE_REGISTRY_TEMPORARY:-}" ]]; then rm -f -- "$HIVE_REGISTRY_TEMPORARY"; fi' EXIT
+  hive_registry_configuration "$command"
   hive_validate
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
     jq -e '.components|has("oathweave") or has("cindertrace") or has("chattermost")' "$HIVE_CONFIG" >/dev/null || hive_die '--relax-auth-limits needs Oathweave, Cindertrace or ChatterMost in this installation'
@@ -420,9 +442,11 @@ hive_main() {
       if [[ -n "$HIVE_MANIFEST" || -n "$HIVE_SIGNATURE" || -n "$HIVE_TRUST_KEY" ]]; then hive_need openssl; hive_need sha256sum; hive_manifest; fi
       hive_plan; return;;
     status)
-      local host
+      local host registry_report registry_host
+      registry_report=$(hive_registry_report)
+      registry_host=$(hive_registry_host)
       while IFS= read -r host; do
-        hive_host "$host" 'set -euo pipefail; read -r input; directory=$(jq -r .directory <<< "$input");
+        { hive_host "$host" 'set -euo pipefail; read -r input; directory=$(jq -r .directory <<< "$input");
           test -f "$directory/installation.json";
           test "$(jq -r .installation "$directory/installation.json")" = "$(jq -r .installation <<< "$input")";
           test "$(jq -r .host "$directory/installation.json")" = "$(jq -r .host <<< "$input")";
@@ -446,12 +470,14 @@ hive_main() {
           done < <(jq -r ".agents[].id" <<< "$input") | jq -s .);
           authLimits="{\"relaxed\":false,\"products\":[]}";
           if [[ -f "$directory/compose.json" ]]; then authLimits=$(jq -c "[.services|to_entries[]|select(.value.environment.RELAX_AUTH_LIMITS==\"true\")|.key]|sort|{relaxed:(length>0),products:.}" "$directory/compose.json"); fi;
-          jq -n --arg host "$(jq -r .host <<< "$input")" --argjson containers "$containers" --argjson agents "$agents" --argjson authLimits "$authLimits" "{schema:1,host:\$host,authLimits:\$authLimits,containers:\$containers,nativeAgents:\$agents}"'
+          jq -n --arg host "$(jq -r .host <<< "$input")" --argjson containers "$containers" --argjson agents "$agents" --argjson authLimits "$authLimits" "{schema:1,host:\$host,authLimits:\$authLimits,containers:\$containers,nativeAgents:\$agents}"'; } |
+          if [[ "$host" == "$registry_host" ]]; then jq --argjson registry "$registry_report" '.registry=$registry'; else cat; fi
       done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG"); return;;
-    doctor) hive_doctor; return;;
+    doctor)
+      hive_registry_preflight; hive_registry_doctor; return;;
+    registry) hive_registry_command "${registry_arguments[@]}"; return;;
   esac
   hive_need openssl; hive_need sha256sum; hive_manifest
-  HIVE_OPERATION=$command
   hive_plan
   if [[ "$confirmed" != true ]]; then
     [[ "$interactive" == true && -t 0 ]] || hive_die 'Applying changes requires --yes or interactive confirmation'

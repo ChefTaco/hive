@@ -14,6 +14,7 @@ jq --arg root "$temporary" '.profile="full" | .origin="https://localhost:65426" 
  .components|=with_entries(.key as $name|.value.configDirectory=(if $name=="hivexui" then null else $root+"/install/config/"+$name end)|.value|=with_entries(select(.value!=null))|if .value.envFile then .value.envFile=($root+"/install/config/"+$name+".env") else . end) |
  .console.httpsPort=65426 | .console.runtimeFile=($root+"/install/config/runtime.json") | .bootstrap.certificateFile=($root+"/server.crt") | .bootstrap.privateKeyFile=($root+"/server.key")' "$ROOT/examples/installation.json" > "$temporary/config.json"
 jq -n --slurpfile c "$temporary/config.json" --arg user "$(id -u):$(id -g)" '{schema:1,version:"0.1.0",profiles:{core:($c[0].components|keys),full:($c[0].components|keys)},components:($c[0].components|map_values({image:("example.com/synthetic@sha256:"+("0"*64)),service:{user:$user,healthcheck:{test:["CMD","true"]}}}))} | .components.hivexui.kind="static-ui" | .components.hivexui.service.user="101:101" | .components.ingress.kind="ingress" | reduce ["magnus","cindertrace","chattermost"][] as $name (.;.components[$name].initialization={image:("example.com/migrator@sha256:"+("1"*64)),command:["apply"],verificationCommand:["verify-current"]})' > "$temporary/release.json"
+source "$ROOT/scripts/suite/test-catalog.sh"; hive_test_catalog "$temporary/release.json"
 openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/release.json" -out "$temporary/release.json.sig"
 mkdir "$temporary/bin"
 cat > "$temporary/bin/docker" <<'DOCKER'

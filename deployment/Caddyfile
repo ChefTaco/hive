@@ -43,6 +43,17 @@
 	header_up X-Forwarded-For {client_ip}
 }
 
+# Hive Registry: this installation's install catalog, not the HiveSkills skills
+# registry. Default deny: GET only, an explicit route list, no cookies, and only a
+# well-formed bearer credential. The registry decides what that credential may see.
+(hive_registry_backend) {
+	header_up -*
+	header_up Authorization {http.request.header.Authorization}
+	header_up Accept {http.request.header.Accept}
+	header_up X-Forwarded-For {client_ip}
+	header_down -Set-Cookie
+}
+
 {$HIVE_CONSOLE_HOST} {
 	tls /config/console.crt /config/console.key
 	handle /_hive/ready {
@@ -51,6 +62,18 @@
 	@magnus_ready {
 		method GET
 		path /api/magnus/health/ready
+	}
+	@registry_ready {
+		method GET
+		path /api/registry/health/ready
+	}
+	handle @registry_ready {
+		rewrite * /health/ready
+		reverse_proxy http://hive-registry:8095 {
+			header_up -*
+			header_up Accept {http.request.header.Accept}
+			header_down -Set-Cookie
+		}
 	}
 	handle /api/emberpath/health/ready {
 		rewrite * /health/ready
@@ -290,6 +313,36 @@
 			respond @magnus_not_bearer "Bearer token required" 401
 			reverse_proxy {$MAGNUS_ENDPOINT:https://unconfigured.invalid} {
 				import magnus_backend {$MAGNUS_TLS_NAME:unconfigured.invalid}
+			}
+		}
+		handle {
+			respond "API unavailable" 404
+		}
+	}
+	handle_path /api/registry/* {
+		# Patterns match decoded paths, so refuse any request whose raw path could
+		# read differently here and upstream.
+		@registry_unsafe_path expression <<CEL
+			!{http.request.orig_uri}.matches(r"^/api/registry/")
+			|| {http.request.orig_uri}.matches(r"(?i)^[^?]*(//|/\.\.?(/|\?|$)|\\|%(2f|5c|2e|25|[01][0-9a-f]|7f))")
+			CEL
+		handle @registry_unsafe_path {
+			respond "API unavailable" 404
+		}
+		@registry_not_get not method GET
+		handle @registry_not_get {
+			header Allow GET
+			respond "Method not allowed" 405
+		}
+		@registry_read path_regexp ^/v1/(installation|products(/[a-z][a-z0-9-]{0,47}(/connection)?)?)$
+		handle @registry_read {
+			@registry_not_bearer {
+				header Authorization *
+				not header_regexp Authorization "^Bearer [^ ,]+$"
+			}
+			respond @registry_not_bearer "Bearer token required" 401
+			reverse_proxy http://hive-registry:8095 {
+				import hive_registry_backend
 			}
 		}
 		handle {

@@ -28,8 +28,8 @@ hive_initialize() {
   jq -e --slurpfile release "$HIVE_MANIFEST" '
     .bootstrap!=null and .console!=null and
     (.components|keys) as $names |
-    (["hivexui","ingress","oathweave","oathweave-redis"]-$names|length==0) and
-    ($names-["emberpath","hivemem","hivemem-qdrant","hiveskills","hivexui","ingress","oathweave","oathweave-redis","magnus","magnus-postgres","magnus-redis","cindertrace","cindertrace-postgres","cindertrace-redis","chattermost","chattermost-postgres","emberfold"]|length==0) and
+    (["hive-registry","hivexui","ingress","oathweave","oathweave-redis"]-$names|length==0) and
+    ($names-["hive-registry","emberpath","hivemem","hivemem-qdrant","hiveskills","hivexui","ingress","oathweave","oathweave-redis","magnus","magnus-postgres","magnus-redis","cindertrace","cindertrace-postgres","cindertrace-redis","chattermost","chattermost-postgres","emberfold"]|length==0) and
     (. as $c|all(["magnus","cindertrace","chattermost"][];. as $name| if $c.components[$name] then
       $release[0].components[$name].initialization!=null and
       $c.components[$name+"-postgres"].host==$c.components[$name].host and
@@ -45,7 +45,7 @@ hive_initialize() {
       .value.configDirectory==($c.hosts[.value.host].directory+"/config/"+.key) and
       (if (.key|test("-(qdrant|redis|postgres)$")) then true else .value.envFile==($c.hosts[.value.host].directory+"/config/"+.key+".env") end)
     end))
-  ' "$HIVE_CONFIG" >/dev/null || hive_die 'Fresh suite initialization requires Oathweave, its private Redis, HiveXUI and ingress, locally placed selected-product datastores, explicit HTTPS endpoints across hosts and standard protected config paths. Existing or separately configured products must use their owning setup workflow; this command never adopts or overwrites their state.'
+  ' "$HIVE_CONFIG" >/dev/null || hive_die 'Fresh suite initialization requires the Hive Registry, Oathweave, its private Redis, HiveXUI and ingress, locally placed selected-product datastores, explicit HTTPS endpoints across hosts and standard protected config paths. Existing or separately configured products must use their owning setup workflow; this command never adopts or overwrites their state.'
   HIVE_BOOTSTRAP_USERS=$(jq -c --slurpfile config "$HIVE_CONFIG" '.components|with_entries(select(.key as $name|$config[0].components[$name]!=null))|map_values(.service.user)' "$HIVE_MANIFEST")
   HIVE_BOOTSTRAP_IMAGES=$(jq -c --slurpfile config "$HIVE_CONFIG" ' .components|with_entries(select(.key as $name|$config[0].components[$name]!=null))|map_values(.image)' "$HIVE_MANIFEST")
   HIVE_BOOTSTRAP_INGRESS=$(base64 -w0 "$HIVE_ROOT/deployment/Caddyfile")
@@ -64,5 +64,6 @@ hive_initialize() {
     [[ "$host" != "$identity_host" ]] || continue
     HIVE_HOST_ACTION=initialize hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/initialize-full-host.sh" "$HIVE_ROOT/scripts/suite/initialize-host.sh")" || hive_die 'Fresh configuration initialization held; preserve its protected receipt and rerun with identical inputs'
   done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
+  hive_registry_provision
   printf 'Protected selected-product configuration prepared. Review the plan, then run install with this same configuration. Initial sign-in instructions are stored on the identity host in config/initial-credentials.env.\n'
 }

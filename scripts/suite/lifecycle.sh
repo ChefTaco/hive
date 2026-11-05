@@ -51,7 +51,10 @@ hive_stage() {
 hive_lifecycle() {
   local operation=$1
   if [[ "$operation" == install ]] && jq -e '.bootstrap!=null' "$HIVE_CONFIG" >/dev/null; then hive_initialize; fi
-  hive_doctor
+  # Protected credentials exist before preflight and before any pre-change backup.
+  case "$operation" in install|upgrade|rollback|adopt|rehearse) hive_registry_provision;; esac
+  case "$operation" in upgrade|rollback) hive_registry_refresh_ingress;; esac
+  case "$operation" in install|upgrade|rollback|adopt|rehearse) hive_doctor;; *) hive_registry_preflight;; esac
   case "$operation" in
     agents-accept) hive_all agents-accept || hive_die 'Native acceptance failed; existing suite services were not restarted';;
     install|upgrade|rollback)
@@ -68,8 +71,12 @@ hive_lifecycle() {
         hive_all rehearse || hive_hold
         [[ "$operation" != upgrade ]] || hive_all migrate || hive_hold
       fi
+      hive_registry_begin || hive_hold
       hive_all activate || hive_hold
       hive_all adapters-accept || hive_hold
+      # Recorded before completion: a failed write leaves the transaction open and the
+      # command failed, so the installation cannot look finished with a wrong catalog.
+      hive_registry_complete || hive_registry_failed "$operation"
       hive_all complete || hive_hold
       ;;
     backup)
@@ -110,8 +117,13 @@ hive_lifecycle() {
       rm -rf -- "$temporary"
       hive_all adopt-check || hive_die 'Existing resources do not match the explicit adoption configuration'
       hive_all prepare || hive_die 'Adoption ownership could not be recorded'
+      hive_registry_refresh_ingress
       hive_stage
       hive_all adopt || hive_die 'Adoption verification failed; no service was restarted'
+      # The registry joins beside the running products, which are not restarted, and
+      # records them. The ingress serves its route after its next restart.
+      hive_registry_begin || hive_registry_failed "$operation"
+      hive_registry_complete || hive_registry_failed "$operation"
       hive_all complete || hive_die 'Adoption receipt could not be finalized'
       ;;
   esac

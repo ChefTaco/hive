@@ -12,6 +12,8 @@ import { createServer } from 'node:net';
 import https from 'node:https';
 import { extendFullFixture } from './full-release-fixture.mjs';
 import { restoredPeerRehearsal } from './restored-peer-rehearsal.mjs';
+import { applySuiteCatalog, hiveRegistryComponent } from './suite-catalog.mjs';
+import { hostStatuses, proveRegistry, proveRestoredRegistry, registryCall } from './registry-proof.mjs';
 const execute = promisify(execFile), root = resolve(import.meta.dirname, '../..');
 function argument(name) { const index = process.argv.indexOf(name); assert(index >= 0 && process.argv[index + 1], name + ' is required'); return resolve(process.argv[index + 1]); }
 const output = argument('--output'), template = argument('--template-release');
@@ -31,7 +33,7 @@ const configFile = join(output, 'installation.json'), manifestFile = join(output
 const full = process.argv.includes('--full'), browserReview = process.argv.includes('--browser-review'), relaxAuthLimits = process.argv.includes('--relax-auth-limits');
 assert(!(interactive && relaxAuthLimits), '--relax-auth-limits applies to the unattended path');
 const selectionIndex=process.argv.indexOf('--components'), selection=selectionIndex<0 ? null : process.argv[selectionIndex+1].split(',');
-assert(!selection || (!full && selection.every(name=>/^[a-z][a-z0-9-]*$/.test(name)) && ['oathweave','oathweave-redis','hivexui','ingress'].every(name=>selection.includes(name))),'Custom developer fixture requires the suite foundation and cannot combine --full');
+assert(!selection || (!full && selection.every(name=>/^[a-z][a-z0-9-]*$/.test(name)) && ['hive-registry','oathweave','oathweave-redis','hivexui','ingress'].every(name=>selection.includes(name))),'Custom developer fixture requires the suite foundation and cannot combine --full');
 const selected=name=>!selection || selection.includes(name);
 const browserProducts=['oathweave','emberpath','hivemem','hiveskills',...(full?['cindertrace','chattermost','magnus']:[])].filter(selected);
 const tags = [], registryPort = await port(), consolePort = await port(), sshPort = await port(), registry = '127.0.0.1:' + registryPort;
@@ -48,16 +50,18 @@ try {
   const manifest = JSON.parse(readFileSync(template, 'utf8'));
   const expected = ['emberpath', 'hivemem', 'hivemem-qdrant', 'hiveskills', 'hivexui', 'ingress', 'oathweave', 'oathweave-redis'];
   assert.deepEqual(Object.keys(manifest.components).sort(), expected, 'Template must contain the reviewed eight-component core fixture contract only');
-  if (selection) assert(selection.every(name=>expected.includes(name)),'This custom developer fixture accepts reviewed core product components only');
-  manifest.version = '0.1.0'; manifest.profiles = { core: expected, full: expected };
+  if (selection) assert(selection.every(name=>[...expected,'hive-registry'].includes(name)),'This custom developer fixture accepts reviewed core product components only');
+  manifest.version = '0.1.0'; manifest.profiles = { core: [...expected,'hive-registry'], full: [...expected,'hive-registry'] };
   docker('run', '-d', '--name', registryName, '--user', `${process.getuid()}:${process.getgid()}`, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--tmpfs', '/var/lib/registry:uid=' + process.getuid() + ',gid=' + process.getgid() + ',mode=700', '-p', '127.0.0.1:' + registryPort + ':5000', 'registry@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373');
-  for (const product of ['oathweave', 'emberpath', 'hivemem', 'hiveskills', 'hivexui', 'ingress']) {
+  manifest.components['hive-registry'] = hiveRegistryComponent('pending', `${process.getuid()}:${process.getgid()}`);
+  for (const product of ['oathweave', 'emberpath', 'hivemem', 'hiveskills', 'hivexui', 'ingress', 'hive-registry']) {
     const tag = registry + '/' + id + '/' + product + ':candidate'; tags.push(tag);
     docker('tag', product === 'ingress' ? 'hive-ingress:candidate' : product + ':candidate', tag); docker('push', tag);
     manifest.components[product].image = JSON.parse(docker('image', 'inspect', tag, '--format', '{{json .RepoDigests}}')).find(value => value.startsWith(registry + '/' + id + '/' + product + '@sha256:'));
     assert(manifest.components[product].image);
   }
   if (full) extendFullFixture({ manifest, registry, id, tags, docker, user: `${process.getuid()}:${process.getgid()}` });
+  applySuiteCatalog(manifest);
   for (const name of ['host', 'client', 'wrong-host']) run('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', join(output, name)]);
   put(join(output, 'authorized_keys'), readFileSync(join(output, 'client.pub')));
   const known = '[127.0.0.1]:' + sshPort + ' ' + readFileSync(join(output, 'host.pub'), 'utf8'); put(join(output, 'known_hosts'), known);
@@ -71,7 +75,10 @@ try {
 fi
 ` : '';
   const activationInterruption=interactive?'':`if [[ "\${1:-}" == compose && "\${2:-}" == -f && "\${3:-}" == '${addresses.identity}/candidate.'*.json && " $* " == *' up '* && ! -e '${output}/activation-interrupted' ]]; then touch '${output}/activation-interrupted'; exit 23; fi\n`;
-  put(join(output, 'bin/docker'), `#!/usr/bin/env bash\n${migrationInterruption}${activationInterruption}exec '${actualDocker}' "$@"\n`, 0o700);
+  // Fails the first registry record after every product has started, to prove the
+  // install cannot finish with an unrecorded catalog and that a retry reconciles it.
+  const registryInterruption=interactive?'':`if [[ "\${1:-}" == compose && " $* " == *' exec -T hive-registry '* && " $* " == *' POST /v1/sync '* && -e '${addresses.identity}/receipt.json' && ! -e '${output}/registry-interrupted' ]]; then touch '${output}/registry-interrupted'; exit 23; fi\n`;
+  put(join(output, 'bin/docker'), `#!/usr/bin/env bash\n${migrationInterruption}${activationInterruption}${registryInterruption}exec '${actualDocker}' "$@"\n`, 0o700);
   const actualSsh=run('sh',['-c','command -v ssh']);
   put(join(output,'bin/ssh'),`#!/usr/bin/env bash\nexec '${actualSsh}' -F '${sshConfig}' "$@"\n`,0o700);
   const actualScp=run('sh',['-c','command -v scp']);
@@ -129,10 +136,23 @@ fi
   }
   assert(existsSync(join(output, 'activation-interrupted')), 'Expected second-host activation interruption');
   for (const host of Object.keys(addresses)) assert.equal(docker('ps', '-q', '--filter', 'label=com.docker.compose.project=' + id + '-' + host), '', 'An interrupted host writer remained active');
+  await assert.rejects(hive('install'));
+  assert(existsSync(join(output, 'registry-interrupted')), 'Expected a failed registry record after activation');
+  assert.match(readFileSync(join(output, 'install-failure.log'), 'utf8'), /could not record this install/);
+  for (const directory of Object.values(addresses)) assert.notEqual(JSON.parse(readFileSync(join(directory, 'transaction.json'), 'utf8')).phase, 'complete', 'A failed registry record completed the install');
+  assert.notEqual(docker('ps', '-q', '--filter', 'label=com.docker.compose.project=' + id + '-' + consoleHost), '', 'A failed registry record stopped running services');
+  const interrupted = hostStatuses(await hive('status')).find(document => document.registry).registry;
+  assert.equal(interrupted.state, 'drift', 'Status did not report the unrecorded install');
+  assert(interrupted.drift.some(item => item.code === 'incomplete-transaction'));
+  await assert.rejects(hive('doctor'));
   }
   const credentialPath = join(addresses.identity, 'config/initial-credentials.env'), originalCredentials = readFileSync(credentialPath);
   const identities = Object.fromEntries(['identity-id', ...(selected('emberpath')?['model-id']:[]), ...(selected('hivemem')?['memory-id']:[])].map(name => [name, readFileSync(join(addresses.identity, 'config/.initializer/secrets', name), 'utf8').trim()]));
-  put(join(output, 'resume.log'), await hive('install')); put(join(output, 'repeat.log'), await hive('install'));
+  put(join(output, 'resume.log'), await hive('install'));
+  const recorded = JSON.parse(await hive('registry', 'history')).entries.length, recordedState = await hive('registry', 'list');
+  put(join(output, 'repeat.log'), await hive('install'));
+  assert.equal(JSON.parse(await hive('registry', 'history')).entries.length, recorded, 'A repeated install added registry history');
+  assert.deepEqual(JSON.parse(await hive('registry', 'list')), JSON.parse(recordedState), 'A repeated install changed the registry');
   assert.deepEqual(readFileSync(credentialPath), originalCredentials);
   for (const [name, value] of Object.entries(identities)) for (const directory of Object.values(addresses)) assert.equal(readFileSync(join(directory, 'config/.initializer/secrets', name), 'utf8').trim(), value);
   assert(!existsSync(join(consoleDirectory, 'config/oathweave.env'))); assert(!existsSync(join(addresses.identity, 'config/emberpath.env')));
@@ -158,6 +178,7 @@ fi
     }); req.on('error', reject); req.on('timeout', () => req.destroy(Error('API timeout'))); if (body) req.write(Buffer.isBuffer(body) ? body : JSON.stringify(body)); req.end();
   }); }
   const rawRequest = (path, headers = {}) => new Promise((resolveResponse, reject) => { https.get({ hostname: 'localhost', port: consolePort, path, ca, headers, timeout: 8000 }, response => { response.resume(); response.on('end', () => resolveResponse({ status: response.statusCode })); }).on('error', reject); });
+  await proveRegistry({ hive, output, addresses, config, manifest, docker, call: registryCall({ port: consolePort, ca }), ...(selected('emberpath') ? {} : { product: selection.find(name => ['hiveskills', 'hivemem'].includes(name)) ?? 'oathweave' }) });
   const browserHeaders = { Origin: config.origin, 'X-Oathweave-Browser': 'true' };
   const login = await request('/api/oathweave/auth/login', { username: credentials.SEED_ADMIN_USERNAME, password: credentials.SEED_ADMIN_PASSWORD }, browserHeaders); assert.equal(login.status, 200);
   const cookie = login.headers['set-cookie'].find(value => value.startsWith('__Host-oathweave_sso=')).split(';')[0], headers = { ...browserHeaders, Cookie: cookie }, tokens = {};
@@ -228,6 +249,8 @@ fi
   }
   put(join(output, 'backup.log'), await hive('backup', '--archive', 'distributed'));
   put(join(output, 'rehearse.log'), await hive('rehearse', '--archive', 'distributed'));
+  const registryLive = JSON.parse(await hive('registry', 'list'));
+  proveRestoredRegistry({ directory: consoleDirectory, archive: 'distributed', live: registryLive, docker });
   const restoreResults = Object.fromEntries(Object.entries(addresses).map(([host, directory]) => [host, JSON.parse(readFileSync(join(directory, 'rehearsals/distributed/result.json'), 'utf8'))]));
   assert(restoreResults.identity.installationUUID !== restoreResults[consoleHost].installationUUID);
   for (const result of Object.values(restoreResults)) assert.equal(result.result, 'passed');
@@ -242,7 +265,7 @@ fi
     } finally { docker('compose','-f',restored,'stop','--timeout','45','chattermost-postgres'); }
   }
   if (full) await restoredPeerRehearsal({output,addresses,config,docker,put,request,credentials,identities,consoleHost});
-  put(join(output, 'result.json'), { schema: 1, result: 'passed', productionCutover: false, profile: full ? 'full' : selection ? 'custom' : 'core', interactive, physicalHosts: 1, sshInventories: 2, checks: ['fresh protected per-host product configuration', 'strict real SSH/SFTP trust', 'distinct Compose bridge projects with explicit verified HTTPS endpoints', 'private datastores stay local and unpublished', ...(interactive?['real terminal full wizard and Apply confirmation install all17 services successfully']:['interrupted second-host activation holds every writer']), 'repeat install preserves coordinated accounts and independent product secrets', 'one browser sign-in authorizes '+browserProducts.length+' selected products across host inventories', 'wrong-audience and revoked resource tokens rejected', 'separate host-bound backup and isolated restore rehearsals', ...(full ? ['explicit product migrator images and exact completion verification', ...(!interactive?['real committed chat migration interruption reconciles by verification without replay']:[]), 'seven resource-specific product identities, with HiveXUI as the Magnus console', 'native chat sign-in and retained post', 'offline PostgreSQL checksums on restored private datastores', 'coordinated six-product authenticated peer restore with preserved original bytes'] : [])], productImages: Object.fromEntries(Object.entries(manifest.components).map(([name, value]) => [name, value.image])) });
+  put(join(output, 'result.json'), { schema: 1, result: 'passed', productionCutover: false, profile: full ? 'full' : selection ? 'custom' : 'core', interactive, physicalHosts: 1, sshInventories: 2, checks: ['fresh protected per-host product configuration', 'strict real SSH/SFTP trust', 'distinct Compose bridge projects with explicit verified HTTPS endpoints', 'private datastores stay local and unpublished', ...(interactive?['real terminal full wizard and Apply confirmation install all 18 services successfully']:['interrupted second-host activation holds every writer']), 'repeat install preserves coordinated accounts and independent product secrets', 'one browser sign-in authorizes '+browserProducts.length+' selected products across host inventories', 'wrong-audience and revoked resource tokens rejected', 'separate host-bound backup and isolated restore rehearsals', 'Hive Registry records equal the running containers and signed release on every host', 'registry reads through the ingress expose only public fields; writes do not pass', 'a failed registry record leaves the install incomplete and a retry reconciles it without duplicates', 'status and doctor report real registry drift', 'restored Hive Registry holds the backed-up records and stays read-only', ...(full ? ['explicit product migrator images and exact completion verification', ...(!interactive?['real committed chat migration interruption reconciles by verification without replay']:[]), 'seven resource-specific product identities, with HiveXUI as the Magnus console', 'native chat sign-in and retained post', 'offline PostgreSQL checksums on restored private datastores', 'coordinated six-product authenticated peer restore with preserved original bytes'] : [])], productImages: Object.fromEntries(Object.entries(manifest.components).map(([name, value]) => [name, value.image])) });
   passed = true; console.log('PASS: fresh distributed ' + (full ? 'full suite' : selection ? 'custom selection' : 'core') + ', real SSH, verified cross-host HTTPS, interrupted resume, resource authorization, stable credentials and separate isolated restores (one physical host).');
 } finally {
   if (!passed) for (const host of Object.keys(addresses)) for (const container of docker('ps', '-aq', '--filter', 'label=com.docker.compose.project=' + id + '-' + host).split(/\s+/).filter(Boolean)) {

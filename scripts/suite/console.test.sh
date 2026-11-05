@@ -4,6 +4,7 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 HIVE_ROOT=$ROOT
 source "$ROOT/scripts/suite/controller.sh"
 source "$ROOT/scripts/suite/public-runtime.sh"
+source "$ROOT/scripts/suite/test-catalog.sh"
 temporary=$(mktemp -d)
 trap 'rm -rf -- "$temporary"' EXIT
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
@@ -15,6 +16,7 @@ cp "$HIVE_CONFIG" "$temporary/valid-config.json"
 openssl genpkey -algorithm ED25519 -out "$temporary/private" >/dev/null 2>&1
 openssl pkey -in "$temporary/private" -pubout -out "$temporary/public" >/dev/null 2>&1
 jq -n --slurpfile c "$HIVE_CONFIG" '{schema:1,version:"0.1.0",profiles:{core:($c[0].components|keys),full:($c[0].components|keys)},components:($c[0].components|map_values({image:("example.com/synthetic@sha256:"+("0"*64)),service:{user:"1000:1000",healthcheck:{test:["CMD","true"]}}}))} | .components.hivexui.kind="static-ui" | .components.hivexui.service.user="101:101" | .components.ingress.kind="ingress"' > "$HIVE_MANIFEST"
+hive_test_catalog "$HIVE_MANIFEST"
 sign() { openssl pkeyutl -sign -inkey "$temporary/private" -rawin -in "$HIVE_MANIFEST" -out "$HIVE_SIGNATURE"; }
 sign
 hive_validate

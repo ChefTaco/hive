@@ -59,7 +59,10 @@ const server=https.createServer({key:fs.readFileSync('/config/console.key'),cert
 });
 server.on('upgrade',(req,socket)=>{const accept=crypto.createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');socket.write('HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\nSec-WebSocket-Accept: '+accept+'\\r\\nX-Fixture-Cookie: '+req.headers.cookie+'\\r\\n\\r\\n');socket.write(Buffer.from([129,2,111,107]));setTimeout(()=>socket.destroy(),2000);});
 server.listen(9443,'0.0.0.0');
-http.createServer((req,res)=>{res.setHeader('Set-Cookie','MMSID=obviously-fake-forged');res.setHeader('Content-Type','application/json');res.end(JSON.stringify({path:req.url,authorization:req.headers.authorization,cookie:req.headers.cookie,origin:req.headers.origin}));}).listen(8096,'0.0.0.0');
+const plain=http.createServer((req,res)=>{res.setHeader('Set-Cookie','MMSID=obviously-fake-forged');res.setHeader('Content-Type','application/json');res.end(JSON.stringify({path:req.url,authorization:req.headers.authorization,cookie:req.headers.cookie,origin:req.headers.origin}));});
+plain.listen(8096,'0.0.0.0');
+const registry=http.createServer((req,res)=>{res.setHeader('Set-Cookie','hive_registry_forged=obviously-fake; Path=/');res.setHeader('Content-Type','application/json');res.end(JSON.stringify({path:req.url,method:req.method,authorization:req.headers.authorization,cookie:req.headers.cookie,origin:req.headers.origin}));});
+registry.listen(8095,'0.0.0.0');
 `,
     { mode: 0o600 },
   );
@@ -89,6 +92,8 @@ http.createServer((req,res)=>{res.setHeader('Set-Cookie','MMSID=obviously-fake-f
     'backend',
     '--network-alias',
     'emberfold',
+    '--network-alias',
+    'hive-registry',
     ...restrictions,
     '-v',
     `${temporary}:/config:ro`,
@@ -410,6 +415,37 @@ http.createServer((req,res)=>{res.setHeader('Set-Cookie','MMSID=obviously-fake-f
     req.on('error', reject);
     req.on('timeout', () => req.destroy(new Error('timeout')));
   });
+  // Hive Registry lookups: explicit GET routes only, no cookies either way, and a
+  // bearer credential or nothing. Writes stop at the ingress, whatever they carry.
+  for (const [input, expected] of [
+    ['/api/registry/health/ready', '/health/ready'],
+    ['/api/registry/v1/installation', '/v1/installation'],
+    ['/api/registry/v1/products', '/v1/products'],
+    ['/api/registry/v1/products?installed=true', '/v1/products?installed=true'],
+    ['/api/registry/v1/products/emberpath', '/v1/products/emberpath'],
+    ['/api/registry/v1/products/hive-registry/connection', '/v1/products/hive-registry/connection'],
+  ]) {
+    const result = await request(input, headers);
+    assert.equal(result.status, 200, input);
+    const body = JSON.parse(result.body);
+    assert.equal(body.path, expected, input);
+    assert.equal(body.method, 'GET');
+    assert.equal(body.cookie, undefined, input + ' forwarded a cookie to the registry');
+    assert.equal(body.origin, undefined, input + ' forwarded a browser origin to the registry');
+    assert.deepEqual((result.cookies || []).filter(Boolean), [], input + ' let the registry set a cookie');
+    assert.equal(body.authorization, input.endsWith('/health/ready') ? undefined : headers.Authorization, input);
+    const unsigned = JSON.parse((await request(input, { Cookie: headers.Cookie })).body);
+    assert(!unsigned.authorization, input + ' invented a credential');
+  }
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'])
+    for (const path of ['/api/registry/v1/sync', '/api/registry/v1/products', '/api/registry/v1/products/emberpath', '/api/registry/health/ready', '/api/registry/anything']) {
+      const result = await request(path, { Authorization: headers.Authorization, 'Content-Type': 'application/json' }, method, ['POST', 'PUT', 'PATCH'].includes(method) ? '{}' : undefined);
+      assert.equal(result.status, 405, method + ' ' + path + ' reached past the ingress');
+    }
+  for (const path of ['/api/registry/v1/sync', '/api/registry/v1/history', '/api/registry/v1/unknown', '/api/registry/v2/products', '/api/registry/v1/products/Bad', '/api/registry/v1/products/emberpath/other', '/api/registry/health/live', '/api/registry/', '/api/registry/v1/products/%2e%2e/sync', '/api/registry/v1//products', '/api/registry/v1/products%2femberpath'])
+    assert.equal((await request(path, headers)).status, 404, path + ' passed the registry allowlist');
+  for (const authorization of ['Basic b2J2aW91c2x5OmZha2U=', 'Bearer two words', 'Bearer ', 'Bearer a,b'])
+    assert.equal((await request('/api/registry/v1/products', { Authorization: authorization })).status, 401, authorization);
   passed = true;
   console.log(
     'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming, WebSocket transport, and the Magnus route allowlist with machine credentials stripped.',

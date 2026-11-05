@@ -23,6 +23,8 @@ import { rehearseArdent } from './core-ardent.mjs';
 import { rehearseEnrollment } from './core-enrollment.mjs';
 import { rehearseCodex } from './core-codex.mjs';
 import { rehearseHermes } from './core-hermes.mjs';
+import { applySuiteCatalog, hiveRegistryComponent } from './suite-catalog.mjs';
+import { proveRegistry, proveRestoredRegistry, registryCall } from './registry-proof.mjs';
 const root = resolve(import.meta.dirname, '../..');
 const outputIndex = process.argv.indexOf('--output');
 assert(
@@ -122,7 +124,7 @@ try {
     registryImage,
   );
   const images = {};
-  for (const product of ['oathweave', 'emberpath', 'hivemem', 'hiveskills', 'hivexui']) {
+  for (const product of ['hive-registry', 'oathweave', 'emberpath', 'hivemem', 'hiveskills', 'hivexui']) {
     const tag = registry + '/' + id + '/' + product + ':candidate';
     tags.push(tag);
     docker('tag', product + ':candidate', tag);
@@ -174,6 +176,7 @@ try {
       'memory-data': { driver: 'bridge', internal: true },
     },
     components: {
+      'hive-registry': hiveRegistryComponent(images['hive-registry'], user),
       oathweave: {
         ...app('oathweave', { 'oathweave-redis': { condition: 'service_healthy' } }),
         requiresLocal: ['oathweave-redis'],
@@ -257,6 +260,7 @@ try {
       },
     },
   };
+  applySuiteCatalog(manifest);
   config = JSON.parse(readFileSync(join(root, 'examples/installation.json'), 'utf8'));
   config.installation = id;
   config.origin = 'https://localhost:' + consolePort;
@@ -386,6 +390,7 @@ try {
       req.end();
     });
   }
+  await proveRegistry({ hive, output, addresses: { control: owned }, config, manifest, docker, call: registryCall({ port: consolePort, ca }) });
   const credentials = parseEnv(firstCredentials.toString());
   const browserHeaders = { Origin: config.origin, 'X-Oathweave-Browser': 'true' };
   const login = await request(
@@ -530,7 +535,11 @@ try {
     readFileSync(join(owned, 'rehearsals/core-proof/result.json'), 'utf8'),
   );
   assert.equal(rehearsal.result, 'passed');
+  proveRestoredRegistry({ directory: owned, archive: 'core-proof', live: JSON.parse(await hive('registry', 'list')), docker });
   if (process.argv.includes('--lifecycle')) {
+    // Rehearsals keep their private networks; Docker's address pools are finite.
+    const releaseRehearsal = (name) => docker('compose', '-f', join(owned, 'rehearsals', name, 'isolated.json'), 'down', '--remove-orphans');
+    releaseRehearsal('core-proof');
     const original = readFileSync(manifestFile, 'utf8');
     function publishCandidate(document) {
       put(manifestFile, document);
@@ -552,6 +561,7 @@ try {
       await hive('upgrade', '--release', '0.1.1', '--archive', 'pre-upgrade-proof'),
     );
     assert.equal(JSON.parse(readFileSync(join(owned, 'receipt.json'), 'utf8')).version, '0.1.1');
+    releaseRehearsal('pre-upgrade-proof');
     publishCandidate(original);
     put(
       join(output, 'rollback.log'),

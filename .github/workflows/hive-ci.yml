@@ -37,6 +37,7 @@ jobs:
             services/hive-iam/package-lock.json
             services/hive-mem/ts-core/package-lock.json
             services/hive-skills/package-lock.json
+            services/hive-registry/package-lock.json
             packages/hive/package-lock.json
 
       - name: Install bundled upgrade runtime build dependencies
@@ -62,6 +63,10 @@ jobs:
       - name: Install Hive Skills dependencies
         run: npm ci
         working-directory: services/hive-skills
+
+      - name: Install Hive Registry dependencies
+        run: npm ci
+        working-directory: services/hive-registry
 
       - name: Install launcher dependencies
         run: npm ci

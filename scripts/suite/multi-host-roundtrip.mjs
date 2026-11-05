@@ -8,6 +8,8 @@ import { join, resolve, dirname } from 'node:path';
 import { userInfo } from 'node:os';
 import { createServer } from 'node:net';
 import { randomBytes, createHash } from 'node:crypto';
+import { fixtureCatalog, hiveRegistryComponent } from './suite-catalog.mjs';
+import { startRegistryImage } from './registry-image-fixture.mjs';
 const root=resolve(import.meta.dirname,'../..'),index=process.argv.indexOf('--output');
 assert(index>=0 && process.argv[index+1],'--output NEW_PRIVATE_DIRECTORY is required');
 const output=resolve(process.argv[index+1]);assert(!existsSync(output));assert(/^\/[A-Za-z0-9_./-]+$/.test(output));mkdirSync(output,{recursive:true,mode:0o700});chmodSync(output,0o700);
@@ -20,7 +22,7 @@ const user=`${process.getuid()}:${process.getgid()}`,image='node:24.22.1-slim@sh
 const configFile=join(output,'installation.json'),releaseFile=join(output,'release.json'),sshConfig=join(output,'ssh.conf');
 const addresses={first:join(output,'first'),second:join(output,'second')};
 const listener=createServer().listen(0,'127.0.0.1');await new Promise(done=>listener.once('listening',done));const sshPort=listener.address().port;await new Promise(done=>listener.close(done));
-let daemon,logDescriptor,passed=false;
+let daemon,logDescriptor,registryImage,passed=false;
 const projects=[id+'-first',id+'-second'];
 function hive(command,...extra){try{return run(join(root,'hive.sh'),[command,'--config',configFile,'--manifest',releaseFile,'--trust-key',join(output,'publisher.pub'),'--non-interactive','--yes',...extra],{maxBuffer:8*1024*1024});}catch(error){put(join(output,command+'-failure.log'),String(error.stdout||'')+'\n'+String(error.stderr||''));throw error;}}
 try{
@@ -41,8 +43,10 @@ try{
   put(join(directory,'config',name,'service.mjs'),`import http from 'node:http';import{DatabaseSync}from'node:sqlite';const database=new DatabaseSync('/data/state.sqlite');database.exec('CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY,credential TEXT); CREATE TABLE IF NOT EXISTS counters(name TEXT PRIMARY KEY,value INTEGER);');database.prepare('INSERT OR IGNORE INTO accounts VALUES (?,?)').run(process.env.SUBJECT_ID,process.env.SYNTHETIC_CREDENTIAL);database.exec("INSERT OR IGNORE INTO counters VALUES('enrollment',1)");const server=http.createServer((req,res)=>res.end('ready')).listen(8080,'0.0.0.0');process.on('SIGTERM',()=>server.close(()=>{database.close();process.exit(0)}));`);
   components[name]={host,envFile:join(directory,'config',name+'.env'),configDirectory:join(directory,'config',name)};
  }
+ registryImage=await startRegistryImage(id);
+ components['hive-registry']={host:'first',envFile:join(addresses.first,'config/hive-registry.env'),configDirectory:join(addresses.first,'config/hive-registry')};
  const config={schema:1,installation:id,release:'0.1.0',profile:'custom',origin:'https://console.example.com',hosts:Object.fromEntries(Object.entries(addresses).map(([host,directory])=>[host,{target:username+'@'+host+'.example.com',sshConfig,directory}])),components,agents:[],inference:[]};
- const release={schema:1,version:'0.1.0',profiles:{core:Object.keys(components),full:Object.keys(components)},components:Object.fromEntries(Object.keys(components).map(name=>[name,{image,storageFormat:'synthetic-v1',service:{user,command:['node','/config/service.mjs'],healthcheck:{test:['CMD','node','-e',"fetch('http://127.0.0.1:8080/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"],interval:'1s',timeout:'3s',retries:20}}}]))};
+ const release={schema:1,version:'0.1.0',profiles:{core:Object.keys(components),full:Object.keys(components)},components:Object.fromEntries(Object.keys(components).map(name=>[name,name==='hive-registry'?hiveRegistryComponent(registryImage.image,user):{image,storageFormat:'synthetic-v1',catalog:fixtureCatalog(name),service:{user,command:['node','/config/service.mjs'],healthcheck:{test:['CMD','node','-e',"fetch('http://127.0.0.1:8080/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"],interval:'1s',timeout:'3s',retries:20}}}]))};
  put(configFile,config);put(releaseFile,release);run('openssl',['genpkey','-algorithm','ED25519','-out',join(output,'publisher.key')]);run('openssl',['pkey','-in',join(output,'publisher.key'),'-pubout','-out',join(output,'publisher.pub')]);run('openssl',['pkeyutl','-sign','-inkey',join(output,'publisher.key'),'-rawin','-in',releaseFile,'-out',releaseFile+'.sig']);
  // Reject an unknown host key before any ownership, data or transaction writes.
  put(join(output,'known_hosts'),'[127.0.0.1]:'+sshPort+' '+readFileSync(join(output,'wrong-host.pub'),'utf8'));
@@ -76,5 +80,6 @@ finally{
  for(const host of Object.keys(addresses))for(const file of [join(addresses[host],'rehearsals/paired/isolated.json'),join(addresses[host],'compose.json')])if(existsSync(file))try{docker('compose','-f',file,'down','--remove-orphans');}catch{}
  for(const project of projects)for(const container of docker('ps','-aq','--filter','label=com.docker.compose.project='+project).split(/\s+/).filter(Boolean))try{docker('rm','-f',container);}catch{}
  if(daemon){daemon.kill('SIGTERM');await new Promise(done=>{if(daemon.exitCode!==null)done();else daemon.once('close',done);});}
+ registryImage?.stop();
  if(!passed)console.error('Only generated local SSH credentials and disposable stores were selected.');
 }

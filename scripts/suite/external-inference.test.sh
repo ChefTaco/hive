@@ -37,6 +37,7 @@ done
 openssl genpkey -algorithm ED25519 -out "$temporary/private" >/dev/null 2>&1
 openssl pkey -in "$temporary/private" -pubout -out "$temporary/public" >/dev/null 2>&1
 jq -n --slurpfile c "$temporary/base.json" '{schema:1,version:"0.1.0",profiles:{core:($c[0].components|keys),full:($c[0].components|keys)},components:($c[0].components|map_values({image:("example.com/synthetic@sha256:"+("0"*64)),service:{user:"1000:1000",healthcheck:{test:["CMD","true"]}}}))} | .components.hivexui.kind="static-ui" | .components.ingress.kind="ingress"' > "$temporary/release.json"
+source "$ROOT/scripts/suite/test-catalog.sh"; hive_test_catalog "$temporary/release.json"
 HIVE_MANIFEST=$temporary/release.json HIVE_SIGNATURE=$temporary/signature HIVE_TRUST_KEY=$temporary/public
 cp "$temporary/release.json" "$temporary/valid.json"
 for patch in '.inferenceProfiles={}' '.managedInference=[]' '.modelStorage="/opt/models"' '.components.ollama=.components.emberpath' '.components.emberpath.image=("ollama/ollama@sha256:"+("0"*64))'; do

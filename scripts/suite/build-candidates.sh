@@ -19,6 +19,7 @@ images=(
   'magnus-server|Magnus|services/control-api/Dockerfile|'
   'magnus-agent|Magnus|packages/agent/Dockerfile|'
   'hive-ingress|Hive/deployment|ingress.Dockerfile|'
+  'hive-registry|Hive/services/hive-registry|Dockerfile|'
 )
 selected=("$@")
 for entry in "${images[@]}"; do

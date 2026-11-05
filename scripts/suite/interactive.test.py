@@ -23,8 +23,14 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     manifest['components']['ingress']['kind'] = 'ingress'
     for name in ['hivemem-qdrant', 'oathweave-redis']:
         manifest['components'][name]['kind'] = 'datastore'
+    catalog = json.loads((root / 'scripts/suite/suite-catalog.json').read_text())
+    def with_catalog(document):
+        for name, component in document['components'].items():
+            component['catalog'] = catalog[name]
+        document['components']['hive-registry']['storageFormat'] = 'hive-registry-v1'
+        return document
     release = base / 'release.json'
-    release.write_text(json.dumps(manifest))
+    release.write_text(json.dumps(with_catalog(manifest)))
     def openssl(*args):
         subprocess.run(['openssl', *map(str, args)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     openssl('genpkey', '-algorithm', 'ED25519', '-out', base / 'publisher.key')
@@ -147,7 +153,7 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
         manifest['components'][name]['initialization'] = {'image': 'example.com/migrator@sha256:' + '1' * 64,
                                                           'command': ['apply'], 'verificationCommand': ['verify-current']}
     manifest['profiles']['full'] = sorted(manifest['components'])
-    release.write_text(json.dumps(manifest))
+    release.write_text(json.dumps(with_catalog(manifest)))
     openssl('pkeyutl', '-sign', '-inkey', base / 'publisher.key', '-rawin', '-in', release, '-out', str(release) + '.sig')
     full_output = base / 'inventory' / 'full.json'
     full_questions = []
@@ -159,7 +165,7 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
                                  'transcriptFile': str(base / 'full-transcript.log'), 'timeoutSeconds': 30}))
     subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
     full_config = json.loads(full_output.read_text())
-    assert full_config['profile'] == 'full' and len(full_config['components']) == 17
+    assert full_config['profile'] == 'full' and len(full_config['components']) == 18
     assert 'magnusConsoleOrigin' not in full_config['bootstrap']
     assert full_output.stat().st_mode & 0o077 == 0
     assert not (base / 'deployment').exists(), 'Full planning contacted a host'
@@ -181,7 +187,7 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
     custom_config = json.loads(custom_output.read_text())
     assert custom_config['profile'] == 'custom'
-    assert set(custom_config['components']) == {'oathweave', 'oathweave-redis', 'hivexui', 'ingress', 'hiveskills'}
+    assert set(custom_config['components']) == {'hive-registry', 'oathweave', 'oathweave-redis', 'hivexui', 'ingress', 'hiveskills'}
     assert custom_config['inference'] == [] and custom_config['agents'] == []
     assert custom_output.stat().st_mode & 0o077 == 0
     subprocess.run([*arguments[:2], '--config', str(custom_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)

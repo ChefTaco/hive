@@ -14,6 +14,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
+import { fixtureCatalog, hiveRegistryComponent } from './suite-catalog.mjs';
+import { startRegistryImage } from './registry-image-fixture.mjs';
 const root = resolve(import.meta.dirname, '../..');
 const temp = mkdtempSync(join(tmpdir(), 'hive-lifecycle-'));
 const owned = join(temp, 'installation');
@@ -36,8 +38,9 @@ const configPath = join(temp, 'installation.json');
 const image =
   'node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205';
 const projects = new Set();
-let passed = false;
+let passed = false, registryImage;
 try {
+  registryImage = await startRegistryImage(id);
   mkdirSync(join(owned, 'config', 'probe'), { recursive: true, mode: 0o700 });
   put(join(owned, 'config', 'probe.env'), 'SYNTHETIC_TEST=fixture\n');
   put(
@@ -83,10 +86,12 @@ process.on('SIGTERM',()=>server.close(()=>{db.close();process.exit(0);}));
     const manifest = {
       schema: 1,
       version,
-      profiles: { core: ['probe'], full: ['probe'] },
+      profiles: { core: ['probe', 'hive-registry'], full: ['probe', 'hive-registry'] },
       components: {
+        'hive-registry': hiveRegistryComponent(registryImage.image, `${process.getuid()}:${process.getgid()}`),
         probe: {
           image,
+          catalog: fixtureCatalog('probe'),
           storageFormat: format,
           readableFormats: [format],
           ...(from ? { migration: { from, command: ['node', '/config/service.mjs', mode] } } : {}),
@@ -137,6 +142,7 @@ process.on('SIGTERM',()=>server.close(()=>{db.close();process.exit(0);}));
     origin: 'https://console.example.com',
     hosts: { control: { target: 'local', directory: owned } },
     components: {
+      'hive-registry': { host: 'control', envFile: join(owned, 'config', 'hive-registry.env'), configDirectory: join(owned, 'config', 'hive-registry') },
       probe: {
         host: 'control',
         envFile: join(owned, 'config', 'probe.env'),
@@ -273,6 +279,8 @@ process.on('SIGTERM',()=>server.close(()=>{db.close();process.exit(0);}));
   // is required; do not silently erase it to make the rest of acceptance pass.
   const pending = JSON.parse(readFileSync(join(owned, 'transaction.json')));
   assert.equal(pending.operation, 'rollback');
+  // Measured stopped: SQLite's WAL sidecars change when a store closes cleanly.
+  execute('docker', ['compose', '-f', compose, 'stop', '--timeout', '30']);
   const current = execute('bash', [
     '-c',
     'cd "$1/data"; find . -type f -print0 | sort -z | xargs -0 -r sha256sum --zero | sha256sum | cut -d " " -f1',
@@ -293,6 +301,8 @@ process.on('SIGTERM',()=>server.close(()=>{db.close();process.exit(0);}));
   });
   cli('restore', '0.1.0', ['--archive', 'baseline', '--reconciliation', reconcile]);
   assert.equal(JSON.parse(sql('SELECT id,name FROM accounts'))[0].id, 'synthetic-id');
+  // The restored registry describes the restored installation.
+  assert.match(cli('doctor').stdout, /Hive Registry: in sync/);
   assert.equal(
     JSON.parse(sql("SELECT count(*) AS total FROM counters WHERE name='migration'"))[0].total,
     0,
@@ -317,6 +327,7 @@ process.on('SIGTERM',()=>server.close(()=>{db.close();process.exit(0);}));
     try {
       execute('docker', ['compose', '-f', file, 'down', '--timeout', '10']);
     } catch {}
+  registryImage?.stop();
   if (passed) rmSync(temp, { recursive: true, force: true });
   else console.error('Private lifecycle evidence retained at ' + temp);
 }

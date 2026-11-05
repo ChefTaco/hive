@@ -5,6 +5,7 @@ temporary=$(mktemp -d)
 trap 'rm -rf -- "$temporary"' EXIT
 export HIVE_ROOT=$ROOT
 source "$ROOT/scripts/suite/controller.sh"
+source "$ROOT/scripts/suite/test-catalog.sh"
 cp "$ROOT/examples/installation.json" "$temporary/installation.json"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 reject() { if ( "$@" ) > "$temporary/result" 2>&1; then fail 'Unsafe input was accepted'; fi; }
@@ -21,6 +22,7 @@ reject "$ROOT/hive.sh" plan --config "$temporary/bad.json"
 openssl genpkey -algorithm ED25519 -out "$temporary/private" >/dev/null 2>&1
 openssl pkey -in "$temporary/private" -pubout -out "$temporary/public" >/dev/null 2>&1
 jq -n --slurpfile c "$temporary/installation.json" '{schema:1,version:"0.1.0",profiles:{core:($c[0].components|keys),full:($c[0].components|keys)},components:($c[0].components|map_values({image:("example.com/synthetic@sha256:"+("0"*64)),service:{user:"1000:1000",healthcheck:{test:["CMD","true"]}}}))} | .components.hivexui.kind="static-ui" | .components.ingress.kind="ingress"' > "$temporary/release.json"
+hive_test_catalog "$temporary/release.json"
 openssl pkeyutl -sign -inkey "$temporary/private" -rawin -in "$temporary/release.json" -out "$temporary/release.sig"
 HIVE_CONFIG=$temporary/installation.json HIVE_VERSION=0.1.0
 HIVE_MANIFEST=$temporary/release.json HIVE_SIGNATURE=$temporary/release.sig HIVE_TRUST_KEY=$temporary/public
@@ -55,7 +57,8 @@ done
 jq 'del(.components.oathweave,.components["oathweave-redis"])' "$temporary/installation.json" > "$temporary/none.json"
 if "$ROOT/hive.sh" plan --config "$temporary/none.json" --relax-auth-limits > "$temporary/result" 2>&1; then fail 'A plan with no limited product accepted --relax-auth-limits'; fi
 jq '.profile="custom"|.components+={cindertrace:{host:"control",envFile:"/opt/hive/config/cindertrace.env",configDirectory:"/opt/hive/config/cindertrace"},chattermost:{host:"control",envFile:"/opt/hive/config/chattermost.env",configDirectory:"/opt/hive/config/chattermost"}}' "$temporary/installation.json" > "$temporary/suite.json"
-jq --slurpfile c "$temporary/suite.json" '{schema:1,version:"0.1.0",profiles:{core:[],full:[]},components:($c[0].components|map_values({image:("example.com/synthetic@sha256:"+("0"*64)),service:{user:"1000:1000",healthcheck:{test:["CMD","true"]},environment:{SYNTHETIC:"kept"}}}))} | .components.hivexui.kind="static-ui" | .components.ingress.kind="ingress" | .components["oathweave-redis"].kind="datastore"|.components["hivemem-qdrant"].kind="datastore"|.components.hivexui.service.environment={}' -n > "$temporary/suite-release.json"
+jq --slurpfile c "$temporary/suite.json" '{schema:1,version:"0.1.0",profiles:{core:["hive-registry"],full:["hive-registry"]},components:($c[0].components|map_values({image:("example.com/synthetic@sha256:"+("0"*64)),service:{user:"1000:1000",healthcheck:{test:["CMD","true"]},environment:{SYNTHETIC:"kept"}}}))} | .components.hivexui.kind="static-ui" | .components.ingress.kind="ingress" | .components["oathweave-redis"].kind="datastore"|.components["hivemem-qdrant"].kind="datastore"|.components.hivexui.service.environment={}' -n > "$temporary/suite-release.json"
+hive_test_catalog "$temporary/suite-release.json"
 openssl pkeyutl -sign -inkey "$temporary/private" -rawin -in "$temporary/suite-release.json" -out "$temporary/suite-release.sig"
 suite_arguments=(--config "$temporary/suite.json" --release 0.1.0 --manifest "$temporary/suite-release.json" --signature "$temporary/suite-release.sig" --trust-key "$temporary/public")
 "$ROOT/hive.sh" plan "${suite_arguments[@]}" > "$temporary/default.plan" 2> "$temporary/default.warning"

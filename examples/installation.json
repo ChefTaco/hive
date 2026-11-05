@@ -11,6 +11,11 @@
     }
   },
   "components": {
+    "hive-registry": {
+      "host": "control",
+      "envFile": "/opt/hive/config/hive-registry.env",
+      "configDirectory": "/opt/hive/config/hive-registry"
+    },
     "oathweave": {
       "host": "control",
       "envFile": "/opt/hive/config/oathweave.env",

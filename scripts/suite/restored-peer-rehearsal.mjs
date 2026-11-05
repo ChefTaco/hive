@@ -102,6 +102,9 @@ export async function restoredPeerRehearsal({ output, addresses, config, docker,
     const chatCompose=paths[consoleHost].file;
     const chatSnapshot=()=>docker('compose','-f',chatCompose,'exec','-T','chattermost-postgres','psql','-U','chattermost_app','-d','chattermost','-At','-c','SELECT value FROM "RuntimeState";');
     const before=chatSnapshot();
+    // The restored Hive Registry answers public lookups through the ingress and refuses writes.
+    const registrySummary=await request('/api/registry/v1/installation');assert.equal(registrySummary.status,200);assert.equal(registrySummary.body.id,config.installation);
+    assert.throws(()=>docker('compose','-f',paths[consoleHost].file,'exec','-T','hive-registry','node','/app/dist/cli.js','request','DELETE','/v1/products/any-product','write'),'A restored registry accepted a write');
     const browserHeaders={Origin:config.origin,'X-Oathweave-Browser':'true'};
     const login=await request('/api/oathweave/auth/login',{username:credentials.SEED_ADMIN_USERNAME,password:credentials.SEED_ADMIN_PASSWORD},browserHeaders);assert.equal(login.status,200,'Restored original password failed');
     const cookie=login.headers['set-cookie'].find(value=>value.startsWith('__Host-oathweave_sso=')).split(';')[0],headers={...browserHeaders,Cookie:cookie},tokens={};
@@ -141,7 +144,7 @@ export async function restoredPeerRehearsal({ output, addresses, config, docker,
     assert.equal(magnusRevoked,401,'Restored revoked token accepted: magnus');
     assert.equal((await request('/api/v4/users/me',null,chatHeaders)).status,401,'Restored bound chat session ignored revocation');
     assert.equal(chatSnapshot(),before,'Authenticated clone changed durable chat records');
-    proofResult={schema:1,result:'passed',productionCutover:false,helperSha256:createHash('sha256').update(readFileSync(new URL(import.meta.url))).digest('hex'),physicalHosts:1,sshInventories:2,checks:['original restored config and data preserved separately','one active disposable clone set; original writers stopped','same issuer, keys, client registrations, IDs and original passwords','verified HTTPS peers on isolated internal bridge; no external endpoints reachable','six resource PKCE, restored product reads, wrong audience rejection','restored native chat password, retained post/attachment read and authenticated WSS ping','unexpired resource and bound chat cookie revoked online','durable mutations refused; original chat RuntimeState unchanged']};
+    proofResult={schema:1,result:'passed',productionCutover:false,helperSha256:createHash('sha256').update(readFileSync(new URL(import.meta.url))).digest('hex'),physicalHosts:1,sshInventories:2,checks:['original restored config and data preserved separately','one active disposable clone set; original writers stopped','same issuer, keys, client registrations, IDs and original passwords','verified HTTPS peers on isolated internal bridge; no external endpoints reachable','six resource PKCE, restored product reads, wrong audience rejection','restored native chat password, retained post/attachment read and authenticated WSS ping','unexpired resource and bound chat cookie revoked online','durable mutations refused; original chat RuntimeState unchanged','restored Hive Registry answers public lookups and refuses writes']};
   } catch(error) {
     for(const [host,item] of Object.entries(paths))if(existsSync(item.file))try {
       put(join(evidence,host+'-containers.log'),docker('compose','-f',item.file,'logs','--no-color','--tail','250'));
