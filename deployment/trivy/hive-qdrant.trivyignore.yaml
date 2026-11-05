@@ -1,0 +1,11 @@
+# Scoped to ghcr.io/cheftaco/hive-qdrant only. Both packages appear in /qdrant/qdrant.spdx.json,
+# the upstream SBOM of the whole Cargo workspace, but neither crate is linked into the shipped
+# /qdrant/qdrant binary: of the 218 crate source paths embedded in the 1.18.3 binary, none is
+# pyo3 or quinn-proto. The SBOM is kept unmodified. See deployment/README.md.
+vulnerabilities:
+  - id: GHSA-36hh-v3qg-5jq4
+    purls: ["pkg:cargo/pyo3@0.28.3"]
+    statement: Listed in the upstream SBOM only; pyo3 is not linked into the Qdrant binary.
+  - id: GHSA-4w2j-m93h-cj5j
+    purls: ["pkg:cargo/quinn-proto@0.11.14"]
+    statement: Listed in the upstream SBOM only; quinn-proto is not linked into the Qdrant binary.

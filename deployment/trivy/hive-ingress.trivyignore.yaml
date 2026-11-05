@@ -1,0 +1,7 @@
+# Scoped to ghcr.io/cheftaco/hive-ingress only. go-jose v3 has no fixed release. It reaches the
+# Caddy binary only through the PKI app (caddypki, via smallstep/certificates), which the Hive
+# Caddyfile never enables: no ACME, no local CA, `admin off`, static certificates.
+vulnerabilities:
+  - id: CVE-2026-116587
+    purls: ["pkg:golang/github.com/go-jose/go-jose/v3@v3.0.5"]
+    statement: No fixed go-jose v3 release; reachable only through caddypki, which the suite does not use.
