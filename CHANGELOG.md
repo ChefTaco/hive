@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Wire Magnus into the suite with HiveXUI as its console: an Oathweave browser client and explicit ADMIN link for the fresh operator, and an `/api/magnus` ingress mapping limited to Magnus's browser-facing routes that forwards no machine credential. `bootstrap.magnusConsoleOrigin` is removed, and a configuration that still sets it is refused with a clear message.
+
 - Add `hive.sh install|upgrade --relax-auth-limits` for testing. It renders the setting for Oathweave, Cindertrace and ChatterMost, is part of the plan digest, and is reported as `authLimits` by the plan and `hive.sh status`.
 
 - Document isolated temporary-account authentication forks and central public-client authorization without weakening existing-account acceptance or changing production identity.

@@ -105,7 +105,7 @@ export async function restoredPeerRehearsal({ output, addresses, config, docker,
     const browserHeaders={Origin:config.origin,'X-Oathweave-Browser':'true'};
     const login=await request('/api/oathweave/auth/login',{username:credentials.SEED_ADMIN_USERNAME,password:credentials.SEED_ADMIN_PASSWORD},browserHeaders);assert.equal(login.status,200,'Restored original password failed');
     const cookie=login.headers['set-cookie'].find(value=>value.startsWith('__Host-oathweave_sso=')).split(';')[0],headers={...browserHeaders,Cookie:cookie},tokens={};
-    const routes={oathweave:'/api/oathweave/auth/me',emberpath:'/api/emberpath/auth/me',hivemem:'/api/hivemem/agents',hiveskills:'/api/hiveskills/admin/skills',cindertrace:'/api/cindertrace/security-fusion/overview'};
+    const routes={oathweave:'/api/oathweave/auth/me',emberpath:'/api/emberpath/auth/me',hivemem:'/api/hivemem/agents',hiveskills:'/api/hiveskills/admin/skills',cindertrace:'/api/cindertrace/security-fusion/overview',magnus:'/api/magnus/console/session'};
     for(const product of [...Object.keys(routes),'chattermost']) {
       const verifier=randomBytes(32).toString('base64url'),state=randomBytes(32).toString('base64url'),nonce=randomBytes(32).toString('base64url');
       const code=await request('/api/oathweave/oauth/authorize',{clientId:'hivexui-'+product,redirectUri:config.origin+'/auth/callback',responseType:'code',codeChallenge:createHash('sha256').update(verifier).digest('base64url'),codeChallengeMethod:'S256',scope:'openid profile',state,nonce},headers);assert.equal(code.status,200);assert.equal(code.body.state,state);
@@ -136,6 +136,9 @@ export async function restoredPeerRehearsal({ output, addresses, config, docker,
     assert.equal((await request(routes.cindertrace,null,{Authorization:'Bearer '+tokens.cindertrace})).status,200);
     assert.equal((await request('/api/oathweave/browser/logout',{},headers)).status,200);
     for(const product of ['emberpath','hivemem','hiveskills','cindertrace'])assert.equal((await request(routes[product],null,{Authorization:'Bearer '+tokens[product]})).status,401,'Restored revoked token accepted: '+product);
+    // Magnus documents online revocation within 15 seconds of logout.
+    let magnusRevoked;for(let attempt=0;attempt<25&&magnusRevoked!==401;attempt++){if(attempt)await new Promise(done=>setTimeout(done,1000));magnusRevoked=(await request(routes.magnus,null,{Authorization:'Bearer '+tokens.magnus})).status;}
+    assert.equal(magnusRevoked,401,'Restored revoked token accepted: magnus');
     assert.equal((await request('/api/v4/users/me',null,chatHeaders)).status,401,'Restored bound chat session ignored revocation');
     assert.equal(chatSnapshot(),before,'Authenticated clone changed durable chat records');
     proofResult={schema:1,result:'passed',productionCutover:false,helperSha256:createHash('sha256').update(readFileSync(new URL(import.meta.url))).digest('hex'),physicalHosts:1,sshInventories:2,checks:['original restored config and data preserved separately','one active disposable clone set; original writers stopped','same issuer, keys, client registrations, IDs and original passwords','verified HTTPS peers on isolated internal bridge; no external endpoints reachable','six resource PKCE, restored product reads, wrong audience rejection','restored native chat password, retained post/attachment read and authenticated WSS ping','unexpired resource and bound chat cookie revoked online','durable mutations refused; original chat RuntimeState unchanged']};

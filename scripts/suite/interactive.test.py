@@ -155,18 +155,16 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
         if label == 'Product profile': answer = 'full'
         if label == 'Write protected installation configuration to': answer = str(full_output)
         full_questions.append((label, answer))
-        if label == 'Protected console private key file':
-            full_questions.append(('Existing Magnus console HTTPS URL', 'https://fleet.example.com'))
     review.write_text(json.dumps({'command': arguments, 'questions': full_questions,
                                  'transcriptFile': str(base / 'full-transcript.log'), 'timeoutSeconds': 30}))
     subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
     full_config = json.loads(full_output.read_text())
     assert full_config['profile'] == 'full' and len(full_config['components']) == 17
-    assert full_config['bootstrap']['magnusConsoleOrigin'] == 'https://fleet.example.com'
+    assert 'magnusConsoleOrigin' not in full_config['bootstrap']
     assert full_output.stat().st_mode & 0o077 == 0
     assert not (base / 'deployment').exists(), 'Full planning contacted a host'
     subprocess.run([*arguments[:2], '--config', str(full_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
-    print('Passed: interactive full profile, explicit existing Magnus console link, protected config and identical unattended planning.')
+    print('Passed: interactive full profile, protected config and identical unattended planning.')
 
     custom_output = base / 'inventory' / 'custom.json'
     custom_questions = []

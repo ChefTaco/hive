@@ -33,10 +33,12 @@ remote placements need explicit verified HTTPS endpoints. Static HiveXUI is loca
 to ingress. Do not expose datastore ports.
 
 Browser prefixes are `/api/emberpath`, `/api/oathweave`, `/api/hivemem`,
-`/api/hiveskills`, `/api/cindertrace`, and `/api/chattermost`. Configure the same
-prefixes in HiveXUI runtime JSON. The first three rewrite to `/api`, `/api/v1`,
+`/api/hiveskills`, `/api/cindertrace`, `/api/chattermost`, and `/api/magnus`.
+Configure the same prefixes in HiveXUI runtime JSON. The first three rewrite to `/api`, `/api/v1`,
 and `/v1` respectively; Skills receives its native paths, Cindertrace `/api/v1`,
-and chat its native `/api/v4` paths. The ingress preserves user Authorization,
+and chat its native `/api/v4` paths. Magnus is the exception to prefix mapping:
+only an explicit list of browser-facing routes rewrites to `/api/v1`, and everything
+else answers 404 (see [FULL.md](FULL.md)). The ingress preserves user Authorization,
 Origin and native product sessions without injecting an administrator credential.
 Oathweave's SSO and refresh cookies reach only Oathweave; other APIs cannot set
 these identity cookies. Static assets receive no Authorization or Cookie header
@@ -59,7 +61,9 @@ The readiness listener is container-local loopback only.
 After building HiveXUI as `hivexui:candidate`, run
 `node scripts/suite/ingress-roundtrip.mjs` for disposable transport acceptance.
 It checks TLS certificate-name rejection, path mappings, identity-cookie isolation,
-native session preservation, streaming and WebSocket upgrades. It is not a product authorization or migrated
+native session preservation, streaming and WebSocket upgrades, plus the Magnus route
+allowlist and header stripping. Set `HIVE_MAGNUS_ROUTE_INVENTORY` to Magnus's
+`docs/console-api.md` to check every row of that inventory. It is not a product authorization or migrated
 data test. Released deployment must use registry image digests rather than these
 local candidate tags.
 

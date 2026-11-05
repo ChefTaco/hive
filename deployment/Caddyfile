@@ -28,10 +28,29 @@
 	header_down -Set-Cookie
 }
 
+(magnus_backend) {
+	import stateless_backend {args[0]}
+	# Default deny: the API reads only these. x-api-secret grants system ADMIN and
+	# x-node-token an agent's access, so a browser must never be able to send them.
+	header_up -*
+	header_up -X-Api-Secret
+	header_up -X-Node-Token
+	header_up Authorization {http.request.header.Authorization}
+	header_up Content-Type {http.request.header.Content-Type}
+	header_up Accept {http.request.header.Accept}
+	header_up X-Idempotency-Key {http.request.header.X-Idempotency-Key}
+	header_up X-Trace-Id {http.request.header.X-Trace-Id}
+	header_up X-Forwarded-For {client_ip}
+}
+
 {$HIVE_CONSOLE_HOST} {
 	tls /config/console.crt /config/console.key
 	handle /_hive/ready {
 		respond "ready" 200
+	}
+	@magnus_ready {
+		method GET
+		path /api/magnus/health/ready
 	}
 	handle /api/emberpath/health/ready {
 		rewrite * /health/ready
@@ -77,6 +96,204 @@
 	handle_path /api/chattermost/* {
 		reverse_proxy {$CHATTERMOST_ENDPOINT:https://unconfigured.invalid} {
 			import product_backend {$CHATTERMOST_TLS_NAME:unconfigured.invalid} "__Host-oathweave_sso|iam_refresh|hive_router_admin|hivemem_dash|hive_skills_session|cindertrace_session"
+		}
+	}
+	# Magnus is reached only by the browser console, with a bearer token. The
+	# routes below are the browser-facing rows of Magnus's docs/console-api.md and
+	# nothing else: machine-only, excluded and retired routes answer 404 here.
+	handle @magnus_ready {
+		rewrite * /api/v1/health
+		reverse_proxy {$MAGNUS_ENDPOINT:https://unconfigured.invalid} {
+			import magnus_backend {$MAGNUS_TLS_NAME:unconfigured.invalid}
+		}
+	}
+	handle_path /api/magnus/* {
+		rewrite * /api/v1{uri}
+		# Patterns match decoded paths, so refuse any request whose raw path could
+		# read differently here and upstream.
+		@magnus_unsafe_path expression <<CEL
+			!{http.request.orig_uri}.matches(r"^/api/magnus/")
+			|| {http.request.orig_uri}.matches(r"(?i)^[^?]*(//|/\.\.?(/|\?|$)|\\|%(2f|5c|2e|25|[01][0-9a-f]|7f))")
+			CEL
+		handle @magnus_unsafe_path {
+			respond "API unavailable" 404
+		}
+		# A route parameter also matches a literal segment. These non-browser routes
+		# are shadowed by a broader browser pattern, so they are refused first.
+		@magnus_explicit_deny {
+			method GET
+			path /api/v1/agents/upgrade/runs/latest
+			path /api/v1/nodes/compare /api/v1/nodes/scan-users /api/v1/nodes/tags
+			path /api/v1/ardent/installations/*/profiles/*/context-adoptions/*
+			path /api/v1/ardent/installations/*/profiles/*/context-release
+		}
+		handle @magnus_explicit_deny {
+			respond "API unavailable" 404
+		}
+		# Deferred: the browser terminal needs its own gateway at
+		# /api/magnus/terminal/*. It has no route until that gateway exists, and
+		# POST /api/v1/terminal/ticket stays retired.
+		@magnus_browser expression <<CEL
+			({method} == "GET" && (
+				{path} == "/api/v1/agents/upgrade/eligibility"
+				|| {path}.matches("^/api/v1/agents/upgrade/runs/[^/]+$")
+				|| {path} == "/api/v1/anomalies"
+				|| {path}.matches("^/api/v1/anomalies/event/[^/]+/correlation$")
+				|| {path} == "/api/v1/anomalies/summary"
+				|| {path} == "/api/v1/ardent/installations"
+				|| {path}.matches("^/api/v1/ardent/installations/[^/]+$")
+				|| {path}.matches("^/api/v1/ardent/installations/[^/]+/profiles/[^/]+/.+$")
+				|| {path}.matches("^/api/v1/ardent/installations/[^/]+/profiles/[^/]+/artifacts/[^/]+$")
+				|| {path} == "/api/v1/ardent/profiles"
+				|| {path} == "/api/v1/assistant/conversations"
+				|| {path} == "/api/v1/assistant/insights"
+				|| {path} == "/api/v1/assistant/insights/pins"
+				|| {path}.matches("^/api/v1/assistant/shares/[^/]+$")
+				|| {path} == "/api/v1/audit"
+				|| {path} == "/api/v1/audit/days"
+				|| {path} == "/api/v1/codex/installations"
+				|| {path}.matches("^/api/v1/codex/installations/[^/]+$")
+				|| {path}.matches("^/api/v1/codex/installations/[^/]+/device-auth/[^/]+$")
+				|| {path} == "/api/v1/commands"
+				|| {path}.matches("^/api/v1/commands/[^/]+$")
+				|| {path}.matches("^/api/v1/commands/[^/]+/result$")
+				|| {path} == "/api/v1/console/session"
+				|| {path} == "/api/v1/cron"
+				|| {path}.matches("^/api/v1/cron/[^/]+$")
+				|| {path} == "/api/v1/dependencies"
+				|| {path} == "/api/v1/events/stream"
+				|| {path} == "/api/v1/files/read"
+				|| {path} == "/api/v1/health"
+				|| {path}.matches("^/api/v1/health/[^/]+/forecast$")
+				|| {path} == "/api/v1/hermes/installations"
+				|| {path}.matches("^/api/v1/hermes/installations/[^/]+/profiles$")
+				|| {path} == "/api/v1/hermes/profiles"
+				|| {path} == "/api/v1/library/categories"
+				|| {path} == "/api/v1/library/files"
+				|| {path}.matches("^/api/v1/library/files/[^/]+$")
+				|| {path} == "/api/v1/logs/stream"
+				|| {path} == "/api/v1/nodes"
+				|| {path}.matches("^/api/v1/nodes/[^/]+$")
+				|| {path}.matches("^/api/v1/nodes/[^/]+/gpu$")
+				|| {path}.matches("^/api/v1/nodes/[^/]+/health$")
+				|| {path}.matches("^/api/v1/nodes/[^/]+/health/history$")
+				|| {path}.matches("^/api/v1/nodes/[^/]+/health/timeseries$")
+				|| {path} == "/api/v1/nodes/system-updates/summary"
+				|| {path} == "/api/v1/nodes/tailscale/summary"
+				|| {path} == "/api/v1/notifications"
+				|| {path} == "/api/v1/notifications/preferences"
+				|| {path} == "/api/v1/notifications/unread-count"
+				|| {path} == "/api/v1/ops/applications"
+				|| {path} == "/api/v1/ops/capacity-advice"
+				|| {path} == "/api/v1/ops/dependency-health"
+				|| {path} == "/api/v1/ops/hermes-effective-state"
+				|| {path} == "/api/v1/ops/incident-summary"
+				|| {path}.matches("^/api/v1/ops/incidents/[^/]+/evidence$")
+				|| {path} == "/api/v1/ops/lessons"
+				|| {path} == "/api/v1/ops/maintenance"
+				|| {path} == "/api/v1/ops/readiness"
+				|| {path} == "/api/v1/ops/retention"
+				|| {path}.matches("^/api/v1/ops/storage-evidence/[^/]+$")
+				|| {path} == "/api/v1/ops/timeline"
+				|| {path} == "/api/v1/orchestra/installations"
+				|| {path} == "/api/v1/orchestra/profiles"
+				|| {path} == "/api/v1/remediation/executions"
+				|| {path} == "/api/v1/remediation/rules"
+				|| {path} == "/api/v1/roles"
+				|| {path}.matches("^/api/v1/roles/[^/]+$")
+				|| {path} == "/api/v1/roles/applications/list"
+				|| {path} == "/api/v1/rollouts"
+				|| {path}.matches("^/api/v1/rollouts/[^/]+$")
+				|| {path} == "/api/v1/self-update/status"
+				|| {path} == "/api/v1/self-update/version"
+				|| {path} == "/api/v1/skills"
+				|| {path} == "/api/v1/stats/overview"
+				|| {path} == "/api/v1/system/updates"
+				|| {path} == "/api/v1/topology"
+				|| {path} == "/api/v1/webhooks"
+				|| {path}.matches("^/api/v1/webhooks/[^/]+$")
+				|| {path}.matches("^/api/v1/webhooks/[^/]+/deliveries$")
+			))
+			|| ({method} == "POST" && (
+				{path} == "/api/v1/agents/upgrade"
+				|| {path}.matches("^/api/v1/agents/upgrade/runs/[^/]+/retry$")
+				|| {path}.matches("^/api/v1/agents/upgrade/runs/[^/]+/stop$")
+				|| {path}.matches("^/api/v1/ardent/installations/[^/]+/profiles/[^/]+/action$")
+				|| {path} == "/api/v1/assistant/insights/pins"
+				|| {path}.matches("^/api/v1/codex/installations/[^/]+/device-auth$")
+				|| {path}.matches("^/api/v1/codex/installations/[^/]+/device-auth/[^/]+/cancel$")
+				|| {path}.matches("^/api/v1/codex/installations/[^/]+/logout$")
+				|| {path}.matches("^/api/v1/codex/installations/[^/]+/update$")
+				|| {path} == "/api/v1/commands"
+				|| {path}.matches("^/api/v1/commands/[^/]+/cancel$")
+				|| {path} == "/api/v1/cron"
+				|| {path} == "/api/v1/files/update"
+				|| {path} == "/api/v1/library/categories"
+				|| {path} == "/api/v1/library/deploy"
+				|| {path} == "/api/v1/library/files"
+				|| {path} == "/api/v1/library/files/move"
+				|| {path} == "/api/v1/logs/query"
+				|| {path}.matches("^/api/v1/nodes/[^/]+/system-updates/enable$")
+				|| {path} == "/api/v1/nodes/register"
+				|| {path} == "/api/v1/notifications/read"
+				|| {path} == "/api/v1/notifications/read-all"
+				|| {path}.matches("^/api/v1/ops/applications/[^/]+/canary$")
+				|| {path} == "/api/v1/ops/lessons"
+				|| {path} == "/api/v1/ops/maintenance"
+				|| {path}.matches("^/api/v1/ops/maintenance/[^/]+/cancel$")
+				|| {path}.matches("^/api/v1/quick-command/[^/]+/exec$")
+				|| {path}.matches("^/api/v1/remediation/executions/[^/]+/approve$")
+				|| {path} == "/api/v1/remediation/rules"
+				|| {path} == "/api/v1/remediation/trigger"
+				|| {path} == "/api/v1/roles"
+				|| {path}.matches("^/api/v1/roles/[^/]+/apply$")
+				|| {path}.matches("^/api/v1/roles/[^/]+/assign$")
+				|| {path}.matches("^/api/v1/roles/[^/]+/unassign$")
+				|| {path}.matches("^/api/v1/rollouts/[^/]+/abort$")
+				|| {path}.matches("^/api/v1/rollouts/[^/]+/pause$")
+				|| {path}.matches("^/api/v1/rollouts/[^/]+/resume$")
+				|| {path} == "/api/v1/scan/cron"
+				|| {path} == "/api/v1/scan/skills"
+				|| {path} == "/api/v1/topology/scan"
+				|| {path} == "/api/v1/webhooks"
+				|| {path}.matches("^/api/v1/webhooks/[^/]+/deliveries/[^/]+/redeliver$")
+				|| {path}.matches("^/api/v1/webhooks/[^/]+/test$")
+			))
+			|| ({method} == "PUT" && (
+				{path} == "/api/v1/notifications/preferences"
+			))
+			|| ({method} == "PATCH" && (
+				{path}.matches("^/api/v1/cron/[^/]+$")
+				|| {path}.matches("^/api/v1/library/categories/[^/]+$")
+				|| {path}.matches("^/api/v1/library/files/[^/]+$")
+				|| {path}.matches("^/api/v1/nodes/[^/]+$")
+				|| {path}.matches("^/api/v1/remediation/rules/[^/]+$")
+				|| {path}.matches("^/api/v1/roles/[^/]+$")
+				|| {path}.matches("^/api/v1/webhooks/[^/]+$")
+			))
+			|| ({method} == "DELETE" && (
+				{path}.matches("^/api/v1/assistant/insights/pins/[^/]+$")
+				|| {path}.matches("^/api/v1/cron/[^/]+$")
+				|| {path}.matches("^/api/v1/library/categories/[^/]+$")
+				|| {path}.matches("^/api/v1/library/files/[^/]+$")
+				|| {path}.matches("^/api/v1/nodes/[^/]+$")
+				|| {path}.matches("^/api/v1/remediation/rules/[^/]+$")
+				|| {path}.matches("^/api/v1/roles/[^/]+$")
+				|| {path}.matches("^/api/v1/webhooks/[^/]+$")
+			))
+			CEL
+		handle @magnus_browser {
+			@magnus_not_bearer {
+				header Authorization *
+				not header_regexp Authorization "^Bearer [^ ,]+$"
+			}
+			respond @magnus_not_bearer "Bearer token required" 401
+			reverse_proxy {$MAGNUS_ENDPOINT:https://unconfigured.invalid} {
+				import magnus_backend {$MAGNUS_TLS_NAME:unconfigured.invalid}
+			}
+		}
+		handle {
+			respond "API unavailable" 404
 		}
 	}
 	# Emberfold has an optional co-located HTTP listener. HTTPS terminates here;

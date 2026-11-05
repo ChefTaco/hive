@@ -41,10 +41,16 @@ Distributed configuration adds verified HTTPS `productEndpoints` for selected
 Magnus, Cindertrace and ChatterMost services, alongside the four core endpoints.
 The optional Emberfold HTTP service stays on the console host's Compose network.
 Its API token remains in its protected backend environment. Browser configuration
-contains the installation namespace and same-origin product paths only. Magnus's
-existing console remains a separate product interface pending its later merge.
-Set optional `bootstrap.magnusConsoleOrigin` to expose its HTTPS link in HiveXUI;
-fresh setup does not invent a Magnus console URL or reuse its credentials.
+contains the installation namespace and same-origin product paths only.
+
+HiveXUI is the Magnus console. It reaches the fleet API at `/api/magnus` with a
+short-lived Oathweave resource token (audience `magnus`), and fresh setup links the
+initial operator to Magnus as an explicit ADMIN. The ingress allows only the
+browser-facing rows of Magnus's `docs/console-api.md`, answers 404 for everything
+else, and forwards no machine credential, so `x-api-secret` and `x-node-token` never
+reach Magnus through it. Agents and services keep using the Magnus endpoint directly.
+Browser terminal access is deferred until its gateway exists. The former
+`bootstrap.magnusConsoleOrigin` setting is refused with a clear message; remove it.
 
 Dispatch, ingestion, retention and notification integrations in fresh Cindertrace
 configuration start disabled until the operator reviews their product-owned

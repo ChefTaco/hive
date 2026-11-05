@@ -53,9 +53,9 @@ try {
 const https=require('https'),http=require('http'),fs=require('fs'),crypto=require('crypto');
 const names=['__Host-oathweave_sso','iam_refresh','hive_router_admin','hivemem_dash','hive_skills_session','cindertrace_session','MMSID','MMUSERID','MMCSRF'];
 const server=https.createServer({key:fs.readFileSync('/config/console.key'),cert:fs.readFileSync('/config/console.crt')},(req,res)=>{
- if(req.url==='/v1/stream'){res.writeHead(200,{'Content-Type':'text/event-stream'});res.write('data: first\\n\\n');setTimeout(()=>res.end('data: last\\n\\n'),350);return;}
+ if(req.url==='/v1/stream'||req.url==='/api/v1/events/stream'){res.writeHead(200,{'Content-Type':'text/event-stream'});res.write('data: first\\n\\n');setTimeout(()=>res.end('data: last\\n\\n'),350);return;}
  res.setHeader('Set-Cookie',names.map(name=>name+'=obviously-fake-native; Path=/; Secure; HttpOnly'));
- res.setHeader('Content-Type','application/json');res.end(JSON.stringify({path:req.url,authorization:req.headers.authorization,cookie:req.headers.cookie,origin:req.headers.origin}));
+ res.setHeader('Content-Type','application/json');const chunks=[];req.on('data',chunk=>chunks.push(chunk));req.on('end',()=>res.end(JSON.stringify({path:req.url,method:req.method,authorization:req.headers.authorization,cookie:req.headers.cookie,origin:req.headers.origin,headers:req.headers,body:Buffer.concat(chunks).toString()})));
 });
 server.on('upgrade',(req,socket)=>{const accept=crypto.createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');socket.write('HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\nSec-WebSocket-Accept: '+accept+'\\r\\nX-Fixture-Cookie: '+req.headers.cookie+'\\r\\n\\r\\n');socket.write(Buffer.from([129,2,111,107]));setTimeout(()=>socket.destroy(),2000);});
 server.listen(9443,'0.0.0.0');
@@ -138,6 +138,7 @@ http.createServer((req,res)=>{res.setHeader('Set-Cookie','MMSID=obviously-fake-f
     'HIVESKILLS',
     'CINDERTRACE',
     'CHATTERMOST',
+    'MAGNUS',
   ])
     env.push(
       '-e',
@@ -186,9 +187,9 @@ http.createServer((req,res)=>{res.setHeader('Set-Cookie','MMSID=obviously-fake-f
     ca: readFileSync(join(temporary, 'console.crt')),
     timeout: 5000,
   };
-  async function request(path, headers = {}) {
+  async function request(path, headers = {}, method = 'GET', body) {
     return new Promise((resolve, reject) => {
-      const req = https.get({ ...options, path, headers }, (res) => {
+      const req = https.request({ ...options, path, headers, method }, (res) => {
         const chunks = [];
         let first;
         res.on('data', (chunk) => {
@@ -206,6 +207,7 @@ http.createServer((req,res)=>{res.setHeader('Set-Cookie','MMSID=obviously-fake-f
       });
       req.on('timeout', () => req.destroy(new Error('timeout')));
       req.on('error', reject);
+      req.end(body);
     });
   }
   let ready = false;
@@ -267,6 +269,114 @@ http.createServer((req,res)=>{res.setHeader('Set-Cookie','MMSID=obviously-fake-f
   const stream = await request('/v1/stream', headers);
   assert.match(stream.body, /first[\s\S]*last/);
   assert(stream.streamMilliseconds > 150, 'Streaming response was buffered until completion');
+  // Magnus: only browser-facing routes, only the headers its API reads.
+  const refused = 'API unavailable';
+  const magnusHeaders = {
+    ...headers,
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    'X-Idempotency-Key': 'obviously-fake-key',
+    'X-Trace-Id': 'obviously-fake-trace',
+    'X-Api-Secret': 'obviously-fake-secret',
+    'x-node-token': 'obviously-fake-node-token',
+    'X-Log-Token': 'obviously-fake-log-token',
+    'X-Forwarded-For': '192.0.2.1',
+  };
+  for (const [input, expected, method, payload] of [
+    ['/api/magnus/health/ready', '/api/v1/health'],
+    ['/api/magnus/health', '/api/v1/health'],
+    ['/api/magnus/console/session', '/api/v1/console/session'],
+    ['/api/magnus/nodes/node-1/gpu', '/api/v1/nodes/node-1/gpu'],
+    ['/api/magnus/files/read?path=%2Fetc%2Fhosts', '/api/v1/files/read?path=%2Fetc%2Fhosts'],
+    ['/api/magnus/ardent/installations/node-1/profiles/main/sessions/one', '/api/v1/ardent/installations/node-1/profiles/main/sessions/one'],
+    ['/api/magnus/commands', '/api/v1/commands', 'POST', '{"synthetic":true}'],
+    ['/api/magnus/notifications/preferences', '/api/v1/notifications/preferences', 'PUT', '{"synthetic":true}'],
+    ['/api/magnus/nodes/node-1', '/api/v1/nodes/node-1', 'PATCH', '{"synthetic":true}'],
+    ['/api/magnus/nodes/node-1', '/api/v1/nodes/node-1', 'DELETE'],
+  ]) {
+    const result = await request(input, magnusHeaders, method, payload);
+    assert.equal(result.status, 200, input);
+    const body = JSON.parse(result.body);
+    assert.equal(body.path, expected);
+    assert.equal(body.method, method ?? 'GET');
+    assert.equal(body.body, payload ?? '', input + ' changed the request body');
+    assert.equal(body.authorization, headers.Authorization);
+    assert.equal(body.headers['x-idempotency-key'], 'obviously-fake-key');
+    assert.equal(body.headers['x-trace-id'], 'obviously-fake-trace');
+    assert.equal(body.headers.accept, 'application/json');
+    assert.equal(body.headers['content-type'], 'application/json');
+    for (const name of ['x-api-secret', 'x-node-token', 'x-log-token', 'cookie', 'origin'])
+      assert.equal(body.headers[name], undefined, input + ' forwarded ' + name);
+    assert.notEqual(body.headers['x-forwarded-for'], '192.0.2.1', 'Ingress trusted a browser forwarding header');
+    assert.deepEqual((result.cookies || []).filter(Boolean), [], input + ' let Magnus set a cookie');
+  }
+  assert.equal((await request('/api/magnus/console/session', { Authorization: 'Basic b2JfdmlvdXNseQ==' })).status, 401, 'Non-bearer Authorization reached Magnus');
+  for (const [input, method] of [
+    ['/api/magnus/heartbeat', 'POST'],
+    ['/api/magnus/heartbeat/stream/stats'],
+    ['/api/magnus/discovery/scan', 'POST'],
+    ['/api/magnus/terminal/ticket', 'POST'],
+    ['/api/magnus/health/ready', 'POST'],
+    ['/api/magnus/nodes/scan-users'],
+    ['/api/magnus/nodes/SCAN-USERS'],
+    ['/api/magnus/nodes/compare'],
+    ['/api/magnus/nodes/tags'],
+    ['/api/magnus/agents/upgrade/runs/latest'],
+    ['/api/magnus/ardent/installations/node-1/profiles/main/context-release'],
+    ['/api/magnus/ardent/installations/node-1/profiles/main/context-adoptions/release-1'],
+    ['/api/magnus/nodes', 'DELETE'],
+    ['/api/magnus/nodes', 'OPTIONS'],
+    ['/api/magnus/nodes/node-1/unknown'],
+    ['/api/magnus/nodes/'],
+    ['/api/magnus'],
+    ['/API/MAGNUS/nodes'],
+    ['/api/magnus/Nodes'],
+    ['/api/magnus//nodes'],
+    ['/api/magnus/nodes//node-1'],
+    ['/api/magnus/nodes/%2Fnode-1'],
+    ['/api/magnus/nodes%2Fnode-1'],
+    ['/api/magnus/nodes/scan%2Dusers'],
+    ['/api/magnus/nodes/../heartbeat'],
+    ['/api/magnus/nodes/./node-1'],
+    ['/api/magnus/nodes/%2e%2e/heartbeat'],
+    ['/api/magnus/nodes/node-1%00'],
+    ['/api/magnus/nodes/node-1%0a'],
+    ['/api/magnus/nodes/node%252F1'],
+    ['/api/magnus/nodes/node%5c1'],
+  ]) {
+    const result = await request(input, magnusHeaders, method);
+    assert.equal(result.status, 404, (method ?? 'GET') + ' ' + input + ' was not refused');
+    assert.equal(result.body, refused, input + ' reached a backend');
+  }
+  const magnusStream = await request('/api/magnus/events/stream', { ...magnusHeaders, Accept: 'text/event-stream' });
+  assert.equal(magnusStream.status, 200);
+  assert.match(magnusStream.body, /first[\s\S]*last/);
+  assert(magnusStream.streamMilliseconds > 150, 'Magnus event stream was buffered until completion');
+  // Optional: the whole of Magnus's own route inventory, when a checkout supplies it.
+  if (process.env.HIVE_MAGNUS_ROUTE_INVENTORY) {
+    const counts = { browser: 0, refused: 0 };
+    let section = '';
+    for (const line of readFileSync(process.env.HIVE_MAGNUS_ROUTE_INVENTORY, 'utf8').split('\n')) {
+      if (line.startsWith('## ')) section = line.slice(3);
+      const row = line.match(/^\| (GET|POST|PUT|PATCH|DELETE|ALL) \| `(\/api\/v1\/[^`]*)` \|/);
+      if (!row || section === 'Explicit denies') continue;
+      const allowed = section === 'Browser-facing';
+      const path = '/api/magnus' + row[2].slice('/api/v1'.length).replace(/:[A-Za-z]+/g, 'probe').replace(/\/\*$/, '/probe/deep');
+      if (allowed) assert(!/\*/.test(path), 'Browser inventory row is not a concrete path: ' + row[2]);
+      const concrete = path.replace(/\*/g, 'probe');
+      const method = row[1] === 'ALL' ? 'GET' : row[1];
+      const result = await request(concrete, { Authorization: headers.Authorization }, method);
+      if (allowed) {
+        assert.equal(result.status, 200, method + ' ' + concrete + ' was refused');
+        if (!result.body.startsWith('data:')) assert.equal(JSON.parse(result.body).path, '/api/v1' + concrete.slice('/api/magnus'.length));
+        counts.browser++;
+      } else {
+        assert.equal(result.status, 404, method + ' ' + concrete + ' (' + section + ') was allowed');
+        counts.refused++;
+      }
+    }
+    console.log('Magnus route inventory: ' + counts.browser + ' browser rows allowed, ' + counts.refused + ' other rows refused.');
+  }
   await new Promise((resolve, reject) => {
     const req = https.get({
       ...options,
@@ -302,7 +412,7 @@ http.createServer((req,res)=>{res.setHeader('Set-Cookie','MMSID=obviously-fake-f
   });
   passed = true;
   console.log(
-    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming and WebSocket transport.',
+    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming, WebSocket transport, and the Magnus route allowlist with machine credentials stripped.',
   );
 } catch (error) {
   for (const container of containers) {

@@ -96,8 +96,6 @@ hive_configure() {
   if [[ "$mode" == fresh || "$mode" == distributed ]]; then
     selected_json=$(jq -nc --argjson selected "$selected_json" '$selected+["oathweave","oathweave-redis","hivexui","ingress"]|unique')
   fi
-  magnus_console=''
-  if [[ "$mode" == fresh || "$mode" == distributed ]] && jq -e 'index("magnus")!=null' <<< "$selected_json" >/dev/null; then hive_prompt magnus_console 'Existing Magnus console HTTPS URL (blank to leave unconfigured)'; fi
   printf 'Inference services remain external. Hive verifies their APIs and registers providers only with an explicit Emberpath credential reference.\n'
   hive_prompt endpoint 'Existing external inference HTTPS endpoint (blank to skip)'
   if [[ -n "$endpoint" ]]; then
@@ -133,10 +131,10 @@ hive_configure() {
   done
   temporary=$(mktemp -d)
   config="$temporary/installation.json"
-  jq -n --arg id "$id" --arg directory "$directory" --arg target "$target" --arg architecture "$architecture" --arg origin "$origin" --arg profile "$profile" --arg version "$HIVE_VERSION" --arg bind "$bind" --arg port "$port" --arg mode "$mode" --arg username "${username:-}" --arg email "${email:-}" --arg certificate "${certificate:-}" --arg key "${private_key:-}" --arg magnusConsole "${magnus_console:-}" --argjson selected "$selected_json" --argjson agents "$agents" --argjson inference "$inference" --slurpfile release "$HIVE_MANIFEST" '
+  jq -n --arg id "$id" --arg directory "$directory" --arg target "$target" --arg architecture "$architecture" --arg origin "$origin" --arg profile "$profile" --arg version "$HIVE_VERSION" --arg bind "$bind" --arg port "$port" --arg mode "$mode" --arg username "${username:-}" --arg email "${email:-}" --arg certificate "${certificate:-}" --arg key "${private_key:-}" --argjson selected "$selected_json" --argjson agents "$agents" --argjson inference "$inference" --slurpfile release "$HIVE_MANIFEST" '
     {schema:1,installation:$id,release:$version,profile:$profile,origin:$origin,hosts:{control:{target:$target,directory:$directory,architecture:$architecture}},components:($selected|map(. as $name|{key:$name,value:({host:"control"}+(if $release[0].components[$name].kind=="static-ui" then {} elif $release[0].components[$name].kind=="datastore" then {configDirectory:($directory+"/config/"+$name)} else {envFile:($directory+"/config/"+$name+".env"),configDirectory:($directory+"/config/"+$name)} end))})|from_entries),agents:$agents,inference:$inference} +
     (if ($selected|index("hivexui"))!=null or ($selected|index("ingress"))!=null then {console:{host:"control",bindAddress:$bind,httpsPort:($port|tonumber),runtimeFile:($directory+"/config/runtime.json")}} else {} end) +
-    (if $mode=="fresh" or $mode=="distributed" then {bootstrap:({adminUsername:$username,adminEmail:$email,certificateFile:$certificate,privateKeyFile:$key}+(if $magnusConsole!="" then {magnusConsoleOrigin:$magnusConsole} else {} end))} else {} end)' > "$config"
+    (if $mode=="fresh" or $mode=="distributed" then {bootstrap:{adminUsername:$username,adminEmail:$email,certificateFile:$certificate,privateKeyFile:$key}} else {} end)' > "$config"
   if [[ "$mode" == distributed ]]; then
     printf 'Place products within this installation. Each product keeps its private datastore on its selected host. Every host must trust the explicit HTTPS certificate bundle.\n'
     hive_prompt trust_bundle 'Product trust bundle file available on every host (absolute)'
@@ -204,13 +202,15 @@ hive_validate() {
   HIVE_ID=$(jq -r '.installation' "$HIVE_CONFIG")
   HIVE_VERSION=${HIVE_VERSION:-$(jq -r '.release' "$HIVE_CONFIG")}
   if jq -e 'has("bootstrap")' "$HIVE_CONFIG" >/dev/null; then
+    if jq -e '.bootstrap|type=="object" and has("magnusConsoleOrigin")' "$HIVE_CONFIG" >/dev/null; then
+      hive_die 'bootstrap.magnusConsoleOrigin is no longer supported: HiveXUI now provides the Magnus console through /api/magnus. Remove this field from the installation configuration and run the command again; review the new plan before applying it.'
+    fi
     jq -e '
       def path: type=="string" and test("^/[A-Za-z0-9_./-]+$") and (split("/")|all(.!=".."));
-      .bootstrap|type=="object" and (keys-["adminUsername","adminEmail","certificateFile","privateKeyFile","productEndpoints","trustBundleFile","magnusConsoleOrigin"]|length==0) and
+      .bootstrap|type=="object" and (keys-["adminUsername","adminEmail","certificateFile","privateKeyFile","productEndpoints","trustBundleFile"]|length==0) and
       (.adminUsername|type=="string" and test("^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$")) and
       (.adminEmail|type=="string" and length<=254 and test("^[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")) and
-      (.certificateFile|path) and (.privateKeyFile|path) and
-      (if has("magnusConsoleOrigin") then .magnusConsoleOrigin|type=="string" and test("^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[-A-Za-z0-9._~]+)*$") else true end)
+      (.certificateFile|path) and (.privateKeyFile|path)
     ' "$HIVE_CONFIG" >/dev/null || hive_die 'Invalid fresh-install bootstrap configuration; provide initial operator labels and protected console certificate/key references'
     if declare -F hive_bootstrap_validate >/dev/null; then hive_bootstrap_validate; fi
   fi

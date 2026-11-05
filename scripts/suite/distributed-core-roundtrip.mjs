@@ -32,7 +32,7 @@ const full = process.argv.includes('--full'), browserReview = process.argv.inclu
 const selectionIndex=process.argv.indexOf('--components'), selection=selectionIndex<0 ? null : process.argv[selectionIndex+1].split(',');
 assert(!selection || (!full && selection.every(name=>/^[a-z][a-z0-9-]*$/.test(name)) && ['oathweave','oathweave-redis','hivexui','ingress'].every(name=>selection.includes(name))),'Custom developer fixture requires the suite foundation and cannot combine --full');
 const selected=name=>!selection || selection.includes(name);
-const browserProducts=['oathweave','emberpath','hivemem','hiveskills',...(full?['cindertrace','chattermost']:[])].filter(selected);
+const browserProducts=['oathweave','emberpath','hivemem','hiveskills',...(full?['cindertrace','chattermost','magnus']:[])].filter(selected);
 const tags = [], registryPort = await port(), consolePort = await port(), sshPort = await port(), registry = '127.0.0.1:' + registryPort;
 let daemon, passed = false;
 async function hive(command, ...args) {
@@ -95,7 +95,7 @@ fi
   if(!interactive)put(configFile, config); put(manifestFile, manifest); run('openssl', ['pkeyutl', '-sign', '-inkey', join(output, 'publisher.key'), '-rawin', '-in', manifestFile, '-out', manifestFile + '.sig']);
   if(interactive) {
     assert(full && !selection,'Interactive developer acceptance selects the full profile');
-    const questions=[['Installation name',id],['Installation directory on the selected host',consoleDirectory],['Host SSH target',username+'@control.example.com'],['Host architecture',process.arch==='arm64'?'arm64':'amd64'],['Console HTTPS origin',config.origin],['Product profile','full'],['HTTPS bind address','127.0.0.1'],['HTTPS listener port',String(consolePort)],['Configuration mode','distributed'],['Initial operator username','admin'],['Initial operator email','alice@example.com'],['Existing console certificate file',config.bootstrap.certificateFile],['Protected console private key file',config.bootstrap.privateKeyFile],['Existing Magnus console HTTPS URL',''],['Existing external inference HTTPS endpoint',''],['Opt-in native agent runtime',''],['Product trust bundle file available on every host',config.bootstrap.trustBundleFile]];
+    const questions=[['Installation name',id],['Installation directory on the selected host',consoleDirectory],['Host SSH target',username+'@control.example.com'],['Host architecture',process.arch==='arm64'?'arm64':'amd64'],['Console HTTPS origin',config.origin],['Product profile','full'],['HTTPS bind address','127.0.0.1'],['HTTPS listener port',String(consolePort)],['Configuration mode','distributed'],['Initial operator username','admin'],['Initial operator email','alice@example.com'],['Existing console certificate file',config.bootstrap.certificateFile],['Protected console private key file',config.bootstrap.privateKeyFile],['Existing external inference HTTPS endpoint',''],['Opt-in native agent runtime',''],['Product trust bundle file available on every host',config.bootstrap.trustBundleFile]];
     for(const product of ['oathweave','emberpath','hivemem','hiveskills','magnus','cindertrace','chattermost']) {
       const host=['oathweave','hiveskills'].includes(product)?'identity':consoleHost,endpoint=config.bootstrap.productEndpoints[product];
       questions.push(['Inventory host for '+product,host]);
@@ -154,6 +154,7 @@ fi
       let raw = ''; response.on('data', chunk => raw += chunk); response.on('end', () => { try { resolveResponse({ status: response.statusCode, headers: response.headers, body: raw ? JSON.parse(raw) : null }); } catch { reject(Error('Unexpected browser API response')); } });
     }); req.on('error', reject); req.on('timeout', () => req.destroy(Error('API timeout'))); if (body) req.write(Buffer.isBuffer(body) ? body : JSON.stringify(body)); req.end();
   }); }
+  const rawRequest = (path, headers = {}) => new Promise((resolveResponse, reject) => { https.get({ hostname: 'localhost', port: consolePort, path, ca, headers, timeout: 8000 }, response => { response.resume(); response.on('end', () => resolveResponse({ status: response.statusCode })); }).on('error', reject); });
   const browserHeaders = { Origin: config.origin, 'X-Oathweave-Browser': 'true' };
   const login = await request('/api/oathweave/auth/login', { username: credentials.SEED_ADMIN_USERNAME, password: credentials.SEED_ADMIN_PASSWORD }, browserHeaders); assert.equal(login.status, 200);
   const cookie = login.headers['set-cookie'].find(value => value.startsWith('__Host-oathweave_sso=')).split(';')[0], headers = { ...browserHeaders, Cookie: cookie }, tokens = {};
@@ -185,8 +186,17 @@ fi
     const upload=await request('/api/v4/files?channel_id='+channels.body[0].id,Buffer.concat([Buffer.from('--'+boundary+'\r\nContent-Disposition: form-data; name="files"; filename="fixture.txt"\r\nContent-Type: text/plain\r\n\r\n'),attachment,Buffer.from('\r\n--'+boundary+'--\r\n')]),{...chatHeaders,'Content-Type':'multipart/form-data; boundary='+boundary});assert.equal(upload.status,201);const fileId=upload.body.file_infos[0].id;
     const post = await request('/api/v4/posts', {channel_id:channels.body[0].id,message:'Synthetic full-suite retained content',file_ids:[fileId]}, chatHeaders); assert.equal(post.status, 201); put(join(output,'full-chat-proof.json'), {postId:post.body.id, accountId:exchange.body.user.id,fileId,fileSha256:createHash('sha256').update(attachment).digest('hex')});
     assert.equal((await request('/api/chattermost/api/v4/auth/oathweave/session', {}, {Authorization:'Bearer '+tokens.oathweave,Origin:config.origin})).status,401);
+    // HiveXUI is the Magnus console: the operator's link decides the role, the
+    // audience is exact, and a machine credential has no effect through ingress.
+    const magnusSession = await request('/api/magnus/console/session', null, { Authorization: 'Bearer ' + tokens.magnus }); assert.equal(magnusSession.status, 200);
+    assert.equal(magnusSession.body.data.role, 'ADMIN'); assert.equal(magnusSession.body.data.userId, readFileSync(join(addresses.identity, 'config/.initializer/secrets/magnus-id'), 'utf8').trim());
+    assert.equal((await request('/api/magnus/console/session', null, { Authorization: 'Bearer ' + tokens.oathweave })).status, 401, 'Magnus accepted another audience');
+    assert.equal((await request('/api/magnus/health/ready')).status, 200);
+    const magnusSecret = { 'X-Api-Secret': parseEnv(readFileSync(join(consoleDirectory, 'config/magnus.env'), 'utf8')).API_SECRET };
+    assert.equal((await request('/api/magnus/console/session', null, magnusSecret)).status, 401, 'Ingress forwarded a machine API secret');
+    assert.equal((await rawRequest('/api/magnus/heartbeat/stream/stats', { Authorization: 'Bearer ' + tokens.magnus })).status, 404, 'Machine-only Magnus route reached through ingress');
   }
-  const routes = Object.fromEntries(Object.entries({ oathweave: '/api/oathweave/auth/me', emberpath: '/api/emberpath/auth/me', hivemem: '/api/hivemem/agents', hiveskills: '/api/hiveskills/admin/skills' }).filter(([name])=>selected(name)));
+  const routes = Object.fromEntries(Object.entries({ oathweave: '/api/oathweave/auth/me', emberpath: '/api/emberpath/auth/me', hivemem: '/api/hivemem/agents', hiveskills: '/api/hiveskills/admin/skills', ...(full ? { magnus: '/api/magnus/console/session' } : {}) }).filter(([name])=>selected(name)));
   for (const [product, path] of Object.entries(routes)) assert.equal((await request(path, null, { Authorization: 'Bearer ' + tokens[product] })).status, 200, 'Distributed authorized product failed: ' + product);
   const negativeResource=Object.keys(routes).find(name=>name!=='oathweave'); if(negativeResource) assert.equal((await request(routes[negativeResource], null, { Authorization: 'Bearer ' + tokens.oathweave })).status, 401);
   if (browserReview) {
@@ -207,6 +217,9 @@ fi
   assert.equal((await request('/api/oathweave/browser/logout', {}, headers)).status, 200);
   for (const product of ['emberpath', 'hivemem', 'hiveskills'].filter(selected)) assert.equal((await request(routes[product], null, { Authorization: 'Bearer ' + tokens[product] })).status, 401, 'Cross-host revoked session accepted: ' + product);
   if (full) {
+    // Magnus documents online revocation within 15 seconds of logout.
+    let magnusRevoked; for (let attempt = 0; attempt < 25 && magnusRevoked !== 401; attempt++) { if (attempt) await new Promise(done => setTimeout(done, 1000)); magnusRevoked = (await request(routes.magnus, null, { Authorization: 'Bearer ' + tokens.magnus })).status; }
+    assert.equal(magnusRevoked, 401, 'Revoked Magnus resource token accepted');
     assert.equal((await request('/api/cindertrace/security-fusion/overview', null, { Authorization:'Bearer '+tokens.cindertrace })).status, 401, 'Revoked security resource token accepted');
     assert.equal((await request('/api/v4/users/me', null, { Cookie:boundChatCookie, Origin:config.origin })).status, 401, 'Chat suite cookie ignored identity session revocation');
   }
@@ -226,7 +239,7 @@ fi
     } finally { docker('compose','-f',restored,'stop','--timeout','45','chattermost-postgres'); }
   }
   if (full) await restoredPeerRehearsal({output,addresses,config,docker,put,request,credentials,identities,consoleHost});
-  put(join(output, 'result.json'), { schema: 1, result: 'passed', productionCutover: false, profile: full ? 'full' : selection ? 'custom' : 'core', interactive, physicalHosts: 1, sshInventories: 2, checks: ['fresh protected per-host product configuration', 'strict real SSH/SFTP trust', 'distinct Compose bridge projects with explicit verified HTTPS endpoints', 'private datastores stay local and unpublished', ...(interactive?['real terminal full wizard and Apply confirmation install all17 services successfully']:['interrupted second-host activation holds every writer']), 'repeat install preserves coordinated accounts and independent product secrets', 'one browser sign-in authorizes '+browserProducts.length+' selected products across host inventories', 'wrong-audience and revoked resource tokens rejected', 'separate host-bound backup and isolated restore rehearsals', ...(full ? ['explicit product migrator images and exact completion verification', ...(!interactive?['real committed chat migration interruption reconciles by verification without replay']:[]), 'six resource-specific product identities', 'native chat sign-in and retained post', 'offline PostgreSQL checksums on restored private datastores', 'coordinated six-product authenticated peer restore with preserved original bytes'] : [])], productImages: Object.fromEntries(Object.entries(manifest.components).map(([name, value]) => [name, value.image])) });
+  put(join(output, 'result.json'), { schema: 1, result: 'passed', productionCutover: false, profile: full ? 'full' : selection ? 'custom' : 'core', interactive, physicalHosts: 1, sshInventories: 2, checks: ['fresh protected per-host product configuration', 'strict real SSH/SFTP trust', 'distinct Compose bridge projects with explicit verified HTTPS endpoints', 'private datastores stay local and unpublished', ...(interactive?['real terminal full wizard and Apply confirmation install all17 services successfully']:['interrupted second-host activation holds every writer']), 'repeat install preserves coordinated accounts and independent product secrets', 'one browser sign-in authorizes '+browserProducts.length+' selected products across host inventories', 'wrong-audience and revoked resource tokens rejected', 'separate host-bound backup and isolated restore rehearsals', ...(full ? ['explicit product migrator images and exact completion verification', ...(!interactive?['real committed chat migration interruption reconciles by verification without replay']:[]), 'seven resource-specific product identities, with HiveXUI as the Magnus console', 'native chat sign-in and retained post', 'offline PostgreSQL checksums on restored private datastores', 'coordinated six-product authenticated peer restore with preserved original bytes'] : [])], productImages: Object.fromEntries(Object.entries(manifest.components).map(([name, value]) => [name, value.image])) });
   passed = true; console.log('PASS: fresh distributed ' + (full ? 'full suite' : selection ? 'custom selection' : 'core') + ', real SSH, verified cross-host HTTPS, interrupted resume, resource authorization, stable credentials and separate isolated restores (one physical host).');
 } finally {
   if (!passed) for (const host of Object.keys(addresses)) for (const container of docker('ps', '-aq', '--filter', 'label=com.docker.compose.project=' + id + '-' + host).split(/\s+/).filter(Boolean)) {

@@ -131,11 +131,6 @@
         "trustBundleFile": {
           "$ref": "#/$defs/path",
           "description": "PEM trust bundle available at this protected local reference on every configured host."
-        },
-        "magnusConsoleOrigin": {
-          "type": "string",
-          "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[-A-Za-z0-9._~]+)*$",
-          "description": "Optional existing Magnus console URL; remains a separate authenticated product interface."
         }
       }
     },

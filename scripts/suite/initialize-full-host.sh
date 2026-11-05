@@ -14,7 +14,7 @@ hive_full_configuration() {
   done
   if has_component magnus; then
     {
-      common_environment; line MAGNUS_HOME /data; line MAGNUS_AUTO_MIGRATE false; line MAGNUS_UPDATE_CHECK false; line MAGNUS_AGENT_UPGRADES false
+      common_environment; resource_identity; line MAGNUS_HOME /data; line MAGNUS_AUTO_MIGRATE false; line MAGNUS_UPDATE_CHECK false; line MAGNUS_AGENT_UPGRADES false
       line DATABASE_URL "postgresql://magnus:$(secret magnus-db)@magnus-postgres:5432/magnus"
       line REDIS_URL "redis://:$(secret magnus-redis)@magnus-redis:6379"
       line API_SECRET "$(secret magnus-api)"; line JWT_SECRET "$(secret magnus-jwt)"; line NODE_MANAGER_SECRET "$(secret magnus-manager)"
@@ -23,6 +23,8 @@ hive_full_configuration() {
       line TLS_CERT_PATH /config/tls.crt; line TLS_KEY_PATH /config/tls.key; line CONTROL_API_BIND_HOST 0.0.0.0; line CONTROL_API_PORT 4000
       line CONTROL_API_URL "$(product_endpoint magnus https://magnus:4000)"; line CORS_ORIGIN "$origin"; line DASHBOARD_PUBLIC_ORIGIN "$origin"
       line SECURITY_FUSION_MODE off; line ENABLE_AGENT_DISCOVERY false
+      line MAGNUS_CONSOLE_BASE_PATH /fleet; line MAGNUS_HERMES_ENABLED true
+      line MAGNUS_OATHWEAVE_IDENTITIES_JSON "$(jq -nc --arg issuer "$issuer" --arg subject "$subject" --arg id "$(secret magnus-id)" '[{issuer:$issuer,subject:$subject,localUserId:$id,role:"ADMIN"}]')"
     } | publish_file magnus "$directory/config/magnus.env"
   fi
   if has_component cindertrace; then
