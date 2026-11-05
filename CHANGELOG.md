@@ -16,7 +16,11 @@ package is published for this release; the legacy npm packages stay on their 1.x
 
 - Every image the 2.0.0 manifest pins has no CRITICAL or HIGH finding with a fix available, on linux/amd64 and linux/arm64 (`scripts/release/scan-suite-images.sh`). The product images drop npm, npx, corepack and apt from their runtime. The ingress is `hive-ingress:2.0.2`, Caddy 2.11.7 compiled with Go 1.26.10, `golang.org/x/net` v0.60.0 and go-jose v4.1.6, which fixes CVE-2026-78669 (HTTP/2 SETTINGS flood) and the other Go findings of the upstream 2.11.7 build. PostgreSQL, Redis and Qdrant ship as hardened suite images (`hive-postgres`, `hive-redis`, `hive-qdrant`); see `deployment/README.md`.
 - Accepted exceptions, each scoped to one image in `deployment/trivy/`: go-jose v3 CVE-2026-116587 (no fixed release; only reachable through Caddy's PKI app, which the suite never enables) and, in `hive-qdrant`, pyo3 GHSA-36hh-v3qg-5jq4 and quinn-proto GHSA-4w2j-m93h-cj5j (listed in Qdrant's bundled SBOM but not linked into its binary).
-- Findings with no fix available upstream are listed in the release notes. `hive-ingress:2.0.0` and `2.0.1` were published from `main` before these fixes and are not used by any release.
+- `hive-ingress:2.0.0` and `2.0.1` were published from `main` before these fixes and are not used by any release.
+- HIGH and CRITICAL findings with no fix available upstream, as scanned on 2026-11-05:
+  - Debian 12 base of every product image, `hive-registry` and `hive-redis`: CVE-2023-45853 (zlib, CRITICAL, will not be fixed), CVE-2026-76844 (zlib), CVE-2025-69720 (ncurses), CVE-2026-16742 (libsystemd0, libudev1), CVE-2026-41992 (gzip), CVE-2026-53613, CVE-2026-53615 and CVE-2026-78410 (util-linux), CVE-2026-54369 (libacl1), CVE-2026-9538 (perl-base); `magnus-server` and `cindertrace` also CVE-2023-2953 (libldap).
+  - Debian 13 base of `hive-postgres` and `hive-qdrant`: CVE-2025-69720, CVE-2026-119373, CVE-2026-16742, CVE-2026-54369, CVE-2026-76642, CVE-2026-76844, CVE-2026-78408, CVE-2026-78409, CVE-2026-78410 and CVE-2026-9538; `hive-postgres` also CVE-2026-24882, CVE-2026-6653, CVE-2026-74860 and CVE-2026-86138 to CVE-2026-86144 (except CVE-2026-86141).
+  - `hive-ingress`: CVE-2026-116587 (go-jose v3, see above). `hivexui`: none.
 
 ### Added
 
