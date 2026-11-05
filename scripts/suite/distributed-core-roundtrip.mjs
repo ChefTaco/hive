@@ -28,7 +28,8 @@ const id = 'distributed-' + randomBytes(5).toString('hex'), registryName = id + 
 const interactive=process.argv.includes('--interactive'),consoleHost=interactive?'control':'console';
 const addresses = { identity: join(output, 'identity'), [consoleHost]: join(output,consoleHost) },consoleDirectory=addresses[consoleHost];
 const configFile = join(output, 'installation.json'), manifestFile = join(output, 'release.json'), sshConfig = join(output, 'ssh.conf');
-const full = process.argv.includes('--full'), browserReview = process.argv.includes('--browser-review');
+const full = process.argv.includes('--full'), browserReview = process.argv.includes('--browser-review'), relaxAuthLimits = process.argv.includes('--relax-auth-limits');
+assert(!(interactive && relaxAuthLimits), '--relax-auth-limits applies to the unattended path');
 const selectionIndex=process.argv.indexOf('--components'), selection=selectionIndex<0 ? null : process.argv[selectionIndex+1].split(',');
 assert(!selection || (!full && selection.every(name=>/^[a-z][a-z0-9-]*$/.test(name)) && ['oathweave','oathweave-redis','hivexui','ingress'].every(name=>selection.includes(name))),'Custom developer fixture requires the suite foundation and cannot combine --full');
 const selected=name=>!selection || selection.includes(name);
@@ -36,7 +37,9 @@ const browserProducts=['oathweave','emberpath','hivemem','hiveskills',...(full?[
 const tags = [], registryPort = await port(), consolePort = await port(), sshPort = await port(), registry = '127.0.0.1:' + registryPort;
 let daemon, passed = false;
 async function hive(command, ...args) {
-  try { return (await execute(join(root, 'hive.sh'), [command, '--config', configFile, '--manifest', manifestFile, '--trust-key', join(output, 'publisher.pub'), '--non-interactive', '--yes', ...args], { env: environment, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 })).stdout.trim(); }
+  // The controller accepts this testing flag only for the commands that plan and apply.
+  const relax = relaxAuthLimits && ['plan', 'install', 'upgrade'].includes(command) ? ['--relax-auth-limits'] : [];
+  try { return (await execute(join(root, 'hive.sh'), [command, '--config', configFile, '--manifest', manifestFile, '--trust-key', join(output, 'publisher.pub'), '--non-interactive', '--yes', ...relax, ...args], { env: environment, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 })).stdout.trim(); }
   catch (error) { put(join(output, command + '-failure.log'), String(error.stdout || '') + '\n' + String(error.stderr || '')); throw Error('Distributed ' + command + ' failed; protected evidence retained'); }
 }
 try {
