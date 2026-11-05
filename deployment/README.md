@@ -106,14 +106,23 @@ images using a temporary loopback registry, generated accounts and empty stores.
 Add `--interactive` to exercise the terminal installer. Both variants verify repeat
 execution, four-product SSO, audience/revocation denial, a host-bound backup and an
 isolated restore. Their local trust keys and images are developer fixtures; they
-are not published release artifacts or migration approval. Full-profile fresh
-bootstrap, multi-host bootstrap and remaining agent integrations are separate gates.
+are not published release artifacts or migration approval. Separate fresh
+[distributed core](DISTRIBUTED.md), [full](FULL.md) and [custom](CUSTOM.md) drivers
+also pass interrupted execution, stable retry and isolated recovery across two
+strict SSH inventories on one physical host. Full setup includes both an actual
+terminal wizard and unattended installation, plus authenticated restored peers.
+Separate physical machines and existing installations retain their own gates.
 
 Native Magnus artifact staging, authenticated heartbeat and a read-only command
 now have a separate disposable rehearsal. Native Ardent model/memory, Codex
-Responses, Hermes streaming and its HiveMem plugin also have integrated core recovery proof. Optional consumers and existing
-provider authorization retain their own acceptance gates. See
-[native agents](NATIVE_AGENTS.md) for protected configuration, preflight, explicit acceptance and status.
+Responses, Hermes streaming and its HiveMem plugin also have integrated core
+recovery proof. Ardent Skills, scoped chat and embedded Emberfold, plus Hermes's
+native Skills tools and Mattermost adapter, have a separate
+[consumer drill](NATIVE_CONSUMERS.md). Actual Magnus
+[user-service activation and restart](USER_SERVICES.md) also pass. Existing profiles
+and provider authorization retain their own acceptance gates. See
+[native agents](NATIVE_AGENTS.md) for protected configuration, preflight, explicit
+acceptance and status.
 
 Deployment plans include a controller source fingerprint. Signed manifests may
 require it using `controllerSHA256`. A different controller cannot resume the same

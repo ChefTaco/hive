@@ -14,13 +14,13 @@ source snapshot or passing unit test is not evidence of a production cutover.
 | --- | --- | --- |
 | Public source inventory and provenance | Implemented | Per-product provenance.json records source revision and original file hashes |
 | Independent backend builds and tests | Local required gates pass | Published images and released contract artifacts remain separate gates |
-| Static HiveXUI extraction | Build/container and synthetic render checks pass | No backend imports; browser render and workflow acceptance |
+| Static HiveXUI extraction | Independent static build, owned contract checks and actual suite browser workflows pass | Released contract/image selection and restored-account browser acceptance |
 | Direct product authorization | Implemented; bounded regression tests pass | Resource audience, permissions, revocation and step-up regression tests |
 | Oathweave browser SSO | Disposable browser workflows pass; restored-account sign-in pending | PKCE, consent, MFA/passkeys, recovery, session/logout acceptance |
-| Memory and workspace workflows | Native advanced operations and suite browser session/webhook/graph checks pass | External webhook delivery and installation-specific acceptance |
-| Security and chat UI consolidation | Fresh suite files/sockets, investigations and native-session revocation pass; expanded conversation and administration browser checks pass | Remaining workflow and migrated-account browser acceptance |
-| Shell suite lifecycle | Core, full and custom distributed SSH installation/recovery drills pass; compatible bundle upgrade/rollback pass | Separate physical-host and installation-specific acceptance |
-| Host agent enrollment | Native Magnus heartbeat/job and integrated Ardent, Codex, Hermes/plugin core recovery pass | Optional consumer wiring, existing provider authorization and persistent supervision acceptance |
+| Memory and workspace workflows | Native advanced operations, suite browser checks and actual HTTPS/HMAC worker delivery/restart pass | Existing permissions and operator-owned integration destination acceptance |
+| Security and chat UI consolidation | Fresh conversation/admin/files/sockets and investigations pass; durable signed response safety and native-session revocation pass | Migrated-account browser and installation-specific acceptance |
+| Shell suite lifecycle | Interactive/unattended core/full, custom and distributed SSH recovery pass; authenticated peer restores and compatible bundle upgrade/rollback pass | Separate physical-host and installation-specific acceptance |
+| Host agent enrollment | Native Magnus heartbeat/job/user-service restart, integrated Ardent/Codex/Hermes/plugin recovery and optional native consumers pass | Selected existing profiles, provider authorization and persistent gateway supervision acceptance |
 | External inference | Verified HTTPS fixture and actual Emberpath enrollment/inference pass | Operator-owned endpoint acceptance through protected references; no inference provisioning |
 | Production adoption and migration | Pending | Installation-bound restored backup, single writer, acceptance and recovery proof |
 | Published release and branding | Product directory and guides updated; publication pending | Publisher trust key, reviewed compatibility lock and published immutable artifacts |
@@ -45,6 +45,9 @@ An explicitly selected identity authority may coordinate them through separate
 installation namespaces, with reviewed subjects and product-account links.
 
 ## Workflow parity
+
+See [the candidate workflow checklist](WORKFLOW_PARITY.md) for ownership,
+implemented workflows, available checks and installation-specific gates.
 
 - Models: providers, discovery, model aliases, routing objectives/rules,
   heuristics, generation/testing, streaming/failover, client quotas, traces,
@@ -121,8 +124,9 @@ checks hosts and applies constrained Compose definitions. Candidate lifecycle
 adapters implement host-bound backups, isolated restore rehearsal, exact migrations,
 compatible rollback, reconciliation-bound restore, explicit Compose adoption and
 transaction receipts. The disposable SQLite lifecycle drill covers retries, restored
-candidate execution and uncertain migration refusal. It does not certify interactive
-full installs. Two host inventories now have real strict-SSH transport, interrupted
+candidate execution and uncertain migration refusal. The separate full-profile
+driver covers an actual interactive wizard and unattended installation. Two host
+inventories now have real strict-SSH transport, interrupted
 activation, input-drift refusal, stable retry and separate backup/restore proof
 through `test:suite:multi-host`. Both SSH targets run on one physical developer
 host; this does not certify a deployment across separate physical machines.
@@ -144,6 +148,10 @@ stable retry, independent backups and isolated restores. Custom selection proves
 that unselected model/memory services and their credentials are omitted, including
 on an ingress-only host. The full drill includes offline integrity checks of all
 three PostgreSQL stores and preservation of a chat post and account links.
+Coordinated disposable copies of those restores also pass six resource audiences,
+native chat sign-in, retained post/attachment reads, WebSocket ping and live-token
+revocation, while original restore bytes remain unchanged. These copies retain
+synthetic fixture accounts; they do not satisfy existing-account sign-in gates.
 No official suite manifest or publisher trust key has been released.
 This is not an installation or migration release.
 
@@ -198,9 +206,13 @@ pinned Codex Responses streaming through actual Emberpath. The public Hermes bun
 has read-only preflight, separately journaled profile initialization and actual
 streaming acceptance. Its product-owned HiveMem plugin proves native provider
 registration and workspace-scoped write/search/delete through an explicit HTTPS
-memory ingress prefix. Remaining integrations retain their own acceptance gates.
-See `deployment/NATIVE_AGENTS.md`
-for explicit manual startup and acceptance.
+memory ingress prefix. Separate native consumer drills verify Ardent Skills, scoped
+Chat and embedded Emberfold checkpoint recovery, plus Hermes Skills tools and its
+Mattermost adapter using an explicitly selected messaging artifact. An actual
+Magnus user-service drill proves activation, stop/restart, renewed acceptance and
+ownership-checked cleanup. Existing-profile authorization and persistent gateway
+operation retain independent gates. See `deployment/NATIVE_AGENTS.md`,
+`deployment/NATIVE_CONSUMERS.md` and `deployment/USER_SERVICES.md`.
 `npm run test:suite:lifecycle` exercises the isolated candidate/recovery lifecycle.
 None of these tests contacts or modifies a production installation.
 
@@ -221,10 +233,16 @@ resource access after logout. `npm run test:suite:containers` repeats this flow
 using the actual non-root read-only images, with Redis on a separate internal
 network and product APIs on a host-local bridge. The memory SDK's independent build and tests pass.
 
-Owned OpenAPI baselines now live in the extracted repositories. Emberpath and
-HiveMem inherit incomplete schema coverage; HiveSkills adds a source-derived route
-inventory. Their drift checks do not claim full request/response contract coverage.
-That remains a frontend cutover gate alongside released contract exports.
+Owned OpenAPI baselines now live in the extracted repositories. Emberpath's
+provider/model/alias write and browser read contracts, and configuration recovery
+contract, have independent browser-safe exports pinned by revision and checksum.
+Provider/alias responses exclude protected credential fields. Actual version-one
+download/import and provider/alias edits pass in the final suite browser; database
+regressions prove preserved credentials, reconciled provider references and atomic
+rollback of configuration and audit on failure. Other inherited Emberpath and
+HiveMem routes retain incomplete response schema coverage; HiveSkills adds a
+source-derived route inventory. Drift checks do not imply complete coverage.
+Released contract artifacts remain a frontend cutover gate.
 
 Synthetic desktop/mobile browser checks cover security/chat renders, theme changes,
 mobile navigation disclosure, Escape focus restoration, reduced-motion preference
@@ -256,6 +274,14 @@ credential-generation pin for rotated identities. Regressions cover missing and
 disabled accounts, stale pins and native-token rotation. Workspace administration and native advanced memory workflows have independent
 regression and browser proof. Installation-specific mapping and real-data acceptance
 remain separate gates.
+
+HiveMem's native webhook worker has actual scoped HTTPS/HMAC delivery proof,
+including API-visible outcomes, failure reporting, restart without completed-job
+replay and disabled-endpoint refusal. Cindertrace's database-backed dispatcher
+passes expired and changed approvals, concurrent one-use dispatch, invalid/lost
+receipts, durable unknown outcomes and process restart without duplicate commands.
+Its synthetic signed HTTPS executor performs no host operations. These disposable
+checks do not authorize a real destination or response target.
 
 
 Isolated native-backup candidate acceptance now has a dedicated developer harness
@@ -291,3 +317,10 @@ Oathweave now preserves independently created sessions with the same IP address
 and user agent. Those signals are risk metadata, not session identities. Heuristic
 session deduplication refuses changes; operators select exact session IDs to revoke.
 Browser regression and restored-session checks remain part of candidate acceptance.
+
+The current private adoption inventory does not select an existing Magnus fleet or
+Ardent profile. Their fresh-container and native fixture checks cannot stand in for
+a migration of existing fleet state. Future adoption requires selected effective
+configuration, a current database checkpoint and retained keys, plus each selected
+profile's independent backup and isolated restore. The optional Emberfold HTTP
+service is stateless; contexts remain owned by callers and embedded SDK profiles.

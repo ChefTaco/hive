@@ -52,8 +52,9 @@ including private CA references. A disposable core rehearsal additionally proves
 model generation through Emberpath and storage/search through an independent,
 workspace-scoped HiveMem identity. Model and memory credentials cannot administer
 either backend. Profile credentials are preserved, and termination stops the
-gateway child process. Skills, Emberfold and chat integrations need their own
-acceptance before enabling their consumers.
+gateway child process. The separate [native consumer drill](NATIVE_CONSUMERS.md)
+proves immutable Skills, scoped native chat and embedded Emberfold checkpoints for
+a disposable Ardent profile. Other profiles retain independent acceptance.
 
 Codex has a separate `--product codex` export from an exact npm version and
 lockfile integrity. Its launcher requires an owned private profile and environment
@@ -74,6 +75,11 @@ Status emits one versioned object per host, with container state and native agen
 installation, preflight and acceptance state. Healthy containers do not imply
 that a native agent is accepted. Raw credentials, fingerprints and diagnostic
 bodies are excluded from this summary.
+
+The [user-service drill](USER_SERVICES.md) verifies actual systemd user-manager
+activation, stop/restart, current state and renewed acceptance for the packaged
+Magnus agent. It preserves existing units and profiles. This does not certify
+machine boot, lingering or persistent operation of another agent's gateway.
 
 Native artifacts and profile backups may not take ownership of inference models.
 Common model files or external runtime caches hold profile handling before they
@@ -128,3 +134,9 @@ checks exact retry, streams through Emberpath, and runs the native plugin's scop
 write/search/delete check before the core backup and isolated restore. Existing
 profiles are never selected. These local AMD64 checks do not certify physical
 ARM64 deployments or persistent production supervision.
+
+Select Magnus's explicit `--extras messaging` Hermes artifact for the optional
+[Skills and Chat consumer drill](NATIVE_CONSUMERS.md). It uses the frozen upstream
+dependency lock; Hive installs no dependencies into an existing profile. Native
+Skills tools and the Mattermost adapter pass separately from model-driven gateway
+and supervisor acceptance. The headless artifact remains an independent selection.

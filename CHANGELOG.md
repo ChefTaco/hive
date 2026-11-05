@@ -8,6 +8,9 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Record candidate workflow parity, final browser contract checks, authenticated
+  peer restores and native consumer acceptance with explicit installation gates.
+
 - Report current native user-service state separately from historical acceptance, and rehearse real user-manager activation, stop/restart, authenticated work and ownership-checked cleanup.
 
 - Verify immutable Skills list/view and scoped Chat adapter consumption with a separately selected public native Hermes messaging artifact, retaining protected profile bytes and explicit gateway supervision limits.
