@@ -9,8 +9,18 @@ All notable changes to this project are documented in this file. The format is b
 The first Hive suite release. `./hive.sh --release 2.0.0` installs the core or full profile from
 the signed manifest `releases/2.0.0.json`, which pins Oathweave 2.0.0, Emberpath 2.0.0, HiveMem
 1.3.0, HiveSkills 1.3.0, HiveXUI 0.1.0, Magnus 2.1.0 (with the optional fleet gateway), Cindertrace
-0.2.0, ChatterMost 0.4.0, Emberfold 0.2.0, the Hive Registry and the ingress by image digest. No npm
+0.2.0, ChatterMost 0.4.1, Emberfold 0.2.0, the Hive Registry and the ingress by image digest. No npm
 package is published for this release; the legacy npm packages stay on their 1.x line.
+
+### Known issues
+
+- The ingress image `hive-ingress:2.0.1` runs Caddy 2.11.7, the newest release at least two weeks old, with curl removed and Alpine packages upgraded. Trivy still reports HIGH findings in the Caddy binary, fixed only in later Caddy builds:
+  - CVE-2026-78669 (Go `net/http` and `golang.org/x/net/http2`: excessive HTTP/2 SETTINGS frames cause CPU exhaustion). **This applies:** the ingress serves HTTP/2 to browsers, so a client that reaches the console listener can load it. Keep the listener on a trusted network until a later suite release moves to a fixed Caddy.
+  - CVE-2026-78667 (Range header DoS in `FileServer`/`ServeContent`): does not apply, because the Caddyfile serves no files.
+  - CVE-2026-97031 (`crypto/tls` Encrypted Client Hello DoS): does not apply, because ECH is not configured.
+  - CVE-2026-111943 (`crypto/x509` untrusted intermediates under system roots): does not apply, because upstream TLS is verified against the installation's explicit backend CA bundle and the console certificate is static.
+  - CVE-2026-116587 (`go-jose` crafted JWK DoS): does not apply, because ACME, the PKI app and the admin API are off (`admin off`, static certificates).
+- `hive-ingress:2.0.0` (Caddy 2.11.2) was published from `main` before this fix and is not used by any release.
 
 ### Added
 
@@ -26,7 +36,7 @@ package is published for this release; the legacy npm packages stay on their 1.x
 - Add `backup-hive.sh --online`, a capture for rehearsals that never stops a service. It is not a coordinated recovery point.
 - Add the Hive Registry, a mandatory container in every installation: a SQLite install catalog and read-only lookup API at `/api/registry`, written by `hive.sh` from the signed manifest and observed state. `hive.sh registry` looks up entries and manages externally managed products, `status` and `doctor` report drift, and upgrade and adoption add it to existing installations. Not related to the HiveSkills skills registry.
 
-- Publish `ghcr.io/cheftaco/hive-registry` and `ghcr.io/cheftaco/hive-ingress` (linux/amd64 and linux/arm64) at the suite version from the *Suite release* workflow. `publish.yml` now runs only for legacy `v1.*` tags and no longer builds them.
+- Publish `ghcr.io/cheftaco/hive-registry` and `ghcr.io/cheftaco/hive-ingress` (linux/amd64 and linux/arm64) from the *Suite release* workflow. The ingress uses Caddy 2.11.7. `publish.yml` now runs only for legacy `v1.*` tags and no longer builds them.
 
 - Wire Magnus into the suite with HiveXUI as its console: an Oathweave browser client and explicit ADMIN link for the fresh operator, and an `/api/magnus` ingress mapping limited to Magnus's browser-facing routes that forwards no machine credential. `bootstrap.magnusConsoleOrigin` is removed, and a configuration that still sets it is refused with a clear message.
 
