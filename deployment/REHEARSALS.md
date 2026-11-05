@@ -105,6 +105,120 @@ code replay and session revocation. A separate real-browser review is still requ
 protocol success alone cannot mark browser acceptance complete. The temporary ingress
 exposes only a loopback port; backend networks remain private with workers disabled.
 
+## Unknown passwords: a separate authentication fork
+
+A saved seed password is not evidence of a current operator password. If the
+current password is unknown, expired or requires unavailable MFA, keep the
+existing-account authentication gate pending. Do not reset an existing password,
+replace its hash, promote an existing user, disable MFA or relax the password
+policy to make a rehearsal pass.
+
+An explicitly authorized temporary-account review is a separate, operator-managed
+procedure, not an automatic fallback of `test:suite:native`:
+
+1. Complete the original archive/restore integrity checks first. Preserve the
+   original archives, copied preservation baseline and original signing/session
+   key files unchanged. Make another independent copy for authentication testing;
+   never mount the original database or a live installation into this fork.
+2. Give the fork a distinct runtime identity: new signing keys, a separate HTTPS
+   native/browser issuer and new product session secrets, issuers and audiences.
+   Configure every participating product to trust only this fork's identity and
+   endpoints. Do not retain production signing keys as previous verification keys
+   or fall back to production discovery, userinfo or JWKS. Use separate runtime
+   configuration and key files instead of overwriting preserved originals. Keep
+   data-encryption material needed to read restored data protected and unchanged;
+   changing runtime trust is not a rotation of archived encryption keys.
+3. Create a clearly named temporary account, such as `rehearsal-review`, only in
+   this copied data. Use the existing password policy and grant a new temporary
+   role only the permissions needed for the selected review. For each exercised
+   product, create a separate temporary local account and an explicit link from
+   the fork issuer and temporary Oathweave subject. Do not bind that subject to an
+   existing administrator, infer ownership from email, or modify reviewed links
+   belonging to existing accounts. Retain all original users, password hashes,
+   memberships and ownership records.
+4. Keep credentials and links in protected operator files and memory. Keep
+   dispatchers, collectors, retention, integrations, agents and outbound access
+   disabled unless a separately selected disposable fixture requires an exact
+   internal endpoint. Temporary accounts and fork-signed credentials must not
+   authenticate to production. Never import the fork back into an installation.
+5. Record temporary-account browser results separately from existing-account
+   authentication, real ownership and migration acceptance. After review, stop
+   only the owned rehearsal services and retain protected evidence. The temporary
+   flow never closes an existing-administrator ownership or authentication gate.
+
+The baseline harness preserves native issuer and key bytes for recovery proof.
+The additional authentication fork deliberately uses distinct runtime trust. Do
+not report these as the same check, and do not weaken the preservation check to
+accommodate temporary credentials.
+
+When a forwarded browser uses a different visible origin, add only that exact
+HTTPS origin to the fork's explicit `CORS_ORIGIN` allowlist. Preserve the browser's
+original `Origin` header. Do not use wildcards, rewrite `Origin` to an allowed
+value, disable certificate verification or derive the configured issuer from
+forwarded headers. Keep canonical issuer, authorization and discovery URLs
+explicit; document the separate browser transport origin in protected evidence.
+
+## Central authorization and optional standalone security sign-in
+
+HiveXUI provides `/auth/authorize` for explicitly registered Oathweave public
+clients. It accepts standard Authorization Code with PKCE S256 parameters, reuses
+SSO, password/MFA and consent, and returns the backend-issued code only after
+checking state, configured issuer and the exact registered HTTPS callback.
+Unknown/repeated parameters, unsafe callbacks and declined consent remain local
+errors. In-flight and completed requests are deduplicated; logout or session
+invalidation prevents a late redirect. The requesting application's backend keeps
+its verifier and exchanges the code. HiveXUI does not exchange that external
+client's code or persist its credentials.
+
+Oathweave's optional client-scoped discovery requires explicit public metadata:
+
+```dotenv
+IAM_BROWSER_ISSUER=https://identity.example.com
+IAM_BROWSER_AUTHORIZATION_URL=https://identity.example.com/auth/authorize
+IAM_BROWSER_API_BASE_URL=https://identity.example.com/api/oathweave
+```
+
+Both endpoint URLs must use HTTPS on the issuer's exact origin, without credentials,
+query parameters or fragments. The browser discovery request is:
+
+```text
+https://identity.example.com/api/oathweave/oauth/.well-known/openid-configuration?client_id=hivexui-security-console
+```
+
+The selected ID must appear in `IAM_BROWSER_CLIENT_POLICIES` and exist as an active
+public database client with the required permission ceiling and exact callback.
+Browser metadata uses configured URLs, not forwarding headers, and includes no
+credentials, cookies or redirects. Missing browser metadata configuration fails
+closed. Discovery without `client_id` retains its existing native behavior.
+
+The retained standalone Cindertrace console can optionally use this central flow.
+Its public-client callback remains
+`https://security.example.com/api/auth/hive/callback`. Configure only the selected
+rehearsal copy when exercising it. The console uses these non-secret references:
+
+```dotenv
+CINDERTRACE_API_BROWSER_AUTH=true
+CINDERTRACE_API_URL=https://security-api.example.com
+DASHBOARD_PUBLIC_ORIGIN=https://security.example.com
+HIVE_OAUTH_ISSUER=https://identity.example.com
+HIVE_OAUTH_DISCOVERY_URL=https://identity.example.com/api/oathweave/oauth/.well-known/openid-configuration?client_id=hivexui-security-console
+HIVE_OAUTH_CLIENT_ID=hivexui-security-console
+HIVE_OAUTH_API_AUDIENCE=cindertrace
+```
+
+The API independently requires `CINDERTRACE_BROWSER_AUTH_ENABLED=true`, its
+verified `OATHWEAVE_ISSUER`, `OATHWEAVE_JWKS_URL` and `OATHWEAVE_USERINFO_URL`, and
+explicit `CINDERTRACE_OATHWEAVE_IDENTITIES_JSON` links to product-local accounts.
+Keep session configuration protected; `HIVE_OAUTH_CLIENT_SECRET` must be absent for
+this public PKCE client. See the selected Cindertrace revision's
+[standalone console runbook](https://github.com/ChefTaco/cindertrace/blob/main/docs/OATHWEAVE_CONSOLE.md)
+for its API-owned session, permission, revocation and verified backchannel contract.
+
+This documents available integration and an isolated review procedure. It does
+not assert that an existing production Cindertrace deployment was configured or
+that its existing administrator authenticated. Production configuration, account
+ownership and cutover retain their separate review and acceptance gates.
+
 A cutover additionally requires a fresh host-bound backup, authenticated browser
 and real agent/provider/memory workflow acceptance, all product parity gates,
 reviewed links, a maintenance window, one active writer/dispatcher, compatible

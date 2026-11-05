@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Document isolated temporary-account authentication forks and central public-client authorization without weakening existing-account acceptance or changing production identity.
+
 - Verify immutable product-owned browser contract integration, native memory
   pagination and direct authorized incident summaries across the extracted console.
 

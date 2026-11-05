@@ -334,3 +334,13 @@ a migration of existing fleet state. Future adoption requires selected effective
 configuration, a current database checkpoint and retained keys, plus each selected
 profile's independent backup and isolated restore. The optional Emberfold HTTP
 service is stateless; contexts remain owned by callers and embedded SDK profiles.
+
+Unknown or expired operator passwords do not authorize password resets or policy
+changes. A separately copied authentication fork may use a clearly named temporary
+account with distinct runtime signing/session keys and issuers, temporary product
+accounts and explicit links; it preserves all original users and recovery inputs.
+Its browser proof does not close an existing-administrator ownership or sign-in
+gate. The [rehearsal runbook](../deployment/REHEARSALS.md) also documents central
+HiveXUI authorization, explicit Oathweave browser discovery and optional standalone
+Cindertrace sign-in. These integration instructions do not claim production
+configuration or cutover.
