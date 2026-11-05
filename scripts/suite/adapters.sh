@@ -49,6 +49,9 @@ hive_adapter_manifest() {
       (.executable|test("^[A-Za-z0-9_./-]+$") and (split("/")|all(.!=".." and .!=""))) and
       (.arguments|type=="array" and all(.[];type=="string" and (test("[\\r\\n]")|not))) and
       (if .preflight then (.preflight.arguments|type=="array" and length>0 and all(.[];type=="string" and (test("[\\r\\n]")|not))) and (.preflight.expectedOutput|type=="string" and length>0 and length<=256 and (test("[\\r\\n]")|not)) else true end) and
+      (if has("initializationArguments") or has("verificationArguments") then
+        all([.initializationArguments,.verificationArguments][];type=="array" and length>0 and length<=128 and all(.[];type=="string" and length>0 and length<=4096 and (test("[\\r\\n]")|not) and (contains("\u0000")|not)))
+       else true end) and
       (if .acceptanceArguments then (.acceptanceArguments|type=="array" and length>0 and all(.[];type=="string" and (test("[\\r\\n]")|not))) else true end))
   ' "$HIVE_MANIFEST" >/dev/null || hive_die 'Selected native agent artifact is absent from the signed release matrix'
 }

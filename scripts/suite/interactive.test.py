@@ -167,3 +167,24 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     assert not (base / 'deployment').exists(), 'Full planning contacted a host'
     subprocess.run([*arguments[:2], '--config', str(full_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
     print('Passed: interactive full profile, explicit existing Magnus console link, protected config and identical unattended planning.')
+
+    custom_output = base / 'inventory' / 'custom.json'
+    custom_questions = []
+    for label, answer in questions[:13]:
+        if label == 'Product profile': answer = 'custom'
+        custom_questions.append((label, answer))
+        if label == 'Product profile':
+            custom_questions.append(('Selected component names', 'hiveskills'))
+    custom_questions += [('Existing external inference HTTPS endpoint', ''),
+                         ('Opt-in native agent runtime', ''),
+                         ('Write protected installation configuration to', str(custom_output))]
+    review.write_text(json.dumps({'command': arguments, 'questions': custom_questions,
+                                 'transcriptFile': str(base / 'custom-transcript.log'), 'timeoutSeconds': 30}))
+    subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
+    custom_config = json.loads(custom_output.read_text())
+    assert custom_config['profile'] == 'custom'
+    assert set(custom_config['components']) == {'oathweave', 'oathweave-redis', 'hivexui', 'ingress', 'hiveskills'}
+    assert custom_config['inference'] == [] and custom_config['agents'] == []
+    assert custom_output.stat().st_mode & 0o077 == 0
+    subprocess.run([*arguments[:2], '--config', str(custom_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
+    print('Passed: interactive custom selection adds the identity/console foundation, omits unselected products and matches unattended planning.')

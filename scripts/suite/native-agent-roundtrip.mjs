@@ -442,7 +442,7 @@ try {
     agents: [selected],
     inference: [],
   };
-  const code = ['adapters-host.sh', 'inference-registration.sh', 'host-runtime.sh']
+  const code = ['native-initialization-host.sh', 'adapters-host.sh', 'inference-registration.sh', 'host-runtime.sh']
     .map((file) => readFileSync(join(root, 'scripts/suite', file), 'utf8'))
     .join('\n');
   const environment = Object.fromEntries(

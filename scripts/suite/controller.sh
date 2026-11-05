@@ -5,7 +5,7 @@ hive_need() { command -v "$1" >/dev/null || hive_die "Required tool missing: $1"
 hive_runtime_files() {
   printf '%s\n' LICENSE hive.sh deployment/Caddyfile \
     scripts/suite/controller.sh scripts/suite/lifecycle.sh scripts/suite/host-runtime.sh \
-    scripts/suite/adapters.sh scripts/suite/adapters-host.sh scripts/suite/inference-registration.sh \
+    scripts/suite/adapters.sh scripts/suite/native-initialization-host.sh scripts/suite/adapters-host.sh scripts/suite/inference-registration.sh \
     scripts/suite/public-runtime.sh scripts/suite/preflight-host.sh scripts/suite/initialize.sh \
     scripts/suite/initialize-host.sh scripts/suite/initialize-full-host.sh scripts/suite/initialize-migrations-host.sh scripts/suite/integrity-host.sh scripts/suite/input-artifacts-host.sh scripts/suite/check-data.mjs
 }
@@ -87,6 +87,9 @@ hive_configure() {
     hive_prompt certificate 'Existing console certificate file on the selected host (absolute)'
     hive_prompt private_key 'Protected console private key file on the selected host (absolute)'
   elif [[ "$mode" != prepared ]]; then hive_die 'Choose fresh, distributed or prepared configuration'; fi
+  if [[ "$mode" == fresh || "$mode" == distributed ]]; then
+    selected_json=$(jq -nc --argjson selected "$selected_json" '$selected+["oathweave","oathweave-redis","hivexui","ingress"]|unique')
+  fi
   magnus_console=''
   if [[ "$mode" == fresh || "$mode" == distributed ]] && jq -e 'index("magnus")!=null' <<< "$selected_json" >/dev/null; then hive_prompt magnus_console 'Existing Magnus console HTTPS URL (blank to leave unconfigured)'; fi
   printf 'Inference services remain external. Hive verifies their APIs and registers providers only with an explicit Emberpath credential reference.\n'
@@ -244,7 +247,7 @@ hive_manifest() {
       (.value.service.healthcheck.test|type=="array" and length>0) and
       (.value.service.healthcheck.disable != true) and
       ((.value.service.tmpfs // [])|type=="array" and length<=8 and (unique|length)==length and all(.[];type=="string" and length<=256 and test("^/(var/)?run/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$"))) and
-      (if .value.initialization then .value.initialization|
+      (if .value.initialization!=null then .value.initialization|
         type=="object" and (keys-["image","command","entrypoint","verificationCommand","workingDirectory"]|length==0) and
         (.image|test("^[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}$")) and
         all([.command,.verificationCommand][];type=="array" and length>0 and all(.[];type=="string" and length>0 and (contains("\u0000")|not))) and

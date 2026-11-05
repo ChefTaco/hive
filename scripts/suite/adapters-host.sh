@@ -33,6 +33,14 @@ adapter_assert_agent_inputs() {
   [[ -z "$unsupported" ]] || die 'Native artifact contains unsupported file types'
   current_tree=$(tree_digest "$target") || die 'Native artifact fingerprint cannot be read'
   [[ $(digest "$environment") == "$(jq -er .environmentSHA256 "$candidate")" && "$current_tree" == "$(jq -er .treeSHA256 "$target.verification.json")" ]] || die 'Native agent inputs changed since staging'
+  if [[ $(jq -r '.nativeInitializationRequired // false' "$candidate") == true ]]; then
+    local initialization="$directory/agents/$(jq -er .id <<< "$item")/initialization.$(jq -er .artifactSHA256 "$candidate").json"
+    [[ -f "$initialization" && ! -L "$initialization" && $(stat -c %u "$initialization") == "$(id -u)" ]] || die 'Native initialization completion receipt is missing or unsafe'
+    permissions=$(stat -c %a "$initialization"); (( (8#$permissions & 077)==0 )) || die 'Native initialization receipt permissions changed'
+    jq -e '.phase=="verified"' "$initialization" >/dev/null || die 'Native initialization is not verified; launch and acceptance remain held'
+    [[ $(jq -Sc .specification "$initialization" | sha256sum | cut -d ' ' -f1) == "$(jq -er .nativeInitializationSpecificationSHA256 "$candidate")" ]] || die 'Native initialization specification differs from the staged artifact'
+  fi
+
 }
 adapter_preflight() {
   local item id runtime profile environment artifact architecture path permissions
@@ -57,7 +65,7 @@ adapter_preflight() {
 }
 
 adapter_stage_agents() {
-  local item id runtime version architecture artifact sha target url executable profile environment temporary verification env_sha candidate preflight_passed current_tree unsupported
+  local item id runtime version architecture artifact sha target url executable profile environment temporary verification env_sha candidate preflight_passed current_tree unsupported initialization_required initialization_spec
   architecture=$(uname -m); case "$architecture" in x86_64) architecture=amd64;; aarch64) architecture=arm64;; esac
   while IFS= read -r item; do
     id=$(jq -er .id <<< "$item"); runtime=$(jq -er .runtime <<< "$item"); version=$(jq -er .version <<< "$item")
@@ -96,10 +104,17 @@ adapter_stage_agents() {
     preflight_passed=false
     if jq -e '.preflight!=null' <<< "$artifact" >/dev/null; then
       adapter_arguments "$(jq -c .preflight.arguments <<< "$artifact")" "$profile" "$environment" "$target"
-      adapter_native_command "$profile" timeout 30 "$executable" "${HIVE_AGENT_ARGUMENTS[@]}" > "$directory/agents/$id/preflight.$plan.log" 2>&1 || die 'Native agent cannot run on this host; inspect its protected preflight log before activation'
+      adapter_native_command "$profile" timeout 30 "$executable" "${HIVE_AGENT_ARGUMENTS[@]}" < /dev/null > "$directory/agents/$id/preflight.$plan.log" 2>&1 || die 'Native agent cannot run on this host; inspect its protected preflight log before activation'
       [[ $(stat -c %s "$directory/agents/$id/preflight.$plan.log") -le 4096 ]] || die 'Native preflight output exceeds its evidence bound'
       [[ $(cat "$directory/agents/$id/preflight.$plan.log") == "$(jq -er .preflight.expectedOutput <<< "$artifact")" ]] || die 'Native agent preflight version differs from the signed artifact'
       preflight_passed=true
+    fi
+    adapter_initialize_native "$item" "$artifact" "$target" "$executable"
+    initialization_required=$(jq -c 'has("initializationArguments")' <<< "$artifact")
+    initialization_spec=null
+    if [[ "$initialization_required" == true && $(jq -r .authorized <<< "$item") == true ]]; then
+      jq -e '.phase=="verified"' "$directory/agents/$id/initialization.$sha.json" >/dev/null || die 'Native initialization has no verified completion receipt'
+      initialization_spec=$(jq -Sc .specification "$directory/agents/$id/initialization.$sha.json" | sha256sum | cut -d ' ' -f1)
     fi
     adapter_arguments "$(jq -c .arguments <<< "$artifact")" "$profile" "$environment" "$target"
     {
@@ -110,8 +125,8 @@ adapter_stage_agents() {
     } > "$directory/agents/$id/run.$plan.new"
     chmod 700 "$directory/agents/$id/run.$plan.new"
     mv -T "$directory/agents/$id/run.$plan.new" "$directory/agents/$id/run.$plan"
-    jq -n --arg id "$id" --arg runtime "$runtime" --arg version "$version" --arg sha "$sha" --arg profile "$profile" --arg envSHA "$env_sha" --arg configSHA "$(jq -Sc . <<< "$item" | sha256sum | cut -d ' ' -f1)" --argjson preflight "$preflight_passed" --argjson authorized "$(jq -r .authorized <<< "$item")" \
-      '{schema:1,id:$id,runtime:$runtime,version:$version,artifactSHA256:$sha,profileDirectory:$profile,environmentSHA256:$envSHA,configurationSHA256:$configSHA,preflightPassed:$preflight,operatorAuthorized:$authorized,installed:true,accepted:false}' | atomic_json "$candidate"
+    jq -n --arg id "$id" --arg runtime "$runtime" --arg version "$version" --arg sha "$sha" --arg profile "$profile" --arg envSHA "$env_sha" --arg configSHA "$(jq -Sc . <<< "$item" | sha256sum | cut -d ' ' -f1)" --argjson preflight "$preflight_passed" --argjson initializationRequired "$initialization_required" --arg initializationSpec "$initialization_spec" --argjson authorized "$(jq -r .authorized <<< "$item")" \
+      '{schema:1,id:$id,runtime:$runtime,version:$version,artifactSHA256:$sha,profileDirectory:$profile,environmentSHA256:$envSHA,configurationSHA256:$configSHA,preflightPassed:$preflight,nativeInitializationRequired:$initializationRequired,nativeInitializationSpecificationSHA256:$initializationSpec,operatorAuthorized:$authorized,installed:true,accepted:false}' | atomic_json "$candidate"
   done < <(jq -c '.agents[]' <<< "$input")
 }
 
@@ -135,7 +150,7 @@ adapter_accept_agents() {
     adapter_assert_agent_inputs "$item" "$candidate" "$target"
     executable="$target/$(jq -er .executable <<< "$artifact")"; proof="$directory/agents/$id/acceptance.$active_plan.json"
     adapter_arguments "$(jq -c .acceptanceArguments <<< "$artifact")" "$(jq -er .profileDirectory <<< "$item")" "$env_file" "$target"
-    adapter_native_command "$(jq -er .profileDirectory <<< "$item")" timeout 330 "$executable" "${HIVE_AGENT_ARGUMENTS[@]}" > "$proof" 2> "$proof.log" || die 'Native agent acceptance failed; inspect its protected result and log'
+    adapter_native_command "$(jq -er .profileDirectory <<< "$item")" timeout 330 "$executable" "${HIVE_AGENT_ARGUMENTS[@]}" < /dev/null > "$proof" 2> "$proof.log" || die 'Native agent acceptance failed; inspect its protected result and log'
     [[ $(stat -c %s "$proof") -le 65536 ]] || die 'Native acceptance response exceeds its evidence bound'
     jq -e --arg version "$version" '.ok==true and .version==$version' "$proof" >/dev/null || die 'Native agent has not passed its product acceptance contract'
     jq --arg accepted "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg evidence "$(digest "$proof")" '.accepted=true|.acceptedAt=$accepted|.acceptanceProofSHA256=$evidence' "$candidate" | atomic_json "$directory/agents/$id/receipt.json"

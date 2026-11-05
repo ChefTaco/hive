@@ -252,6 +252,12 @@ case "$action" in
           ,SECURITY_DISPATCH_ENABLED:"false",SECURITY_INGEST_ENABLED:"false",SECURITY_RETENTION_ENABLED:"false",SECURITY_NOTIFICATIONS_ENABLED:"false"
         })))
     ' "$candidate" > "$bootstrap_compose"
+    if jq -e '.services|length==0' "$bootstrap_compose" >/dev/null; then
+      # An ingress/static-only host has no product data to seed. Retain its
+      # explicit initialization receipt without launching a frontend early.
+      jq '.phase="ready"' "$initial_receipt" | atomic_json "$initial_receipt"
+      exit 0
+    fi
     docker compose -f "$bootstrap_compose" config --quiet
     mapfile -t datastores < <(jq -r --slurpfile release "$directory/manifest.$plan.json" '.services|keys[]|. as $name|select($release[0].components[$name].kind=="datastore")' "$bootstrap_compose")
     if ((${#datastores[@]})); then docker compose -f "$bootstrap_compose" up -d --wait --wait-timeout 180 "${datastores[@]}"; fi

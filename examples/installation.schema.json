@@ -31,7 +31,8 @@
         "core",
         "full",
         "custom"
-      ]
+      ],
+      "description": "Core and full release profiles, or custom selected products. Fresh custom setup includes the Oathweave/Redis, HiveXUI and ingress foundation."
     },
     "origin": {
       "type": "string",
@@ -100,10 +101,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "oathweave",
-            "emberpath",
-            "hivemem",
-            "hiveskills"
+            "oathweave"
           ],
           "properties": {
             "oathweave": {

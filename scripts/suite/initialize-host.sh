@@ -110,7 +110,9 @@ ensure_secret() {
   [[ "$value" =~ ^[a-f0-9]+$ && ${#value} == "$length" ]] || die 'Invalid protected initialization secret'
   record_file "$path"
 }
-identity_names=(identity-id model-id memory-id)
+identity_names=(identity-id)
+jq -e '.bootstrapServiceUsers.emberpath!=null' <<< "$input" >/dev/null && identity_names+=(model-id)
+jq -e '.bootstrapServiceUsers.hivemem!=null' <<< "$input" >/dev/null && identity_names+=(memory-id)
 jq -e '.bootstrapServiceUsers.cindertrace!=null' <<< "$input" >/dev/null && identity_names+=(security-id)
 jq -e '.bootstrapServiceUsers.chattermost!=null' <<< "$input" >/dev/null && identity_names+=(chat-id)
 for name in "${identity_names[@]}"; do
@@ -203,7 +205,7 @@ if has_component ingress; then
 fi
 username=$(jq -er .bootstrap.adminUsername <<< "$input")
 email=$(jq -er .bootstrap.adminEmail <<< "$input")
-subject=$(secret identity-id); model_id=$(secret model-id); memory_id=$(secret memory-id)
+subject=$(secret identity-id); model_id=$(secret model-id 2>/dev/null || true); memory_id=$(secret memory-id 2>/dev/null || true)
 issuer="$origin/api/oathweave"
 if has_component oathweave; then
 jq -n --arg id "$subject" --arg redirect "$origin/auth/callback" --argjson selection "$(jq -c .bootstrapServiceUsers <<< "$input")" '{schema:1,adminId:$id,clients:[
@@ -212,7 +214,7 @@ jq -n --arg id "$subject" --arg redirect "$origin/auth/callback" --argjson selec
  {id:"hivexui-hivemem",audience:"hivemem",permissions:["hivemem:admin:all"],redirectUris:[$redirect],firstParty:true},
  {id:"hivexui-hiveskills",audience:"hiveskills",permissions:["hiveskills:admin"],redirectUris:[$redirect],firstParty:true}]} |
  .clients += ((if $selection.cindertrace then [{id:"hivexui-cindertrace",audience:"cindertrace",permissions:["cindertrace:view","cindertrace:investigate","cindertrace:admin"],redirectUris:[$redirect],firstParty:true}] else [] end) +
- (if $selection.chattermost then [{id:"hivexui-chattermost",audience:"chattermost",permissions:["chattermost:session"],redirectUris:[$redirect],firstParty:true}] else [] end))' | publish_file oathweave "$directory/config/oathweave/suite-bootstrap.json"
+ (if $selection.chattermost then [{id:"hivexui-chattermost",audience:"chattermost",permissions:["chattermost:session"],redirectUris:[$redirect],firstParty:true}] else [] end)) | .clients |= map(select(.audience as $name|$selection[$name]!=null))' | publish_file oathweave "$directory/config/oathweave/suite-bootstrap.json"
 policies=$(jq -c '.clients|map({key:.id,value:{audience,permissions}})|from_entries' "$directory/config/oathweave/suite-bootstrap.json")
 fi
 if has_component hivemem; then
@@ -240,8 +242,10 @@ if has_component oathweave; then
   line SEED_ADMIN_USERNAME "$username"; line SEED_ADMIN_EMAIL "$email"; line SEED_ADMIN_PASSWORD "$(secret admin-password)"
   line SEED_HIVE_CLIENT_SECRET "$(secret native-hive-client)"; line SEED_HIVE_ROUTER_CLIENT_SECRET "$(secret native-router-client)"
   line OATHWEAVE_SUITE_BOOTSTRAP_FILE /config/suite-bootstrap.json
+  if jq -e '.bootstrapServiceUsers.emberpath!=null and .bootstrapServiceUsers.hivemem!=null' <<< "$input" >/dev/null; then
   line IAM_ENROLLMENT_INSTALLATION_ID "$installation"
   line IAM_ENROLLMENT_PRODUCTS_JSON "$(jq -nc --arg models "$(product_endpoint emberpath https://emberpath:9443)/api" --arg memory "$(product_endpoint hivemem https://hivemem:18790)/v1" '{emberpath:{url:$models,caFile:"/config/authority.pem"},hivemem:{url:$memory,caFile:"/config/authority.pem"}}')"
+  fi
   line TLS_CERT_PATH /config/tls.crt; line TLS_KEY_PATH /config/tls.key; line CORS_ORIGIN "$origin"
   line WEBAUTHN_RP_ID "$console_hostname"; line WEBAUTHN_RP_ORIGIN "$origin"; line WEBAUTHN_RP_NAME Oathweave
   line IAM_RECOVERY_OUTBOX_DIRECTORY /data/iam/recovery-outbox
@@ -289,6 +293,7 @@ if has_component ingress; then
   line HIVE_CONSOLE_HOST "$console_hostname"; line XDG_CONFIG_HOME /data/config; line XDG_DATA_HOME /data
   for mapping in oathweave:OATHWEAVE:4200 emberpath:EMBERPATH:9443 hivemem:HIVEMEM:18790 hiveskills:HIVESKILLS:4030; do
     component=${mapping%%:*}; tail=${mapping#*:}; label=${tail%%:*}; port=${tail##*:}
+    jq -e --arg name "$component" '.bootstrapServiceUsers[$name]!=null' <<< "$input" >/dev/null || continue
     endpoint=$(product_endpoint "$component" "https://$component:$port")
     hostname=${endpoint#https://}; hostname=${hostname%%:*}
     line "${label}_ENDPOINT" "$endpoint"; line "${label}_TLS_NAME" "$hostname"
@@ -299,9 +304,11 @@ if has_component ingress; then
     endpoint=$(product_endpoint "$component" "https://$component:$port"); hostname=${endpoint#https://}; hostname=${hostname%%:*}
     line "${label}_ENDPOINT" "$endpoint"; line "${label}_TLS_NAME" "$hostname"
   done
+  if jq -e '.bootstrapServiceUsers.emberpath!=null' <<< "$input" >/dev/null; then
   endpoint=$(product_endpoint emberpath https://emberpath:4020 inferenceOrigin)
   hostname=${endpoint#https://}; hostname=${hostname%%:*}
   line EMBERPATH_API_ENDPOINT "$endpoint"; line EMBERPATH_API_TLS_NAME "$hostname"
+  fi
 } | publish_file ingress "$directory/config/ingress.env"
 fi
 hive_full_configuration
@@ -309,6 +316,8 @@ if has_component hivexui; then
 jq -n --arg issuer "$issuer" --arg installation "$installation" --arg magnusConsole "$(jq -r '.bootstrap.magnusConsoleOrigin // empty' <<< "$input")" --argjson selection "$(jq -c .bootstrapServiceUsers <<< "$input")" '{schema:1,mode:"suite",enrollmentInstallationId:$installation,products:{oathweave:"/api/oathweave",emberpath:"/api/emberpath",hivemem:"/api/hivemem",hiveskills:"/api/hiveskills"},identity:{issuer:$issuer,apiPrefix:"/api/oathweave",clients:{oathweave:"hivexui-oathweave",emberpath:"hivexui-emberpath",hivemem:"hivexui-hivemem",hiveskills:"hivexui-hiveskills"}}} |
  if $selection.cindertrace then .products.cindertrace="/api/cindertrace" | .identity.clients.cindertrace="hivexui-cindertrace" else . end |
  if $selection.chattermost then .products.chattermost="/api/chattermost" | .identity.clients.chattermost="hivexui-chattermost" else . end |
+ .products |= with_entries(select(.key as $name|$selection[$name]!=null)) | .identity.clients |= with_entries(select(.key as $name|$selection[$name]!=null)) |
+ if ($selection.emberpath and $selection.hivemem) then . else del(.enrollmentInstallationId) end |
  if $magnusConsole!="" then .links.magnus=$magnusConsole else . end' | publish_file hivexui "$directory/config/runtime.json" 644
 fi
 if has_component oathweave; then

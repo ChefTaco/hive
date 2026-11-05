@@ -11,8 +11,9 @@ for each selected product. The wizard keeps Oathweave's Redis, HiveMem's Qdrant,
 PostgreSQL/Redis datastores on their owning product's host. Ingress and static HiveXUI remain together on the console
 host. Every inventory host must have a selected component.
 
-The endpoint object must contain `oathweave`, `emberpath`, `hivemem` and
-`hiveskills`. Each entry contains:
+The endpoint object must contain `oathweave` and every other selected API product.
+Core includes `emberpath`, `hivemem` and `hiveskills`; [custom selections](CUSTOM.md)
+may omit them. Each entry contains:
 
 ```json
 {
