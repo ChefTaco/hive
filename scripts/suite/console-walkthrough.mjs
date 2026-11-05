@@ -133,7 +133,7 @@ async function createSession(browser) {
     events.responses.push(entry);
   });
   // A connection left open on purpose (chat realtime) must not hold the quiet period.
-  const pendingRequests = () => [...state.inflight.keys()].filter((request) => request.resourceType() !== 'websocket' && request.resourceType() !== 'eventsource');
+  const pendingRequests = () => [...state.inflight.keys()].filter((request) => request.resourceType() !== 'websocket' && request.resourceType() !== 'eventsource' && !/\/stream(\/|$|\?)/.test(new URL(request.url()).pathname));
 
   async function answerPrompts() {
     const consent = page.getByRole('dialog', { name: 'Review access', exact: true });
