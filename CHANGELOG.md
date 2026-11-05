@@ -8,6 +8,9 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Verify immutable product-owned browser contract integration, native memory
+  pagination and direct authorized incident summaries across the extracted console.
+
 - Record candidate workflow parity, final browser contract checks, authenticated
   peer restores and native consumer acceptance with explicit installation gates.
 

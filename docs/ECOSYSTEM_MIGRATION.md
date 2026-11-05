@@ -15,7 +15,7 @@ source snapshot or passing unit test is not evidence of a production cutover.
 | Public source inventory and provenance | Implemented | Per-product provenance.json records source revision and original file hashes |
 | Independent backend builds and tests | Local required gates pass | Published images and released contract artifacts remain separate gates |
 | Static HiveXUI extraction | Independent static build, owned contract checks and actual suite browser workflows pass | Released contract/image selection and restored-account browser acceptance |
-| Direct product authorization | Implemented; bounded regression tests pass | Resource audience, permissions, revocation and step-up regression tests |
+| Direct product authorization | Implemented; receiving API regressions and immutable browser contracts pass | Installation-specific resource audience, permissions, revocation and step-up acceptance |
 | Oathweave browser SSO | Disposable browser workflows pass; restored-account sign-in pending | PKCE, consent, MFA/passkeys, recovery, session/logout acceptance |
 | Memory and workspace workflows | Native advanced operations, suite browser checks and actual HTTPS/HMAC worker delivery/restart pass | Existing permissions and operator-owned integration destination acceptance |
 | Security and chat UI consolidation | Fresh conversation/admin/files/sockets and investigations pass; durable signed response safety and native-session revocation pass | Migrated-account browser and installation-specific acceptance |
@@ -243,6 +243,16 @@ rollback of configuration and audit on failure. Other inherited Emberpath and
 HiveMem routes retain incomplete response schema coverage; HiveSkills adds a
 source-derived route inventory. Drift checks do not imply complete coverage.
 Released contract artifacts remain a frontend cutover gate.
+
+Current identity/account/enrollment, Skills, security and chat modules now also
+consume immutable owner exports, including their native response envelopes and
+request refinements. Read/list responses omit native archive paths and protected
+provider relations; one-time credentials use uncached responses. Cross-product
+incident summaries now compose authorized trace, identity audit and scoped memory
+queue reads in the browser, project only explicit safe details and report missing
+sources. Legacy coordinator endpoints remain reserved for retained native recovery.
+Memory browser pagination now uses its native offset and has a populated multi-page
+browser regression, alongside actual CRUD and generated URL/array-bound checks.
 
 Synthetic desktop/mobile browser checks cover security/chat renders, theme changes,
 mobile navigation disclosure, Escape focus restoration, reduced-motion preference
