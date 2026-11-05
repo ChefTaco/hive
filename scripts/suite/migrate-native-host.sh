@@ -982,6 +982,23 @@ action_tls_refresh() {
   docker compose -f "$directory/compose.json" restart ingress >/dev/null
   log 'Ingress restarted with the current native certificates'
 }
+# The Router's memory proxy token is renewed in the native environment file, which the suite
+# Emberpath copied at cutover. This copies the current value and recreates Emberpath. The value
+# is never printed.
+action_refresh_memory_token() {
+  check_binding
+  [[ -f "$directory/compose.json" ]] || die 'The suite is not active here'
+  local file="$directory/config/emberpath.env" current next
+  next=$(router_env | jq -c 'select((.HIVE_ROUTER_MEMORY_PROXY_TOKEN // "")|length>0)|{HIVE_ROUTER_MEMORY_PROXY_TOKEN}')
+  [[ -n "$next" ]] || die 'The native Router environment has no memory proxy token'
+  current=$(env_json "$file")
+  if jq -e --argjson next "$next" '.HIVE_ROUTER_MEMORY_PROXY_TOKEN==$next.HIVE_ROUTER_MEMORY_PROXY_TOKEN' <<< "$current" >/dev/null; then
+    log 'Emberpath already has the current memory proxy token'; return
+  fi
+  write_env emberpath "$file" "$(jq -c --argjson next "$next" '.+$next' <<< "$current")"
+  docker compose -f "$directory/compose.json" up -d --wait --wait-timeout 180 --no-deps --force-recreate emberpath >&2
+  log 'Emberpath was recreated with the renewed memory proxy token'
+}
 
 # ---- Rollback. Native data was never written after the stop, so it is simply restarted. ----
 action_rollback() {
@@ -1056,6 +1073,7 @@ case "$action" in
   native-verify-live) verify_suite live;;
   native-issue-token) action_issue_token;;
   native-tls-refresh) action_tls_refresh;;
+  native-refresh-memory-token) action_refresh_memory_token;;
   native-rollback) action_rollback;;
   native-status) action_status;;
   *) die 'Unknown migration action';;

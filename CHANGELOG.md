@@ -24,6 +24,12 @@ only `hive.sh` changes.
   `ClientApiKey.lastUsedAt` and `updatedAt`. Rollback is unchanged. See
   `deployment/MIGRATE_NATIVE.md`.
 
+### Added
+
+- `hive.sh migrate-native refresh-memory-token` copies a renewed `HIVE_ROUTER_MEMORY_PROXY_TOKEN`
+  from the native Router environment into the suite Emberpath and recreates it, without printing
+  the value.
+
 ### Changed
 
 - `hive.sh migrate-native verify` checks a live suite without failing on client writes: the

@@ -13,6 +13,7 @@
 //   backupRehearsal run hive.sh backup on the migrated suite, measure its stop window, then
 //                   rehearse a restore of the archive
 //   signIn          false skips the sign-in fork, the reset rehearsal and the browser
+//   refreshMemoryToken  renew the Router memory proxy token natively, then run refresh-memory-token
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes, scryptSync } from 'node:crypto';
@@ -295,6 +296,27 @@ async function backupRehearsal(trust, traffic) {
   assert.equal(restored.archiveSHA256, receipt.sha256);
   result.restoreCheck = { seconds: restore.seconds, result: restored.result, isolated: restored.isolated, portsPublished: restored.portsPublished, archiveSHA256Matches: true };
   return result;
+}
+// A renewal writes a new memory proxy token to the native Router file. A credential HiveMem accepts
+// stands in for the renewed value; it is compared by digest and never printed.
+function refreshMemoryToken() {
+  const file = join(native, 'state/opt/hive-router/shared/.env');
+  const renewed = nativeEnv([join(native, 'state/opt/hivemem/.env')]).HIVEMEM_ADMIN_TOKEN;
+  const inside = () => sha(docker('compose', '-f', join(suite, 'compose.json'), 'exec', '-T', 'emberpath', 'node', '-e', 'process.stdout.write(process.env.HIVE_ROUTER_MEMORY_PROXY_TOKEN ?? "")'));
+  assert.notEqual(inside(), sha(renewed), 'The stand-in must differ from the copied token');
+  writeFileSync(file, readFileSync(file, 'utf8').split('\n').filter((line) => !line.startsWith('HIVE_ROUTER_MEMORY_PROXY_TOKEN=')).join('\n') + '\nHIVE_ROUTER_MEMORY_PROXY_TOKEN=' + renewed + '\n');
+  const started = () => docker('inspect', run('docker', ['compose', '-f', join(suite, 'compose.json'), 'ps', '-q', 'emberpath']).trim(), '--format', '{{.State.StartedAt}}');
+  const before = started();
+  const first = hive('refresh-memory-token');
+  assert.equal(first.status, 0, first.stderr.slice(-2000));
+  assert(!(first.stdout + first.stderr).includes(renewed), 'The token must never be printed');
+  assert.equal(inside(), sha(renewed), 'Emberpath runs with the renewed token');
+  const second = hive('refresh-memory-token');
+  assert.equal(second.status, 0);
+  assert.match(second.stderr, /already has the current memory proxy token/);
+  const mode = (statSync(join(suite, 'config/emberpath.env')).mode & 0o777).toString(8);
+  assert.equal(mode, '600');
+  return { seconds: first.seconds, emberpathRecreated: started() !== before, containerHasRenewedValue: true, repeatChangedNothing: true, fileMode: mode, valuePrinted: false };
 }
 
 // Native clients trust exactly these files, so probes use nothing else.
@@ -675,6 +697,13 @@ async function main() {
         assert.equal(after.status, 0, after.stdout.slice(-2000) + after.stderr.slice(-2000));
         report.liveVerifyAfterBackup = parseJSONLine(after.stdout);
       }
+    }
+    if (c.refreshMemoryToken) {
+      say('refresh-memory-token: a renewed native token reaches the suite Emberpath');
+      report.refreshMemoryToken = refreshMemoryToken();
+      const after = hive('verify');
+      assert.equal(after.status, 0, after.stdout.slice(-2000) + after.stderr.slice(-2000));
+      report.liveVerifyAfterRefresh = parseJSONLine(after.stdout);
     }
     if (traffic) { await traffic.stop(); report.trafficTotal = trafficSummary(traffic.log); }
 

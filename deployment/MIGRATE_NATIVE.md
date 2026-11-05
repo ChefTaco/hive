@@ -128,6 +128,7 @@ Every step leaves a receipt in `<directory>/migration/steps`, and repeating a co
 | `rollback` | See below | Started |
 | `issue-admin-token` | Issues a new reset token for the configured administrator | Stopped |
 | `tls-refresh` | Reloads native certificates; see below | Stopped |
+| `refresh-memory-token` | Copies a renewed `HIVE_ROUTER_MEMORY_PROXY_TOKEN` from the native Router environment into the suite Emberpath and recreates it | Stopped |
 
 Run `prepare` close to the maintenance window, then `cutover` without changing the configuration:
 the plan digest binds them. A configuration or link change requires `prepare` again.
@@ -209,6 +210,13 @@ renewal is otherwise unchanged except for the identity leaf, which the disabled 
 when that leaf has under seven days left, `tls-refresh` issues a new one from the native CA with the
 same names and key, kept with the suite configuration. **Schedule `tls-refresh` at least weekly.**
 Renew any certificate near expiry before `cutover`.
+
+### Memory proxy token
+
+Cutover copies the Router's `HIVE_ROUTER_MEMORY_PROXY_TOKEN` into `<directory>/config/emberpath.env`.
+When something renews it in the native file `/opt/hive-router/shared/.env`, run
+`refresh-memory-token`: it copies the current value, keeps the file owner-only, recreates Emberpath
+and never prints the value. It does nothing when the suite already has that value.
 
 ## First sign-in
 

@@ -132,7 +132,7 @@ hive_native_set_password() {
 
 hive_native_migrate() {
   local subcommand=$1 confirmed=$2 hold=$3 host
-  [[ -n "$subcommand" ]] || hive_die 'Use: migrate-native plan|prepare|cutover|verify|rollback|status|issue-admin-token|set-admin-password|tls-refresh'
+  [[ -n "$subcommand" ]] || hive_die 'Use: migrate-native plan|prepare|cutover|verify|rollback|status|issue-admin-token|set-admin-password|tls-refresh|refresh-memory-token'
   jq -e '.nativeMigration!=null' "$HIVE_CONFIG" >/dev/null || hive_die 'This configuration has no nativeMigration block'
   host=$(hive_native_host)
   hive_need openssl; hive_need sha256sum; hive_manifest
@@ -141,8 +141,8 @@ hive_native_migrate() {
     plan) hive_native_action "$host" native-plan; return;;
     status) hive_native_action "$host" native-status; return;;
     set-admin-password) hive_native_set_password "$host"; return;;
-    prepare|cutover|verify|rollback|issue-admin-token|tls-refresh) ;;
-    *) hive_die 'Use: migrate-native plan|prepare|cutover|verify|rollback|status|issue-admin-token|set-admin-password|tls-refresh';;
+    prepare|cutover|verify|rollback|issue-admin-token|tls-refresh|refresh-memory-token) ;;
+    *) hive_die 'Use: migrate-native plan|prepare|cutover|verify|rollback|status|issue-admin-token|set-admin-password|tls-refresh|refresh-memory-token';;
   esac
   case "$subcommand" in
     cutover|rollback)
@@ -169,5 +169,6 @@ hive_native_migrate() {
     rollback) hive_native_rollback "$host";;
     issue-admin-token) hive_native_issue_token "$host";;
     tls-refresh) hive_native_action "$host" native-tls-refresh;;
+    refresh-memory-token) hive_native_action "$host" native-refresh-memory-token;;
   esac
 }

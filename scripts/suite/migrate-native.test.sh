@@ -525,6 +525,23 @@ jq '.schema=1|.passed=true|.failures=[]' "$vdir/migration/verification.json" > "
 v_action native-verify-live >/dev/null 2>&1 || fail 'The standalone check accepts an exact verification by an earlier cutover'
 jq -e '.receipt.kind=="exact-cutover-verification"' "$vdir/migration/live-verification.json" >/dev/null || fail 'Legacy receipt kind'
 refused 'No valid preservation receipt' v_action native-verify
+# ---- refresh-memory-token copies a renewed native value into the suite, never printing it. ----
+grep -v '^HIVE_ROUTER_MEMORY_PROXY_TOKEN=' "$vdir/config/emberpath.env" > "$temporary/ember.before"
+printf 'HIVE_ROUTER_MEMORY_PROXY_TOKEN=fake-renewed-proxy-token-1\n' >> "$source_root/opt/hive-router/shared/.env"
+: > "$stub/docker.calls"
+v_action native-refresh-memory-token > "$temporary/refresh.out" 2>&1 || { cat "$temporary/refresh.out" >&2; fail 'refresh-memory-token'; }
+[[ $(sed -n "s/^HIVE_ROUTER_MEMORY_PROXY_TOKEN='\(.*\)'$/\1/p" "$vdir/config/emberpath.env") == fake-renewed-proxy-token-1 ]] || fail 'The renewed token reaches the suite'
+[[ $(stat -c %a "$vdir/config/emberpath.env") == 600 ]] || fail 'The environment file stays owner-only'
+cmp -s "$temporary/ember.before" <(grep -v '^HIVE_ROUTER_MEMORY_PROXY_TOKEN=' "$vdir/config/emberpath.env") || fail 'Only the memory proxy token changes'
+grep -q 'compose -f .*compose.json up -d --wait --wait-timeout 180 --no-deps --force-recreate emberpath' "$stub/docker.calls" || fail 'Emberpath must be recreated to read the token'
+! grep -q fake-renewed "$temporary/refresh.out" "$stub/docker.calls" || fail 'The token must never be printed or passed'
+: > "$stub/docker.calls"
+v_action native-refresh-memory-token 2>&1 | grep -q 'already has the current memory proxy token' || fail 'An unchanged token changes nothing'
+! grep -q 'force-recreate' "$stub/docker.calls" || fail 'An unchanged token must not restart Emberpath'
+rm "$vdir/compose.json"
+refused 'The suite is not active here' v_action native-refresh-memory-token
+sed -i '/^HIVE_ROUTER_MEMORY_PROXY_TOKEN=/d' "$source_root/opt/hive-router/shared/.env"; touch "$vdir/compose.json"
+refused 'has no memory proxy token' v_action native-refresh-memory-token
 unset VSTUB
 
 # The runtime bundle carries everything the host needs.
