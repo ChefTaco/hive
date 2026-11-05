@@ -13,7 +13,8 @@ Fresh initialization requires a reviewed `initialization` contract for each
 PostgreSQL application. It names an immutable image digest, an apply `command`
 and an exact `verificationCommand`; optional `entrypoint` and `workingDirectory`
 are part of the signed contract. Examples are Magnus's `migrate` and
-`verify-migrations`, Cindertrace's packaged migration CLI and `--verify-current`,
+`verify-initialization`, which checks its transactional base-seed marker as well
+as exact packaged migrations, Cindertrace's migration CLI and `--verify-current`,
 and ChatterMost's separate migrator image with `migrate` and `validate-current`.
 Hive never infers application schemas from a sibling checkout. The signed service
 contract may request private runtime directories in `service.tmpfs` beneath `/run`
@@ -49,7 +50,9 @@ Dispatch, ingestion, retention and notification integrations in fresh Cindertrac
 configuration start disabled until the operator reviews their product-owned
 settings. Migration rehearsals additionally enforce each product's isolated
 read-only mode. Restored Magnus does not consume queued work or contact agents;
-restored ChatterMost refuses logins and WebSocket upgrades. PostgreSQL clusters
+restored ChatterMost normally refuses logins and WebSocket upgrades. The separate
+coordinated authentication copy below explicitly enables its volatile, read-only
+authentication mode. PostgreSQL clusters
 created for the full-profile fixture enable data checksums, which the exact
 pinned datastore image verifies offline before candidate startup. Existing
 clusters without checksums need a separately reviewed product recovery adapter;
@@ -72,3 +75,33 @@ certification, ARM64 certification, or proof that every existing installation's
 account recovery and data migration gates have passed. Preserve each independent
 installation's state and rehearse its own backups before a separately approved
 maintenance window.
+
+The developer full-suite driver also makes a second, separate disposable copy of
+each isolated restore for coordinated authentication checks. After its browser
+review completes, it stops the original fixture writers before reusing the exact
+console origin. The original restored configuration and data remain separately
+fingerprinted. Application peers share one internal-only transport bridge across
+the two inventory projects; datastore networks stay private. Original issuers,
+signing keys, account IDs, passwords and client registrations are retained.
+Transport overrides verify the preserved CA and certificate hostname. The derived
+ingress permits reads and authentication only. ChatterMost additionally uses its
+explicit volatile-authentication rehearsal mode and a read-only PostgreSQL source.
+
+This proof exercises six resource audiences, native chat sign-in, retained post
+and attachment reads, authenticated WebSocket ping, wrong-audience rejection and
+online revocation while tokens are still live. It verifies unchanged durable chat
+records and unchanged original restore bytes. It uses synthetic accounts from the
+fresh fixture; it does not satisfy an existing installation's account-recovery or
+current-password gate. Both inventory projects run on one physical development
+host and do not constitute separate-machine transport certification. The driver
+never selects production installations or activates restored state.
+
+Add `--interactive` to the developer driver for a real terminal wizard and Apply
+confirmation followed by the actual full installation. This path records its
+protected transcript and repeats the generated configuration unattended. It uses
+`control` and `identity` inventory IDs and a fixture-only SSH/SFTP client
+configuration; it never edits the operator's SSH files. The unattended path
+separately injects migration and host-activation interruptions before resuming.
+For authenticated peer restores, a loopback-only raw TCP relay forwards TLS bytes
+to the isolated ingress. It does not terminate TLS or add credentials; backend
+containers retain internal-only networks and certificate verification.

@@ -11,6 +11,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 import https from 'node:https';
 import { extendFullFixture } from './full-release-fixture.mjs';
+import { restoredPeerRehearsal } from './restored-peer-rehearsal.mjs';
 const execute = promisify(execFile), root = resolve(import.meta.dirname, '../..');
 function argument(name) { const index = process.argv.indexOf(name); assert(index >= 0 && process.argv[index + 1], name + ' is required'); return resolve(process.argv[index + 1]); }
 const output = argument('--output'), template = argument('--template-release');
@@ -24,7 +25,8 @@ const docker = (...args) => run('docker', args);
 const environment = Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'TZ'].filter(key => process.env[key]).map(key => [key, process.env[key]]));
 async function port() { const socket = createServer().listen(0, '0.0.0.0'); await new Promise(done => socket.once('listening', done)); const value = socket.address().port; await new Promise(done => socket.close(done)); return value; }
 const id = 'distributed-' + randomBytes(5).toString('hex'), registryName = id + '-registry', username = userInfo().username;
-const addresses = { identity: join(output, 'identity'), console: join(output, 'console') };
+const interactive=process.argv.includes('--interactive'),consoleHost=interactive?'control':'console';
+const addresses = { identity: join(output, 'identity'), [consoleHost]: join(output,consoleHost) },consoleDirectory=addresses[consoleHost];
 const configFile = join(output, 'installation.json'), manifestFile = join(output, 'release.json'), sshConfig = join(output, 'ssh.conf');
 const full = process.argv.includes('--full'), browserReview = process.argv.includes('--browser-review');
 const selectionIndex=process.argv.indexOf('--components'), selection=selectionIndex<0 ? null : process.argv[selectionIndex+1].split(',');
@@ -58,25 +60,31 @@ try {
   const known = '[127.0.0.1]:' + sshPort + ' ' + readFileSync(join(output, 'host.pub'), 'utf8'); put(join(output, 'known_hosts'), known);
   mkdirSync(join(output, 'bin'), { mode: 0o700 });
   const actualDocker = run('sh', ['-c', 'command -v docker']);
-  const migrationInterruption = full ? `if [[ "\${1:-}" == compose && "\${2:-}" == -f && "\${3:-}" == '${addresses.console}/bootstrap.'*.chattermost.compose.json && "\${!#}" == migrate ]]; then
+  const migrationInterruption = full && !interactive ? `if [[ "\${1:-}" == compose && "\${2:-}" == -f && "\${3:-}" == '${consoleDirectory}/bootstrap.'*.chattermost.compose.json && "\${!#}" == migrate ]]; then
  printf 'apply\\n' >> '${output}/chat-migration-calls'
  '${actualDocker}' "$@"; status=$?
  if [[ "$status" == 0 && ! -e '${output}/migration-interrupted' ]]; then touch '${output}/migration-interrupted'; exit 23; fi
  exit "$status"
 fi
 ` : '';
-  put(join(output, 'bin/docker'), `#!/usr/bin/env bash\n${migrationInterruption}if [[ "\${1:-}" == compose && "\${2:-}" == -f && "\${3:-}" == '${addresses.identity}/candidate.'*.json && " $* " == *' up '* && ! -e '${output}/activation-interrupted' ]]; then touch '${output}/activation-interrupted'; exit 23; fi\nexec '${actualDocker}' "$@"\n`, 0o700);
+  const activationInterruption=interactive?'':`if [[ "\${1:-}" == compose && "\${2:-}" == -f && "\${3:-}" == '${addresses.identity}/candidate.'*.json && " $* " == *' up '* && ! -e '${output}/activation-interrupted' ]]; then touch '${output}/activation-interrupted'; exit 23; fi\n`;
+  put(join(output, 'bin/docker'), `#!/usr/bin/env bash\n${migrationInterruption}${activationInterruption}exec '${actualDocker}' "$@"\n`, 0o700);
+  const actualSsh=run('sh',['-c','command -v ssh']);
+  put(join(output,'bin/ssh'),`#!/usr/bin/env bash\nexec '${actualSsh}' -F '${sshConfig}' "$@"\n`,0o700);
+  const actualScp=run('sh',['-c','command -v scp']);
+  put(join(output,'bin/scp'),`#!/usr/bin/env bash\nexec '${actualScp}' -F '${sshConfig}' "$@"\n`,0o700);
+  environment.PATH=join(output,'bin')+':'+environment.PATH;
   put(join(output, 'sshd.conf'), `Port ${sshPort}\nListenAddress 127.0.0.1\nHostKey ${output}/host\nPidFile ${output}/sshd.pid\nAuthorizedKeysFile ${output}/authorized_keys\nAllowUsers ${username}\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAuthenticationMethods publickey\nUsePAM no\nPermitRootLogin no\nAllowTcpForwarding no\nX11Forwarding no\nPermitTTY no\nSetEnv PATH=${join(output, 'bin')}:${process.env.PATH}\nSubsystem sftp internal-sftp\n`);
-  put(sshConfig, `Host identity.example.com console.example.com\n HostName 127.0.0.1\n Port ${sshPort}\n UserKnownHostsFile ${output}/known_hosts\n IdentityFile ${output}/client\n IdentityAgent none\n IdentitiesOnly yes\n StrictHostKeyChecking yes\n BatchMode yes\n ConnectTimeout 5\n LogLevel ERROR\n`);
+  put(sshConfig, `Host identity.example.com console.example.com control.example.com\n HostName 127.0.0.1\n Port ${sshPort}\n UserKnownHostsFile ${output}/known_hosts\n IdentityFile ${output}/client\n IdentityAgent none\n IdentitiesOnly yes\n StrictHostKeyChecking yes\n BatchMode yes\n ConnectTimeout 5\n LogLevel ERROR\n`);
   const descriptor = openSync(join(output, 'sshd.log'), 'wx', 0o600); daemon = spawn('/usr/sbin/sshd', ['-D', '-e', '-f', join(output, 'sshd.conf')], { stdio: ['ignore', descriptor, descriptor] }); closeSync(descriptor);
   await new Promise(done => setTimeout(done, 300));
   assert.equal(run('ssh', ['-F', sshConfig, username + '@identity.example.com', 'command -v docker']), join(output, 'bin/docker'));
-  const config = JSON.parse(readFileSync(join(root, 'examples/installation.json'), 'utf8'));
-  config.installation = id; if (selection) { config.profile='custom'; config.components=Object.fromEntries(Object.entries(config.components).filter(([name])=>selected(name))); } if (full) { config.profile = 'full'; for (const name of Object.keys(manifest.components)) if (!config.components[name]) config.components[name] = { host: 'console', configDirectory: '/config/' + name, ...(/-(postgres|redis)$/.test(name) ? {} : { envFile: '/config/' + name + '.env' }) }; } config.origin = 'https://localhost:' + consolePort;
+  let config = JSON.parse(readFileSync(join(root, 'examples/installation.json'), 'utf8'));
+  config.installation = id; if (selection) { config.profile='custom'; config.components=Object.fromEntries(Object.entries(config.components).filter(([name])=>selected(name))); } if (full) { config.profile = 'full'; for (const name of Object.keys(manifest.components)) if (!config.components[name]) config.components[name] = { host: consoleHost, configDirectory: '/config/' + name, ...(/-(postgres|redis)$/.test(name) ? {} : { envFile: '/config/' + name + '.env' }) }; } config.origin = 'https://localhost:' + consolePort;
   config.hosts = Object.fromEntries(Object.entries(addresses).map(([host, directory]) => [host, { target: username + '@' + host + '.example.com', directory, sshConfig }]));
-  config.console = { host: 'console', bindAddress: '127.0.0.1', httpsPort: consolePort, runtimeFile: join(addresses.console, 'config/runtime.json') };
+  config.console = { host: consoleHost, bindAddress: '127.0.0.1', httpsPort: consolePort, runtimeFile: join(consoleDirectory, 'config/runtime.json') };
   for (const [name, placement] of Object.entries(config.components)) {
-    placement.host = ['oathweave', 'oathweave-redis', 'hiveskills'].includes(name) ? 'identity' : 'console';
+    placement.host = ['oathweave', 'oathweave-redis', 'hiveskills'].includes(name) ? 'identity' : consoleHost;
     if (placement.envFile) placement.envFile = join(addresses[placement.host], 'config', name + '.env');
     if (placement.configDirectory) placement.configDirectory = join(addresses[placement.host], 'config', name);
   }
@@ -84,7 +92,25 @@ fi
   for (const product of ['oathweave', 'emberpath', 'hivemem', 'hiveskills', ...(full ? ['magnus', 'cindertrace', 'chattermost'] : [])].filter(selected)) config.bootstrap.productEndpoints[product] = { origin: 'https://' + gateway + ':' + await port(), bindAddress: gateway, certificateFile: join(output, 'server.crt'), privateKeyFile: join(output, 'server.key'), ...(product === 'emberpath' ? { inferenceOrigin: 'https://' + gateway + ':' + await port() } : {}) };
   run('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', config.bootstrap.privateKeyFile, '-out', config.bootstrap.certificateFile, '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:' + gateway, '-days', '2']); chmodSync(config.bootstrap.privateKeyFile, 0o600);
   run('openssl', ['genpkey', '-algorithm', 'ED25519', '-out', join(output, 'publisher.key')]); run('openssl', ['pkey', '-in', join(output, 'publisher.key'), '-pubout', '-out', join(output, 'publisher.pub')]);
-  put(configFile, config); put(manifestFile, manifest); run('openssl', ['pkeyutl', '-sign', '-inkey', join(output, 'publisher.key'), '-rawin', '-in', manifestFile, '-out', manifestFile + '.sig']);
+  if(!interactive)put(configFile, config); put(manifestFile, manifest); run('openssl', ['pkeyutl', '-sign', '-inkey', join(output, 'publisher.key'), '-rawin', '-in', manifestFile, '-out', manifestFile + '.sig']);
+  if(interactive) {
+    assert(full && !selection,'Interactive developer acceptance selects the full profile');
+    const questions=[['Installation name',id],['Installation directory on the selected host',consoleDirectory],['Host SSH target',username+'@control.example.com'],['Host architecture',process.arch==='arm64'?'arm64':'amd64'],['Console HTTPS origin',config.origin],['Product profile','full'],['HTTPS bind address','127.0.0.1'],['HTTPS listener port',String(consolePort)],['Configuration mode','distributed'],['Initial operator username','admin'],['Initial operator email','alice@example.com'],['Existing console certificate file',config.bootstrap.certificateFile],['Protected console private key file',config.bootstrap.privateKeyFile],['Existing Magnus console HTTPS URL',''],['Existing external inference HTTPS endpoint',''],['Opt-in native agent runtime',''],['Product trust bundle file available on every host',config.bootstrap.trustBundleFile]];
+    for(const product of ['oathweave','emberpath','hivemem','hiveskills','magnus','cindertrace','chattermost']) {
+      const host=['oathweave','hiveskills'].includes(product)?'identity':consoleHost,endpoint=config.bootstrap.productEndpoints[product];
+      questions.push(['Inventory host for '+product,host]);
+      if(product==='oathweave')questions.push(['SSH target for identity',username+'@identity.example.com'],['Installation directory on identity',addresses.identity],['Architecture for identity',process.arch==='arm64'?'arm64':'amd64'],['Protected SSH configuration for identity',sshConfig]);
+      questions.push(['Verified HTTPS origin for '+product,endpoint.origin],['HTTPS bind address for '+product,endpoint.bindAddress],['Certificate file on the '+product+' host',endpoint.certificateFile],['Protected private key file on the '+product+' host',endpoint.privateKeyFile]);
+      if(product==='emberpath')questions.push(['Distinct native model API HTTPS origin for Emberpath',endpoint.inferenceOrigin]);
+    }
+    questions.push(['Write protected installation configuration to',configFile],['Apply this exact installation plan','y']);
+    const review=join(output,'interactive-input.json');put(review,{command:[join(root,'hive.sh'),'--release','0.1.0','--manifest',manifestFile,'--trust-key',join(output,'publisher.pub')],questions,transcriptFile:join(output,'interactive-install.log'),timeoutSeconds:600});
+    run('python3',[join(root,'scripts/suite/interactive-driver.py'),review],{env:environment});
+    const expected=config;config=JSON.parse(readFileSync(configFile,'utf8'));
+    assert.equal(config.profile,'full');assert.equal(config.console.host,consoleHost);assert.deepEqual(Object.keys(config.components).sort(),Object.keys(expected.components).sort());assert.deepEqual(config.bootstrap.productEndpoints,expected.bootstrap.productEndpoints);
+    for(const [name,placement] of Object.entries(expected.components))assert.equal(config.components[name].host,placement.host);
+    for(const [host,placement] of Object.entries(config.hosts)){assert.equal(placement.directory,addresses[host]);assert.equal(placement.target,username+'@'+host+'.example.com');}
+  } else {
   put(join(output, 'plan.log'), await hive('plan'));
   put(join(output, 'known_hosts'), '[127.0.0.1]:' + sshPort + ' ' + readFileSync(join(output, 'wrong-host.pub'), 'utf8'));
   await assert.rejects(hive('init'));
@@ -100,13 +126,14 @@ fi
   }
   assert(existsSync(join(output, 'activation-interrupted')), 'Expected second-host activation interruption');
   for (const host of Object.keys(addresses)) assert.equal(docker('ps', '-q', '--filter', 'label=com.docker.compose.project=' + id + '-' + host), '', 'An interrupted host writer remained active');
+  }
   const credentialPath = join(addresses.identity, 'config/initial-credentials.env'), originalCredentials = readFileSync(credentialPath);
   const identities = Object.fromEntries(['identity-id', ...(selected('emberpath')?['model-id']:[]), ...(selected('hivemem')?['memory-id']:[])].map(name => [name, readFileSync(join(addresses.identity, 'config/.initializer/secrets', name), 'utf8').trim()]));
   put(join(output, 'resume.log'), await hive('install')); put(join(output, 'repeat.log'), await hive('install'));
   assert.deepEqual(readFileSync(credentialPath), originalCredentials);
   for (const [name, value] of Object.entries(identities)) for (const directory of Object.values(addresses)) assert.equal(readFileSync(join(directory, 'config/.initializer/secrets', name), 'utf8').trim(), value);
-  assert(!existsSync(join(addresses.console, 'config/oathweave.env'))); assert(!existsSync(join(addresses.identity, 'config/emberpath.env')));
-  assert(!existsSync(join(addresses.console, 'config/initial-credentials.env')));
+  assert(!existsSync(join(consoleDirectory, 'config/oathweave.env'))); assert(!existsSync(join(addresses.identity, 'config/emberpath.env')));
+  assert(!existsSync(join(consoleDirectory, 'config/initial-credentials.env')));
   for (const host of Object.keys(addresses)) {
     const definition = JSON.parse(readFileSync(join(addresses[host], 'compose.json'), 'utf8'));
     for (const [name, service] of Object.entries(definition.services)) {
@@ -115,7 +142,7 @@ fi
     }
   }
   if (selection) {
-    const runtime=JSON.parse(readFileSync(join(addresses.console,'config/runtime.json'),'utf8'));
+    const runtime=JSON.parse(readFileSync(join(consoleDirectory,'config/runtime.json'),'utf8'));
     assert.deepEqual(Object.keys(runtime.products).sort(),browserProducts.toSorted());
     for (const name of ['emberpath','hivemem','hiveskills'].filter(name=>!selected(name))) for(const directory of Object.values(addresses)) assert(!existsSync(join(directory,'config',name+'.env')),'Unselected product configuration was created');
     if (!selected('emberpath')) for(const directory of Object.values(addresses)) assert(!existsSync(join(directory,'config/.initializer/secrets/model-id')));
@@ -143,18 +170,20 @@ fi
   if (full) {
     const contextRequest={schema_version:1,namespace:'example:admin:rehearsal',instructions:'Retain the synthetic pending action.',current:[{id:'current',role:'user',content:'Continue.'}],history:[],exchanges:[],protected:[],budget:{context_tokens:16000,output_reserve_tokens:4000},policy:{profile:'general'},dry_run:true};
     assert.equal((await request('/api/emberfold/v1/prepare',contextRequest)).status,401,'Context API accepted a missing product credential');
-    const contextToken=parseEnv(readFileSync(join(addresses.console,'config/emberfold.env'),'utf8')).EMBERFOLD_API_TOKEN;
+    const contextToken=parseEnv(readFileSync(join(consoleDirectory,'config/emberfold.env'),'utf8')).EMBERFOLD_API_TOKEN;
     const prepared=await request('/api/emberfold/v1/prepare',contextRequest,{Authorization:'Bearer '+contextToken}); assert.equal(prepared.status,200,'Context API standalone dry-run failed'); assert.equal(prepared.body.fits,true);
     assert.equal((await request('/api/emberfold/v1/prepare',contextRequest,{Authorization:'Bearer '+contextToken,Origin:config.origin})).status,403,'Context API accepted a browser origin');
     assert.equal((await request('/api/cindertrace/security-fusion/overview', null, { Authorization: 'Bearer ' + tokens.cindertrace })).status, 200);
     assert.equal((await request('/api/cindertrace/security-fusion/overview', null, { Authorization: 'Bearer ' + tokens.oathweave })).status, 401);
-    const nativeSecurity = await request('/api/cindertrace/auth/local/login', JSON.parse(readFileSync(join(addresses.console, 'config/cindertrace/initial-browser-account.json'), 'utf8')), {Origin:config.origin}); assert.equal(nativeSecurity.status,200,'Product-owned security browser password hash failed');
+    const nativeSecurity = await request('/api/cindertrace/auth/local/login', JSON.parse(readFileSync(join(consoleDirectory, 'config/cindertrace/initial-browser-account.json'), 'utf8')), {Origin:config.origin}); assert.equal(nativeSecurity.status,200,'Product-owned security browser password hash failed');
     const exchange = await request('/api/chattermost/api/v4/auth/oathweave/session', {}, { Authorization: 'Bearer ' + tokens.chattermost, Origin: config.origin }); assert.equal(exchange.status, 200); boundChatCookie = exchange.headers['set-cookie'].find(value => value.startsWith('MMSID=')).split(';')[0];
     assert.equal(exchange.body.user.id, readFileSync(join(addresses.identity, 'config/.initializer/secrets/chat-id'), 'utf8').trim());
-    const nativeLogin = await request('/api/v4/users/login', { login_id: 'admin', password: parseEnv(readFileSync(join(addresses.console, 'config/chattermost.env'), 'utf8')).ADMIN_PASSWORD }, { Origin: config.origin }); assert.equal(nativeLogin.status, 200);
+    const nativeLogin = await request('/api/v4/users/login', { login_id: 'admin', password: parseEnv(readFileSync(join(consoleDirectory, 'config/chattermost.env'), 'utf8')).ADMIN_PASSWORD }, { Origin: config.origin }); assert.equal(nativeLogin.status, 200);
     const chatHeaders = { Authorization: 'Bearer ' + nativeLogin.headers.token, Origin: config.origin };
     const teams = await request('/api/v4/users/me/teams', null, chatHeaders); assert.equal(teams.status, 200); const channels = await request('/api/v4/users/me/teams/' + teams.body[0].id + '/channels', null, chatHeaders); assert.equal(channels.status, 200);
-    const post = await request('/api/v4/posts', {channel_id:channels.body[0].id,message:'Synthetic full-suite retained content'}, chatHeaders); assert.equal(post.status, 201); put(join(output,'full-chat-proof.json'), {postId:post.body.id, accountId:exchange.body.user.id});
+    const attachment=Buffer.from('Synthetic restored attachment\n'), boundary='fixture'+randomBytes(16).toString('hex');
+    const upload=await request('/api/v4/files?channel_id='+channels.body[0].id,Buffer.concat([Buffer.from('--'+boundary+'\r\nContent-Disposition: form-data; name="files"; filename="fixture.txt"\r\nContent-Type: text/plain\r\n\r\n'),attachment,Buffer.from('\r\n--'+boundary+'--\r\n')]),{...chatHeaders,'Content-Type':'multipart/form-data; boundary='+boundary});assert.equal(upload.status,201);const fileId=upload.body.file_infos[0].id;
+    const post = await request('/api/v4/posts', {channel_id:channels.body[0].id,message:'Synthetic full-suite retained content',file_ids:[fileId]}, chatHeaders); assert.equal(post.status, 201); put(join(output,'full-chat-proof.json'), {postId:post.body.id, accountId:exchange.body.user.id,fileId,fileSha256:createHash('sha256').update(attachment).digest('hex')});
     assert.equal((await request('/api/chattermost/api/v4/auth/oathweave/session', {}, {Authorization:'Bearer '+tokens.oathweave,Origin:config.origin})).status,401);
   }
   const routes = Object.fromEntries(Object.entries({ oathweave: '/api/oathweave/auth/me', emberpath: '/api/emberpath/auth/me', hivemem: '/api/hivemem/agents', hiveskills: '/api/hiveskills/admin/skills' }).filter(([name])=>selected(name)));
@@ -184,10 +213,10 @@ fi
   put(join(output, 'backup.log'), await hive('backup', '--archive', 'distributed'));
   put(join(output, 'rehearse.log'), await hive('rehearse', '--archive', 'distributed'));
   const restoreResults = Object.fromEntries(Object.entries(addresses).map(([host, directory]) => [host, JSON.parse(readFileSync(join(directory, 'rehearsals/distributed/result.json'), 'utf8'))]));
-  assert(restoreResults.identity.installationUUID !== restoreResults.console.installationUUID);
+  assert(restoreResults.identity.installationUUID !== restoreResults[consoleHost].installationUUID);
   for (const result of Object.values(restoreResults)) assert.equal(result.result, 'passed');
   if (full) {
-    const restored = join(addresses.console,'rehearsals/distributed/isolated.json');
+    const restored = join(consoleDirectory,'rehearsals/distributed/isolated.json');
     docker('compose','-f',restored,'up','-d','--wait','--wait-timeout','60','chattermost-postgres');
     try {
       const snapshot = JSON.parse(docker('compose','-f',restored,'exec','-T','chattermost-postgres','psql','-U','chattermost_app','-d','chattermost','-At','-c','SELECT value FROM "RuntimeState";'));
@@ -196,7 +225,8 @@ fi
       assert(snapshot.users.some(user=>user.id===proof.accountId),'Restored chat product account ID differs');
     } finally { docker('compose','-f',restored,'stop','--timeout','45','chattermost-postgres'); }
   }
-  put(join(output, 'result.json'), { schema: 1, result: 'passed', productionCutover: false, profile: full ? 'full' : selection ? 'custom' : 'core', physicalHosts: 1, sshInventories: 2, checks: ['fresh protected per-host product configuration', 'strict real SSH/SFTP trust', 'distinct Compose bridge projects with explicit verified HTTPS endpoints', 'private datastores stay local and unpublished', 'interrupted second-host activation holds every writer', 'repeat install preserves coordinated accounts and independent product secrets', 'one browser sign-in authorizes '+browserProducts.length+' selected products across host inventories', 'wrong-audience and revoked resource tokens rejected', 'separate host-bound backup and isolated restore rehearsals', ...(full ? ['explicit product migrator images and exact completion verification', 'real committed chat migration interruption reconciles by verification without replay', 'six resource-specific product identities', 'native chat sign-in and retained post', 'offline PostgreSQL checksums on restored private datastores'] : [])], productImages: Object.fromEntries(Object.entries(manifest.components).map(([name, value]) => [name, value.image])) });
+  if (full) await restoredPeerRehearsal({output,addresses,config,docker,put,request,credentials,identities,consoleHost});
+  put(join(output, 'result.json'), { schema: 1, result: 'passed', productionCutover: false, profile: full ? 'full' : selection ? 'custom' : 'core', interactive, physicalHosts: 1, sshInventories: 2, checks: ['fresh protected per-host product configuration', 'strict real SSH/SFTP trust', 'distinct Compose bridge projects with explicit verified HTTPS endpoints', 'private datastores stay local and unpublished', ...(interactive?['real terminal full wizard and Apply confirmation install all17 services successfully']:['interrupted second-host activation holds every writer']), 'repeat install preserves coordinated accounts and independent product secrets', 'one browser sign-in authorizes '+browserProducts.length+' selected products across host inventories', 'wrong-audience and revoked resource tokens rejected', 'separate host-bound backup and isolated restore rehearsals', ...(full ? ['explicit product migrator images and exact completion verification', ...(!interactive?['real committed chat migration interruption reconciles by verification without replay']:[]), 'six resource-specific product identities', 'native chat sign-in and retained post', 'offline PostgreSQL checksums on restored private datastores', 'coordinated six-product authenticated peer restore with preserved original bytes'] : [])], productImages: Object.fromEntries(Object.entries(manifest.components).map(([name, value]) => [name, value.image])) });
   passed = true; console.log('PASS: fresh distributed ' + (full ? 'full suite' : selection ? 'custom selection' : 'core') + ', real SSH, verified cross-host HTTPS, interrupted resume, resource authorization, stable credentials and separate isolated restores (one physical host).');
 } finally {
   if (!passed) for (const host of Object.keys(addresses)) for (const container of docker('ps', '-aq', '--filter', 'label=com.docker.compose.project=' + id + '-' + host).split(/\s+/).filter(Boolean)) {
