@@ -34,6 +34,7 @@ to ingress. Do not expose datastore ports.
 
 Browser prefixes are `/api/emberpath`, `/api/oathweave`, `/api/hivemem`,
 `/api/hiveskills`, `/api/cindertrace`, `/api/chattermost`, and `/api/magnus`.
+The read-only [Hive Registry](#hive-registry) adds `/api/registry`.
 Configure the same prefixes in HiveXUI runtime JSON. The first three rewrite to `/api`, `/api/v1`,
 and `/v1` respectively; Skills receives its native paths, Cindertrace `/api/v1`,
 and chat its native `/api/v4` paths. Magnus is the exception to prefix mapping:
@@ -116,6 +117,49 @@ also pass interrupted execution, stable retry and isolated recovery across two
 strict SSH inventories on one physical host. Full setup includes both an actual
 terminal wizard and unattended installation, plus authenticated restored peers.
 Separate physical machines and existing installations retain their own gates.
+
+## Hive Registry
+
+Every installation runs a Hive Registry: its install catalog and lookup API, a small
+SQLite container on the console host. It is unrelated to HiveSkills, the skills
+registry. It holds the products the signed release offers, what this installation
+actually runs, the links an operator or client needs, and an append-only history.
+Independent installations never share one. See the [API reference](../docs/hive-registry-api.md).
+
+`hive.sh` is the normal writer. The signed manifest is the source: each component's
+`catalog` block is generated from `scripts/suite/suite-catalog.json`. A configuration or a
+release without the registry is refused. `upgrade` and `adopt` add it to an existing
+installation without rewriting the configuration file; a release that adds it also
+installs the ingress route, keeping the previous file as `Caddyfile.pre-registry`.
+Adoption restarts nothing, so its route starts with the next ingress restart.
+
+```bash
+./hive.sh registry list --config FILE           # also: installed, summary, history
+./hive.sh registry get emberpath --config FILE  # also: connection ID
+./hive.sh registry add ID --file ENTRY.json --config FILE  # also: update, remove
+```
+
+`add`, `update` and `remove` cover externally managed products only. Entries are private
+unless they set `"public": true`, and any credential in one is refused. Lookups and writes
+run over SSH through a client inside the container; the controller and host need no Node.
+
+The installer generates separate read and write credentials once into owner-only files,
+`config/hive-registry/read-token` and `write-token`. Hosts and internal endpoints need a
+credential; see the API reference for what is public. The ingress passes only explicit GET
+routes under `/api/registry/` and strips cookies, so writes never leave the private network.
+
+The registry starts before the products it records and marks them `activating`. After
+activation, the installer records `installed` only for products observed running their
+exact signed image. If that record fails, services keep running, the command fails and
+the transaction stays open, so the install cannot look finished with a wrong catalog.
+Repeat the command to finish: writes are idempotent and add no duplicates. If the registry
+cannot start, the operation holds. `status` reports `registry.state` and each drift by name
+(`in-sync`, `drift`, `missing`, `unavailable` or `not-active`), and `doctor` fails on any drift.
+
+Backups, restores and adoption treat its data like any product's: the stopped archive
+includes the whole SQLite family. Rehearsals mount `/data` read-only and serve a private
+copy that refuses writes. A rollback to a release from before the registry stops it and
+keeps its data for the next upgrade.
 
 ## Relaxed authentication limits for testing
 

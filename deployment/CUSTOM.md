@@ -2,7 +2,8 @@
 
 Choose `custom` in interactive setup, or set `profile` to `custom` in the same
 versioned installation JSON used for unattended execution. Fresh suite setup
-requires Oathweave and its private Redis, HiveXUI and Caddy ingress. The wizard
+requires Oathweave and its private Redis, HiveXUI, Caddy ingress and the
+[Hive Registry](README.md#hive-registry), which every installation has. The wizard
 adds that foundation when the operator selects individual products. A prepared
 standalone product deployment can still use its independent owning setup tools.
 

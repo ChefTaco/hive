@@ -8,6 +8,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Add the Hive Registry, a mandatory container in every installation: a SQLite install catalog and read-only lookup API at `/api/registry`, written by `hive.sh` from the signed manifest and observed state. `hive.sh registry` looks up entries and manages externally managed products, `status` and `doctor` report drift, and upgrade and adoption add it to existing installations. Not related to the HiveSkills skills registry.
+
+- Publish `ghcr.io/cheftaco/hive-registry` and `ghcr.io/cheftaco/hive-ingress` from the tag-driven release.
+
 - Wire Magnus into the suite with HiveXUI as its console: an Oathweave browser client and explicit ADMIN link for the fresh operator, and an `/api/magnus` ingress mapping limited to Magnus's browser-facing routes that forwards no machine credential. `bootstrap.magnusConsoleOrigin` is removed, and a configuration that still sets it is refused with a clear message.
 
 - Add `hive.sh install|upgrade --relax-auth-limits` for testing. It renders the setting for Oathweave, Cindertrace and ChatterMost, is part of the plan digest, and is reported as `authLimits` by the plan and `hive.sh status`.

@@ -1,7 +1,8 @@
 # Fresh full-profile bootstrap
 
 A signed full release may add Magnus, Cindertrace, ChatterMost and the optional
-Emberfold HTTP service to the eight core components. Magnus and Cindertrace each
+Emberfold HTTP service to the nine core components, which include the mandatory
+[Hive Registry](README.md#hive-registry). Magnus and Cindertrace each
 own a private PostgreSQL database and Redis instance; ChatterMost owns a separate
 PostgreSQL database. Datastore listeners stay on product-local private networks. ChatterMost's owned
 container wrapper expects the local database DNS alias `postgres`; the signed

@@ -48,7 +48,7 @@ completion statements must be read with the current limitations below.
 
 | Product | Responsibility |
 | --- | --- |
-| Hive | Bash installer/controller, deployment inventory, tested release bundles, upgrades, backups, restore and recovery |
+| Hive | Bash installer/controller, deployment inventory, tested release bundles, upgrades, backups, restore and recovery, and the Hive Registry (the install catalog of one installation) |
 | Emberpath | External model providers, routing, aliases, quotas, inference requests and telemetry |
 | Oathweave | Identity, authentication, authorization, OAuth/OIDC, users, roles, service identities and enrollment coordination |
 | HiveMem | Memory, workspaces, retrieval, consolidation and memory integrations |
