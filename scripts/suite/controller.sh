@@ -413,8 +413,20 @@ hive_main() {
           containers=$(docker compose -f "$directory/compose.json" ps --format json | jq -s flatten);
           agents=$(while IFS= read -r id; do
             receipt="$directory/agents/$id/receipt.json";
-            if [[ -f "$receipt" && ! -L "$receipt" ]]; then jq --arg id "$id" "{id:\$id,runtime,version,installed:(.installed // false),preflightPassed:(.preflightPassed // false),accepted:(.accepted // false),operatorAuthorized:(.operatorAuthorized // false),acceptedAt}" "$receipt";
-            else jq -n --arg id "$id" "{id:\$id,installed:false,accepted:false}"; fi;
+            service=$(jq -r --arg id "$id" ".agents[]|select(.id==\$id)|.service" <<< "$input");
+            service_state=manual;
+            if [[ "$service" == user ]]; then
+              service_state=unavailable;
+              unit="hive-$(jq -r .installation <<< "$input")-$id.service";
+              if command -v systemctl >/dev/null 2>&1; then
+                posture=$(systemctl --user show "$unit" --property=LoadState --property=ActiveState 2>/dev/null) || posture="";
+                if [[ "$posture" == *"LoadState=loaded"* ]]; then
+                  case "$posture" in *"ActiveState=active"*) service_state=active;; *"ActiveState=inactive"*|*"ActiveState=deactivating"*) service_state=inactive;; *"ActiveState=failed"*) service_state=failed;; esac;
+                fi;
+              fi;
+            fi;
+            if [[ -f "$receipt" && ! -L "$receipt" ]]; then jq --arg id "$id" --arg serviceState "$service_state" "{id:\$id,runtime,version,installed:(.installed // false),preflightPassed:(.preflightPassed // false),accepted:(.accepted // false),operatorAuthorized:(.operatorAuthorized // false),acceptedAt,serviceState:\$serviceState}" "$receipt";
+            else jq -n --arg id "$id" --arg serviceState "$service_state" "{id:\$id,installed:false,accepted:false,serviceState:\$serviceState}"; fi;
           done < <(jq -r ".agents[].id" <<< "$input") | jq -s .);
           jq -n --arg host "$(jq -r .host <<< "$input")" --argjson containers "$containers" --argjson agents "$agents" "{schema:1,host:\$host,containers:\$containers,nativeAgents:\$agents}"'
       done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG"); return;;

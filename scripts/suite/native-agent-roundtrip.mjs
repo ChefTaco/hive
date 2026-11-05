@@ -2,6 +2,7 @@
 // Developer proof: packaged native agent, real Magnus API, isolated PostgreSQL
 // and Redis. Never selects an existing host agent, fleet or production service.
 import assert from 'node:assert/strict';
+import { prepareUserService } from './native-user-service.mjs';
 import { execFileSync, spawn } from 'node:child_process';
 import {
   mkdirSync,
@@ -18,6 +19,12 @@ import { createServer as createTcpServer } from 'node:net';
 const args = process.argv.slice(2),
   options = {};
 for (let index = 0; index < args.length; index += 2) {
+  if (args[index] === '--user-service') {
+    assert(!options.userService);
+    options.userService = true;
+    index--;
+    continue;
+  }
   assert(['--artifact', '--server-image', '--output'].includes(args[index]) && args[index + 1]);
   options[args[index].slice(2)] = args[index + 1];
 }
@@ -55,6 +62,7 @@ assert.equal(metadata.architecture, { x64: 'amd64', arm64: 'arm64' }[process.arc
 assert.equal(createHash('sha256').update(readFileSync(archive)).digest('hex'), metadata.sha256);
 const id = 'native-proof-' + randomBytes(5).toString('hex'),
   user = `${process.getuid()}:${process.getgid()}`;
+const userService = options.userService ? prepareUserService({ installation: id }) : null;
 const port = async () => {
   const server = createTcpServer().listen(0, '127.0.0.1');
   await new Promise((done) => server.once('listening', done));
@@ -408,7 +416,7 @@ try {
     version: metadata.version,
     profileDirectory: profile,
     environmentFile: envFile,
-    service: 'none',
+    service: userService ? 'user' : 'none',
     authorized: true,
   };
   put('installation/installation.json', { installation: id, host: 'control', uuid: id });
@@ -442,7 +450,12 @@ try {
     agents: [selected],
     inference: [],
   };
-  const code = ['native-initialization-host.sh', 'adapters-host.sh', 'inference-registration.sh', 'host-runtime.sh']
+  const code = [
+    'native-initialization-host.sh',
+    'adapters-host.sh',
+    'inference-registration.sh',
+    'host-runtime.sh',
+  ]
     .map((file) => readFileSync(join(root, 'scripts/suite', file), 'utf8'))
     .join('\n');
   const environment = Object.fromEntries(
@@ -450,11 +463,12 @@ try {
       .filter((name) => process.env[name])
       .map((name) => [name, process.env[name]]),
   );
+  if (userService) environment.XDG_RUNTIME_DIR = userService.env.XDG_RUNTIME_DIR;
   environment.CURL_CA_BUNDLE = authority;
   environment.UNRELATED_INFRA_SECRET = 'obviously-fake-must-not-inherit';
-  async function action(name) {
+  async function action(name, expected = 0, extraEnv = {}) {
     const child = spawn('bash', ['-c', code], {
-      env: environment,
+      env: { ...environment, ...extraEnv },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let log = '';
@@ -466,19 +480,56 @@ try {
     });
     child.stdin.end(JSON.stringify({ ...payload, action: name }) + '\n');
     const status = await finished;
-    put(name + '.log', log);
-    assert.equal(status, 0, 'Native adapter failed; private log retained');
+    put(name + (expected === 0 ? '' : '-refused') + '.log', log);
+    assert.equal(
+      status === 0,
+      expected === 0,
+      'Native adapter exit differed; private log retained',
+    );
   }
+  if (userService) {
+    await action('adapters-preflight', 1, { XDG_RUNTIME_DIR: join(output, 'missing-user-bus') });
+    assert(
+      !existsSync(join(installation, 'agents/native-magnus/candidate.' + plan + '.json')),
+      'Unavailable user bus must fail before staging',
+    );
+  }
+  await action('adapters-preflight');
   await action('adapters-stage');
   await action('adapters-stage');
-  const log = put('native.log', ''),
-    { openSync, closeSync } = await import('node:fs'),
-    descriptor = openSync(log, 'a');
-  native = spawn('bash', [join(installation, 'agents/native-magnus/run.' + plan)], {
-    env: environment,
-    stdio: ['ignore', descriptor, descriptor],
-  });
-  closeSync(descriptor);
+  let supervisedPID;
+  if (userService) {
+    await action('adapters-accept');
+    userService.capture(join(installation, 'agents/native-magnus/run.' + plan));
+    const initial = userService.state();
+    assert(initial.active && initial.pid > 0);
+    userService.control('stop', userService.unit);
+    assert.equal(userService.state().active, false);
+    // The real Bash activation path restarts only its uniquely owned synthetic service.
+    await action('adapters-accept');
+    await action('agents-accept');
+    const restarted = userService.state();
+    assert(restarted.active && restarted.pid > 0 && restarted.invocation !== initial.invocation);
+    supervisedPID = restarted.pid;
+    put('user-service.json', {
+      passed: true,
+      realUserManager: true,
+      initialActive: true,
+      stopped: true,
+      restartedAndAccepted: true,
+      separateInvocation: true,
+      unavailableBusRefusedBeforeStaging: true,
+    });
+  } else {
+    const log = put('native.log', ''),
+      { openSync, closeSync } = await import('node:fs'),
+      descriptor = openSync(log, 'a');
+    native = spawn('bash', [join(installation, 'agents/native-magnus/run.' + plan)], {
+      env: environment,
+      stdio: ['ignore', descriptor, descriptor],
+    });
+    closeSync(descriptor);
+  }
   await action('agents-accept');
   const receipt = JSON.parse(
     readFileSync(join(installation, 'agents/native-magnus/receipt.json'), 'utf8'),
@@ -486,11 +537,16 @@ try {
   assert.equal(receipt.accepted, true);
   assert.equal(receipt.preflightPassed, true);
   assert.deepEqual(readFileSync(envFile), originalEnv);
-  const processEnvironment = readFileSync('/proc/' + native.pid + '/environ', 'utf8').split('\0');
+  const processEnvironment = readFileSync(
+    '/proc/' + (supervisedPID ?? native.pid) + '/environ',
+    'utf8',
+  ).split('\0');
   assert(!processEnvironment.some((value) => value.startsWith('UNRELATED_INFRA_SECRET=')));
   assert(
-    /Umask:\s+0077/.test(readFileSync('/proc/' + native.pid + '/status', 'utf8')),
-    'Manual launcher must protect new profile state',
+    /Umask:\s+0077/.test(
+      readFileSync('/proc/' + (supervisedPID ?? native.pid) + '/status', 'utf8'),
+    ),
+    'Native launcher must protect new profile state',
   );
   put('installation/compose.json', compose);
   const statusConfig = put('hive-installation.json', {
@@ -511,6 +567,28 @@ try {
   });
   put('status.json', summary);
   assert.equal(JSON.parse(summary).nativeAgents[0].accepted, true);
+  assert.equal(JSON.parse(summary).nativeAgents[0].serviceState, userService ? 'active' : 'manual');
+  if (userService) {
+    userService.control('stop', userService.unit);
+    const stoppedSummary = run(join(root, 'hive.sh'), ['status', '--config', statusConfig], {
+      env: environment,
+    });
+    put('status-stopped.json', stoppedSummary);
+    assert.equal(JSON.parse(stoppedSummary).nativeAgents[0].serviceState, 'inactive');
+    assert.equal(
+      JSON.parse(stoppedSummary).nativeAgents[0].accepted,
+      true,
+      'Acceptance is explicitly historical while current service is stopped',
+    );
+    await action('adapters-accept');
+    await action('agents-accept');
+    const restartedSummary = run(join(root, 'hive.sh'), ['status', '--config', statusConfig], {
+      env: environment,
+    });
+    put('status-restarted.json', restartedSummary);
+    assert.equal(JSON.parse(restartedSummary).nativeAgents[0].serviceState, 'active');
+    assert.equal(JSON.parse(restartedSummary).nativeAgents[0].accepted, true);
+  }
   for (const secret of Object.values(secrets)) assert(!summary.includes(secret));
   const nodes = await request('/api/v1/nodes');
   assert.equal(nodes.status, 200);
@@ -569,6 +647,7 @@ try {
     nativeAgentVersion: metadata.version,
     nodeVersion: metadata.nodeVersion,
     artifactSHA256: metadata.sha256,
+    supervision: userService ? 'systemd-user' : 'manual',
     checks: [
       'packaged native runtime staged through the Bash adapter',
       'immutable artifact and protected environment preserved on retry',
@@ -582,7 +661,9 @@ try {
     limitations: [
       'single physical Linux AMD64 host',
       'native Magnus protocol; model-agent identities and provider logins are separate gates',
-      'manual supervision selected for the disposable agent',
+      userService
+        ? 'real user service on the existing manager; machine boot and other accounts are not exercised'
+        : 'manual supervision selected for the disposable agent',
     ],
   });
   passed = true;
@@ -595,6 +676,15 @@ try {
   } catch {}
   throw error;
 } finally {
+  let cleanupError;
+  if (userService) {
+    try {
+      put('user-service-cleanup.json', userService.cleanup());
+    } catch (error) {
+      cleanupError = error;
+      put('user-service-cleanup-error.txt', error.message);
+    }
+  }
   if (native && native.exitCode === null) {
     native.kill('SIGTERM');
     await Promise.race([
@@ -610,6 +700,7 @@ try {
   try {
     dc('down', '--remove-orphans');
   } catch {}
+  if (cleanupError) throw cleanupError;
   if (!passed)
     console.error(
       'Private native proof retained at ' +
