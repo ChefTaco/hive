@@ -210,6 +210,12 @@ async function createSession(browser) {
         const box = element.getBoundingClientRect();
         const x = box.left + box.width / 2, y = box.top + box.height / 2;
         if (!element.checkVisibility({ visibilityProperty: true, contentVisibilityAuto: true }) || !box.width || !box.height || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return [];
+        // Scrolled out of its own list or panel: reachable by scrolling, not covered.
+        for (let parent = element.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+          if (getComputedStyle(parent).overflowY === 'visible' && getComputedStyle(parent).overflowX === 'visible') continue;
+          const frame = parent.getBoundingClientRect();
+          if (y < frame.top || y > frame.bottom || x < frame.left || x > frame.right) return [];
+        }
         const top = document.elementFromPoint(x, y);
         // A visually hidden input is operated through its label.
         if (!top || element === top || element.contains(top) || top.contains(element) || element.closest('label')?.contains(top)) return [];
