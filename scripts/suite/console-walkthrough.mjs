@@ -107,7 +107,7 @@ async function createSession(browser) {
     if (request.isNavigationRequest() && request.frame() === page.mainFrame()) { state.inflight.clear(); }
     const { pathname } = new URL(request.url());
     if (pathname.startsWith('/api/')) apiCalls.add(pathname.split('/').slice(0, 3).join('/'));
-    state.inflight.set(request, request.url());
+    state.inflight.set(request, { url: request.url(), at: Date.now() });
     state.lastActivity = Date.now();
   });
   const finished = (request) => {
@@ -133,6 +133,13 @@ async function createSession(browser) {
     events.responses.push(entry);
   });
   // A connection left open on purpose (chat realtime) must not hold the quiet period.
+  // A request the old document made just before a reload can die with it and never report an end.
+  // Once the new document commits, nothing issued before that moment can still be answered.
+  page.on('framenavigated', (frame) => {
+    if (frame !== page.mainFrame()) return;
+    const committed = Date.now();
+    for (const [request, entry] of state.inflight) if (entry.at < committed) state.inflight.delete(request);
+  });
   const pendingRequests = () => [...state.inflight.keys()].filter((request) => request.resourceType() !== 'websocket' && request.resourceType() !== 'eventsource' && !/\/stream(\/|$|\?)/.test(new URL(request.url()).pathname));
 
   async function answerPrompts() {
