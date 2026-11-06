@@ -10,6 +10,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DatabaseSync, backup } from 'node:sqlite';
+import { serviceUser } from './sudo-target.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const sha = (value) => createHash('sha256').update(value).digest('hex');
@@ -53,7 +54,7 @@ async function sqliteRows(file, scratch) {
 
 // Reached through a helper container in the store's network namespace, as the controller does.
 function inContainer(container, code, environment = {}) {
-  const result = docker('run', '--rm', '--network', 'container:' + container, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--user', `${process.getuid()}:${process.getgid()}`,
+  const result = docker('run', '--rm', '--network', 'container:' + container, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--user', serviceUser,
     ...Object.entries(environment).flatMap(([key, value]) => ['-e', key + '=' + value]), '--mount', `type=bind,source=${join(root, 'scripts/suite')},target=/tools,readonly`,
     'node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205', 'node', '--no-warnings', '--input-type=module', '-e', code);
   return JSON.parse(result);
@@ -112,7 +113,7 @@ export async function inventory({ suite, data, scratch, live = true }) {
     }
     const key = secretOf(join(suite, 'config/hivemem-qdrant/qdrant.yaml'), /^\s*api_key:\s*(\S+)/m);
     const password = secretOf(join(suite, 'config/oathweave-redis/redis.conf'), /^requirepass\s+(\S+)/m);
-    const container = (name, ...args) => { const id = 'proof-' + name + '-' + randomBytes(4).toString('hex'); temporary.push(id); docker('run', '-d', '--name', id, '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--user', `${process.getuid()}:${process.getgid()}`, '--tmpfs', '/tmp:mode=1777', ...args); return id; };
+    const container = (name, ...args) => { const id = 'proof-' + name + '-' + randomBytes(4).toString('hex'); temporary.push(id); docker('run', '-d', '--name', id, '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--user', serviceUser, '--tmpfs', '/tmp:mode=1777', ...args); return id; };
     const retry = (work) => { for (let attempt = 0; ; attempt++) { try { return work(); } catch (error) { if (attempt > 90) throw error; execFileSync('sleep', ['1']); } } };
     if (compose.services['hivemem-qdrant']) {
       const target = live ? docker('compose', '-f', join(suite, 'compose.json'), 'ps', '-q', 'hivemem-qdrant')

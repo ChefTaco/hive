@@ -108,7 +108,7 @@ function release() {
   const names = ['oathweave', 'oathweave-redis', 'emberpath', 'hivemem', 'hivemem-qdrant', 'hiveskills', 'hivexui', 'ingress'];
   const manifest = { schema: 1, version: c.version ?? '0.1.0', networks: { 'identity-data': template.networks['identity-data'], 'memory-data': template.networks['memory-data'] }, components: Object.fromEntries(names.map((name) => [name, template.components[name]])), profiles: {} };
   const user = serviceUser;
-  const port = Number(docker('run', '-d', '--name', prefix + '-images', '--label', 'hive.migration.rehearsal=' + label, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--user', user, '--tmpfs', `/var/lib/registry:uid=${process.getuid()},gid=${process.getgid()},mode=700`, '-p', '127.0.0.1::5000', c.images.registry) && docker('inspect', prefix + '-images', '--format', '{{(index (index .NetworkSettings.Ports "5000/tcp") 0).HostPort}}'));
+  const port = Number(docker('run', '-d', '--name', prefix + '-images', '--label', 'hive.migration.rehearsal=' + label, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--user', user, '--tmpfs', `/var/lib/registry:uid=${serviceUser.replace(':', ',gid=')},mode=700`, '-p', '127.0.0.1::5000', c.images.registry) && docker('inspect', prefix + '-images', '--format', '{{(index (index .NetworkSettings.Ports "5000/tcp") 0).HostPort}}'));
   registry = '127.0.0.1:' + port;
   for (let attempt = 0; attempt < 30; attempt++) { if (spawnSync('curl', ['-fsS', '-o', '/dev/null', `http://${registry}/v2/`]).status === 0) break; execFileSync('sleep', ['1']); }
   manifest.components['hive-registry'] = hiveRegistryComponent('pending', user);
@@ -182,7 +182,8 @@ function startNative() {
   mkdirSync(join(out, 'native-qdrant'), { mode: 0o700 });
   if (sudoHost) run('chown', [serviceUser, join(out, 'native-qdrant')]);
   docker('run', '-d', '--name', prefix + '-native-qdrant', ...labels, ...netns, '--user', user, '--workdir', '/data', '--mount', `type=bind,source=${join(out, 'native-qdrant')},target=/data`, '--mount', `type=bind,source=${join(native, 'recovery')},target=/snapshots,readonly`, '-e', 'QDRANT__STORAGE__STORAGE_PATH=/data/storage', '-e', 'QDRANT__STORAGE__SNAPSHOTS_PATH=/data/snapshots', '-e', 'QDRANT__TELEMETRY_DISABLED=true', '--entrypoint', '/qdrant/qdrant', c.images.qdrant, ...manifest.qdrant.flatMap((snapshot) => ['--snapshot', `/snapshots/${snapshot.file}:${snapshot.collection}`]));
-  const dataTool = (request, ...extra) => run('docker', ['run', '--rm', '--network', prefix + '-native', '--user', user, '--read-only', '--tmpfs', '/tmp:mode=1777', ...extra, '--entrypoint', 'node', c.images.utility, '--no-warnings', '--input-type=module', '-e', readFileSync(join(root, 'scripts/suite/migrate-native-data.mjs'), 'utf8'), JSON.stringify(request)]).trim();
+  // The data tool is this driver's own loader, not a service: it runs as the driver does.
+  const dataTool = (request, ...extra) => run('docker', ['run', '--rm', '--network', prefix + '-native', '--user', `${process.getuid()}:${process.getgid()}`, '--read-only', '--tmpfs', '/tmp:mode=1777', ...extra, '--entrypoint', 'node', c.images.utility, '--no-warnings', '--input-type=module', '-e', readFileSync(join(root, 'scripts/suite/migrate-native-data.mjs'), 'utf8'), JSON.stringify(request)]).trim();
   for (let attempt = 0; attempt < 90; attempt++) {
     try { const inventory = JSON.parse(dataTool({ command: 'qdrant-inventory', url: `http://${address}:6333` })); if (inventory.totalCollections === manifest.qdrant.length) break; } catch { /* still restoring */ }
     execFileSync('sleep', ['2']);
@@ -802,12 +803,24 @@ async function main() {
     if (c.upgrade) {
       say('before upgrade: the migrated Router depends on its copied static memory token');
       const before = memoryCredential();
-      report.beforeUpgrade = { configuration: before.configuration(), staticToken: before.staticOnly() };
-      assert.equal(report.beforeUpgrade.configuration.emberpath.clientId, null, 'The earlier release has no self-renewing credential');
-      assert(report.beforeUpgrade.staticToken.failsOnceExpired, 'Before the upgrade, memory features fail once the static token expires: ' + JSON.stringify(report.beforeUpgrade.staticToken));
+      const configuration = before.configuration();
+      // A migration by 2.0.2 or later already provisioned the self-renewing credential.
+      const provisioned = configuration.emberpath.clientId !== null;
+      report.beforeUpgrade = { configuration, credentialAlreadyProvisioned: provisioned, ...(provisioned ? {} : { staticToken: before.staticOnly() }) };
+      if (!provisioned) assert(report.beforeUpgrade.staticToken.failsOnceExpired, 'Before the upgrade, memory features fail once the static token expires: ' + JSON.stringify(report.beforeUpgrade.staticToken));
       say('upgrade: hive.sh upgrade to ' + c.upgrade.version + ' with this controller');
       report.upgrade = upgradeSuite();
-      assert(report.upgrade.emberpathCredentialAddedByUpgrade, 'The upgrade adds the self-renewing credential');
+      if (provisioned) assert.equal(memoryCredential().configuration().emberpath.clientId, configuration.emberpath.clientId, 'The upgrade keeps the self-renewing credential');
+      else assert(report.upgrade.emberpathCredentialAddedByUpgrade, 'The upgrade adds the self-renewing credential');
+      // Emberpath signs in through Oathweave after the upgrade, and its own check agrees.
+      const emberEnv = parseEnv(readFileSync(join(suite, 'config/emberpath.env'), 'utf8'));
+      const check = spawnSync('docker', ['compose', '-f', join(suite, 'compose.json'), 'exec', '-T', 'emberpath', 'node', '/app/dist/src/index.js', 'check'], { encoding: 'utf8' });
+      const authLine = (check.stdout + check.stderr).split('\n').find((line) => /auth-mode/.test(line)) ?? null;
+      report.emberpathAuth = { mode: emberEnv.HIVE_ROUTER_AUTH_MODE ?? null, oathweaveClient: Boolean(emberEnv.HIVE_ROUTER_IAM_CLIENT_ID), check: authLine };
+      if (report.emberpathAuth.oathweaveClient) {
+        assert.equal(report.emberpathAuth.mode, 'iam-oidc', 'A migrated Emberpath with an Oathweave client signs in through it');
+        assert(!authLine || !/fail/i.test(authLine), 'Emberpath check passes its auth mode: ' + authLine);
+      }
       const verified = hive('verify');
       assert.equal(verified.status, 0, verified.stdout.slice(-2000) + verified.stderr.slice(-2000));
       report.liveVerifyAfterUpgrade = parseJSONLine(verified.stdout);

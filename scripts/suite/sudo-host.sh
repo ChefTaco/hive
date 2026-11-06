@@ -2,7 +2,7 @@
 # Runs a developer rehearsal the way a production host runs hive.sh's host side: as root, through
 # sudo -S, over SSH, while the suite's services run as their own non-root users.
 #
-#   scripts/suite/sudo-host.sh --scratch DIR [--mount DIR]... [--name NAME] -- COMMAND [ARGUMENTS...]
+#   scripts/suite/sudo-host.sh --scratch DIR [--mount DIR]... [--own DIR]... [--name NAME] -- COMMAND [ARGUMENTS...]
 #
 # COMMAND runs as root in a disposable container on the host network, with the host's Docker
 # daemon and the repository, DIR and every --mount at their own paths, so every bind mount the
@@ -10,16 +10,18 @@
 # deploy, whose sudo needs a password; the rehearsal drivers (scripts/suite/sudo-target.mjs)
 # start an sshd for it and give the controller sshConfig and sudoPasswordFile, as production
 # installations have. Services run as HIVE_SERVICE_USER, the invoking operator's uid:gid.
-# Afterwards DIR and every --mount are given back to the invoking operator.
+# Afterwards DIR and every --own directory (this run's evidence, inside a mount) are given back
+# to the invoking operator. Mounts are never changed: another run may be using them as root.
 set -Eeuo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 die() { printf 'sudo-host: %s\n' "$*" >&2; exit 1; }
-scratch='' mounts=() name=''
+scratch='' mounts=() owned=() name=''
 while (($#)); do
   case $1 in
     --scratch) scratch=$2; shift 2;;
     --mount) mounts+=("$2"); shift 2;;
     --name) name=$2; shift 2;;
+    --own) owned+=("$2"); shift 2;;
     --) shift; break;;
     *) die "Unknown option: $1";;
   esac
@@ -40,7 +42,7 @@ FROM node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8e
 FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      openssh-server openssh-client sudo jq curl ca-certificates openssl sqlite3 git util-linux procps xz-utils python3 \
+      openssh-server openssh-client sudo jq curl ca-certificates openssl sqlite3 git util-linux procps xz-utils python3 iproute2 diffutils findutils \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /bin/bash deploy \
     && printf 'deploy ALL=(ALL:ALL) ALL\nDefaults:deploy timestamp_timeout=0\n' > /etc/sudoers.d/deploy && chmod 440 /etc/sudoers.d/deploy \
@@ -58,9 +60,11 @@ volumes=(-v /var/run/docker.sock:/var/run/docker.sock -v "$docker_cli:/usr/bin/d
 for path in "${mounts[@]}"; do volumes+=(-v "$path:$path"); done
 give_back() {
   # Everything the root side wrote becomes the operator's again, so it can be read and removed.
-  local path; local -a own=(-v "$scratch:$scratch")
-  for path in "${mounts[@]}"; do own+=(-v "$path:$path"); done
-  docker run --rm "${own[@]}" --entrypoint chown "$image" -R "$(id -u):$(id -g)" "$scratch" "${mounts[@]}" >/dev/null 2>&1 || true
+  local path
+  for path in "$scratch" "${owned[@]}"; do
+    [[ -d "$path" ]] || continue
+    docker run --rm -v "$path:$path" --entrypoint chown "$image" -R "$(id -u):$(id -g)" "$path" >/dev/null 2>&1 || true
+  done
 }
 trap give_back EXIT
 # The sudo password exists only in this container: a random value, readable by root alone.

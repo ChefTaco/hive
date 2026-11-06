@@ -6,6 +6,8 @@ import { join, resolve } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { parseEnv } from 'node:util';
 import { createServer,connect } from 'node:net';
+import { execFileSync } from 'node:child_process';
+import { sudoHost } from './sudo-target.mjs';
 
 export async function restoredPeerRehearsal({ output, addresses, config, docker, put, request, credentials, identities, consoleHost=config.console.host }) {
   assert(/^distributed-[a-f0-9]{10}$/.test(config.installation), 'Only this fresh developer fixture may be selected');
@@ -19,8 +21,11 @@ export async function restoredPeerRehearsal({ output, addresses, config, docker,
     assert(Object.values(isolated.networks).every(network=>network.internal===true),'Every original restore network must be internal');
     originals[host]=fingerprint(source);
     const destination=join(evidence,host); mkdirSync(destination,{mode:0o700});
-    cpSync(join(source,'config'),join(destination,'config'),{recursive:true,errorOnExist:true,force:false,preserveTimestamps:true});
-    cpSync(join(source,'data'),join(destination,'data'),{recursive:true,errorOnExist:true,force:false,preserveTimestamps:true});
+    // As root (scripts/suite/sudo-host.sh), each copy keeps its owners, as a host restore does.
+    for(const part of ['config','data']) {
+      if(sudoHost) execFileSync('cp',['-a','--',join(source,part),join(destination,part)]);
+      else cpSync(join(source,part),join(destination,part),{recursive:true,errorOnExist:true,force:false,preserveTimestamps:true});
+    }
     for(const service of Object.values(isolated.services)) for(const mount of service.volumes??[]) {
       assert(mount.type==='bind' && mount.source.startsWith(source+'/'),'Restore contains an unexpected mount');
       mount.source=destination+mount.source.slice(source.length);
