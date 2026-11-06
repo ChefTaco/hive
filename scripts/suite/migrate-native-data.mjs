@@ -177,7 +177,28 @@ async function redisExport(url, prefix, output) {
   return { keys: records.length };
 }
 
-// Each record under the namespace, by digest only: key, serialized value and absolute expiry.
+// A record's value, independent of how Redis encodes it: DUMP bytes change when a store is
+// reloaded, so values are read by type. Members of hashes and sets are sorted.
+const redisText = (value) => (Buffer.isBuffer(value) ? value.toString('base64') : Array.isArray(value) ? value.map(redisText) : value);
+export function canonicalRedisValue(type, reply) {
+  const value = redisText(reply);
+  if (type === 'hash') {
+    const pairs = [];
+    for (let index = 0; index < value.length; index += 2) pairs.push([value[index], value[index + 1]]);
+    return JSON.stringify([type, pairs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))]);
+  }
+  if (type === 'set') return JSON.stringify([type, [...value].sort()]);
+  return JSON.stringify([type, value]);
+}
+const redisRead = { string: ['GET'], hash: ['HGETALL'], set: ['SMEMBERS'], zset: ['ZRANGE', 0, -1, 'WITHSCORES'], list: ['LRANGE', 0, -1], stream: ['XRANGE', '-', '+'] };
+async function redisValue(client, key) {
+  const type = String(await client.command('TYPE', key));
+  const read = redisRead[type];
+  if (!read) throw Error('Unsupported Redis record type: ' + type);
+  return sha(canonicalRedisValue(type, await client.command(read[0], key, ...read.slice(1))));
+}
+
+// Each record under the namespace, by digest only: key, value and absolute expiry.
 async function redisInventory(client, prefix) {
   if (!/^[A-Za-z0-9:_-]+$/.test(prefix)) throw Error('Unsafe Redis namespace');
   const records = {};
@@ -186,8 +207,9 @@ async function redisInventory(client, prefix) {
     const [next, keys] = await client.command('SCAN', cursor, 'MATCH', prefix + '*', 'COUNT', 500);
     cursor = next.toString();
     for (const key of keys) {
-      const dump = await client.command('DUMP', key), ttl = await client.command('PTTL', key);
-      if (dump !== null) records[sha(key)] = { value: sha(dump), expiresAt: ttl > 0 ? Date.now() + ttl : null };
+      const ttl = await client.command('PTTL', key);
+      if (ttl === -2) continue;
+      records[sha(key)] = { value: await redisValue(client, key), expiresAt: ttl > 0 ? Date.now() + ttl : null };
     }
   } while (cursor !== '0');
   return records;

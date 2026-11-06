@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { CREDENTIAL_TABLES, LIVE_COLUMNS, compareDatabases, compareRedis, databaseState } from './migrate-native-data.mjs';
+import { CREDENTIAL_TABLES, LIVE_COLUMNS, canonicalRedisValue, compareDatabases, compareRedis, databaseState } from './migrate-native-data.mjs';
 
 const fixture = (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'hive-migrate-data-'));
@@ -83,4 +83,14 @@ test('Redis records must stay, except those whose own expiry passed', () => {
   assert.equal(compareRedis(before, { a: before.a }, now).missing, 1);
   assert.equal(compareRedis(before, { a: { value: 'other', expiresAt: null }, c: before.c }, now).changed, 1);
   assert.equal(compareRedis(before, { ...before, d: { value: 'v4', expiresAt: null } }, now).unexpected, 1);
+});
+
+test('a Redis value is compared by content, not by its encoding or member order', () => {
+  const b = (text) => Buffer.from(text);
+  assert.equal(canonicalRedisValue('hash', [b('f2'), b('v2'), b('f1'), b('v1')]), canonicalRedisValue('hash', [b('f1'), b('v1'), b('f2'), b('v2')]));
+  assert.notEqual(canonicalRedisValue('hash', [b('f1'), b('v1')]), canonicalRedisValue('hash', [b('f1'), b('v2')]));
+  assert.equal(canonicalRedisValue('set', [b('b'), b('a')]), canonicalRedisValue('set', [b('a'), b('b')]));
+  assert.notEqual(canonicalRedisValue('list', [b('b'), b('a')]), canonicalRedisValue('list', [b('a'), b('b')]));
+  assert.notEqual(canonicalRedisValue('string', b('1')), canonicalRedisValue('list', [b('1')]));
+  assert.equal(canonicalRedisValue('stream', [[b('1-0'), [b('k'), b('v')]]]), JSON.stringify(['stream', [['MS0w', ['aw==', 'dg==']]]]));
 });
