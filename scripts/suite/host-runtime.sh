@@ -11,6 +11,8 @@ plan=$(jq -er .plan <<< "$input")
 version=$(jq -er .version <<< "$input")
 archive=$(jq -r '.archive // empty' <<< "$input")
 die() { printf 'Hive host: %s\n' "$*" >&2; exit 1; }
+# As root on an installation an ordinary account owns, leave what this action wrote to it.
+trap 'if declare -F restore_installation_owner >/dev/null; then restore_installation_owner; fi' EXIT
 digest() { sha256sum -- "$1" | cut -d ' ' -f1; }
 # Every file's SHA-256, as "HASH  ./PATH" records in sorted path order. Files are hashed in
 # parallel, since a datastore's preallocated sparse files can reach many times its real size.

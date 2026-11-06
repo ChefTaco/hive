@@ -14,6 +14,7 @@ directory=$(jq -er .directory <<< "$input")
 plan=$(jq -r '.plan // ""' <<< "$input")
 action=$(jq -er .cindertrace.action <<< "$input")
 die() { printf 'Cindertrace collectors: %s\n' "$*" >&2; exit 1; }
+trap restore_installation_owner EXIT
 [[ "$directory" =~ ^/[A-Za-z0-9_./-]+$ && "$directory" != *'/../'* && "$directory" != */.. && ! -L "$directory" ]] || die 'Invalid installation path'
 jq -e '.placements.cindertrace!=null' <<< "$input" >/dev/null || die 'Cindertrace is not placed on this host'
 config="$directory/config"

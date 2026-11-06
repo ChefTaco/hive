@@ -371,6 +371,7 @@ snapshot_finish() {
   if [[ "$snapshot_succeeded" != true && -n "$snapshot_created" ]]; then rm -rf -- "$snapshot_created"; fi
   if [[ "$resumed" != true ]]; then
     record recovery-required
+    if declare -F restore_installation_owner >/dev/null; then restore_installation_owner; fi
     printf 'Hive host: paused services could not be resumed: run docker unpause for the installation containers\n' >&2
     exit 1
   fi
@@ -380,6 +381,7 @@ snapshot_finish() {
     printf 'Hive host: online backup failed; every service kept serving and no archive was kept\n' >&2
     ((status != 0)) || status=1
   fi
+  if declare -F restore_installation_owner >/dev/null; then restore_installation_owner; fi
   exit "$status"
 }
 

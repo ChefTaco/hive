@@ -29,6 +29,11 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- A host side that runs as root through `sudoPasswordFile` on an installation an ordinary account
+  owns left root-owned archives, rehearsals, transactions and receipts that account could not
+  read. Every host action now gives what it wrote back to the installation directory's owner,
+  keeping modes; service data and root-owned installations, as on production hosts, are
+  unchanged.
 - The installation guide, README and deployment overview of 2.0.3 still installed 2.0.2.
 - FULL.md now shows how to create the web terminal's restricted node account and gateway key.
 

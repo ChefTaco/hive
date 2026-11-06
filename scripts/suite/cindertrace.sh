@@ -21,6 +21,6 @@ hive_cindertrace_collector() {
   [[ "$subcommand" == list || "$id" =~ ^[a-z][a-z0-9-]{0,47}$ ]] || hive_die 'A collector ID is lowercase letters, digits and hyphens, starting with a letter'
   host=$(jq -r .components.cindertrace.host "$HIVE_CONFIG")
   HIVE_HOST_ACTION=cindertrace-collector HIVE_CINDERTRACE_INPUT=$request \
-    hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/input-artifacts-host.sh" "$HIVE_ROOT/scripts/suite/cindertrace-host.sh")" ||
+    hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/ownership-host.sh" "$HIVE_ROOT/scripts/suite/input-artifacts-host.sh" "$HIVE_ROOT/scripts/suite/cindertrace-host.sh")" ||
     hive_die 'The Cindertrace collector change failed; see the reason above'
 }

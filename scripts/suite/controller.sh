@@ -14,7 +14,7 @@ hive_runtime_files() {
     scripts/suite/memory-credential.sh scripts/suite/memory-credential-host.sh \
     scripts/suite/magnus-gateway.sh scripts/suite/magnus-gateway-host.sh \
     scripts/suite/migrate-native.sh scripts/suite/migrate-native-host.sh scripts/suite/migrate-native-data.mjs scripts/suite/set-admin-password.sh \
-    scripts/suite/cindertrace.sh scripts/suite/cindertrace-host.sh
+    scripts/suite/cindertrace.sh scripts/suite/cindertrace-host.sh scripts/suite/ownership-host.sh
 }
 hive_controller_digest() {
   local file

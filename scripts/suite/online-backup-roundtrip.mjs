@@ -188,6 +188,8 @@ try {
   say('online backup while every writer writes');
   const online = await backup('online-a');
   assert.equal(online.receipt.mode, 'online');
+  // The installation is root's, as on production hosts, so a root host side leaves it root's.
+  if (sudoHost) for (const name of ['', 'state.tar.gz', 'receipt.json']) assert.equal(statSync(join(owned, 'backups', 'online-a', name)).uid, 0, 'A root-owned installation was given to another owner');
   assert.deepEqual(online.after, online.before, 'No service stopped or restarted');
   assert(online.requests.length > 20 && online.requests.every((item) => item.ok), 'Every client request was answered');
   report.online = {
