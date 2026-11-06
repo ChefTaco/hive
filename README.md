@@ -35,19 +35,19 @@ offered by every release but never selected by a profile. Inference stays extern
 On a Linux host with Docker Engine and Compose, from a checkout of the release tag:
 
 ```bash
-git clone --branch v2.0.1 https://github.com/ChefTaco/hive.git
+git clone --branch v2.0.2 https://github.com/ChefTaco/hive.git
 cd hive
-./hive.sh --release 2.0.1          # terminal setup, then review and apply the plan
+./hive.sh --release 2.0.2          # terminal setup, then review and apply the plan
 ```
 
-`hive.sh` verifies `releases/2.0.1.json` against `releases/2.0.1.json.sig` with the publisher key
+`hive.sh` verifies `releases/2.0.2.json` against `releases/2.0.2.json.sig` with the publisher key
 in `trust/publisher.pub` before it reads anything else, and refuses a manifest pinned to a different
 controller. The setup writes a protected installation file that the same commands accept
 unattended:
 
 ```bash
-./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 2.0.1
-./hive.sh install --config ~/.config/hive/ID/installation.json --release 2.0.1 --non-interactive --yes
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 2.0.2
+./hive.sh install --config ~/.config/hive/ID/installation.json --release 2.0.2 --non-interactive --yes
 ./hive.sh status  --config ~/.config/hive/ID/installation.json
 ./hive.sh doctor  --config ~/.config/hive/ID/installation.json
 ```

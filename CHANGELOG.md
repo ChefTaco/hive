@@ -4,7 +4,40 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.0.2] - 2026-11-06
+
+`releases/2.0.2.json` pins Oathweave 2.0.2, Emberpath 2.0.2 and HiveMem 1.3.2, which ship
+together: they carry Emberpath's self-renewing HiveMem service credential. Every other image is
+exactly as in 2.0.1: HiveSkills 1.3.1, HiveXUI 0.1.1, Magnus 2.1.1 (with the optional fleet
+gateway), Cindertrace 0.2.1, ChatterMost 0.4.1, Emberfold 0.2.1, `hive-registry:2.0.2`,
+`hive-ingress:2.0.2` and the hardened datastores. The publisher key is unchanged (fingerprint
+`c0d0665a70969f37c8f1cffbdcf8e54df13626f8dbd4b5759a7c44843d86d1b2`).
+
+### Upgrading
+
+- On an installation migrated with `hive.sh migrate-native` (2.0.0 or 2.0.1), run
+  `hive.sh upgrade` to 2.0.2 **before the copied `HIVE_ROUTER_MEMORY_PROXY_TOKEN` expires**.
+  Until the upgrade, the console's memory pages, memory agents in the actors list, and actor
+  onboarding and rotation depend on that static token, and fail once it expires. The upgrade
+  provisions the self-renewing credential with no other step; afterwards the token is only a
+  fallback. Set the installation file's `release` to `2.0.2` (or pass `--release 2.0.2`) and
+  run the upgrade from a checkout of the `v2.0.2` tag. Like every upgrade, it first takes a
+  backup with the suite stopped.
+- The products' own changes: Oathweave 2.0.2 creates installation-owned machine clients at
+  startup (`IAM_MACHINE_CLIENT_SECRETS`), HiveMem 1.3.2 accepts linked Oathweave service
+  identities (`HIVEMEM_OATHWEAVE_SERVICES_JSON`) and its image listens on all interfaces
+  through `HIVEMEM_TS_CORE_HOST`, and Emberpath 2.0.2 renews its HiveMem token in-process and
+  names itself on its admin port's fallback page. See each product's changelog.
+
+### Security
+
+- Rescanned on 2026-11-06 (`scripts/release/scan-suite-images.sh`), every pinned image has no
+  CRITICAL or HIGH finding with a fix available, on linux/amd64 and linux/arm64. The accepted
+  exceptions in `deployment/trivy/` are unchanged, and the unfixed findings are exactly those
+  listed for 2.0.0, including in the three new product images.
+- The service credential is scoped to HiveMem: an Oathweave confidential client limited to the
+  client credentials grant, whose five-minute tokens carry the `hivemem` audience and cannot be
+  exchanged for a HiveMem bearer token. Its secret is generated on the host and never printed.
 
 ### Added
 
@@ -37,6 +70,13 @@ All notable changes to this project are documented in this file. The format is b
 - `hive-set-admin-password` accepts the protected token file as its only argument
   (`hive-set-admin-password FILE`), as well as `--token-file FILE`. A token value given as an
   argument is still refused.
+
+### Fixed
+
+- The README and `deployment/README.md` install the current release, and
+  `deployment/MIGRATE_NATIVE.md` documents the memory credential, the token-file argument and
+  when `refresh-memory-token` is still needed. `deployment/BACKUPS.md` describes online backups.
+- The restored-peer proof script validates and encodes the attachment ID it requests.
 
 ## [2.0.1] - 2026-11-06
 
