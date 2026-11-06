@@ -394,7 +394,9 @@ action_configure() {
       HIVE_IAM_INTERNAL_URL:"https://oathweave:4200",HIVEMEM_INTERNAL_URL:"https://hivemem:18790",
       HIVE_ROUTER_IAM_CA_CERT_PATH:"/config/authority.pem",HIVEMEM_CA_CERT_PATH:"/config/authority.pem",
       OATHWEAVE_ISSUER:$issuer,OATHWEAVE_JWKS_URL:"https://oathweave:4200/api/v1/oauth/jwks",OATHWEAVE_USERINFO_URL:"https://oathweave:4200/api/v1/oauth/userinfo",
-      EMBERPATH_OATHWEAVE_IDENTITIES_JSON:($links|tojson)} + (if $rehearsal=="true" then {HIVE_ROUTER_DECISION_MODE:"off",OTEL_SDK_DISABLED:"true"} else {} end) | if $rehearsal=="true" then del(.HIVE_ROUTER_OPENROUTER_KEY,.HIVE_TYPESAFE_AI_KEY) else . end' <<< "$router")
+      EMBERPATH_OATHWEAVE_IDENTITIES_JSON:($links|tojson)} +
+      # Accounts move to Oathweave: Emberpath sign-in uses it, never PAM on the host.
+      (if ((.HIVE_ROUTER_IAM_CLIENT_ID // "")|length)>0 and ((.HIVE_ROUTER_IAM_CLIENT_SECRET // "")|length)>=24 then {HIVE_ROUTER_AUTH_MODE:"iam-oidc"} else {} end) + (if $rehearsal=="true" then {HIVE_ROUTER_DECISION_MODE:"off",OTEL_SDK_DISABLED:"true"} else {} end) | if $rehearsal=="true" then del(.HIVE_ROUTER_OPENROUTER_KEY,.HIVE_TYPESAFE_AI_KEY) else . end' <<< "$router")
   write_env emberpath "$directory/config/emberpath.env" "$ember_env"
   mem_env=$(jq -c --argjson common "$common" --arg issuer "$issuer" --arg origin "$origin" --rawfile qdrant "$secrets/qdrant-key" --argjson links "$(link_env hivemem 0)" --arg rehearsal "$rehearsal" '
     with_entries(select(.key|test("^HIVEMEM_(JWT_[A-Z_]+|RENEWAL_[A-Z_]+|ADMIN_TOKEN|METRICS_[A-Z_]+|VECTOR_DIM|DEDUP_[A-Z_]+|PRUNE_[A-Z_]+|CONFIDENCE_[A-Z_]+|IMPORTANCE_[A-Z_]+|DASHBOARD_[A-Z_]+|TOKEN_EXPIRE_HOURS|LOG_LEVEL|ADMIN_OS_USERS)$"))) + $common + {

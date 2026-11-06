@@ -100,6 +100,15 @@ identity() {
   update "$oath" "$(jq -c --arg client "$client" --argjson policies "$policies" --argjson secrets "$secrets" --rawfile secret "$secret_file" -n '{
       IAM_MACHINE_CLIENT_POLICIES:($policies+{($client):{audience:"hivemem",permissions:["hivemem:admin:all"],lifetimeSeconds:300,rotationOwner:"hive-suite"}}|tojson),
       IAM_MACHINE_CLIENT_SECRETS:($secrets+{($client):($secret|rtrimstr("\n"))}|tojson)}')"
+  # A migrated Emberpath keeps the native Router's HIVE_ROUTER_AUTH_MODE=os, which checks OS
+  # passwords through pamtester; the product image has none, so its own password sign-in
+  # always failed and check reported auth-mode FAIL. In the suite, accounts live in Oathweave:
+  # with the native Router's Oathweave client, sign-in goes through it (iam-oidc). Console
+  # access is unaffected: it uses Oathweave tokens, which Emberpath accepts in either mode.
+  if [[ $(get "$ember" HIVE_ROUTER_AUTH_MODE) != iam-oidc && -n $(get "$ember" HIVE_ROUTER_IAM_CLIENT_ID) && \
+        $(get "$ember" HIVE_ROUTER_IAM_CLIENT_SECRET) =~ ^.{24,}$ && -n $(get "$ember" HIVE_IAM_INTERNAL_URL) ]]; then
+    update "$ember" '{"HIVE_ROUTER_AUTH_MODE":"iam-oidc"}'
+  fi
   update "$ember" "$(jq -nc --arg client "$client" --rawfile secret "$secret_file" --arg identity "$identity_origin" --arg memory "$memory_origin" \
       --arg internal "$(get "$ember" HIVEMEM_INTERNAL_URL)" --arg ca "$(get "$ember" HIVEMEM_CA_CERT_PATH)" '{
       EMBERPATH_HIVEMEM_CLIENT_ID:$client,EMBERPATH_HIVEMEM_CLIENT_SECRET:($secret|rtrimstr("\n")),

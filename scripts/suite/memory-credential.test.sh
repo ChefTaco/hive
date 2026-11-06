@@ -118,6 +118,26 @@ refused 'is not a JSON object' run_step "$fresh" memory-credential-identity "$en
 jq -nc --arg d "$fresh" '{directory:$d,action:"memory-credential-identity",nativeMigration:{},memoryCredential:{"identityOrigin":"https://oathweave:4200","memoryOrigin":"https://hivemem:18790"},placements:{oathweave:{}}}' | bash "$script" > "$temporary/result" 2>&1 && fail 'Accepted a split identity host'
 grep -q 'must share this host' "$temporary/result" || fail 'A split identity host is refused clearly'
 
+# ---- A migrated Emberpath with the native os auth mode signs in through Oathweave. ----
+signin="$temporary/signin"; mkdir -p -m 700 "$signin/config"
+cp "$migrated/config/oathweave.env" "$migrated/config/hivemem.env" "$signin/config/"
+cat > "$signin/config/emberpath.env" <<ENV
+HIVE_IAM_INTERNAL_URL='https://oathweave:4200'
+HIVE_ROUTER_AUTH_MODE='os'
+HIVE_ROUTER_IAM_CLIENT_ID='hive-router'
+HIVE_ROUTER_IAM_CLIENT_SECRET='fake-iam-client-secret-0123456789abcdef'
+HIVE_ROUTER_MEMORY_PROXY_TOKEN='$legacy_token'
+ENV
+chmod 600 "$signin/config/"*.env; cp "$signin/config/emberpath.env" "$temporary/signin.before"
+run_step "$signin" memory-credential-identity "$endpoints" >/dev/null || fail 'The identity step failed with the native auth mode'
+[[ $(value "$signin/config/emberpath.env" HIVE_ROUTER_AUTH_MODE) == iam-oidc && $(grep -c '^HIVE_ROUTER_AUTH_MODE=' "$signin/config/emberpath.env") == 1 ]] || fail 'Emberpath still uses PAM sign-in'
+diff <(grep -vE '^(EMBERPATH_HIVEMEM_|HIVEMEM_|HIVE_ROUTER_AUTH_MODE=)' "$signin/config/emberpath.env" | sort) <(grep -v '^HIVE_ROUTER_AUTH_MODE=' "$temporary/signin.before" | sort) >/dev/null || fail 'Other Emberpath settings changed with the auth mode'
+sums=$(sha256sum "$signin/config/"*.env); run_step "$signin" memory-credential-identity "$endpoints" >/dev/null
+[[ $(sha256sum "$signin/config/"*.env) == "$sums" ]] || fail 'A repeat rewrote the auth mode'
+# Without an Oathweave client for Emberpath the mode is left as it is.
+[[ $(value "$migrated/config/emberpath.env" HIVE_ROUTER_AUTH_MODE) == '' ]] || fail 'An auth mode was set without an Oathweave client'
+grep -q 'HIVE_ROUTER_AUTH_MODE:"iam-oidc"' "$ROOT/scripts/suite/migrate-native-host.sh" || fail 'Migration does not set the Oathweave auth mode'
+
 # ---- The controller runs it on install, upgrade, migration prepare and fresh initialization. ----
 grep -q 'install|upgrade) hive_memory_credential_provision' "$ROOT/scripts/suite/lifecycle.sh" || fail 'Install and upgrade provision the credential'
 grep -q 'hive_memory_credential_provision' "$ROOT/scripts/suite/initialize.sh" || fail 'Fresh initialization provisions the credential'
