@@ -178,9 +178,15 @@ git clone --branch vX.Y.Z https://github.com/ChefTaco/hive.git hive-X.Y.Z && cd 
 ./hive.sh upgrade --config ~/.config/hive/hive/installation.json --release X.Y.Z
 ```
 
-The upgrade shows its plan, takes a stopped backup first, and `./hive.sh rollback` from the same
-checkout returns to the previous release. Read the release notes and [UPGRADING](../UPGRADING.md)
-first.
+The upgrade shows its plan and takes a backup with the suite stopped first, so the console is
+unavailable for about a minute. `./hive.sh rollback` from the same checkout returns to the
+previous release. Read the release notes and [UPGRADING](../UPGRADING.md) first.
+
+The installation file keeps the release it was installed with. From the new checkout, pass
+`--release X.Y.Z` to `backup`, `upgrade` and `rollback`, or set `"release"` in the file to the new
+version; without it they refuse with `Signed release requires different controller source`.
+`status`, `doctor` and `tls-refresh` work either way. Run `schedule` again from the new checkout
+(step 9).
 
 ## 9. Keep the certificate current
 
