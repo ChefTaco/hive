@@ -20,6 +20,9 @@
 //   refreshMemoryToken  renew the Router memory proxy token natively, then run refresh-memory-token
 //   memoryCredential    true or {renewalSeconds, intervalSeconds}: prove the self-renewing Emberpath
 //                       memory credential, including after the copied native token has expired
+// Inside scripts/suite/sudo-host.sh the suite host is reached over SSH as an unprivileged account
+// and runs the host side as root through sudo -S, with sshConfig and sudoPasswordFile, as on a
+// production host; services and the native source run as HIVE_SERVICE_USER.
 //   upgrade             {version, images}: after the migration, hive.sh upgrade of the migrated
 //                       suite with this tree's controller to a release with these product images
 //                       {version, published: {manifest, trustKey}}: upgrade instead to that signed,
@@ -34,17 +37,19 @@ import { parseEnv } from 'node:util';
 import { applySuiteCatalog, hiveRegistryComponent } from './suite-catalog.mjs';
 import { memoryCredentialRehearsal } from './memory-credential-rehearsal.mjs';
 import { proveArchive, snapshotBefore } from './backup-proof.mjs';
+import { serviceUid, serviceUser, startSudoTarget, sudoHost } from './sudo-target.mjs';
 
 const args = process.argv.slice(2);
 assert(args[0] === '--config' && args[1], 'Usage: native-migration-rehearsal.mjs --config PRIVATE_JSON [--cleanup]');
 const configStat = lstatSync(args[1]);
-assert(configStat.isFile() && configStat.uid === process.getuid() && (configStat.mode & 0o077) === 0, 'The configuration must be owner-only');
+assert(configStat.isFile() && (configStat.uid === process.getuid() || (sudoHost && configStat.uid === serviceUid)) && (configStat.mode & 0o077) === 0, 'The configuration must be owner-only');
 const c = JSON.parse(readFileSync(args[1], 'utf8'));
 const root = resolve(import.meta.dirname, '../..');
 const controller = c.controllerRoot ? resolve(c.controllerRoot) : root;
 let hiveScript = join(controller, 'hive.sh');
 // After an upgrade, later commands use the upgraded release and its configuration.
 let installationFile = 'installation.json', releaseFile = 'release.json', trustKeyFile = 'publisher.pub';
+let sudoTarget = null;
 const out = c.output, label = c.runLabel ?? c.host, prefix = 'hive-mn-' + label;
 const run = (program, argv, options = {}) => execFileSync(program, argv, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024, ...options });
 const docker = (...argv) => run('docker', argv).trim();
@@ -102,7 +107,7 @@ function release() {
   const template = JSON.parse(readFileSync(c.template, 'utf8'));
   const names = ['oathweave', 'oathweave-redis', 'emberpath', 'hivemem', 'hivemem-qdrant', 'hiveskills', 'hivexui', 'ingress'];
   const manifest = { schema: 1, version: c.version ?? '0.1.0', networks: { 'identity-data': template.networks['identity-data'], 'memory-data': template.networks['memory-data'] }, components: Object.fromEntries(names.map((name) => [name, template.components[name]])), profiles: {} };
-  const user = process.getuid() + ':' + process.getgid();
+  const user = serviceUser;
   const port = Number(docker('run', '-d', '--name', prefix + '-images', '--label', 'hive.migration.rehearsal=' + label, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--user', user, '--tmpfs', `/var/lib/registry:uid=${process.getuid()},gid=${process.getgid()},mode=700`, '-p', '127.0.0.1::5000', c.images.registry) && docker('inspect', prefix + '-images', '--format', '{{(index (index .NetworkSettings.Ports "5000/tcp") 0).HostPort}}'));
   registry = '127.0.0.1:' + port;
   for (let attempt = 0; attempt < 30; attempt++) { if (spawnSync('curl', ['-fsS', '-o', '/dev/null', `http://${registry}/v2/`]).status === 0) break; execFileSync('sleep', ['1']); }
@@ -147,13 +152,15 @@ function installRuntime(base, directory) {
   symlinkSync('releases/' + id, join(native, 'state', base, 'current'));
   const runtime = join(releases, id, 'runtime');
   if (!existsSync(join(runtime, 'node_modules'))) {
-    run('docker', ['run', '--rm', '--user', process.getuid() + ':' + process.getgid(), '-e', 'HOME=/tmp', '-w', '/runtime', '--mount', `type=bind,source=${runtime},target=/runtime`, c.images.utility, 'sh', '-c', 'npm ci --omit=dev --ignore-scripts --registry=https://registry.npmjs.org >/dev/null 2>&1 && (npm rebuild better-sqlite3 argon2 >/dev/null 2>&1 || true)']);
+    run('docker', ['run', '--rm', '--user', serviceUser, '-e', 'HOME=/tmp', '-w', '/runtime', '--mount', `type=bind,source=${runtime},target=/runtime`, c.images.utility, 'sh', '-c', 'npm ci --omit=dev --ignore-scripts --registry=https://registry.npmjs.org >/dev/null 2>&1 && (npm rebuild better-sqlite3 argon2 >/dev/null 2>&1 || true)']);
   }
   return runtime;
 }
 function startNative() {
   say('native: copying the restored tree and installing the archived native packages');
   cpSync(c.restored, native, { recursive: true, verbatimSymlinks: true });
+  // The native services own their state, as on the source host; the copy was made as root.
+  if (sudoHost) run('chown', ['-R', '--no-dereference', serviceUser, native]);
   if (c.liveTraffic) trafficKey = insertTrafficKey();
   installRuntime('opt/hive-npm');
   if (hasSkills()) {
@@ -166,13 +173,14 @@ function startNative() {
   docker('network', 'create', '--internal', '--subnet', c.subnets.native, prefix + '-native');
   const address = c.subnets.native.replace(/\.0\/24$/, '.10');
   const hosts = ['--add-host', c.fqdn + ':127.0.0.1', '--add-host', c.host + ':127.0.0.1'];
-  const user = process.getuid() + ':' + process.getgid();
+  const user = serviceUser;
   const labels = ['--label', 'hive.migration.rehearsal=' + label];
   docker('run', '-d', '--name', prefix + '-native-pause', ...labels, '--network', prefix + '-native', '--ip', address, ...hosts, '--sysctl', 'net.ipv4.ip_unprivileged_port_start=0', '--entrypoint', 'sleep', c.images.utility, 'infinity');
   const netns = ['--network', 'container:' + prefix + '-native-pause'];
   docker('run', '-d', '--name', prefix + '-native-redis', ...labels, ...netns, '--user', user, c.images.redis, 'redis-server', '--save', '', '--appendonly', 'no', '--bind', '0.0.0.0', '--protected-mode', 'no');
   const manifest = JSON.parse(readFileSync(join(native, 'recovery/manifest.json'), 'utf8'));
   mkdirSync(join(out, 'native-qdrant'), { mode: 0o700 });
+  if (sudoHost) run('chown', [serviceUser, join(out, 'native-qdrant')]);
   docker('run', '-d', '--name', prefix + '-native-qdrant', ...labels, ...netns, '--user', user, '--workdir', '/data', '--mount', `type=bind,source=${join(out, 'native-qdrant')},target=/data`, '--mount', `type=bind,source=${join(native, 'recovery')},target=/snapshots,readonly`, '-e', 'QDRANT__STORAGE__STORAGE_PATH=/data/storage', '-e', 'QDRANT__STORAGE__SNAPSHOTS_PATH=/data/snapshots', '-e', 'QDRANT__TELEMETRY_DISABLED=true', '--entrypoint', '/qdrant/qdrant', c.images.qdrant, ...manifest.qdrant.flatMap((snapshot) => ['--snapshot', `/snapshots/${snapshot.file}:${snapshot.collection}`]));
   const dataTool = (request, ...extra) => run('docker', ['run', '--rm', '--network', prefix + '-native', '--user', user, '--read-only', '--tmpfs', '/tmp:mode=1777', ...extra, '--entrypoint', 'node', c.images.utility, '--no-warnings', '--input-type=module', '-e', readFileSync(join(root, 'scripts/suite/migrate-native-data.mjs'), 'utf8'), JSON.stringify(request)]).trim();
   for (let attempt = 0; attempt < 90; attempt++) {
@@ -428,7 +436,7 @@ function writeInstallation(nativeState) {
   put('reviewed-links.json', links);
   const config = {
     schema: 1, installation: c.installation, release: c.version ?? '0.1.0', profile: 'custom', origin: 'https://' + c.fqdn,
-    hosts: { control: { target: 'local', directory, minimumFreeMiB: 2048 } },
+    hosts: { control: { ...(sudoTarget ? { target: sudoTarget.target, sshConfig: sudoTarget.sshConfig, sudoPasswordFile: sudoTarget.sudoPasswordFile } : { target: 'local' }), directory, minimumFreeMiB: 2048 } },
     components, agents: [], inference: [],
     console: { host: 'control', bindAddress: c.address, httpsPort: 443, runtimeFile: `${directory}/config/runtime.json`, nativeListeners: [{ port: 4020, component: 'emberpath' }, { port: 4200, component: 'oathweave' }, { port: memoryPort, component: 'hivemem' }, ...(hasSkills() ? [{ port: 4030, component: 'hiveskills' }] : [])], networkSubnet: c.subnets.default, edgeSubnet: c.subnets.edge },
     nativeMigration: {
@@ -692,6 +700,7 @@ async function main() {
   const report = { schema: 1, host: c.host, installation: c.installation, startedAt, productionContacted: false };
   cleanup();
   try {
+    if (sudoHost) sudoTarget = await startSudoTarget(join(out, 'sudo-target'));
     release();
     const nativeState = startNative();
     const trust = trustFile();
@@ -914,6 +923,7 @@ async function main() {
     report.finishedAt = new Date().toISOString();
     put('report.json', report);
     if (!c.keepRunningOnFailure || report.result === 'passed') cleanup();
+    sudoTarget?.stop();
     console.log(JSON.stringify({ result: report.result, error: report.error?.slice(0, 1500) }));
   }
 }

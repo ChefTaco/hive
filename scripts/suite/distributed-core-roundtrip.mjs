@@ -16,6 +16,7 @@ import { applySuiteCatalog, hiveRegistryComponent } from './suite-catalog.mjs';
 import { coreRelease, CORE_PRODUCTS } from './release-contracts.mjs';
 import { hostStatuses, proveRegistry, proveRestoredRegistry, registryCall } from './registry-proof.mjs';
 import { proveTerminal, proveTerminalOff } from './terminal-proof.mjs';
+import { serviceUser, sudoHost } from './sudo-target.mjs';
 const execute = promisify(execFile), root = resolve(import.meta.dirname, '../..');
 function argument(name) { const index = process.argv.indexOf(name); assert(index >= 0 && process.argv[index + 1], name + ' is required'); return resolve(process.argv[index + 1]); }
 // --template-release is optional: by default the core contract comes from release-contracts.mjs.
@@ -25,14 +26,16 @@ const output = argument('--output'), template = process.argv.includes('--templat
 const published = process.argv.includes('--published-release') ? argument('--published-release') : null, publishedTrust = published ? argument('--published-trust-key') : null;
 assert(!existsSync(output), 'Select a new protected evidence directory');
 assert(/^\/[A-Za-z0-9_./-]+$/.test(output));
-assert.notEqual(process.getuid(), 0, 'Use an unprivileged operator with Docker access');
+// Inside scripts/suite/sudo-host.sh, every host is reached as the unprivileged deploy account and
+// runs the host side as root through sudo -S, with sudoPasswordFile, as production hosts do.
+assert(sudoHost || process.getuid() !== 0, 'Use an unprivileged operator with Docker access');
 mkdirSync(output, { recursive: true, mode: 0o700 }); chmodSync(output, 0o700);
 const put = (path, value, mode = 0o600) => { writeFileSync(path, typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value, null, 2)); chmodSync(path, mode); };
 const run = (program, args, options = {}) => execFileSync(program, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...options }).trim();
 const docker = (...args) => run('docker', args);
 const environment = Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'TZ'].filter(key => process.env[key]).map(key => [key, process.env[key]]));
 async function port() { const socket = createServer().listen(0, '0.0.0.0'); await new Promise(done => socket.once('listening', done)); const value = socket.address().port; await new Promise(done => socket.close(done)); return value; }
-const id = 'distributed-' + randomBytes(5).toString('hex'), registryName = id + '-registry', username = userInfo().username;
+const id = 'distributed-' + randomBytes(5).toString('hex'), registryName = id + '-registry', username = sudoHost ? 'deploy' : userInfo().username;
 const interactive=process.argv.includes('--interactive'),consoleHost=interactive?'control':'console';
 const addresses = { identity: join(output, 'identity'), [consoleHost]: join(output,consoleHost) },consoleDirectory=addresses[consoleHost];
 const configFile = join(output, 'installation.json'), manifestFile = join(output, 'release.json'), sshConfig = join(output, 'ssh.conf');
@@ -60,25 +63,28 @@ try {
     assert(!interactive && !selection, 'A published release is installed unattended with a profile');
     manifest = JSON.parse(readFileSync(published, 'utf8'));
   } else {
-    manifest = template ? JSON.parse(readFileSync(template, 'utf8')) : coreRelease({ version: '0.1.0', images: Object.fromEntries(CORE_PRODUCTS.map(name => [name, 'pending'])), user: `${process.getuid()}:${process.getgid()}` });
+    manifest = template ? JSON.parse(readFileSync(template, 'utf8')) : coreRelease({ version: '0.1.0', images: Object.fromEntries(CORE_PRODUCTS.map(name => [name, 'pending'])), user: serviceUser });
     delete manifest.components['hive-registry'];
     const expected = ['emberpath', 'hivemem', 'hivemem-qdrant', 'hiveskills', 'hivexui', 'ingress', 'oathweave', 'oathweave-redis'];
     assert.deepEqual(Object.keys(manifest.components).sort(), expected, 'Template must contain the reviewed eight-component core fixture contract only');
     if (selection) assert(selection.every(name=>[...expected,'hive-registry'].includes(name)),'This custom developer fixture accepts reviewed core product components only');
     manifest.version = '0.1.0'; manifest.profiles = { core: [...expected,'hive-registry'], full: [...expected,'hive-registry'] };
-    docker('run', '-d', '--name', registryName, '--user', `${process.getuid()}:${process.getgid()}`, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--tmpfs', '/var/lib/registry:uid=' + process.getuid() + ',gid=' + process.getgid() + ',mode=700', '-p', '127.0.0.1:' + registryPort + ':5000', 'registry@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373');
-    manifest.components['hive-registry'] = hiveRegistryComponent('pending', `${process.getuid()}:${process.getgid()}`);
+    docker('run', '-d', '--name', registryName, '--user', serviceUser, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--tmpfs', '/var/lib/registry:uid=' + serviceUser.replace(':', ',gid=') + ',mode=700', '-p', '127.0.0.1:' + registryPort + ':5000', 'registry@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373');
+    manifest.components['hive-registry'] = hiveRegistryComponent('pending', serviceUser);
     for (const product of ['oathweave', 'emberpath', 'hivemem', 'hiveskills', 'hivexui', 'ingress', 'hive-registry']) {
       const tag = registry + '/' + id + '/' + product + ':candidate'; tags.push(tag);
       docker('tag', product === 'ingress' ? 'hive-ingress:candidate' : product + ':candidate', tag); docker('push', tag);
       manifest.components[product].image = JSON.parse(docker('image', 'inspect', tag, '--format', '{{json .RepoDigests}}')).find(value => value.startsWith(registry + '/' + id + '/' + product + '@sha256:'));
       assert(manifest.components[product].image);
     }
-    if (full) extendFullFixture({ manifest, registry, id, tags, docker, user: `${process.getuid()}:${process.getgid()}` });
+    if (full) extendFullFixture({ manifest, registry, id, tags, docker, user: serviceUser });
     applySuiteCatalog(manifest);
   }
   for (const name of ['host', 'client', 'wrong-host']) run('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', join(output, name)]);
   put(join(output, 'authorized_keys'), readFileSync(join(output, 'client.pub')));
+  // sshd reads the key as the account, which cannot enter this root-only evidence directory.
+  const authorizedKeys = sudoHost ? '/home/deploy/.ssh/authorized_keys' : join(output, 'authorized_keys');
+  if (sudoHost) { mkdirSync('/home/deploy/.ssh', { recursive: true, mode: 0o700 }); put(authorizedKeys, readFileSync(join(output, 'client.pub'))); run('chown', ['-R', 'deploy:deploy', '/home/deploy/.ssh']); }
   const known = '[127.0.0.1]:' + sshPort + ' ' + readFileSync(join(output, 'host.pub'), 'utf8'); put(join(output, 'known_hosts'), known);
   mkdirSync(join(output, 'bin'), { mode: 0o700 });
   const actualDocker = run('sh', ['-c', 'command -v docker']);
@@ -99,14 +105,15 @@ fi
   const actualScp=run('sh',['-c','command -v scp']);
   put(join(output,'bin/scp'),`#!/usr/bin/env bash\nexec '${actualScp}' -F '${sshConfig}' "$@"\n`,0o700);
   environment.PATH=join(output,'bin')+':'+environment.PATH;
-  put(join(output, 'sshd.conf'), `Port ${sshPort}\nListenAddress 127.0.0.1\nHostKey ${output}/host\nPidFile ${output}/sshd.pid\nAuthorizedKeysFile ${output}/authorized_keys\nAllowUsers ${username}\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAuthenticationMethods publickey\nUsePAM no\nPermitRootLogin no\nAllowTcpForwarding no\nX11Forwarding no\nPermitTTY no\nSetEnv PATH=${join(output, 'bin')}:${process.env.PATH}\nSubsystem sftp internal-sftp\n`);
+  put(join(output, 'sshd.conf'), `Port ${sshPort}\nListenAddress 127.0.0.1\nHostKey ${output}/host\nPidFile ${output}/sshd.pid\nAuthorizedKeysFile ${authorizedKeys}\nAllowUsers ${username}\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAuthenticationMethods publickey\nUsePAM no\nPermitRootLogin no\nAllowTcpForwarding no\nX11Forwarding no\nPermitTTY no\nSetEnv PATH=${join(output, 'bin')}:${process.env.PATH}\nSubsystem sftp internal-sftp\n`);
   put(sshConfig, `Host identity.example.com console.example.com control.example.com\n HostName 127.0.0.1\n Port ${sshPort}\n UserKnownHostsFile ${output}/known_hosts\n IdentityFile ${output}/client\n IdentityAgent none\n IdentitiesOnly yes\n StrictHostKeyChecking yes\n BatchMode yes\n ConnectTimeout 5\n LogLevel ERROR\n`);
   const descriptor = openSync(join(output, 'sshd.log'), 'wx', 0o600); daemon = spawn('/usr/sbin/sshd', ['-D', '-e', '-f', join(output, 'sshd.conf')], { stdio: ['ignore', descriptor, descriptor] }); closeSync(descriptor);
   await new Promise(done => setTimeout(done, 300));
-  assert.equal(run('ssh', ['-F', sshConfig, username + '@identity.example.com', 'command -v docker']), join(output, 'bin/docker'));
+  if (sudoHost) assert.equal(run('ssh', ['-F', sshConfig, username + '@identity.example.com', "sudo -k -S -p '' sh -c 'id -u; command -v docker'"], { input: readFileSync(process.env.HIVE_SUDO_PASSWORD_FILE), stdio: ['pipe', 'pipe', 'pipe'] }), '0\n' + join(output, 'bin/docker'));
+  else assert.equal(run('ssh', ['-F', sshConfig, username + '@identity.example.com', 'command -v docker']), join(output, 'bin/docker'));
   let config = JSON.parse(readFileSync(join(root, 'examples/installation.json'), 'utf8'));
   config.installation = id; if (selection) { config.profile='custom'; config.components=Object.fromEntries(Object.entries(config.components).filter(([name])=>selected(name))); } if (full) { config.profile = 'full'; for (const name of Object.keys(manifest.components)) if (!config.components[name] && (name !== 'magnus-gateway' || magnusGateway)) config.components[name] = { host: consoleHost, configDirectory: '/config/' + name, ...(/-(postgres|redis)$/.test(name) ? {} : { envFile: '/config/' + name + '.env' }) }; } config.origin = 'https://localhost:' + consolePort;
-  config.hosts = Object.fromEntries(Object.entries(addresses).map(([host, directory]) => [host, { target: username + '@' + host + '.example.com', directory, sshConfig }]));
+  config.hosts = Object.fromEntries(Object.entries(addresses).map(([host, directory]) => [host, { target: username + '@' + host + '.example.com', directory, sshConfig, ...(sudoHost ? { sudoPasswordFile: process.env.HIVE_SUDO_PASSWORD_FILE } : {}) }]));
   config.console = { host: consoleHost, bindAddress: '127.0.0.1', httpsPort: consolePort, runtimeFile: join(consoleDirectory, 'config/runtime.json') };
   for (const [name, placement] of Object.entries(config.components)) {
     placement.host = ['oathweave', 'oathweave-redis', 'hiveskills'].includes(name) ? 'identity' : consoleHost;
