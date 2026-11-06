@@ -46,8 +46,9 @@ hive_default_release() {
     fi
     printf '%s\n' "$configured"; return
   fi
-  own=$(hive_checkout_release)
-  if [[ -n "$own" && "$own" != "$configured" ]] && ! jq -e --arg digest "$(hive_controller_digest)" '.controllerSHA256==$digest' "$HIVE_ROOT/releases/$configured.json" >/dev/null 2>&1; then
+  # Outside a complete checkout there is no own release, and the file's release stands.
+  own=$( (hive_checkout_release) 2>/dev/null ) || own=''
+  if [[ -n "$own" && "$own" != "$configured" ]] && ! jq -e --arg digest "$( (hive_controller_digest) 2>/dev/null || true)" '.controllerSHA256==$digest' "${HIVE_ROOT:-}/releases/$configured.json" >/dev/null 2>&1; then
     printf 'Hive: using release %s, which this checkout'"'"'s controller installs; the installation file names %s. Pass --release to choose another\n' "$own" "$configured" >&2
     printf '%s\n' "$own"; return
   fi
@@ -318,7 +319,7 @@ hive_validate() {
     (.agents|type=="array") and (.inference|type=="array")
   ' "$HIVE_CONFIG" >/dev/null || hive_die 'Invalid installation configuration'
   HIVE_ID=$(jq -r '.installation' "$HIVE_CONFIG")
-  if [[ -z "$HIVE_VERSION" ]]; then HIVE_VERSION=$(hive_default_release); fi
+  if [[ -z "${HIVE_VERSION:-}" ]]; then HIVE_VERSION=$(hive_default_release); fi
   if jq -e 'has("bootstrap")' "$HIVE_CONFIG" >/dev/null; then
     if jq -e '.bootstrap|type=="object" and has("magnusConsoleOrigin")' "$HIVE_CONFIG" >/dev/null; then
       hive_die 'bootstrap.magnusConsoleOrigin is no longer supported: HiveXUI now provides the Magnus console through /api/magnus. Remove this field from the installation configuration and run the command again; review the new plan before applying it.'
