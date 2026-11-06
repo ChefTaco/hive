@@ -645,8 +645,10 @@ compare_store() {
   local data=$1 base=$2 allowed=$3 options=${4:-'{}'} component path
   while IFS=$'\t' read -r component path; do
     data_tool none "$(service_user "$component")" "$(jq -nc --arg file "/db/$(basename -- "$path")" --arg component "$component" --argjson allowed "$allowed" --argjson options "$options" '{command:"sqlite-compare",before:("/base/"+$component+".json"),file:$file,component:$component,allowedToChange:$allowed}+$options')" \
-      --mount "type=bind,source=$(dirname -- "$data/$path"),target=/db" --mount "type=bind,source=$base,target=/base,readonly" | jq -c --arg component "$component" '{($component):.}'
-  done < <(database_files) | jq -s add
+      --mount "type=bind,source=$(dirname -- "$data/$path"),target=/db" --mount "type=bind,source=$base,target=/base,readonly" | jq -c --arg component "$component" '{($component):.}' || true
+  done < <(database_files) | jq -s --argjson want "$(database_files | cut -f1 | jq -Rsc 'split("\n")|map(select(length>0))')" '
+    # A store that could not be read is a violation, never a silent pass.
+    (add // {}) as $got | reduce $want[] as $name ($got; if has($name) then . else .[$name]={changed:{},violations:["the store could not be read"]} end)'
 }
 
 # ---- Prepare: everything here is read-only for the native installation. ----

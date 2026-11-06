@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { createConnection } from 'node:net';
 import { readFileSync, writeFileSync } from 'node:fs';
 
+// A live product may hold a write lock for a moment: readers wait for it rather than fail.
 const sha = (value) => createHash('sha256').update(value).digest('hex');
 const quote = (name) => '"' + name.replaceAll('"', '""') + '"';
 const canonical = (value) =>
@@ -34,7 +35,7 @@ const rowHashes = (table, rows, columns) => rows.filter((row) => !regenerated(ta
   .map((row) => sha(rowText(Object.fromEntries(columns.map((column) => [column, row[column]])))).slice(0, 40)).sort();
 
 export function databaseState(file, columnsByTable, stableColumnsByTable) {
-  const database = new DatabaseSync(file, { readOnly: true });
+  const database = new DatabaseSync(file, { readOnly: true, timeout: 30000 });
   try {
     const integrity = database.prepare('PRAGMA integrity_check').all().map((row) => Object.values(row)[0]);
     if (integrity.join() !== 'ok') throw Error('SQLite integrity check failed: ' + file);
@@ -82,7 +83,7 @@ export function compareDatabases(before, after, allowedToChange = [], { tables, 
 }
 
 function accounts(file) {
-  const database = new DatabaseSync(file, { readOnly: true });
+  const database = new DatabaseSync(file, { readOnly: true, timeout: 30000 });
   try {
     return database.prepare('SELECT id, username, passwordHash FROM users ORDER BY id').all()
       .map((row) => ({ id: row.id, username: row.username, passwordHashSHA256: sha(row.passwordHash ?? '') }));

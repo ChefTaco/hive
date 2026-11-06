@@ -507,6 +507,9 @@ sqlite3 "$vdir/data/oathweave/iam/iam.db" "UPDATE users SET passwordHash='fake-h
 sqlite3 "$vdir/data/oathweave/iam/iam.db" "UPDATE clients SET secretHash='rotated'"
 refused 'Credential records changed while serving' v_action native-verify
 sqlite3 "$vdir/data/oathweave/iam/iam.db" "UPDATE clients SET secretHash='fake-secret-hash'"
+cp "$vdir/data/hiveskills/registry.sqlite" "$temporary/skills.keep"; printf 'not a database' > "$vdir/data/hiveskills/registry.sqlite"
+refused 'hiveskills.*the store could not be read' v_action native-verify
+cp "$temporary/skills.keep" "$vdir/data/hiveskills/registry.sqlite"
 printf 'tampered' > "$stub/served/4200.crt"
 refused 'port 4200 does not present its native certificate' v_action native-verify-live
 cp "$vdir/config/ingress/native/4200.crt" "$stub/served/"

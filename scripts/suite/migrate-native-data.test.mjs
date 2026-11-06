@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
+import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -93,4 +94,17 @@ test('a Redis value is compared by content, not by its encoding or member order'
   assert.notEqual(canonicalRedisValue('list', [b('b'), b('a')]), canonicalRedisValue('list', [b('a'), b('b')]));
   assert.notEqual(canonicalRedisValue('string', b('1')), canonicalRedisValue('list', [b('1')]));
   assert.equal(canonicalRedisValue('stream', [[b('1-0'), [b('k'), b('v')]]]), JSON.stringify(['stream', [['MS0w', ['aw==', 'dg==']]]]));
+});
+
+test('a reader waits for a product holding a write lock instead of failing', async (t) => {
+  const { file, database } = fixture(t);
+  database.close();
+  // A writer in another process holds an exclusive lock for a moment, as a live product does.
+  const writer = spawn(process.execPath, ['--no-warnings', '--input-type=module', '-e', `import { DatabaseSync } from 'node:sqlite'; const db = new DatabaseSync(process.argv[1]); db.exec('BEGIN EXCLUSIVE'); console.log('locked'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500); db.exec('COMMIT'); db.close();`, file]);
+  await new Promise((done) => writer.stdout.once('data', done));
+  const started = Date.now();
+  const state = databaseState(file);
+  assert(Date.now() - started >= 500, 'The reader waited for the lock');
+  assert.equal(state.tables.ClientApiKey.count, 1);
+  await new Promise((done) => writer.once('exit', done));
 });
