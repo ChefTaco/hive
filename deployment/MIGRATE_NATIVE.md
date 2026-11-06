@@ -128,7 +128,7 @@ Every step leaves a receipt in `<directory>/migration/steps`, and repeating a co
 | `rollback` | See below | Started |
 | `issue-admin-token` | Issues a new reset token for the configured administrator | Stopped |
 | `tls-refresh` | Reloads native certificates; see below | Stopped |
-| `refresh-memory-token` | Copies a renewed `HIVE_ROUTER_MEMORY_PROXY_TOKEN` from the native Router environment into the suite Emberpath and recreates it | Stopped |
+| `refresh-memory-token` | Copies a renewed `HIVE_ROUTER_MEMORY_PROXY_TOKEN` from the native Router environment into the suite Emberpath and recreates it. Not needed from 2.0.2: see [Memory credential](#memory-credential) | Stopped |
 
 Run `prepare` close to the maintenance window, then `cutover` without changing the configuration:
 the plan digest binds them. A configuration or link change requires `prepare` again.
@@ -211,12 +211,32 @@ when that leaf has under seven days left, `tls-refresh` issues a new one from th
 same names and key, kept with the suite configuration. **Schedule `tls-refresh` at least weekly.**
 Renew any certificate near expiry before `cutover`.
 
-### Memory proxy token
+### Memory credential
 
-Cutover copies the Router's `HIVE_ROUTER_MEMORY_PROXY_TOKEN` into `<directory>/config/emberpath.env`.
-When something renews it in the native file `/opt/hive-router/shared/.env`, run
-`refresh-memory-token`: it copies the current value, keeps the file owner-only, recreates Emberpath
-and never prints the value. It does nothing when the suite already has that value.
+The native Router reached HiveMem with `HIVE_ROUTER_MEMORY_PROXY_TOKEN`, an admin token valid for
+at most 30 days that something on the host renewed. In the suite, Emberpath renews its own
+credential instead, so nothing has to:
+
+- `prepare`, `hive.sh upgrade` and `hive.sh install` declare an Oathweave machine client,
+  `emberpath-hivemem`, wherever Emberpath serves its HiveMem-backed endpoints (the Router memory
+  pages, memory agents in the actors list, and actor onboarding and rotation). Its secret is
+  generated once on the host, kept in `<directory>/config/.credentials/` and written to
+  `config/oathweave.env` (`IAM_MACHINE_CLIENT_POLICIES`, `IAM_MACHINE_CLIENT_SECRETS`) and
+  `config/emberpath.env` (`EMBERPATH_HIVEMEM_CLIENT_ID`, `EMBERPATH_HIVEMEM_CLIENT_SECRET`). It is
+  never printed. `config/hivemem.env` gets the public link (`HIVEMEM_OATHWEAVE_SERVICES_JSON`).
+- Oathweave creates the client on start. Emberpath requests a token for the `hivemem` audience,
+  valid for five minutes, when it first needs one, and the next one before it expires. HiveMem
+  accepts it as the principal of the native token (`hive-router`), so ownership and audit records
+  continue.
+- The copied `HIVE_ROUTER_MEMORY_PROXY_TOKEN` stays as a fallback while no service token can be
+  obtained, and is never sent after its own expiry. `refresh-memory-token` still copies a renewed
+  native value, but nothing depends on it.
+
+An installation migrated with 2.0.0 or 2.0.1 gets the client on its next `hive.sh upgrade`, with no
+other step. A fresh suite does not expose those Emberpath endpoints, so its Emberpath has no HiveMem
+identity at all. When Emberpath and Oathweave run on different hosts, the step is skipped, because
+the secret would have to cross hosts; Emberpath then needs `HIVE_ROUTER_MEMORY_PROXY_TOKEN` as before.
+To contain the client, deactivate it in Oathweave or disable the `hive-router` agent in HiveMem.
 
 ## First sign-in
 

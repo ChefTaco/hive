@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- Emberpath's HiveMem credential renews itself. `hive.sh migrate-native prepare`, `hive.sh upgrade`
+  and `hive.sh install` declare an Oathweave machine client for Emberpath wherever it serves
+  HiveMem-backed endpoints, with its secret generated on the host and never printed. Emberpath
+  fetches five-minute `hivemem` tokens and renews them itself, so the copied native
+  `HIVE_ROUTER_MEMORY_PROXY_TOKEN` no longer has to be renewed or refreshed: it remains only a
+  fallback until it expires. A migrated 2.0.0 or 2.0.1 installation switches over on its next
+  `hive.sh upgrade`. Requires Emberpath 2.0.2, HiveMem 1.3.2 and Oathweave 2.0.2.
+
 ### Changed
 
 - `hive-set-admin-password` accepts the protected token file as its only argument

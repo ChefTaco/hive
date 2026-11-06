@@ -76,5 +76,6 @@ hive_initialize() {
     HIVE_HOST_ACTION=initialize hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/initialize-full-host.sh" "$HIVE_ROOT/scripts/suite/initialize-host.sh")" || hive_die 'Fresh configuration initialization held; preserve its protected receipt and rerun with identical inputs'
   done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
   hive_registry_provision
+  hive_memory_credential_provision
   printf 'Protected selected-product configuration prepared. Review the plan, then run install with this same configuration. Initial sign-in instructions are stored on the identity host in config/initial-credentials.env.\n'
 }

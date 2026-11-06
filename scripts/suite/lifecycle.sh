@@ -53,6 +53,8 @@ hive_lifecycle() {
   if [[ "$operation" == install ]] && jq -e '.bootstrap!=null' "$HIVE_CONFIG" >/dev/null; then hive_initialize; fi
   # Protected credentials exist before preflight and before any pre-change backup.
   case "$operation" in install|upgrade|rollback|adopt|rehearse) hive_registry_provision;; esac
+  # Before the pre-change backup and the staged input pins, like the registry credentials.
+  case "$operation" in install|upgrade) hive_memory_credential_provision;; esac
   case "$operation" in upgrade|rollback) hive_registry_refresh_ingress;; esac
   case "$operation" in install|upgrade|rollback|adopt|rehearse) hive_doctor;; *) hive_registry_preflight;; esac
   case "$operation" in

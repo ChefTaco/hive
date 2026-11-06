@@ -35,6 +35,11 @@ find "$temporary/install/config/.initializer/secrets" -type f -exec sha256sum {}
 run_init > "$temporary/initialized.log"
 find "$temporary/install/config/.initializer/secrets" -type f -exec sha256sum {} + | sort > "$temporary/secrets.after"
 cmp -s "$temporary/secrets.before" "$temporary/secrets.after" || fail 'Retry changed initial credentials or IDs'
+# A fresh Emberpath serves no HiveMem-backed endpoints, so it gets neither a static memory
+# token that would expire nor a HiveMem identity it does not use.
+! grep -qE '^(HIVE_ROUTER_MEMORY_PROXY_TOKEN|EMBERPATH_HIVEMEM_CLIENT_ID)=' "$temporary/install/config/emberpath.env" || fail 'A fresh Emberpath holds a memory credential'
+! grep -q '^HIVEMEM_OATHWEAVE_SERVICES_JSON=' "$temporary/install/config/hivemem.env" || fail 'A fresh HiveMem links a service it does not serve'
+[[ ! -e "$temporary/install/config/.credentials" ]] || fail 'A fresh installation stores a memory client secret'
 find "$temporary/install/config" -type f -exec sha256sum {} + | sort > "$temporary/all.before"
 run_init > "$temporary/repeat.log"
 find "$temporary/install/config" -type f -exec sha256sum {} + | sort > "$temporary/all.after"
@@ -52,4 +57,4 @@ cp "$temporary/valid.json" "$temporary/config.json"
 printf 'OPERATOR_OWNED=retained\n' > "$temporary/install/config/emberpath.env"
 reject run_init
 [[ $(cat "$temporary/install/config/emberpath.env") == OPERATOR_OWNED=retained ]] || fail 'Existing configuration was overwritten'
-printf 'Passed: fresh configuration generation, interrupted entropy preservation, exact retry, repeat execution, public artifact secret isolation and existing-file refusal.\n'
+printf 'Passed: fresh configuration generation, no memory credential where none is used, interrupted entropy preservation, exact retry, repeat execution, public artifact secret isolation and existing-file refusal.\n'

@@ -159,6 +159,7 @@ hive_native_migrate() {
       hive_native_action "$host" native-plan > /dev/null || hive_die 'Plan checks failed; nothing was changed'
       hive_native_action "$host" native-configure || hive_die 'Configuration could not be staged; native services are untouched'
       hive_registry_provision
+      hive_memory_credential_provision
       hive_native_action "$host" native-registry-login || hive_die 'Image registry login failed; native services are untouched'
       hive_stage
       hive_native_action "$host" native-dry-run || hive_die 'The dry run failed; native services are untouched'
