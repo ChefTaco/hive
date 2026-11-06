@@ -12,7 +12,22 @@ version=$(jq -er .version <<< "$input")
 archive=$(jq -r '.archive // empty' <<< "$input")
 die() { printf 'Hive host: %s\n' "$*" >&2; exit 1; }
 digest() { sha256sum -- "$1" | cut -d ' ' -f1; }
-tree_digest() { (cd "$1"; find . -type f -print0 | sort -z | xargs -0 -r sha256sum --zero) | sha256sum | cut -d ' ' -f1; }
+# Every file's SHA-256, as "HASH  ./PATH" records in sorted path order. Files are hashed in
+# parallel, since a datastore's preallocated sparse files can reach many times its real size.
+# Each parallel job writes its own file: concurrent writers to one pipe can interleave.
+tree_lines() {
+  local line path work status=0
+  local -A sums=()
+  work=$(mktemp -d)
+  (cd "$1" && find . -type f -print0 | xargs -0 -r -P "$(nproc)" -n 64 sh -c 'sha256sum --zero -- "$@" > "$(mktemp "$0/sums.XXXXXX")"' "$work") || status=1
+  if ((status == 0)); then
+    while IFS= read -r -d '' line; do sums[${line:66}]=${line:0:64}; done < <(find "$work" -type f -name 'sums.*' -exec cat -- {} +)
+  fi
+  rm -rf -- "$work"
+  ((status == 0)) || return 1
+  while IFS= read -r -d '' path; do printf '%s  %s\0' "${sums[$path]:?}" "$path"; done < <(cd "$1" && find . -type f -print0 | sort -z)
+}
+tree_digest() { tree_lines "$1" | sha256sum | cut -d ' ' -f1; }
 recovery_image='node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205'
 atomic_json() { jq . > "$1.tmp"; chmod 600 "$1.tmp"; sync -f "$1.tmp"; mv -T -- "$1.tmp" "$1"; sync -f "$(dirname -- "$1")"; }
 prepare_data_directories() {

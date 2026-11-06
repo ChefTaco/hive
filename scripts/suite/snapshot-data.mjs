@@ -6,8 +6,7 @@
 // capture  runs while the service is paused: every SQLite database is copied with the SQLite
 //          online backup API (one read transaction, so a consistent snapshot that also includes
 //          committed WAL frames), and each file is brought up to date with the paused state.
-// verify   runs after the pause, against the copy only: SQLite integrity, journal mode, and
-//          a SHA-256 manifest of every file.
+// verify   runs after the pause, against the copy only: SQLite integrity and journal mode.
 import { DatabaseSync, backup } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import {
@@ -190,13 +189,6 @@ export async function capture({ source, target, work, exclude = [] }) {
   return { sqlite: result.sqlite.length, kept: result.kept, appended: result.appended, copied: result.copied, removed: result.removed };
 }
 
-function hashFile(file) {
-  const hash = createHash('sha256'), descriptor = openSync(file, 'r'), buffer = Buffer.allocUnsafe(CHUNK);
-  let read, size = 0;
-  try { while ((read = readSync(descriptor, buffer, 0, CHUNK, null)) > 0) { hash.update(buffer.subarray(0, read)); size += read; } } finally { closeSync(descriptor); }
-  return { size, sha256: hash.digest('hex') };
-}
-
 export function verify({ target, work }) {
   const captured = JSON.parse(readFileSync(join(work, 'capture.json'), 'utf8'));
   const databases = [];
@@ -219,22 +211,18 @@ export function verify({ target, work }) {
     utimesSync(file, item.mtimeMs / 1000, item.mtimeMs / 1000);
     databases.push({ path: item.path, journalMode: item.journalMode, pages });
   }
-  const files = [];
-  let bytes = 0;
+  // Contents are hashed once by the controller, in parallel, for the archive manifest.
+  let files = 0, bytes = 0;
   const visit = (relative) => {
     for (const name of readdirSync(relative ? join(target, relative) : target).sort()) {
       const path = relative ? relative + '/' + name : name, state = lstatSync(join(target, path));
       if (state.isDirectory()) { visit(path); continue; }
       if (!state.isFile()) throw Error('Unsupported file type in a copy: ' + path);
-      const digest = hashFile(join(target, path));
-      files.push({ path, ...digest });
-      bytes += digest.size;
+      files++; bytes += state.size;
     }
   };
   visit('');
-  const manifest = { files, sqlite: databases };
-  writeFileSync(join(work, 'manifest.json'), JSON.stringify(manifest), { mode: 0o600 });
-  return { files: files.length, bytes, sqlite: databases, manifestSHA256: sha(JSON.stringify(manifest)) };
+  return { files, bytes, sqlite: databases };
 }
 
 // The Qdrant API key and snapshot directory come from the product's own mounted configuration.
@@ -255,14 +243,31 @@ async function qdrant(url, config) {
 const collectionNames = async (json) => (await json('/collections')).collections.map((item) => item.name).sort();
 const countPoints = async (json, name) => (await json('/collections/' + encodeURIComponent(name) + '/points/count', { method: 'POST', body: JSON.stringify({ exact: true }) })).count;
 
-// A full storage snapshot: every collection, written by Qdrant into its snapshot directory.
-export async function qdrantSnapshot({ url, config }) {
+// One snapshot per collection, several at a time: Qdrant spends most of a snapshot on fixed
+// per-collection work, so this keeps the writer's pause short. Aliases are recorded too.
+export async function qdrantSnapshot({ url, config, width = 16 }) {
   const { json, snapshots } = await qdrant(url, config);
   if (!snapshots.startsWith('/data/')) throw Error('The Qdrant snapshot directory must be inside its data directory');
-  const created = await json('/snapshots?wait=true', { method: 'POST' });
+  const names = await collectionNames(json);
+  for (const name of names) if (!/^[A-Za-z0-9_.-]{1,255}$/.test(name)) throw Error('A Qdrant collection name needs the stopped backup: ' + name);
+  const queue = [...names], created = {};
+  await Promise.all(Array.from({ length: Math.min(width, names.length) }, async () => {
+    while (queue.length) {
+      const name = queue.shift();
+      const result = await json('/collections/' + encodeURIComponent(name) + '/snapshots?wait=true', { method: 'POST' });
+      created[name] = { name: result.name, checksum: result.checksum, size: result.size };
+    }
+  }));
   const collections = {};
-  for (const name of await collectionNames(json)) collections[name] = await countPoints(json, name);
-  return { name: created.name, checksum: created.checksum, size: created.size, directory: snapshots.slice('/data/'.length), collections };
+  for (const name of names) collections[name] = await countPoints(json, name);
+  const aliases = (await json('/aliases')).aliases.map((item) => ({ alias: item.alias_name, collection: item.collection_name }));
+  return { directory: snapshots.slice('/data/'.length), snapshots: created, collections, aliases };
+}
+// Recreates recorded aliases in a restored store, then reports what it holds.
+export async function qdrantAliases({ url, config, aliases }) {
+  const { json } = await qdrant(url, config);
+  if (aliases.length) await json('/collections/aliases', { method: 'POST', body: JSON.stringify({ actions: aliases.map((item) => ({ create_alias: { collection_name: item.collection, alias_name: item.alias } })) }) });
+  return { aliases: (await json('/aliases')).aliases.map((item) => ({ alias: item.alias_name, collection: item.collection_name })) };
 }
 
 const canonical = (value) => Array.isArray(value) ? value.map(canonical)
@@ -291,6 +296,7 @@ async function main(request) {
     case 'verify': return verify(request);
     case 'qdrant-snapshot': return qdrantSnapshot(request);
     case 'qdrant-inventory': return qdrantInventory(request);
+    case 'qdrant-aliases': return qdrantAliases(request);
     default: throw Error('Unknown snapshot command');
   }
 }

@@ -25,7 +25,7 @@ For each group, the controller:
 |---|---|---|
 | SQLite (Oathweave, Emberpath, HiveSkills, Hive Registry and any other) | SQLite online backup API in one read transaction, run in the pinned recovery image as the service user. Committed WAL frames are included; `-wal`, `-shm` and `-journal` files are never copied | The original journal mode is kept. `PRAGMA integrity_check` on the copy |
 | Redis | `BGSAVE` while the application is paused; the forked child holds that instant. Expiry stays absolute, as RDB stores it | Loaded by the product image with append-only off, then rewritten to the append-only files the suite runs with. Every saved key loaded or had reached its expiry |
-| Qdrant | Full storage snapshot through the API, every collection, written by Qdrant into its own snapshot directory | Restored with `--storage-snapshot` by the product image. Collections and exact point counts equal those at capture; a content digest of every point is recorded |
+| Qdrant | One snapshot per collection through the API, sixteen at a time, written by Qdrant into its own snapshot directory; aliases are recorded | Restored with `--snapshot` by the product image, aliases recreated. Collections, exact point counts and aliases equal those at capture; a content digest of every collection is recorded |
 | PostgreSQL (Magnus, Cindertrace, ChatterMost) | `pg_basebackup` over the local socket, with its WAL streamed | `pg_verifybackup`, then recovery by the product image to a cleanly shut down cluster, then `pg_checksums` |
 | Files (attachments, skill archives, audit logs, keys, certificates) | Copied while serving, then brought up to date while paused: an unchanged file is kept, a file that only grew gains its new tail, anything else is copied again | SHA-256 of every file, in the archive's `snapshot.json` |
 
@@ -60,10 +60,16 @@ verified; a stopped archive's receipt has no `mode`.
 ## Verification while serving
 
 Before the archive is written: each rebuilt store's own check (above), and the offline integrity
-checks the rehearsal runs (SQLite integrity, PostgreSQL checksums). After it is written: the
-archive is read back and the digest of its data must equal that of the snapshot, then the same
-archive checks as for a stopped archive (members, types and the installation binding). Only
-then is the archive renamed into place.
+checks the rehearsal runs (SQLite integrity, PostgreSQL checksums). Every staged file is hashed
+once, in parallel, for the receipt digest and the per-file manifest. After the archive is
+written it is read back: the whole compressed stream must check out and its data must hold
+exactly the staged files with their sizes. Then it is renamed into place and passes the same
+checks as a stopped archive (members, types and the installation binding). Rehearse and restore
+check every byte of the data against the receipt digest.
+
+Datastores preallocate sparse files, so a store's apparent size can be many times its real size
+(a vector store of 2 GB can appear as 50 GB). Archives keep the files sparse, and tree digests,
+including the ones rehearsals and restores check, hash files in parallel.
 
 ## Failure
 
@@ -87,7 +93,8 @@ data is on another filesystem, the data side needs room for one store snapshot.
 ## Limits
 
 - A pause lasts as long as its group's capture. For PostgreSQL that is the base backup, and for
-  Qdrant the storage snapshot: both grow with the size of the store. The receipt and the
+  Qdrant the collection snapshots: both grow with the store, Qdrant's mostly with the number of
+  collections. The receipt and the
   command output report the longest pause.
 - A datastore shared by two applications, or a datastore format the controller does not know,
   is refused before anything starts; use `--stopped` for it.

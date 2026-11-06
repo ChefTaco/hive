@@ -150,7 +150,7 @@ snapshot_qdrant_capture() {
   [[ -n "$config" && -f "$config/qdrant.yaml" ]] || die "Qdrant configuration is missing: $service"
   snapshot_helper "qdrant-$service" "$(snapshot_service "$service" '.services[$name].user')" --network "container:$container" --mount "type=bind,source=$config,target=/config,readonly"
   result=$(snapshot_run "qdrant-$service" '{"command":"qdrant-snapshot","url":"http://127.0.0.1:6333","config":"/config/qdrant.yaml"}') || die "Qdrant snapshot failed: $service"
-  jq -c --arg at "$(date -u +%FT%T.%3NZ)" '{method:"qdrant-storage-snapshot",name,checksum,directory,collections,capturedAt:$at}' <<< "$result" > "$snapshot_staging/work/$service/store.json"
+  jq -c --arg at "$(date -u +%FT%T.%3NZ)" '{method:"qdrant-collection-snapshots",directory,snapshots,collections,aliases,capturedAt:$at}' <<< "$result" > "$snapshot_staging/work/$service/store.json"
 }
 snapshot_postgres_capture() {
   local service=$1 container user
@@ -216,27 +216,48 @@ EOF
   jq -c --argjson verified "$result" '.+{verified:$verified}' "$snapshot_staging/work/$service/store.json" > "$snapshot_staging/work/$service/store.json.next"
   mv -T -- "$snapshot_staging/work/$service/store.json.next" "$snapshot_staging/work/$service/store.json"
 }
+# Collection snapshots that Qdrant wrote into its live directory, one path per line.
+snapshot_qdrant_files() {
+  local store=$1 service=$2 relative
+  relative=$(jq -r .directory "$store")
+  [[ "$relative" =~ ^[A-Za-z0-9._/-]+$ && "$relative" != *..* ]] || return 1
+  jq -r --arg base "$directory/data/$service/$relative" '.snapshots|to_entries[]|select((.key|test("^[A-Za-z0-9_.-]+$")) and (.value.name|test("^[A-Za-z0-9_.-]+$")))|$base+"/"+.key+"/"+.value.name' "$store"
+}
 snapshot_qdrant_verify() {
-  local service=$1 store name file image user config attempt inventory=''
+  local service=$1 store name image user config attempt inventory='' collection file index=0
   store="$snapshot_staging/work/$service/store.json"
   image=$(snapshot_service "$service" '.services[$name].image'); user=$(snapshot_service "$service" '.services[$name].user'); config=$(snapshot_mount "$service" /config)
-  file="$directory/data/$service/$(jq -er .directory "$store")/$(jq -er .name "$store")"
-  [[ $(jq -r .name "$store") =~ ^[A-Za-z0-9._-]+$ && $(jq -r .directory "$store") =~ ^[A-Za-z0-9._/-]+$ && "$file" != *..* && -f "$file" && ! -L "$file" ]] || die "Qdrant snapshot file is missing: $service"
-  mv -T -- "$file" "$snapshot_staging/work/$service/storage.snapshot"; rm -f -- "$file.checksum"
-  [[ $(digest "$snapshot_staging/work/$service/storage.snapshot") == "$(jq -er .checksum "$store")" ]] || die "Qdrant snapshot checksum differs: $service"
+  install -d -m 700 "$snapshot_staging/work/$service/snapshots"
+  local -a restore=()
+  # Each collection is restored from its own snapshot, through the product's startup restore.
+  local relative; relative=$(jq -r .directory "$store")
+  [[ "$relative" =~ ^[A-Za-z0-9._/-]+$ && "$relative" != *..* ]] || die "Qdrant snapshot directory differs: $service"
+  while IFS=$'\t' read -r collection file; do
+    file="$directory/data/$service/$relative/$collection/$file"
+    [[ -f "$file" && ! -L "$file" ]] || die "Qdrant snapshot file is missing: $service $collection"
+    mv -T -- "$file" "$snapshot_staging/work/$service/snapshots/$index.snapshot"; rm -f -- "$file.checksum"; rmdir -- "$(dirname -- "$file")" 2>/dev/null || true
+    [[ $(digest "$snapshot_staging/work/$service/snapshots/$index.snapshot") == "$(jq -er --arg c "$collection" '.snapshots[$c].checksum' "$store")" ]] || die "Qdrant snapshot checksum differs: $service $collection"
+    restore+=(--snapshot "/snapshots/$index.snapshot:$collection"); index=$((index + 1))
+  done < <(jq -r '.snapshots|to_entries[]|select((.key|test("^[A-Za-z0-9_.-]+$")) and (.value.name|test("^[A-Za-z0-9_.-]+$")))|[.key,.value.name]|@tsv' "$store")
+  [[ $index == $(jq '.snapshots|length' "$store") && $index == $(jq '.collections|length' "$store") ]] || die "Qdrant snapshots are incomplete: $service"
   mapfile -t entry < <(snapshot_service "$service" '.services[$name].entrypoint[]?')
   ((${#entry[@]})) || entry=(/qdrant/qdrant)
   mapfile -t command < <(snapshot_service "$service" '.services[$name].command[]?')
   name=$(snapshot_temporary --user "$user" --workdir /data --mount "type=bind,source=$snapshot_staging/data/$service,target=/data" --mount "type=bind,source=$config,target=/config,readonly" \
-    --mount "type=bind,source=$snapshot_staging/work/$service,target=/snapshots,readonly" --entrypoint "${entry[0]}" "$image" "${entry[@]:1}" "${command[@]}" --storage-snapshot /snapshots/storage.snapshot)
-  for attempt in $(seq 1 90); do
-    inventory=$(snapshot_tool "$user" '{"command":"qdrant-inventory","url":"http://127.0.0.1:6333","config":"/config/qdrant.yaml"}' --network "container:$name" --mount "type=bind,source=$config,target=/config,readonly" 2>/dev/null) && break
+    --mount "type=bind,source=$snapshot_staging/work/$service/snapshots,target=/snapshots,readonly" --entrypoint "${entry[0]}" "$image" "${entry[@]:1}" "${command[@]}" "${restore[@]}")
+  snapshot_helper "qdrant-verify-$service" "$user" --network "container:$name" --mount "type=bind,source=$config,target=/config,readonly"
+  for attempt in $(seq 1 120); do
+    inventory=$(snapshot_run "qdrant-verify-$service" '{"command":"qdrant-inventory","url":"http://127.0.0.1:6333","config":"/config/qdrant.yaml"}' 2>/dev/null) &&
+      jq -e --argjson inventory "$inventory" '(.collections|keys)==($inventory.collections|keys)' "$store" >/dev/null && break
     inventory=''; sleep 1
   done
-  [[ -n "$inventory" ]] || die "Qdrant snapshot did not restore: $service"
+  [[ -n "$inventory" ]] || die "Qdrant snapshots did not restore: $service"
+  local aliases
+  aliases=$(snapshot_run "qdrant-verify-$service" "$(jq -c '{command:"qdrant-aliases",url:"http://127.0.0.1:6333",config:"/config/qdrant.yaml",aliases}' "$store")") || die "Qdrant aliases could not be restored: $service"
+  docker rm -f "hive-snapshot-$archive-qdrant-verify-$service" >/dev/null
   timeout 120 docker stop --time 60 "$name" >/dev/null; docker rm "$name" >/dev/null
-  rm -f -- "$snapshot_staging/work/$service/storage.snapshot"
-  jq -e --argjson inventory "$inventory" '.collections == ($inventory.collections|map_values(.points))' "$store" >/dev/null || die "Qdrant collections or point counts differ after restore: $service"
+  rm -rf -- "$snapshot_staging/work/$service/snapshots"
+  jq -e --argjson inventory "$inventory" --argjson restored "$aliases" '.collections == ($inventory.collections|map_values(.points)) and (.aliases|sort) == ($restored.aliases|sort)' "$store" >/dev/null || die "Qdrant collections, point counts or aliases differ after restore: $service"
   jq -c --argjson inventory "$inventory" '.+{verified:$inventory}' "$store" > "$store.next"; mv -T -- "$store.next" "$store"
 }
 snapshot_postgres_verify() {
@@ -312,7 +333,9 @@ snapshot_group() {
 snapshot_space() {
   local data minimum need free
   minimum=$(jq -r '.minimumFreeMiB // 2048' <<< "$input")
-  data=$(du -sk -- "$directory/data" | cut -f1)
+  # A serving product may remove a file while du walks the tree: its total still counts.
+  data=$({ du -sk -- "$directory/data" 2>/dev/null || true; } | cut -f1)
+  [[ "$data" =~ ^[0-9]+$ ]] || die 'The data directory size could not be read'
   need=$(( data * 3 + minimum * 1024 ))
   free=$(df -Pk -- "$directory/backups" | awk 'NR==2 {print $4}')
   ((free >= need)) || die "Online backup needs $((need / 1024)) MiB free for its snapshot and archive; $((free / 1024)) MiB are available. Nothing was changed"
@@ -336,11 +359,10 @@ snapshot_finish() {
   for name in "$directory"/data/*/".hive-snapshot-$archive"; do [[ ! -d "$name" || -L "$name" ]] || rm -rf -- "$name"; done
   if [[ -n "$snapshot_staging" && -d "$snapshot_staging/work" ]]; then
     # A Qdrant snapshot that was never moved out of the live store is removed again.
+    local file
     for name in "$snapshot_staging"/work/*/store.json; do
-      [[ -f "$name" ]] && jq -e '.method=="qdrant-storage-snapshot"' "$name" >/dev/null 2>&1 || continue
-      local file
-      file="$directory/data/$(basename -- "$(dirname -- "$name")")/$(jq -r .directory "$name")/$(jq -r .name "$name")"
-      [[ "$file" == *..* || ! -f "$file" ]] || rm -f -- "$file" "$file.checksum"
+      [[ -f "$name" ]] && jq -e '.method=="qdrant-collection-snapshots"' "$name" >/dev/null 2>&1 || continue
+      while IFS= read -r file; do [[ ! -f "$file" || -L "$file" ]] || rm -f -- "$file" "$file.checksum"; done < <(snapshot_qdrant_files "$name" "$(basename -- "$(dirname -- "$name")")")
     done
   fi
   [[ -z "$snapshot_staging" ]] || rm -rf -- "$snapshot_staging"
@@ -402,14 +424,18 @@ snapshot_online() {
   [[ ! -d "$directory/agent-profiles" ]] || members+=(agent-profiles)
   [[ ! -f "$directory/data-formats.json" ]] || members+=(data-formats.json)
   local data_sha config_sha
-  data_sha=$(tree_digest "$snapshot_staging/data"); config_sha=$(tree_digest "$directory/config")
+  # One parallel pass hashes every staged file: the receipt digest and the file manifest.
+  tree_lines "$snapshot_staging/data" > "$snapshot_staging/work/files.sha256"
+  data_sha=$(sha256sum < "$snapshot_staging/work/files.sha256" | cut -d ' ' -f1); config_sha=$(tree_digest "$directory/config")
+  jq -Rs 'split("\u0000")|map(select(length>0)|{key:.[68:],value:.[0:64]})|from_entries' "$snapshot_staging/work/files.sha256" > "$snapshot_staging/archive/snapshot.json"
   # Streamed straight into the compressed archive: the staged snapshot is the only full copy.
   tar --sparse --hard-dereference -czf "$part.partial" -C "$snapshot_staging" data -C "$directory" "${members[@]}"
-  # The archive is read back while the suite serves: its data must be the staged snapshot.
-  [[ $(snapshot_archive_digest "$part.partial") == "$(snapshot_tree_digest "$snapshot_staging/data")" ]] || die 'Archive data differs from the snapshot'
+  # The archive is read back while the suite serves: the whole compressed stream must check
+  # out, and its data must hold exactly the staged files with their sizes. Rehearse and restore
+  # check every byte against the receipt digest.
+  [[ $(tar -tvzf "$part.partial" data | awk 'substr($0,1,1)=="-" {n++; s+=$3} END {print n+0, s+0}') == \
+    $(find "$snapshot_staging/data" -type f -printf '%s\n' | awk '{n++; s+=$1} END {print n+0, s+0}') ]] || die 'Archive data differs from the snapshot'
   mv -T -- "$part.partial" "$part"
-  jq -s 'map({key:.service,value:.manifest})|from_entries' < <(for name in "$snapshot_staging"/work/*/verify.json; do
-    jq -c --arg service "$(basename -- "$(dirname -- "$name")")" --slurpfile manifest "$(dirname -- "$name")/manifest.json" '{service:$service,manifest:$manifest[0]}' "$name"; done) > "$snapshot_staging/archive/snapshot.json"
   local stores
   stores=$(for name in "$snapshot_staging"/work/*/; do
     name=${name%/}; jq -nc --arg service "$(basename -- "$name")" --slurpfile verify "$name/verify.json" --slurpfile store <(cat "$name/store.json" 2>/dev/null || printf 'null') \
@@ -429,10 +455,4 @@ snapshot_online() {
   record complete
   snapshot_succeeded=true
   jq -c --arg archive "$archive" --argjson bytes "$(stat -c %s "$backup/state.tar.gz")" '{archive:$archive,host,mode,seconds:.snapshot.seconds,longestPauseSeconds:.snapshot.longestPauseSeconds,bytes:$bytes}' "$backup/receipt.json"
-}
-# The same digest of a file tree, from a directory or from the data member of an archive.
-snapshot_tree_digest() { (cd -- "$1" && find . -type f -print0 | xargs -0 -r sha256sum --zero) | LC_ALL=C sort -z | sha256sum | cut -d ' ' -f1; }
-snapshot_archive_digest() {
-  # shellcheck disable=SC2016
-  tar -xzf "$1" --wildcards 'data/*' --to-command='sh -c '\''printf "%s  ./%s\0" "$(sha256sum | cut -d " " -f1)" "${TAR_FILENAME#data/}"'\''' | LC_ALL=C sort -z | sha256sum | cut -d ' ' -f1
 }

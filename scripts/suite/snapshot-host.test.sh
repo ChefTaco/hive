@@ -58,9 +58,7 @@ case "$command" in
       esac
     done
     if [[ "$detached" == true ]]; then log "start $name"; printf 'container\n'; exit 0; fi
-    log "run ${args[*]: -1}"
-    # The one-off helper reads the restored vector store of a verification container.
-    if [[ "${args[*]: -1}" == *qdrant-inventory* ]]; then printf '{"collections":{"memories":{"points":3,"contentSHA256":"synthetic"}}}\n'; fi;;
+    log "run ${args[*]: -1}";;
   exec)
     [[ "$1" != -i ]] || shift
     target=$1; shift
@@ -76,11 +74,12 @@ case "$command" in
       case "$phase" in
         precopy) printf '{"files":1,"bytes":1}\n';;
         capture) [[ ! -f "$data/state.db" ]] || cp "$data/state.db" "$out/state.db"; printf '{"sqlite":0}\n';;
-        verify) printf '{"files":[],"sqlite":[]}' > "$work/manifest.json"; printf '{"files":1,"bytes":1,"sqlite":[]}\n';;
+        verify) printf '{"files":1,"bytes":1,"sqlite":[]}\n';;
         qdrant-snapshot)
-          live=$STUB_DATA/hivemem-qdrant/snapshots; mkdir -p "$live"; printf 'vectors' > "$live/full.snapshot"
-          jq -nc --arg sum "$(sha256sum "$live/full.snapshot" | cut -d ' ' -f1)" '{name:"full.snapshot",checksum:$sum,size:7,directory:"snapshots",collections:{memories:3}}';;
+          live=$STUB_DATA/hivemem-qdrant/snapshots/memories; mkdir -p "$live"; printf 'vectors' > "$live/memories-1.snapshot"
+          jq -nc --arg sum "$(sha256sum "$live/memories-1.snapshot" | cut -d ' ' -f1)" '{directory:"snapshots",snapshots:{memories:{name:"memories-1.snapshot",checksum:$sum,size:7}},collections:{memories:3},aliases:[]}';;
         qdrant-inventory) printf '{"collections":{"memories":{"points":3,"contentSHA256":"synthetic"}}}\n';;
+        qdrant-aliases) printf '{"aliases":[]}\n';;
       esac
       exit 0
     fi
@@ -145,7 +144,7 @@ backup online-a > "$temporary/out" 2> "$temporary/err" || { cat "$temporary/err"
 receipt=$directory/backups/online-a/receipt.json
 jq -e --arg uuid "$uuid" '.mode=="online" and .verified==true and .uuid==$uuid and (.snapshot.pauses|length)==3 and .snapshot.longestPauseSeconds>=0' "$receipt" >/dev/null || fail 'Online receipt is incomplete'
 jq -e '[.snapshot.pauses[].pause[0]]==["hivemem","magnus","oathweave"]' "$receipt" >/dev/null || fail 'The identity provider is not captured last'
-jq -e '.snapshot.stores["oathweave-redis"].store.method=="redis-bgsave" and .snapshot.stores["hivemem-qdrant"].store.method=="qdrant-storage-snapshot" and .snapshot.stores["magnus-postgres"].store.method=="pg_basebackup"' "$receipt" >/dev/null || fail 'A store snapshot method is missing'
+jq -e '.snapshot.stores["oathweave-redis"].store.method=="redis-bgsave" and .snapshot.stores["hivemem-qdrant"].store.method=="qdrant-collection-snapshots" and .snapshot.stores["magnus-postgres"].store.method=="pg_basebackup"' "$receipt" >/dev/null || fail 'A store snapshot method is missing'
 jq -e '.snapshot.stores["hivemem-qdrant"].store.verified.collections.memories.points==3 and .snapshot.stores["oathweave-redis"].store.verified.loaded==2' "$receipt" >/dev/null || fail 'A materialized store was not verified'
 [[ $(jq -r .sha256 "$receipt") == $(sha256sum "$directory/backups/online-a/state.tar.gz" | cut -d ' ' -f1) ]] || fail 'Archive checksum differs'
 [[ $(phase) == complete ]] || fail 'The transaction is not closed'
@@ -163,7 +162,7 @@ before 'pause magnus' 'pg_basebackup magnus-postgres'; before 'pg_basebackup mag
 tar -tzf "$directory/backups/online-a/state.tar.gz" > "$temporary/members"
 for member in data/oathweave/state.db data/oathweave-redis/dump.rdb data/oathweave-redis/appendonlydir/appendonly.aof.manifest data/magnus-postgres/pgdata/PG_VERSION compose.json receipt.json installation.json; do grep -qx "$member" "$temporary/members" || fail "Archive member is missing: $member"; done
 ! grep -q 'hive-snapshot\|storage.snapshot\|\.online-' "$temporary/members" || fail 'A temporary file was archived'
-[[ ! -e "$directory/data/hivemem-qdrant/snapshots/full.snapshot" && -z $(find "$directory/data/magnus-postgres" -name '.hive-snapshot-*') ]] || fail 'A store temporary stayed in the live data'
+[[ ! -e "$directory/data/hivemem-qdrant/snapshots/memories/memories-1.snapshot" && -z $(find "$directory/data/magnus-postgres" -name '.hive-snapshot-*') ]] || fail 'A store temporary stayed in the live data'
 [[ -z $(find "$directory/backups" -mindepth 1 -maxdepth 1 -name '.online-*') ]] || fail 'Staging was left behind'
 [[ -z $(ls "$STUB_STATE/paused") ]] || fail 'A service stayed paused'
 printf 'Passed: online backup captures each group in one pause, in order, with every store method.\n'
@@ -184,7 +183,7 @@ failed() {
   [[ -z $(find "$directory/backups" -mindepth 1 -maxdepth 1 -name '.online-*') ]] || fail 'Staging was left behind'
   [[ -z $(ls "$STUB_STATE/paused") ]] || fail 'A service stayed paused'
   [[ $(cd "$directory/backups" && find online-a stopped-a -type f -print0 | sort -z | xargs -0 sha256sum) == "$kept" ]] || fail 'Another archive changed or was removed'
-  [[ ! -e "$directory/data/hivemem-qdrant/snapshots/full.snapshot" && -z $(find "$directory/data/magnus-postgres" -name '.hive-snapshot-*') ]] || fail 'A store temporary stayed in the live data'
+  [[ ! -e "$directory/data/hivemem-qdrant/snapshots/memories/memories-1.snapshot" && -z $(find "$directory/data/magnus-postgres" -name '.hive-snapshot-*') ]] || fail 'A store temporary stayed in the live data'
   { calls | grep '^pause' || true; } | sed 's/^pause/unpause/' | while read -r expected; do calls | grep -qx "$expected" || fail "Not resumed: $expected"; done
 }
 # ---- Refusals before anything pauses. ----
@@ -222,3 +221,12 @@ grep -q 'could not be resumed' "$temporary/err" || fail 'An unresumed service wa
 pkill -f 'sleep 600; docker unpause' || true
 rm -f "$STUB_STATE"/paused/*
 printf 'Passed: a service that cannot be resumed is reported and holds the transaction.\n'
+
+# ---- The parallel tree digest equals the serial definition, with long and unusual names. ----
+tree=$temporary/tree; mkdir -p "$tree/a b" "$tree/$(printf 'x%.0s' {1..180})"
+for index in $(seq 1 1500); do printf '%s' "$index" > "$tree/$(printf 'x%.0s' {1..180})/segment-$index-$(printf 'y%.0s' {1..60})"; done
+printf 'one' > "$tree/a b/with space"; printf 'two' > "$tree/a b/back\\slash"; truncate -s 64M "$tree/sparse"
+source <(sed -n '/^tree_lines() {/,/^tree_digest()/p' "$ROOT/scripts/suite/host-runtime.sh")
+serial=$( (cd "$tree"; find . -type f -print0 | sort -z | xargs -0 -r sha256sum --zero) | sha256sum | cut -d ' ' -f1)
+for attempt in 1 2 3; do [[ $(tree_digest "$tree") == "$serial" ]] || fail 'The parallel tree digest differs from the serial one'; done
+printf 'Passed: the parallel tree digest equals the serial digest.\n'

@@ -80,10 +80,9 @@ test('files: unchanged are kept, appended gain their tail, replaced and rewritte
     assert.deepEqual(result, { sqlite: 0, kept: 2, appended: 1, copied: 3, removed: 1 });
     for (const name of ['blob.bin', 'logs/audit.jsonl', 'state.json', 'rewritten.txt', 'new.txt', 'orphan-journal']) assert.deepEqual(readFileSync(join(target, name)), readFileSync(join(source, name)), name);
     assert(!existsSync(join(target, 'gone.txt')));
-    const manifest = verify({ target, work });
-    assert.equal(manifest.files, 6);
-    const listed = JSON.parse(readFileSync(join(work, 'manifest.json'), 'utf8')).files;
-    assert.equal(listed.find((file) => file.path === 'logs/audit.jsonl').sha256, execFileSync('sha256sum', [join(source, 'logs', 'audit.jsonl')], { encoding: 'utf8' }).split(' ')[0]);
+    const verified = verify({ target, work });
+    assert.equal(verified.files, 6);
+    assert.equal(verified.bytes, 3 * 1024 * 1024 + 16 + 7 + 4 + 3 + 47);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

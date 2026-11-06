@@ -664,6 +664,8 @@ function upgradeSuite() {
   return { from, to: { version: c.upgrade.version, images: Object.fromEntries(Object.keys(c.upgrade.images).map((name) => [name, manifest.components[name].image])), revisions }, seconds: upgraded.seconds, controller: 'this tree', emberpathCredentialAddedByUpgrade: !/^EMBERPATH_HIVEMEM_CLIENT_ID=/m.test(before) && /^EMBERPATH_HIVEMEM_CLIENT_ID=/m.test(readFileSync(join(suite, 'config/emberpath.env'), 'utf8')) };
 }
 
+// A failed run stops its clients too, so the process can exit.
+let stopTraffic = null;
 async function main() {
   const startedAt = new Date().toISOString();
   const report = { schema: 1, host: c.host, installation: c.installation, startedAt, productionContacted: false };
@@ -713,6 +715,7 @@ async function main() {
       report.suiteMemoryWorker = productionWorker();
       report.pendingAtCapture = pendingJobs(nativeState.address, trust, c.liveTraffic.pendingJobs ?? 5);
       traffic = startTraffic(trust);
+      stopTraffic = traffic.stop;
     }
 
     say('cutover' + (traffic ? ' with live traffic' : ''));
@@ -883,6 +886,7 @@ async function main() {
   } finally {
     for (const name of ['router', 'iam', 'memory', 'skills']) { const log = spawnSync('docker', ['logs', '--tail', '80', prefix + '-native-' + name], { encoding: 'utf8' }); if (log.status === 0) put('log-native-' + name + '.txt', log.stdout + log.stderr); }
     for (const [label, file] of [['suite', join(suite, 'compose.json')], ['fork', join(fork, 'compose.json')]]) { if (existsSync(file)) { const log = spawnSync('docker', ['compose', '-f', file, 'logs', '--no-color', '--tail', '80'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); put('log-' + label + '.txt', log.stdout + log.stderr); } }
+    if (report.result !== 'passed') await stopTraffic?.();
     report.finishedAt = new Date().toISOString();
     put('report.json', report);
     if (!c.keepRunningOnFailure || report.result === 'passed') cleanup();
