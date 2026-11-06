@@ -13,7 +13,8 @@ hive_runtime_files() {
     scripts/suite/registry.sh scripts/suite/registry-host.sh \
     scripts/suite/memory-credential.sh scripts/suite/memory-credential-host.sh \
     scripts/suite/magnus-gateway.sh scripts/suite/magnus-gateway-host.sh \
-    scripts/suite/migrate-native.sh scripts/suite/migrate-native-host.sh scripts/suite/migrate-native-data.mjs scripts/suite/set-admin-password.sh
+    scripts/suite/migrate-native.sh scripts/suite/migrate-native-host.sh scripts/suite/migrate-native-data.mjs scripts/suite/set-admin-password.sh \
+    scripts/suite/cindertrace.sh scripts/suite/cindertrace-host.sh
 }
 hive_controller_digest() {
   local file
@@ -71,7 +72,7 @@ hive_setup_hosts_ready() {
 
 hive_usage() {
   cat <<'EOF'
-Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh]
+Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector]
   --config FILE          Installation JSON (required for unattended use)
   --release VERSION      Override the exact release version
   --manifest FILE        Signed release manifest (default releases/VERSION.json)
@@ -92,6 +93,10 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|re
   --help                 Show this help
 
 init prepares protected configuration for an explicitly fresh installation.
+cindertrace-collector provisions the credential a Cindertrace collector signs events with:
+cindertrace-collector add ID --sources SOURCE[,SOURCE]|list|remove ID. The credential is generated
+on the Cindertrace host into an owner-only file and never printed; Cindertrace ingests while a
+collector exists. See deployment/FULL.md.
 tls-refresh installs a renewed console certificate into a fresh installation: it checks the files at
 bootstrap.certificateFile and privateKeyFile, copies them into the ingress, records them and
 restarts only the ingress. Without --release it uses this checkout's own release. A migrated
@@ -451,9 +456,9 @@ hive_host() {
     --arg action "${HIVE_HOST_ACTION:-}" --arg operation "${HIVE_OPERATION:-}" --arg archive "${HIVE_ARCHIVE:-}" --argjson allowMigrations "${HIVE_ALLOW_MIGRATIONS:-false}" \
     --argjson serviceUsers "$bootstrap_users" --argjson images "$bootstrap_images" --argjson identityIds "${HIVE_BOOTSTRAP_IDENTITIES:-null}" --arg ingressTemplate "${HIVE_BOOTSTRAP_INGRESS:-}" --arg integrityScript "$(base64 -w0 "$HIVE_ROOT/scripts/suite/check-data.mjs")" --arg snapshotTool "${HIVE_SNAPSHOT_TOOL:-}" \
     --arg skillsManifest "${HIVE_SKILLS_MANIFEST:-}" --arg skillsSignature "${HIVE_SKILLS_SIGNATURE:-}" --arg skillsTrust "${HIVE_SKILLS_TRUST:-}" --arg skillsTokenSHA "${HIVE_SKILLS_TOKEN_SHA:-}" \
-    --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" --argjson registry "${HIVE_REGISTRY_INPUT:-null}" --argjson memoryCredential "${HIVE_MEMORY_CREDENTIAL_INPUT:-null}" --argjson magnusTrust "${HIVE_MAGNUS_TRUST_INPUT:-null}" \
+    --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" --argjson registry "${HIVE_REGISTRY_INPUT:-null}" --argjson memoryCredential "${HIVE_MEMORY_CREDENTIAL_INPUT:-null}" --argjson magnusTrust "${HIVE_MAGNUS_TRUST_INPUT:-null}" --argjson cindertrace "${HIVE_CINDERTRACE_INPUT:-null}" \
     --arg dataTool "${HIVE_NATIVE_DATA_TOOL:-}" --arg adminScript "${HIVE_NATIVE_ADMIN_SCRIPT:-}" --argjson reviewedLinks "${HIVE_NATIVE_LINKS:-null}" --arg tokenDigest "${HIVE_NATIVE_TOKEN_DIGEST:-}" --argjson tokenTtlSeconds "${HIVE_NATIVE_TOKEN_TTL:-null}" \
-    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,memoryCredential:$memoryCredential,magnusTrust:$magnusTrust,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,snapshotTool:$snapshotTool,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,nativeMigration:(.nativeMigration // null),dataTool:$dataTool,adminScript:$adminScript,reviewedLinks:$reviewedLinks,tokenDigest:$tokenDigest,tokenTtlSeconds:$tokenTtlSeconds,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
+    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,memoryCredential:$memoryCredential,magnusTrust:$magnusTrust,cindertrace:$cindertrace,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,snapshotTool:$snapshotTool,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,nativeMigration:(.nativeMigration // null),dataTool:$dataTool,adminScript:$adminScript,reviewedLinks:$reviewedLinks,tokenDigest:$tokenDigest,tokenTtlSeconds:$tokenTtlSeconds,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]}' "$HIVE_CONFIG")
   sudo_file=$(hive_sudo_file "$host")
   if [[ "$target" == local ]]; then
     printf '%s\n' "$payload" | bash -c "$script"
@@ -549,7 +554,7 @@ hive_transfer() {
 hive_main() {
   local command=install confirmed=false interactive=true hold_on_failure=false
   HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_ALLOW_MIGRATIONS=false HIVE_RELAX_AUTH_LIMITS=false HIVE_BACKUP_STOPPED=false
-  HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY=''
+  HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY='' HIVE_CINDERTRACE_SOURCES=''
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
   HIVE_RELEASE_SUMMARY='' HIVE_REGISTRY_FILE='' HIVE_REGISTRY_ORIGINAL_CONFIG='' HIVE_REGISTRY_TEMPORARY='' HIVE_OPERATION=''
   local -a registry_arguments=() trust_arguments=()
@@ -563,6 +568,10 @@ hive_main() {
       --non-interactive) interactive=false; shift;;
       --hold-on-failure) hold_on_failure=true; shift;;
       --stopped) [[ "$command" == backup ]] || hive_die '--stopped applies only to backup'; HIVE_BACKUP_STOPPED=true; shift;;
+      --sources)
+        [[ "$command" == cindertrace-collector ]] || hive_die '--sources applies only to cindertrace-collector'
+        (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
+        HIVE_CINDERTRACE_SOURCES=$2; shift 2;;
       --file)
         [[ "$command" == registry ]] || hive_die '--file applies only to registry'
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
@@ -580,14 +589,14 @@ hive_main() {
       *)
         [[ "$1" != --* ]] || hive_die 'Unknown option'
         case "$command" in
-          registry|migrate-native) registry_arguments+=("$1");;
+          registry|migrate-native|cindertrace-collector) registry_arguments+=("$1");;
           magnus-trust) trust_arguments=("$1" "${trust_arguments[@]}");;
           *) hive_die 'Unknown option';;
         esac
         shift;;
     esac
   done
-  case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh) ;; *) hive_die 'Unknown command';; esac
+  case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector) ;; *) hive_die 'Unknown command';; esac
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
     case "$command" in plan|install|upgrade) ;; *) hive_die '--relax-auth-limits applies only to plan, install and upgrade';; esac
   fi
@@ -649,6 +658,7 @@ hive_main() {
     magnus-trust) hive_magnus_trust "${trust_arguments[@]}"; return;;
     migrate-native) hive_native_migrate "${registry_arguments[0]:-}" "$confirmed" "$hold_on_failure"; return;;
     tls-refresh) hive_need openssl; hive_need sha256sum; hive_manifest; hive_tls_refresh; return;;
+    cindertrace-collector) hive_need openssl; hive_need sha256sum; hive_manifest; hive_cindertrace_collector "${registry_arguments[@]}"; return;;
   esac
   hive_need openssl; hive_need sha256sum; hive_manifest
   hive_plan

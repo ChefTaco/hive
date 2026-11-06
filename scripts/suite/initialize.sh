@@ -106,4 +106,7 @@ hive_install_summary() {
   if jq -e '.bootstrap!=null and .console!=null' "$HIVE_CONFIG" >/dev/null; then
     printf '  Renewed console certificate: ./hive.sh tls-refresh --config %s\n' "$config"
   fi
+  if jq -e '.components.cindertrace!=null' "$HIVE_CONFIG" >/dev/null; then
+    printf '  Security events: ./hive.sh cindertrace-collector add ID --sources tailscale --config %s\n' "$config"
+  fi
 }

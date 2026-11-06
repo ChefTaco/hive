@@ -15,6 +15,12 @@ All notable changes to this project are documented in this file. The format is b
   credentials only, and the client address in `X-Forwarded-For`. Before this, a host agent on a
   fresh single-host installation had no route to Magnus, so the full profile's fleet could not
   have nodes. See [Magnus host agents](deployment/FULL.md#magnus-host-agents).
+- `hive.sh cindertrace-collector add ID --sources SOURCE[,SOURCE]`, `list` and `remove ID`
+  provision the credentials Cindertrace collectors sign events with. A credential is generated
+  on the Cindertrace host into an owner-only file and never printed; Cindertrace ingests while a
+  collector exists, and only Cindertrace is recreated. Before this, a fresh installation could
+  not receive security events without editing its digest-checked environment. See
+  [sending security events](deployment/FULL.md#sending-security-events-to-cindertrace).
 - `npm run check:release-docs` fails when an install example names anything but the newest
   signed release.
 - CI runs the ingress transport acceptance, which now proves the agent port's allowlist, that
@@ -33,8 +39,6 @@ All notable changes to this project are documented in this file. The format is b
   "Opt-in native agent runtime" offers runtimes the release has no artifacts for.
 - A `hive.sh` command that registers a Magnus node and writes its agent environment.
 - Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
-- Provisioning a Cindertrace collector credential and enabling ingestion from `hive.sh`; a
-  fresh installation receives no security events today.
 - An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
 
 ## [2.0.3] - 2026-11-06

@@ -159,9 +159,8 @@ as the key in its configuration directory is. Restrict those backups accordingly
 
 Dispatch, ingestion, retention and notification integrations in fresh Cindertrace
 configuration start disabled until the operator reviews their product-owned
-settings. `hive.sh` cannot yet provision a Cindertrace collector credential or turn ingestion
-on, and the configuration files under `config/` are digest-checked, so a fresh installation
-receives no security events until that follow-up ships. Migration rehearsals additionally enforce each product's isolated
+settings. Ingestion starts with the first collector: see
+[sending security events to Cindertrace](#sending-security-events-to-cindertrace). Migration rehearsals additionally enforce each product's isolated
 read-only mode. Restored Magnus does not consume queued work or contact agents;
 restored ChatterMost normally refuses logins and WebSocket upgrades. The separate
 coordinated authentication copy below explicitly enables its volatile, read-only
@@ -233,6 +232,48 @@ Magnus calls the agent back on port 4100 of `HOST_FQDN`, so that name must resol
 Magnus container and present the agent's certificate. See the
 [agent README](https://github.com/ChefTaco/magnus/blob/HEAD/packages/agent/README.md) for the
 unprivileged mode and every setting.
+
+## Sending security events to Cindertrace
+
+A fresh Cindertrace ingests nothing until a collector exists. Each collector signs its events
+with its own credential and may send only the sources it is allowed. Create one with `hive.sh`,
+from the release checkout:
+
+```bash
+./hive.sh cindertrace-collector add edge --sources tailscale --config FILE
+```
+
+The credential is generated on the Cindertrace host into
+`config/.credentials/cindertrace-collectors/edge` (mode 0600) and is never printed or passed
+as an argument. The command turns ingestion on, records the change for later `install`,
+`upgrade` and backup runs, and recreates only Cindertrace. `list` shows each collector, its
+sources and credential file; `remove ID` revokes one, and removing the last turns ingestion
+off. Sources are `unifi_dns`, `unifi_ids`, `netflow`, `wazuh`, `tailscale`, `magnus`, `hive`
+and `chattermost`. Collectors survive upgrades: they live in the installation, not the release.
+
+Collectors send to `https://hive.example.com/api/v1/security-fusion/ingest/events` through the
+console origin. Cindertrace's own collector, `node services/security-collector/dist/index.js`
+in the Cindertrace image the release pins, reads `CINDERTRACE_API_URL=https://hive.example.com`,
+`SECURITY_FUSION_COLLECTOR_ID=edge` and `SECURITY_FUSION_INGEST_SECRET` from that file, plus its
+source settings, such as `TAILSCALE_LOCAL_ENABLED=true`; see Cindertrace's
+[integrations](https://github.com/ChefTaco/cindertrace/blob/HEAD/docs/INTEGRATIONS.md).
+
+Any client can send a batch the same way. The signature is HMAC-SHA256, keyed with the
+credential, over `COLLECTOR_ID.TIMESTAMP.NONCE.BODY`. A test event from the Cindertrace host:
+
+```bash
+secret=/opt/hive/config/.credentials/cindertrace-collectors/edge
+now=$(date -u +%Y-%m-%dT%H:%M:%S.000Z) id=test-$(date +%s) nonce=$(openssl rand -hex 16)
+body=$(jq -cn --arg now "$now" --arg id "$id" '{schemaVersion:"1.0",collectorId:"edge",sentAt:$now,
+  events:[{schemaVersion:"1.0",eventId:$id,source:"tailscale",sourceEventId:$id,kind:"device.login",
+  observedAt:$now,severity:"medium",confidence:0.9,summary:"Test event",entities:[],attributes:{},evidence:[]}]}')
+signature=$(printf '%s' "edge.$now.$nonce.$body" | openssl dgst -sha256 -hmac "$(cat "$secret")" -r | cut -d ' ' -f1)
+curl -sS -H 'Content-Type: application/json' -H "x-security-collector-id: edge" \
+  -H "x-security-timestamp: $now" -H "x-security-nonce: $nonce" -H "x-security-signature: $signature" \
+  --data "$body" https://hive.example.com/api/v1/security-fusion/ingest/events
+```
+
+It answers `202` with the stored count, and the event appears under **Cindertrace > Events**.
 
 ## Developer rehearsal
 
