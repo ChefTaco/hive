@@ -90,6 +90,7 @@
     "test:suite:containers": "node scripts/suite/sso-roundtrip.mjs --containers",
     "test:suite:lifecycle": "node scripts/suite/lifecycle-roundtrip.mjs",
     "test:suite:online-backup": "node scripts/suite/online-backup-roundtrip.mjs",
+    "test:suite:online-backup:sudo": "bash scripts/suite/online-backup-sudo.sh",
     "test:suite:adapters": "node scripts/suite/adapters-roundtrip.mjs",
     "test:suite:multi-host": "node scripts/suite/multi-host-roundtrip.mjs",
     "test:suite:core": "node scripts/suite/core-roundtrip.mjs",

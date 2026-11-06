@@ -9,6 +9,8 @@
 // an earlier controller (--old-controller DIR), still rehearse and restore; a failed backup
 // leaves every service serving, keeps no archive, and removes no other archive.
 // Usage: online-backup-roundtrip.mjs [--old-controller EXTRACTED_RELEASE] [--keep]
+// Inside scripts/suite/sudo-host.sh the host side runs as root through sudo -S over SSH, as on a
+// production host (npm run test:suite:online-backup:sudo).
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
@@ -18,6 +20,7 @@ import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fixtureCatalog, hiveRegistryComponent } from './suite-catalog.mjs';
 import { startRegistryImage } from './registry-image-fixture.mjs';
+import { serviceGid, serviceUid, serviceUser, startSudoTarget, sudoHost } from './sudo-target.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const argument = (name) => { const index = process.argv.indexOf(name); return index > 0 ? process.argv[index + 1] : undefined; };
@@ -26,14 +29,17 @@ const keep = process.argv.includes('--keep');
 const temp = mkdtempSync(join(tmpdir(), 'hive-online-backup-'));
 const owned = join(temp, 'installation');
 const id = 'online-' + randomBytes(4).toString('hex');
-const user = `${process.getuid()}:${process.getgid()}`;
+const user = serviceUser;
 const environment = Object.fromEntries(['PATH', 'LANG', 'LC_ALL', 'TZ'].filter((k) => process.env[k]).map((k) => [k, process.env[k]]));
 const execute = (cmd, args, options = {}) => execFileSync(cmd, args, { encoding: 'utf8', env: environment, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, ...options });
 const docker = (...args) => execute('docker', args).trim();
 const put = (path, value, mode = 0o600) => { writeFileSync(path, typeof value === 'string' ? value : JSON.stringify(value, null, 2)); chmodSync(path, mode); };
 const sha = (value) => createHash('sha256').update(value).digest('hex');
 const say = (text) => console.log(new Date().toISOString().slice(11, 19) + ' ' + text);
-assert.notEqual(process.getuid(), 0, 'Run acceptance as an unprivileged operator with Docker access');
+assert(sudoHost || process.getuid() !== 0, 'Run acceptance as an unprivileged operator with Docker access');
+// The host entry: local as the operator, or production-like through SSH and sudo.
+const target = sudoHost ? await startSudoTarget(join(temp, 'sudo-target')) : null;
+const hostEntry = target ? { target: target.target, sshConfig: target.sshConfig, sudoPasswordFile: target.sudoPasswordFile } : { target: 'local' };
 
 const release = JSON.parse(readFileSync(join(root, 'releases/2.0.1.json'), 'utf8'));
 const images = { node: 'node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205', redis: release.components['oathweave-redis'].image, qdrant: release.components['hivemem-qdrant'].image, postgres: release.components['magnus-postgres'].image };
@@ -100,6 +106,9 @@ try {
   put(join(owned, 'config', 'ledger.env'), 'LEDGER=fixture\n');
   put(join(owned, 'config', 'ledger-postgres', 'password'), secrets.postgres);
   put(join(owned, 'config', 'probe-redis.env'), 'FIXTURE=redis\n'); put(join(owned, 'config', 'probe-qdrant.env'), 'FIXTURE=qdrant\n'); put(join(owned, 'config', 'ledger-postgres.env'), 'FIXTURE=postgres\n');
+  // The fixture's own service configuration belongs to the service account, as an operator would
+  // prepare it; everything else on the host is created by the host side itself.
+  if (sudoHost) execute('chown', ['-R', serviceUser, join(owned, 'config')]);
   execute('openssl', ['genpkey', '-algorithm', 'ED25519', '-out', join(temp, 'publisher.key')]);
   execute('openssl', ['pkey', '-in', join(temp, 'publisher.key'), '-pubout', '-out', join(temp, 'publisher.pub')]);
   const datastore = (name, format) => ({ ...release.components[name], kind: 'datastore', storageFormat: format, readableFormats: [format], catalog: fixtureCatalog(name), service: { ...release.components[name].service, user, networks: ['default'] } });
@@ -119,7 +128,7 @@ try {
   put(manifestFile, manifest);
   execute('openssl', ['pkeyutl', '-sign', '-inkey', join(temp, 'publisher.key'), '-rawin', '-in', manifestFile, '-out', manifestFile + '.sig']);
   const component = (name, env = true) => ({ host: 'control', configDirectory: join(owned, 'config', name), ...(env ? { envFile: join(owned, 'config', name + '.env') } : {}) });
-  const config = { schema: 1, installation: id, release: '0.1.0', profile: 'custom', origin: 'https://console.example.com', hosts: { control: { target: 'local', directory: owned } },
+  const config = { schema: 1, installation: id, release: '0.1.0', profile: 'custom', origin: 'https://console.example.com', hosts: { control: { ...hostEntry, directory: owned } },
     components: { 'hive-registry': { host: 'control', envFile: join(owned, 'config', 'hive-registry.env'), configDirectory: join(owned, 'config', 'hive-registry') }, probe: component('probe'), 'probe-redis': component('probe-redis'), 'probe-qdrant': component('probe-qdrant'), ledger: component('ledger'), 'ledger-postgres': component('ledger-postgres') },
     agents: [], inference: [] };
   const configPath = join(temp, 'installation.json');
@@ -216,7 +225,7 @@ try {
       let points;
       for (let attempt = 0; attempt < 60 && !points; attempt++) { try { points = JSON.parse(docker('run', '--rm', '--network', 'container:' + name + '-qdrant', images.node, 'node', '--input-type=module', '-e', `const h={'api-key':${JSON.stringify(secrets.qdrant)},'Content-Type':'application/json'};const c=await (await fetch('http://127.0.0.1:6333/collections/ticks/points/count',{method:'POST',headers:h,body:'{"exact":true}'})).json();let max=0,offset=null;do{const p=await (await fetch('http://127.0.0.1:6333/collections/ticks/points/scroll',{method:'POST',headers:h,body:JSON.stringify({limit:1000,offset,with_payload:true})})).json();for(const x of p.result.points)max=Math.max(max,x.payload.n);offset=p.result.next_page_offset;}while(offset!==null&&offset!==undefined);console.log(JSON.stringify({count:c.result.count,n:max}))`)); } catch { execute('sleep', ['0.5']); } }
       result.qdrant = points;
-      run(name + '-postgres', ['--tmpfs', `/var/run/postgresql:uid=${process.getuid()},gid=${process.getgid()},mode=700`, '-e', 'PGDATA=/data/pgdata', '--mount', `type=bind,source=${join(data, 'ledger-postgres')},target=/data`, images.postgres]);
+      run(name + '-postgres', ['--tmpfs', `/var/run/postgresql:uid=${serviceUid},gid=${serviceGid},mode=700`, '-e', 'PGDATA=/data/pgdata', '--mount', `type=bind,source=${join(data, 'ledger-postgres')},target=/data`, images.postgres]);
       let rows;
       for (let attempt = 0; attempt < 120 && !rows; attempt++) { try { rows = docker('exec', name + '-postgres', 'psql', '-h', '/var/run/postgresql', '-U', 'ledger', '-d', 'ledger', '-At', '-c', 'SELECT count(*), coalesce(max(n),0) FROM ticks').split('|').map(Number); } catch { execute('sleep', ['0.5']); } }
       result.postgres = { rows: rows[0], n: rows[1] };
@@ -346,6 +355,7 @@ try {
   if (!keep) for (const file of projects) try { execute('docker', ['compose', '-f', file, 'down', '--timeout', '10']); } catch {}
   for (const line of spawnSync('docker', ['ps', '-aq', '--filter', 'name=' + id], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean)) spawnSync('docker', ['rm', '-f', line], { stdio: 'ignore' });
   registryImage?.stop();
+  target?.stop();
   if (passed && !keep) rmSync(temp, { recursive: true, force: true });
   else console.error('Private online-backup evidence retained at ' + temp);
 }

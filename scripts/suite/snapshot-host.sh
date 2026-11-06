@@ -227,7 +227,9 @@ snapshot_qdrant_verify() {
   local service=$1 store name image user config attempt inventory='' collection file index=0
   store="$snapshot_staging/work/$service/store.json"
   image=$(snapshot_service "$service" '.services[$name].image'); user=$(snapshot_service "$service" '.services[$name].user'); config=$(snapshot_mount "$service" /config)
-  install -d -m 700 "$snapshot_staging/work/$service/snapshots"
+  # Mounted into the product as its service user: owned by that user, private to it. The host
+  # side runs as root on a production host, where a directory it creates is root's.
+  install -d -m 700 -o "${user%%:*}" -g "${user##*:}" "$snapshot_staging/work/$service/snapshots"
   local -a restore=()
   # Each collection is restored from its own snapshot, through the product's startup restore.
   local relative; relative=$(jq -r .directory "$store")

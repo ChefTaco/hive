@@ -113,6 +113,11 @@ jobs:
       - name: Ingress upstream keep-alive regression
         run: npm run test:suite:ingress-keepalive
 
+      - name: Online backup with the host side as root through sudo
+        if: matrix.node == '24.22.1'
+        timeout-minutes: 25
+        run: npm run test:suite:online-backup:sudo
+
       - name: Real Qdrant process recovery and bounded corpus drill
         timeout-minutes: 8
         env:
