@@ -7,16 +7,19 @@
 #       USER (default: the sudo caller) owns both files, so it can run hive.sh; the key is 0600.
 #   ./scripts/console-certificate.sh check --cert FILE --key FILE [--name NAME]
 #       Check a certificate and key the way hive.sh does before it uses them.
-#   sudo ./scripts/console-certificate.sh renew --config FILE [--owner USER] [--no-tailscale]
+#   sudo ./scripts/console-certificate.sh renew --config FILE [--hive DIR] [--no-tailscale]
 #       After installation: refresh the Tailscale certificate at the configured paths (skipped
-#       with --no-tailscale, for a certificate you renew some other way), then copy it into the
-#       installation's ingress and restart only the ingress when it changed.
-#   sudo ./scripts/console-certificate.sh schedule --config FILE [--owner USER] [--no-tailscale]
-#       Run `renew` weekly from a systemd timer (hive-console-certificate.timer). Re-run it to
-#       update the schedule; `systemctl disable --now hive-console-certificate.timer` stops it.
+#       with --no-tailscale, for a certificate you renew some other way), then run
+#       `hive.sh tls-refresh`, which installs it into the ingress and restarts only the ingress
+#       when it changed. It runs as the account that owns FILE.
+#   sudo ./scripts/console-certificate.sh schedule --config FILE [--hive DIR] [--no-tailscale]
+#       Run `renew` weekly from a systemd timer (hive-console-certificate.timer). Re-run it from
+#       the new checkout after each upgrade; `systemctl disable --now
+#       hive-console-certificate.timer` stops it.
 #
-# FILE is the installation JSON that `./hive.sh` setup printed (for example
-# ~/.config/hive/ID/installation.json). Run renew and schedule on the console host itself.
+# FILE is the installation JSON that `./hive.sh` setup wrote (for example
+# ~/.config/hive/ID/installation.json). DIR is the release checkout whose hive.sh runs the
+# refresh (default: the checkout this script is in). Run renew and schedule on the console host.
 set -Eeuo pipefail
 umask 077
 
@@ -25,7 +28,7 @@ say() { printf '%s\n' "$*"; }
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; }
 
 command=${1:-}; [[ -n "$command" ]] || { usage >&2; exit 2; }; shift
-dir=/etc/hive/tls owner=${SUDO_USER:-} name='' cert='' key='' config='' use_tailscale=true
+dir=/etc/hive/tls owner=${SUDO_USER:-} name='' cert='' key='' config='' use_tailscale=true hive=''
 while (($#)); do
   case "$1" in
     --dir) dir=${2:?--dir needs a value}; shift;;
@@ -34,6 +37,7 @@ while (($#)); do
     --cert) cert=${2:?--cert needs a value}; shift;;
     --key) key=${2:?--key needs a value}; shift;;
     --config) config=${2:?--config needs a value}; shift;;
+    --hive) hive=${2:?--hive needs a value}; shift;;
     --no-tailscale) use_tailscale=false;;
     -h|--help) usage; exit 0;;
     *) die "unknown option: $1";;
@@ -102,11 +106,17 @@ installation() {
     die "$config: not a fresh installation with a console (needs console, origin and bootstrap certificate files)"
   [[ $(jq -r '.hosts[.console.host].target' "$config") == local ]] ||
     die 'the console host is reached over SSH; run this script on the console host with a copy of the installation JSON whose console host target is local'
-  directory=$(jq -r '.hosts[.console.host].directory' "$config")
   source_certificate=$(jq -r .bootstrap.certificateFile "$config")
   source_key=$(jq -r .bootstrap.privateKeyFile "$config")
   hostname=$(jq -r '.origin|sub("^https://";"")|split(":")[0]' "$config")
-  ingress_config=$(jq -r '.components.ingress.configDirectory' "$config")
+}
+
+# The release checkout whose hive.sh installs the certificate: --hive, or the one holding this script.
+release_checkout() {
+  [[ -n "$hive" ]] || hive=$(dirname -- "$(dirname -- "$(realpath -- "$0")")")
+  hive=$(realpath -- "$hive")
+  [[ -x "$hive/hive.sh" && -f "$hive/scripts/console-certificate.sh" ]] || die "$hive is not a Hive release checkout: pass --hive DIR"
+  grep -q 'tls-refresh' "$hive/scripts/suite/controller.sh" || die "$hive has no hive.sh tls-refresh: use the checkout of release 2.0.2 or later"
 }
 
 case "$command" in
@@ -127,45 +137,33 @@ case "$command" in
     check_pair "$cert" "$key" "$name"
     say "OK: $cert${name:+ is valid for $name,} matches $key and is valid until $(expiry "$cert").";;
   renew)
-    need_root; installation
-    [[ -n "$owner" ]] || owner=$(stat -c %U "$source_key")
-    resolve_owner
-    if [[ "$use_tailscale" == true ]]; then name=$hostname; tailscale_issue "$source_certificate" "$source_key" >/dev/null; fi
-    check_pair "$source_certificate" "$source_key" "$hostname"
-    [[ -f "$ingress_config/console.crt" && -f "$ingress_config/console.key" ]] || die "$ingress_config has no console certificate yet; finish ./hive.sh install first"
-    if cmp -s "$source_certificate" "$ingress_config/console.crt" && cmp -s "$source_key" "$ingress_config/console.key"; then
-      say "Console certificate is current (valid until $(expiry "$ingress_config/console.crt")); nothing changed."
-      exit 0
+    need_root; installation; release_checkout
+    account=$(stat -c %U "$config")
+    if [[ "$use_tailscale" == true ]]; then
+      [[ -n "$owner" ]] || owner=$(stat -c %U "$source_key")
+      resolve_owner; name=$hostname
+      tailscale_issue "$source_certificate" "$source_key" >/dev/null
     fi
-    # Keep the ownership the installer gave the ingress copies; replace each file atomically.
-    uid=$(stat -c %u "$ingress_config/console.key"); gid=$(stat -c %g "$ingress_config/console.key")
-    install -m 0600 -o "$uid" -g "$gid" "$source_certificate" "$ingress_config/console.crt.new"
-    install -m 0600 -o "$uid" -g "$gid" "$source_key" "$ingress_config/console.key.new"
-    cp -p -- "$ingress_config/console.crt" "$ingress_config/console.crt.previous"
-    cp -p -- "$ingress_config/console.key" "$ingress_config/console.key.previous"
-    mv -f -- "$ingress_config/console.key.new" "$ingress_config/console.key"
-    mv -f -- "$ingress_config/console.crt.new" "$ingress_config/console.crt"
-    docker compose -f "$directory/compose.json" restart ingress >/dev/null
-    say "Installed the renewed console certificate (valid until $(expiry "$ingress_config/console.crt")) and restarted the ingress."
-    say "The previous files are kept as console.crt.previous and console.key.previous in $ingress_config.";;
+    check_pair "$source_certificate" "$source_key" "$hostname"
+    # hive.sh keeps the installation's protected files owned by the account that installed it.
+    if [[ "$account" == root ]]; then "$hive/hive.sh" tls-refresh --config "$config"
+    else runuser -u "$account" -- "$hive/hive.sh" tls-refresh --config "$config"; fi;;
   schedule)
-    need_root; installation
-    [[ -n "$owner" ]] || owner=$(stat -c %U "$source_key")
-    resolve_owner
+    need_root; installation; release_checkout
     command -v systemctl >/dev/null && [[ -d /run/systemd/system ]] || die 'systemd is not running; schedule renew with your own scheduler instead'
-    install -d -m 0755 /usr/local/lib/hive
-    install -m 0755 "$(realpath -- "$0")" /usr/local/lib/hive/console-certificate.sh
-    flags=''; [[ "$use_tailscale" == true ]] || flags=' --no-tailscale'
-    printf '[Unit]\nDescription=Renew the Hive console certificate\nAfter=network-online.target docker.service tailscaled.service\nWants=network-online.target\n\n[Service]\nType=oneshot\nExecStart=/usr/local/lib/hive/console-certificate.sh renew --config %s --owner %s%s\n' \
-      "$config" "$owner" "$flags" > /etc/systemd/system/hive-console-certificate.service
+    if [[ "$use_tailscale" == true && -z "$owner" ]]; then owner=$(stat -c %U "$source_key"); fi
+    flags=" --hive $hive"; [[ "$use_tailscale" == true ]] && flags+=" --owner $owner" || flags+=' --no-tailscale'
+    printf '[Unit]\nDescription=Renew the Hive console certificate\nAfter=network-online.target docker.service tailscaled.service\nWants=network-online.target\n\n[Service]\nType=oneshot\nExecStart=%s renew --config %s%s\n' \
+      "$hive/scripts/console-certificate.sh" "$config" "$flags" > /etc/systemd/system/hive-console-certificate.service
     printf '[Unit]\nDescription=Renew the Hive console certificate weekly\n\n[Timer]\nOnCalendar=weekly\nRandomizedDelaySec=6h\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n' \
       > /etc/systemd/system/hive-console-certificate.timer
     chmod 0644 /etc/systemd/system/hive-console-certificate.service /etc/systemd/system/hive-console-certificate.timer
     systemctl daemon-reload
     systemctl enable --now hive-console-certificate.timer >/dev/null
-    say 'Scheduled: hive-console-certificate.timer runs renew weekly.'
+    say "Scheduled: hive-console-certificate.timer runs renew weekly with $hive/hive.sh."
     say "  next run: $(systemctl show hive-console-certificate.timer --property=NextElapseUSecRealtime --value)"
     say '  run now:  sudo systemctl start hive-console-certificate.service'
-    say '  logs:     journalctl -u hive-console-certificate.service';;
+    say '  logs:     journalctl -u hive-console-certificate.service'
+    say 'After upgrading to a new release, run schedule again from its checkout.';;
   *) usage >&2; exit 2;;
 esac

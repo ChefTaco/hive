@@ -77,5 +77,33 @@ hive_initialize() {
   done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
   hive_registry_provision
   hive_memory_credential_provision
-  printf 'Protected selected-product configuration prepared. Review the plan, then run install with this same configuration. Initial sign-in instructions are stored on the identity host in config/initial-credentials.env.\n'
+  if [[ "${HIVE_OPERATION:-}" == install ]]; then printf 'Protected selected-product configuration prepared; installing the release.\n'
+  else printf 'Protected selected-product configuration prepared. Review the plan, then run install with this same configuration. Initial sign-in instructions are stored on the identity host in config/initial-credentials.env.\n'; fi
+}
+
+# A renewed console certificate for a completed fresh installation; see tls-refresh in --help.
+hive_tls_refresh() {
+  jq -e '.bootstrap!=null and .console!=null and .components.ingress!=null' "$HIVE_CONFIG" >/dev/null ||
+    hive_die 'tls-refresh installs a renewed console certificate into a fresh installation. An installation moved with migrate-native uses: hive.sh migrate-native tls-refresh'
+  HIVE_BOOTSTRAP_USERS=$(jq -c --slurpfile config "$HIVE_CONFIG" '.components|with_entries(select(.key as $name|$config[0].components[$name]!=null))|map_values(.service.user)' "$HIVE_MANIFEST")
+  HIVE_HOST_ACTION=console-certificate hive_host "$(jq -r .components.ingress.host "$HIVE_CONFIG")" "$(cat "$HIVE_ROOT/scripts/suite/input-artifacts-host.sh" "$HIVE_ROOT/scripts/suite/initialize-full-host.sh" "$HIVE_ROOT/scripts/suite/initialize-host.sh")" ||
+    hive_die 'Console certificate refresh failed; see the reason above'
+}
+
+# The end of a successful install: where the console is, how to sign in and what to do next.
+hive_install_summary() {
+  local config=${HIVE_REGISTRY_ORIGINAL_CONFIG:-$HIVE_CONFIG} identity directory target
+  printf '\nInstalled Hive %s as installation %s.\n' "$HIVE_VERSION" "$HIVE_ID"
+  if jq -e '.console!=null' "$HIVE_CONFIG" >/dev/null; then printf '  Console:  %s/\n' "$(jq -r .origin "$HIVE_CONFIG")"; fi
+  if jq -e '.bootstrap!=null and .components.oathweave!=null' "$HIVE_CONFIG" >/dev/null; then
+    identity=$(jq -r .components.oathweave.host "$HIVE_CONFIG")
+    directory=$(jq -r --arg host "$identity" '.hosts[$host].directory' "$HIVE_CONFIG")
+    target=$(jq -r --arg host "$identity" '.hosts[$host].target' "$HIVE_CONFIG")
+    printf '  Sign in:  as SEED_ADMIN_USERNAME with SEED_ADMIN_PASSWORD from %s/config/initial-credentials.env%s\n' "$directory" "$([[ "$target" == local ]] || printf ' on %s' "$target")"
+  fi
+  printf '  Check:    ./hive.sh status --config %s\n            ./hive.sh doctor --config %s\n' "$config" "$config"
+  printf '  Back up:  ./hive.sh backup --config %s --archive NAME --yes\n' "$config"
+  if jq -e '.bootstrap!=null and .console!=null' "$HIVE_CONFIG" >/dev/null; then
+    printf '  Renewed console certificate: ./hive.sh tls-refresh --config %s\n' "$config"
+  fi
 }

@@ -68,6 +68,65 @@ while IFS= read -r user; do
 done < <(jq -r '. as $input|.bootstrapServiceUsers|to_entries[]|select(.key!="hivexui" and $input.placements[.key]!=null)|.value' <<< "$input")
 input_sha=$( { printf '%s\n' "$plan"; if (( ${#certificate_references[@]} )); then sha256sum "${certificate_references[@]}" | cut -d ' ' -f1; fi; } | sha256sum | cut -d ' ' -f1)
 receipt="$state/receipt.json"
+if [[ "$action" == console-certificate ]]; then
+  # Installs a renewed console certificate into a completed fresh installation. The new
+  # files passed check_certificate above. Every other generated artifact must be unchanged;
+  # the receipt then records the new copies, so repeating install stays possible.
+  has_component ingress || die 'The console ingress is not on this host'
+  [[ -f "$receipt" && ! -L "$receipt" && $(stat -c %u "$receipt") == "$(id -u)" ]] || die 'No fresh initialization receipt on this host; migrated installations use hive.sh migrate-native tls-refresh'
+  jq -e --arg id "$installation" --arg host "$host" '.schema==1 and .installation==$id and .host==$host and .phase=="complete"' "$receipt" >/dev/null || die 'Initialization is not complete; finish hive.sh install first'
+  source_certificate=$(jq -er .bootstrap.certificateFile <<< "$input"); source_key=$(jq -er .bootstrap.privateKeyFile <<< "$input")
+  deployed_certificate="$directory/config/ingress/console.crt"; deployed_key="$directory/config/ingress/console.key"
+  while IFS=$'\t' read -r path sha; do
+    [[ "$path" == "$deployed_certificate" || "$path" == "$deployed_key" ]] && continue
+    [[ "$path" == "$directory/config/"* && -f "$path" && ! -L "$path" && $(sha256sum "$path" | cut -d ' ' -f1) == "$sha" ]] || die 'A generated configuration artifact changed; the certificate was not replaced'
+  done < <(jq -r '.files|to_entries[]|[.key,.value]|@tsv' "$receipt")
+  recorded_certificate=$(jq -er --arg path "$deployed_certificate" '.files[$path]' "$receipt") || die 'The receipt records no console certificate'
+  recorded_key=$(jq -er --arg path "$deployed_key" '.files[$path]' "$receipt") || die 'The receipt records no console key'
+  # Each deployed copy is unchanged since the last record, or already the new file after an
+  # interrupted refresh.
+  deployed_unchanged() {
+    [[ -f "$1" && ! -L "$1" ]] || die "$1 is missing"
+    [[ $(sha256sum "$1" | cut -d ' ' -f1) == "$2" ]] || cmp -s "$1" "$3" || die "$1 was changed outside hive.sh; restore it before refreshing"
+  }
+  deployed_unchanged "$deployed_certificate" "$recorded_certificate" "$source_certificate"
+  deployed_unchanged "$deployed_key" "$recorded_key" "$source_key"
+  # The recorded inputs used the files the copies were made from. Re-record them only when
+  # they still describe this plan, so a changed plan keeps being refused.
+  previous_sha=$( { printf '%s\n' "$plan"; printf '%s\n%s\n' "$recorded_certificate" "$recorded_key"; if (( ${#certificate_references[@]} > 2 )); then sha256sum "${certificate_references[@]:2}" | cut -d ' ' -f1; fi; } | sha256sum | cut -d ' ' -f1)
+  if cmp -s "$source_certificate" "$deployed_certificate" && cmp -s "$source_key" "$deployed_key"; then changed=false; else changed=true; fi
+  # An interrupted refresh replaced the copies but did not record them or restart the ingress.
+  restart=$changed
+  [[ $(sha256sum "$deployed_certificate" | cut -d ' ' -f1) == "$recorded_certificate" && $(sha256sum "$deployed_key" | cut -d ' ' -f1) == "$recorded_key" ]] || restart=true
+  # The plan's pinned deployment inputs include the ingress configuration. Re-pin them only when
+  # nothing else changed since they were pinned.
+  inputs="$directory/deployment-inputs.$plan.json" definition="$directory/candidate.$plan.json" repin=false
+  [[ -f "$definition" ]] || definition="$directory/compose.json"
+  if [[ "$changed" == true && -f "$inputs" && -f "$definition" ]] && [[ $(deployment_inputs_digest "$definition") == "$(jq -r .sha256 "$inputs")" ]]; then repin=true; fi
+  if [[ "$changed" == true ]]; then
+    user=$(jq -er '.bootstrapServiceUsers.ingress' <<< "$input")
+    replace_deployed() {
+      local pending
+      pending=$(mktemp "$state/publish.XXXXXX"); cat -- "$1" > "$pending"; chmod 600 "$pending"; chown "$user" "$pending"; sync -f "$pending"
+      cp -p -- "$2" "$state/${2##*/}.previous"; mv -T -- "$pending" "$2"
+    }
+    replace_deployed "$source_key" "$deployed_key"
+    replace_deployed "$source_certificate" "$deployed_certificate"
+  fi
+  pending=$(mktemp "$state/receipt.XXXXXX")
+  jq --arg certificate "$deployed_certificate" --arg key "$deployed_key" --arg certificateSha "$(sha256sum "$deployed_certificate" | cut -d ' ' -f1)" --arg keySha "$(sha256sum "$deployed_key" | cut -d ' ' -f1)" \
+    --arg previous "$previous_sha" --arg next "$input_sha" '.files[$certificate]=$certificateSha | .files[$key]=$keySha | if .inputsSHA256==$previous then .inputsSHA256=$next else . end' "$receipt" > "$pending"
+  chmod 600 "$pending"; sync -f "$pending"; mv -T -- "$pending" "$receipt"; sync -f "$state"
+  if [[ "$repin" == true ]]; then
+    pending=$(mktemp "$directory/.deployment-inputs.XXXXXX")
+    jq -n --arg sha "$(deployment_inputs_digest "$definition")" '{schema:1,sha256:$sha}' > "$pending"; chmod 600 "$pending"; sync -f "$pending"; mv -T -- "$pending" "$inputs"
+  fi
+  if [[ "$restart" == true ]]; then
+    docker compose -f "$directory/compose.json" restart ingress >/dev/null || die 'The new certificate is in place, but the ingress did not restart; restart it to serve the new certificate'
+    printf 'Installed the renewed console certificate (valid until %s) and restarted the ingress. The previous files are kept in %s.\n' "$(openssl x509 -in "$deployed_certificate" -noout -enddate | cut -d= -f2)" "$state"
+  else printf 'The console certificate is already current (valid until %s); nothing changed.\n' "$(openssl x509 -in "$deployed_certificate" -noout -enddate | cut -d= -f2)"; fi
+  exit 0
+fi
 if [[ -e "$receipt" || -L "$receipt" ]]; then
   [[ -f "$receipt" && ! -L "$receipt" && $(stat -c %u "$receipt") == "$(id -u)" ]] || die 'Unsafe initialization receipt'
   permissions=$(stat -c %a "$receipt"); (( (8#$permissions & 077)==0 )) || die 'Initialization receipt is not protected'

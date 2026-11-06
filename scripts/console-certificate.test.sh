@@ -73,32 +73,40 @@ expect "certificate: $tls/console.crt"
 run tailscale --dir "$tls" || fail 'repeat failed'
 grep -q '(new)' "$temporary/out" && fail 'a repeat reported a new certificate'
 
-# renew: copies a changed certificate into the ingress and restarts only the ingress.
-directory="$temporary/opt/hive"
-mkdir -p "$directory/config/ingress"
-cp "$tls/console.crt" "$directory/config/ingress/console.crt"; cp "$tls/console.key" "$directory/config/ingress/console.key"
-chmod 600 "$directory/config/ingress/"*
+# renew: refreshes the Tailscale certificate, then hands it to hive.sh tls-refresh as the owner.
+checkout="$temporary/hive"
+mkdir -p "$checkout/scripts/suite"
+cp "$SCRIPT" "$checkout/scripts/console-certificate.sh"
+printf '# hive.sh tls-refresh\n' > "$checkout/scripts/suite/controller.sh"
+cat > "$checkout/hive.sh" <<EOF
+#!/usr/bin/env bash
+printf '%s %s\n' "\$(id -un)" "\$*" >> "$temporary/hive.log"
+EOF
+chmod +x "$checkout/hive.sh"
+cat > "$bin/runuser" <<EOF
+#!/usr/bin/env bash
+printf 'runuser %s\n' "\$2" >> "$temporary/hive.log"; shift 3; exec "\$@"
+EOF
+chmod +x "$bin/runuser"
 config="$temporary/installation.json"
-jq -n --arg d "$directory" --arg c "$tls/console.crt" --arg k "$tls/console.key" \
-  '{origin:"https://hive.example.com",hosts:{control:{target:"local",directory:$d}},console:{host:"control"},
-    components:{ingress:{host:"control",configDirectory:($d+"/config/ingress")}},bootstrap:{certificateFile:$c,privateKeyFile:$k}}' > "$config"
-run renew --config "$config" || { cat "$temporary/out" >&2; fail 'renew failed'; }
-expect 'is current'
-[[ ! -e "$temporary/docker.log" ]] || fail 'restarted an unchanged ingress'
+jq -n --arg c "$tls/console.crt" --arg k "$tls/console.key" \
+  '{origin:"https://hive.example.com",hosts:{control:{target:"local",directory:"/opt/hive"}},console:{host:"control"},
+    components:{ingress:{host:"control",configDirectory:"/opt/hive/config/ingress"}},bootstrap:{certificateFile:$c,privateKeyFile:$k}}' > "$config"
 printf 'second\n' > "$temporary/issue"
-run renew --config "$config" || { cat "$temporary/out" >&2; fail 'renew of a new certificate failed'; }
-expect 'Installed the renewed console certificate'
-cmp -s "$temporary/second/cert.pem" "$directory/config/ingress/console.crt" || fail 'ingress certificate not replaced'
-cmp -s "$temporary/second/key.pem" "$directory/config/ingress/console.key" || fail 'ingress key not replaced'
-cmp -s "$temporary/first/cert.pem" "$directory/config/ingress/console.crt.previous" || fail 'previous certificate not kept'
-[[ $(stat -c %a "$directory/config/ingress/console.key") == 600 ]] || fail 'ingress key mode'
-grep -qx "docker compose -f $directory/compose.json restart ingress" "$temporary/docker.log" || fail 'ingress not restarted'
-# A certificate for another name never reaches the ingress.
+run renew --config "$config" --hive "$checkout" || { cat "$temporary/out" >&2; fail 'renew failed'; }
+cmp -s "$temporary/second/cert.pem" "$tls/console.crt" || fail 'renew did not refresh the Tailscale certificate'
+grep -qx "runuser $user" "$temporary/hive.log" || fail 'tls-refresh did not run as the owner of the configuration'
+grep -qx "$user tls-refresh --config $config" "$temporary/hive.log" || fail 'renew did not run hive.sh tls-refresh'
+# A certificate for another name never reaches hive.sh.
+: > "$temporary/hive.log"
 cp "$temporary/other/cert.pem" "$tls/console.crt"; cp "$temporary/other/key.pem" "$tls/console.key"
-run renew --config "$config" --no-tailscale && fail 'renewed with a certificate for another name'
-cmp -s "$temporary/second/cert.pem" "$directory/config/ingress/console.crt" || fail 'ingress changed after a refused renewal'
+run renew --config "$config" --hive "$checkout" --no-tailscale && fail 'renewed with a certificate for another name'
+[[ ! -s "$temporary/hive.log" ]] || fail 'a wrong-name certificate reached hive.sh'
 jq '.hosts.control.target="deploy@hive.example.com"' "$config" > "$config.remote"
-run renew --config "$config.remote" && fail 'renewed a remote console host'
+run renew --config "$config.remote" --hive "$checkout" && fail 'renewed a remote console host'
 expect 'run this script on the console host'
+printf '# no refresh here\n' > "$checkout/scripts/suite/controller.sh"
+run renew --config "$config" --hive "$checkout" --no-tailscale && fail 'used a checkout without tls-refresh'
+expect 'release 2.0.2 or later'
 run bogus && fail 'accepted an unknown command'
 printf 'console-certificate tests passed\n'

@@ -20,9 +20,32 @@ hive_controller_digest() {
   while IFS= read -r file; do [[ -f "$HIVE_ROOT/$file" && ! -L "$HIVE_ROOT/$file" ]] || hive_die 'Controller runtime must contain regular bundled source files'; done < <(hive_runtime_files)
   (cd "$HIVE_ROOT"; hive_runtime_files | while IFS= read -r file; do sha256sum --zero -- "$file"; done) | sha256sum | cut -d ' ' -f1
 }
+# The one signed release in releases/ that pins exactly this controller source, if any.
+hive_checkout_release() {
+  local digest file versions=()
+  digest=$(hive_controller_digest)
+  for file in "$HIVE_ROOT"/releases/*.json; do
+    [[ -f "$file" ]] || continue
+    if jq -e --arg digest "$digest" '.controllerSHA256==$digest' "$file" >/dev/null 2>&1; then versions+=("$(jq -r .version "$file")"); fi
+  done
+  if ((${#versions[@]} == 1)); then printf '%s\n' "${versions[0]}"; fi
+}
+# After interactive setup and before the plan of an install or init: reach every SSH host and
+# check its installation directory. Planning alone never contacts a host.
+hive_setup_hosts_ready() {
+  local remote
+  while IFS= read -r remote; do
+    if ! hive_host "$remote" "$(declare -f hive_writable_directory)"'
+      set -euo pipefail; read -r input; directory=$(jq -r .directory <<< "$input")
+      hive_writable_directory "$directory" || { printf "%s on %s cannot be created or written by %s. Create it there first: sudo install -d -m 0750 -o %s -g %s %s\n" "$directory" "$(hostname)" "$(id -un)" "$(id -un)" "$(id -gn)" "$directory" >&2; exit 1; }'; then
+      hive_die "Host $remote is not ready: see above. SSH runs non-interactively, so this must work first: ssh -o BatchMode=yes -o StrictHostKeyChecking=yes $(jq -r --arg host "$remote" '.hosts[$host].target' "$HIVE_CONFIG") true. Then continue with: ./hive.sh install --config $HIVE_CONFIG --release $HIVE_VERSION"
+    fi
+  done < <(jq -r '.hosts|to_entries[]|select(.value.target!="local")|.key' "$HIVE_CONFIG")
+}
+
 hive_usage() {
   cat <<'EOF'
-Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|skills-prepare|registry|magnus-trust|migrate-native]
+Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh]
   --config FILE          Installation JSON (required for unattended use)
   --release VERSION      Override the exact release version
   --manifest FILE        Signed release manifest (default releases/VERSION.json)
@@ -43,6 +66,10 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|re
   --help                 Show this help
 
 init prepares protected configuration for an explicitly fresh installation.
+tls-refresh installs a renewed console certificate into a fresh installation: it checks the files at
+bootstrap.certificateFile and privateKeyFile, copies them into the ingress, records them and
+restarts only the ingress. Without --release it uses this checkout's own release. A migrated
+installation uses migrate-native tls-refresh.
 skills-prepare stages only an explicit immutable Skills client and writes protected owner proposals; it never activates mappings.
 agents-accept verifies manually started agents without restarting suite services.
 registry looks up and edits this installation's Hive Registry (the install catalog; HiveSkills
@@ -486,7 +513,7 @@ hive_main() {
         shift;;
     esac
   done
-  case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native) ;; *) hive_die 'Unknown command';; esac
+  case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh) ;; *) hive_die 'Unknown command';; esac
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
     case "$command" in plan|install|upgrade) ;; *) hive_die '--relax-auth-limits applies only to plan, install and upgrade';; esac
   fi
@@ -544,6 +571,7 @@ hive_main() {
     registry) hive_registry_command "${registry_arguments[@]}"; return;;
     magnus-trust) hive_magnus_trust "${trust_arguments[@]}"; return;;
     migrate-native) hive_native_migrate "${registry_arguments[0]:-}" "$confirmed" "$hold_on_failure"; return;;
+    tls-refresh) hive_need openssl; hive_need sha256sum; hive_manifest; hive_tls_refresh; return;;
   esac
   hive_need openssl; hive_need sha256sum; hive_manifest
   hive_plan

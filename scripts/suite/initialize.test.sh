@@ -17,7 +17,9 @@ openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/r
 mkdir -m 700 "$temporary/bin"
 cat > "$temporary/bin/docker" <<'SH'
 #!/usr/bin/env bash
-case "$*" in info|'ps -aq --filter label=com.docker.compose.project=example-suite-control') exit 0;; *) exit 99;; esac
+case "$*" in info|'ps -aq --filter label=com.docker.compose.project=example-suite-control') exit 0;;
+  'compose -f '*'/compose.json restart ingress') printf '%s\n' "$*" >> "${0%/*}/../docker.log";;
+  *) exit 99;; esac
 SH
 chmod 700 "$temporary/bin/docker"
 cat > "$temporary/bin/openssl" <<SH
@@ -58,6 +60,48 @@ jq -e '.mode=="suite" and (.products|length)==4 and (.identity|keys)==["apiPrefi
 while IFS= read -r file; do
   if rg -F -q -- "$(cat "$file")" "$temporary/install/config/runtime.json" "$temporary/install/config/ingress.env"; then fail 'Infrastructure credential reached a browser/ingress artifact'; fi
 done < <(find "$temporary/install/config/.initializer/secrets" -type f ! -name '*-id')
+# A renewed console certificate. Before tls-refresh, repeating setup refuses the changed input;
+# afterwards the ingress serves it, the receipt records it and repeating setup succeeds.
+refresh() { "$ROOT/hive.sh" tls-refresh --config "$temporary/config.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub"; }
+refresh > "$temporary/refresh.log" || fail 'tls-refresh of an unchanged certificate failed'
+grep -q 'already current' "$temporary/refresh.log" && [[ ! -e "$temporary/docker.log" ]] || fail 'An unchanged certificate restarted the ingress'
+cp "$temporary/console.crt" "$temporary/original.crt"
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$temporary/console.key" -out "$temporary/console.crt" -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost' -days 3 >/dev/null 2>&1
+reject run_init
+grep -q 'Initialization inputs changed' "$temporary/rejection.log" || fail 'A renewed certificate was not detected'
+cp "$temporary/console.key" "$temporary/renewed.key"; cp "$temporary/console.crt" "$temporary/renewed.crt"
+cp "$temporary/wrong.crt" "$temporary/console.crt"; cp "$temporary/wrong.key" "$temporary/console.key"
+reject refresh
+grep -q 'is not valid for localhost' "$temporary/rejection.log" || fail 'tls-refresh did not refuse the name'
+cmp -s "$temporary/original.crt" "$temporary/install/config/ingress/console.crt" || fail 'A wrong-name certificate reached the ingress'
+cp "$temporary/renewed.crt" "$temporary/console.crt"; cp "$temporary/renewed.key" "$temporary/console.key"
+# An installed plan pins its deployment inputs, the ingress configuration among them.
+plan=$("$ROOT/hive.sh" plan --config "$temporary/config.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" | jq -r .planDigest)
+jq -n --arg config "$temporary/install/config/ingress" '{services:{ingress:{volumes:[{source:$config,read_only:true}]}}}' > "$temporary/install/compose.json"
+inputs="$temporary/install/deployment-inputs.$plan.json"
+pinned=$(source "$ROOT/scripts/suite/input-artifacts-host.sh"; deployment_inputs_digest "$temporary/install/compose.json")
+jq -n --arg sha "$pinned" '{schema:1,sha256:$sha}' > "$inputs"
+refresh > "$temporary/refresh.log" || fail 'tls-refresh of a renewed certificate failed'
+cmp -s "$temporary/renewed.crt" "$temporary/install/config/ingress/console.crt" && cmp -s "$temporary/renewed.key" "$temporary/install/config/ingress/console.key" || fail 'The ingress copies were not replaced'
+cmp -s "$temporary/original.crt" "$temporary/install/config/.initializer/console.crt.previous" || fail 'The previous certificate was not kept'
+[[ ! -e "$temporary/install/config/ingress/console.crt.previous" ]] || fail 'The previous certificate was left in the ingress configuration'
+[[ $(jq -r .sha256 "$inputs") == "$(source "$ROOT/scripts/suite/input-artifacts-host.sh"; deployment_inputs_digest "$temporary/install/compose.json")" && $(jq -r .sha256 "$inputs") != "$pinned" ]] || fail 'The plan inputs were not re-pinned to the renewed certificate'
+[[ $(stat -c %a "$temporary/install/config/ingress/console.key") == 600 ]] || fail 'The renewed key is not owner-only'
+grep -q 'restart ingress' "$temporary/docker.log" || fail 'The ingress was not restarted'
+run_init > "$temporary/renewed.log" || fail 'Repeating setup after tls-refresh failed'
+refresh > "$temporary/refresh.log" && grep -q 'already current' "$temporary/refresh.log" || fail 'A repeated tls-refresh was not a no-op'
+# A refresh interrupted after replacing the copies records them and restarts the ingress on retry.
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$temporary/console.key" -out "$temporary/console.crt" -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost' -days 4 >/dev/null 2>&1
+cp "$temporary/console.crt" "$temporary/install/config/ingress/console.crt"; cp "$temporary/console.key" "$temporary/install/config/ingress/console.key"
+: > "$temporary/docker.log"
+refresh > "$temporary/refresh.log" || fail 'Retrying an interrupted tls-refresh failed'
+grep -q 'restart ingress' "$temporary/docker.log" || fail 'An interrupted refresh did not restart the ingress'
+run_init > /dev/null || fail 'Repeating setup after an interrupted refresh failed'
+printf 'tampered\n' >> "$temporary/install/config/ingress/backend-ca.pem"
+reject refresh
+grep -q 'A generated configuration artifact changed' "$temporary/rejection.log" || fail 'tls-refresh accepted a changed artifact'
+head -n -1 "$temporary/install/config/ingress/backend-ca.pem" > "$temporary/ca.pem"; cat "$temporary/ca.pem" > "$temporary/install/config/ingress/backend-ca.pem"
+run_init > /dev/null || fail 'Restoring the CA bundle did not restore the installation'
 cp "$temporary/config.json" "$temporary/valid.json"
 jq '.bootstrap.adminEmail="changed@example.com"' "$temporary/valid.json" > "$temporary/config.json"
 reject run_init
@@ -65,4 +109,4 @@ cp "$temporary/valid.json" "$temporary/config.json"
 printf 'OPERATOR_OWNED=retained\n' > "$temporary/install/config/emberpath.env"
 reject run_init
 [[ $(cat "$temporary/install/config/emberpath.env") == OPERATOR_OWNED=retained ]] || fail 'Existing configuration was overwritten'
-printf 'Passed: fresh configuration generation, no memory credential where none is used, interrupted entropy preservation, exact retry, repeat execution, public artifact secret isolation and existing-file refusal.\n'
+printf 'Passed: fresh configuration generation, no memory credential where none is used, interrupted entropy preservation, exact retry, repeat execution, public artifact secret isolation and existing-file refusal, wrong-name certificate refusal and console certificate refresh.\n'
