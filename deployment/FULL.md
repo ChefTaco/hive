@@ -274,6 +274,11 @@ curl -sS -H 'Content-Type: application/json' -H "x-security-collector-id: edge" 
 ```
 
 It answers `202` with the stored count, and the event appears under **Cindertrace > Events**.
+A batch with a bad signature is refused with `401` and leaves no trace. A batch that is signed
+but refused, for example `403` for a source the collector may not send or `400` for an invalid
+event, marks the collector's *Cursor health* as `ERROR` under **Cindertrace > Sources**. The
+mark records only that last refusal: the collector's next accepted batch sets it back to
+`HEALTHY`.
 
 ## Developer rehearsal
 
