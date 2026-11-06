@@ -17,9 +17,31 @@ All notable changes to this project are documented in this file. The format is b
 - `scripts/console-certificate.sh` issues the console certificate with `tailscale cert`, owned
   by the operator with an owner-only key, checks any certificate the way the installer does, and
   renews it into a running installation, weekly from a systemd timer if asked.
+- `hive.sh tls-refresh` installs a renewed console certificate into a fresh installation: it
+  checks the files at `bootstrap.certificateFile` and `privateKeyFile`, copies them into the
+  ingress, records them in the initialization receipt and restarts only the ingress.
+  Repeating `install` keeps working afterwards. Without `--release` it uses the release that
+  pins the checkout's own controller. `scripts/console-certificate.sh renew` and its weekly
+  timer run it.
 - [Install Hive on one host](deployment/QUICKSTART.md): a step-by-step guide from a bare host
   to a signed-in console, with every setup question, certificate choices, backups, upgrades,
   firewall notes, controller-over-SSH setup and common errors.
+
+### Fixed
+
+- The console certificate name check never failed: `openssl x509 -checkhost` exits 0 when the
+  name does not match, so a console certificate for another name passed setup and `doctor`.
+  Setup and host preflight now use `openssl verify -verify_hostname` (or `-verify_ip`) and
+  refuse it, naming the origin.
+- Host preflight and setup name a missing tool, an unreachable Docker daemon or a missing
+  Compose plugin, with the command that installs the prerequisites, instead of failing silently.
+- `install` no longer prints "Review the plan, then run install" while it installs, and ends
+  with the console origin, where the initial sign-in is, and the next commands.
+- Interactive setup offers `/opt/ID` as the installation directory and asks again, with the
+  command that creates it, when a local directory cannot be created; it asks for an SSH
+  configuration file for an SSH target; before an install it connects to each SSH host and
+  checks its directory; and a repeated setup offers to continue with the configuration it
+  already wrote instead of asking every question and then refusing.
 
 ## [2.0.2] - 2026-11-06
 

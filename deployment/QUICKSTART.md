@@ -106,7 +106,7 @@ the default shown in brackets.
 | Question | Answer |
 |---|---|
 | Installation name | `hive`: lowercase letters, digits and hyphens |
-| Installation directory on the selected host | `/opt/hive` |
+| Installation directory on the selected host | the default, `/opt/hive`. A local directory you cannot create is asked for again, with the command that creates it |
 | Host SSH target | `local` |
 | Host architecture | the default |
 | Console HTTPS origin | `https://hive.example.com`, the name on the certificate. Add `:PORT` if the listener port is not 443 |
@@ -126,8 +126,9 @@ the default shown in brackets.
 `hive.sh` then prints the plan: every product, image digest and host path. Answer `y` to apply
 it. The first install pulls the images and takes a few minutes; later commands take seconds.
 
-If it stops after writing the configuration file, fix the cause and continue with that file.
-Running the questions again refuses to overwrite it:
+If it stops after writing the configuration file, fix the cause and run `./hive.sh --release
+2.0.2` again: after the installation name it offers to continue with the saved file instead of
+asking everything again. Unattended, the same step is:
 
 ```bash
 ./hive.sh install --config ~/.config/hive/hive/installation.json --release 2.0.2
@@ -183,21 +184,29 @@ first.
 
 ## 9. Keep the certificate current
 
-The installer copies the certificate into the ingress, so a renewed file needs installing.
-`renew` refreshes a Tailscale certificate, checks it, copies it into the ingress and restarts only
-the ingress, and does nothing while the certificate is unchanged. `schedule` runs it weekly from a
-systemd timer:
+The installer copies the certificate into the ingress, so a renewed certificate needs installing.
+`./hive.sh tls-refresh` does that: it checks the files at the paths you gave during setup,
+copies them into the ingress, records them for later runs and restarts only the ingress. When
+nothing changed it does nothing. The previous files are kept as `console.crt.previous` and
+`console.key.previous` in `/opt/hive/config/.initializer`.
+
+```bash
+./hive.sh tls-refresh --config ~/.config/hive/hive/installation.json
+```
+
+For a Tailscale certificate, `schedule` does it all weekly from a systemd timer: it refreshes the
+certificate with `tailscale cert`, then runs `tls-refresh` from this checkout as the account that
+owns the configuration.
 
 ```bash
 sudo ./scripts/console-certificate.sh schedule --config ~/.config/hive/hive/installation.json
 ```
 
-Tailscale certificates last 90 days, and `tailscale cert` returns a new one as expiry nears. For a certificate you
-renew another way, add `--no-tailscale`: the timer then installs whatever is at the configured
-paths. Run `renew` and `schedule` on the console host. The previous files are kept as
-`console.crt.previous` and `console.key.previous`. Once a certificate has been renewed, do not
-re-run `hive.sh install` for this installation: it checks that the setup inputs, the certificate
-among them, are unchanged. Use `upgrade`, `status`, `doctor` and `backup` as usual.
+Tailscale certificates last 90 days, and `tailscale cert` returns a new one as expiry nears.
+`sudo ./scripts/console-certificate.sh renew --config FILE` runs the same step once. For a
+certificate you renew another way, add `--no-tailscale`, or run `tls-refresh` from your ACME
+client's deploy hook. Run these on the console host. After an upgrade, run `schedule` again from
+the new release's checkout, so the timer uses its `hive.sh`.
 
 ## Firewall and ports
 
@@ -226,28 +235,29 @@ works without a prompt, with a key and a known host key:
 ssh -o BatchMode=yes -o StrictHostKeyChecking=yes deploy@hive.example.com true
 ```
 
-Answer `deploy@hive.example.com` to *Host SSH target*. The certificate, key and installation
-directory are paths on the host. When the key is not one SSH uses by default, or the account needs
-sudo on the host (it is not UID 1000 in the `docker` group), add these to
-`hosts.control` in the installation file and continue with `./hive.sh install --config FILE`:
+Answer `deploy@hive.example.com` to *Host SSH target*. The next question asks for an SSH
+configuration file: leave it blank when that `ssh` command works as it is, or give an owner-only
+`ssh_config` (mode 0600) with a `Host` block naming the `IdentityFile`. The certificate, key and
+installation directory are paths on the host. Before the plan, `hive.sh` connects to the host and
+checks that it can create the installation directory there.
+
+When the account needs sudo on the host (it is not UID 1000 in the `docker` group), add an
+owner-only file holding its sudo password to `hosts.control` in the installation file, then
+continue with `./hive.sh install --config FILE`. Commands on the host then run as root, and the
+installation directory is owned by root:
 
 ```json
-"sshConfig": "/path/to/ssh-config",
 "sudoPasswordFile": "/path/to/sudo-password"
 ```
-
-Both are absolute paths to owner-only files (mode 0600) on the controller. The SSH configuration is an ordinary
-`ssh_config` with a `Host` block naming `IdentityFile`. With `sudoPasswordFile`, commands on the
-host run as root and the installation directory is owned by root.
 
 ## When something goes wrong
 
 | Message | What to do |
 |---|---|
-| `Installation parent is not writable` | Create the directory for your account: `sudo ./scripts/install-prerequisites.sh --directory /opt/hive` |
-| `Configuration already exists; it will not be overwritten` | Continue with `./hive.sh install --config FILE --release VERSION` instead of answering the questions again |
+| `... must be a canonical absolute path that ... can create or write` | Create the directory for your account, as the message shows, or with `sudo ./scripts/install-prerequisites.sh --directory /opt/hive` |
+| `Installation ... already has a configuration` | Answer `yes` to continue with it, or choose another installation name |
 | `permission denied while trying to connect to the docker API` | Log out and back in after joining the `docker` group, then run `./scripts/install-prerequisites.sh --check` |
-| `Host preflight failed` with no other detail | A tool is missing on the host: run `./scripts/install-prerequisites.sh --check` there |
+| `Required tool missing on this host: ...` | Run `sudo ./scripts/install-prerequisites.sh` on that host, then `./scripts/install-prerequisites.sh --check` |
 | `Requested HTTPS port is already occupied` | Something else listens on the port: `sudo ss -lntp 'sport = :443'`. Stop it or choose another port |
-| `Console certificate and private key do not match`, or the browser rejects the name | Check the files with `./scripts/console-certificate.sh check --cert FILE --key FILE --name NAME` |
-| `Permission denied (publickey,password)` | The controller's SSH key is not accepted; see [Managing the host from another machine](#managing-the-host-from-another-machine) |
+| `Console certificate and private key do not match`, or `... is not valid for NAME` | Check the files with `./scripts/console-certificate.sh check --cert FILE --key FILE --name NAME` |
+| `Permission denied (publickey,password)`, or `Host control is not ready` | The controller's SSH key or host key is not accepted; see [Managing the host from another machine](#managing-the-host-from-another-machine) |

@@ -169,6 +169,12 @@ generated once into protected files. Retries check the exact inputs and file
 digests. Existing data, configuration, model resources and Compose projects are
 never silently adopted or overwritten.
 
+A renewed console certificate goes in with `./hive.sh tls-refresh --config FILE`: it checks the
+files at `bootstrap.certificateFile` and `privateKeyFile` like the initializer does, replaces the
+ingress copies, records their digests in the initialization receipt so retries keep working, and
+restarts only the ingress. An installation moved with `migrate-native` uses its own
+`migrate-native tls-refresh`.
+
 Only private backends and datastores run during first initialization. After
 readiness, they stop and the normal release starts with automatic migrations and
 upgrades disabled. Ingress, the console and agents wait for that boundary. Initial
