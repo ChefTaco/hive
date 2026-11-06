@@ -10,8 +10,12 @@
 //                   cutover, as on a busy host, and the native memory queue holds pending jobs
 //                   at capture. The suite memory worker runs, as it does in production.
 //   expectRollback  the cutover must fail verification and roll back (a negative control)
-//   backupRehearsal run hive.sh backup on the migrated suite, measure its stop window, then
-//                   rehearse a restore of the archive
+//   backupRehearsal run hive.sh backup on the migrated suite, measure its stop window (stopped)
+//                   or its pauses (online), then rehearse a restore of the archive
+//   backupStopped   take that backup with --stopped
+//   backupProof     inventory every store before, in and after the backup (backup-proof.mjs)
+//   runLabel        names this run's native containers instead of host, so a concurrent
+//                   rehearsal of the same host is left alone
 //   signIn          false skips the sign-in fork, the reset rehearsal and the browser
 //   refreshMemoryToken  renew the Router memory proxy token natively, then run refresh-memory-token
 //   memoryCredential    true or {renewalSeconds, intervalSeconds}: prove the self-renewing Emberpath
@@ -26,6 +30,7 @@ import { join, resolve } from 'node:path';
 import { parseEnv } from 'node:util';
 import { applySuiteCatalog, hiveRegistryComponent } from './suite-catalog.mjs';
 import { memoryCredentialRehearsal } from './memory-credential-rehearsal.mjs';
+import { proveArchive, snapshotBefore } from './backup-proof.mjs';
 
 const args = process.argv.slice(2);
 assert(args[0] === '--config' && args[1], 'Usage: native-migration-rehearsal.mjs --config PRIVATE_JSON [--cleanup]');
@@ -37,7 +42,7 @@ const controller = c.controllerRoot ? resolve(c.controllerRoot) : root;
 let hiveScript = join(controller, 'hive.sh');
 // After an upgrade, later commands use the upgraded release and its configuration.
 let installationFile = 'installation.json', releaseFile = 'release.json';
-const out = c.output, prefix = 'hive-mn-' + c.host;
+const out = c.output, label = c.runLabel ?? c.host, prefix = 'hive-mn-' + label;
 const run = (program, argv, options = {}) => execFileSync(program, argv, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024, ...options });
 const docker = (...argv) => run('docker', argv).trim();
 const put = (name, value) => { writeFileSync(join(out, name), typeof value === 'string' ? value : JSON.stringify(value, null, 2) + '\n', { mode: 0o600 }); };
@@ -58,7 +63,7 @@ const hive = (subcommand, ...extra) => suiteCommand(['migrate-native', subcomman
 const parseJSONLine = (text) => JSON.parse(text.split('\n').reverse().find((line) => line.startsWith('{')));
 
 function cleanup() {
-  const ids = spawnSync('docker', ['ps', '-aq', '--filter', 'label=hive.migration.rehearsal=' + c.host], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean);
+  const ids = spawnSync('docker', ['ps', '-aq', '--filter', 'label=hive.migration.rehearsal=' + label], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean);
   for (const project of [c.installation + '-control', 'dryrun-' + c.installation, c.installation + '-fork']) {
     for (const id of spawnSync('docker', ['ps', '-aq', '--filter', 'label=com.docker.compose.project=' + project], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean)) ids.push(id);
   }
@@ -95,7 +100,7 @@ function release() {
   const names = ['oathweave', 'oathweave-redis', 'emberpath', 'hivemem', 'hivemem-qdrant', 'hiveskills', 'hivexui', 'ingress'];
   const manifest = { schema: 1, version: c.version ?? '0.1.0', networks: { 'identity-data': template.networks['identity-data'], 'memory-data': template.networks['memory-data'] }, components: Object.fromEntries(names.map((name) => [name, template.components[name]])), profiles: {} };
   const user = process.getuid() + ':' + process.getgid();
-  const port = Number(docker('run', '-d', '--name', prefix + '-images', '--label', 'hive.migration.rehearsal=' + c.host, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--user', user, '--tmpfs', `/var/lib/registry:uid=${process.getuid()},gid=${process.getgid()},mode=700`, '-p', '127.0.0.1::5000', c.images.registry) && docker('inspect', prefix + '-images', '--format', '{{(index (index .NetworkSettings.Ports "5000/tcp") 0).HostPort}}'));
+  const port = Number(docker('run', '-d', '--name', prefix + '-images', '--label', 'hive.migration.rehearsal=' + label, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--user', user, '--tmpfs', `/var/lib/registry:uid=${process.getuid()},gid=${process.getgid()},mode=700`, '-p', '127.0.0.1::5000', c.images.registry) && docker('inspect', prefix + '-images', '--format', '{{(index (index .NetworkSettings.Ports "5000/tcp") 0).HostPort}}'));
   registry = '127.0.0.1:' + port;
   for (let attempt = 0; attempt < 30; attempt++) { if (spawnSync('curl', ['-fsS', '-o', '/dev/null', `http://${registry}/v2/`]).status === 0) break; execFileSync('sleep', ['1']); }
   manifest.components['hive-registry'] = hiveRegistryComponent('pending', user);
@@ -159,13 +164,13 @@ function startNative() {
   const address = c.subnets.native.replace(/\.0\/24$/, '.10');
   const hosts = ['--add-host', c.fqdn + ':127.0.0.1', '--add-host', c.host + ':127.0.0.1'];
   const user = process.getuid() + ':' + process.getgid();
-  const label = ['--label', 'hive.migration.rehearsal=' + c.host];
-  docker('run', '-d', '--name', prefix + '-native-pause', ...label, '--network', prefix + '-native', '--ip', address, ...hosts, '--sysctl', 'net.ipv4.ip_unprivileged_port_start=0', '--entrypoint', 'sleep', c.images.utility, 'infinity');
+  const labels = ['--label', 'hive.migration.rehearsal=' + label];
+  docker('run', '-d', '--name', prefix + '-native-pause', ...labels, '--network', prefix + '-native', '--ip', address, ...hosts, '--sysctl', 'net.ipv4.ip_unprivileged_port_start=0', '--entrypoint', 'sleep', c.images.utility, 'infinity');
   const netns = ['--network', 'container:' + prefix + '-native-pause'];
-  docker('run', '-d', '--name', prefix + '-native-redis', ...label, ...netns, '--user', user, c.images.redis, 'redis-server', '--save', '', '--appendonly', 'no', '--bind', '0.0.0.0', '--protected-mode', 'no');
+  docker('run', '-d', '--name', prefix + '-native-redis', ...labels, ...netns, '--user', user, c.images.redis, 'redis-server', '--save', '', '--appendonly', 'no', '--bind', '0.0.0.0', '--protected-mode', 'no');
   const manifest = JSON.parse(readFileSync(join(native, 'recovery/manifest.json'), 'utf8'));
   mkdirSync(join(out, 'native-qdrant'), { mode: 0o700 });
-  docker('run', '-d', '--name', prefix + '-native-qdrant', ...label, ...netns, '--user', user, '--workdir', '/data', '--mount', `type=bind,source=${join(out, 'native-qdrant')},target=/data`, '--mount', `type=bind,source=${join(native, 'recovery')},target=/snapshots,readonly`, '-e', 'QDRANT__STORAGE__STORAGE_PATH=/data/storage', '-e', 'QDRANT__STORAGE__SNAPSHOTS_PATH=/data/snapshots', '-e', 'QDRANT__TELEMETRY_DISABLED=true', '--entrypoint', '/qdrant/qdrant', c.images.qdrant, ...manifest.qdrant.flatMap((snapshot) => ['--snapshot', `/snapshots/${snapshot.file}:${snapshot.collection}`]));
+  docker('run', '-d', '--name', prefix + '-native-qdrant', ...labels, ...netns, '--user', user, '--workdir', '/data', '--mount', `type=bind,source=${join(out, 'native-qdrant')},target=/data`, '--mount', `type=bind,source=${join(native, 'recovery')},target=/snapshots,readonly`, '-e', 'QDRANT__STORAGE__STORAGE_PATH=/data/storage', '-e', 'QDRANT__STORAGE__SNAPSHOTS_PATH=/data/snapshots', '-e', 'QDRANT__TELEMETRY_DISABLED=true', '--entrypoint', '/qdrant/qdrant', c.images.qdrant, ...manifest.qdrant.flatMap((snapshot) => ['--snapshot', `/snapshots/${snapshot.file}:${snapshot.collection}`]));
   const dataTool = (request, ...extra) => run('docker', ['run', '--rm', '--network', prefix + '-native', '--user', user, '--read-only', '--tmpfs', '/tmp:mode=1777', ...extra, '--entrypoint', 'node', c.images.utility, '--no-warnings', '--input-type=module', '-e', readFileSync(join(root, 'scripts/suite/migrate-native-data.mjs'), 'utf8'), JSON.stringify(request)]).trim();
   for (let attempt = 0; attempt < 90; attempt++) {
     try { const inventory = JSON.parse(dataTool({ command: 'qdrant-inventory', url: `http://${address}:6333` })); if (inventory.totalCollections === manifest.qdrant.length) break; } catch { /* still restoring */ }
@@ -175,7 +180,7 @@ function startNative() {
   // A native Qdrant restarts on its own storage, as it does on the source host.
   docker('stop', '--time', '30', prefix + '-native-qdrant');
   docker('rm', prefix + '-native-qdrant');
-  docker('run', '-d', '--name', prefix + '-native-qdrant', ...label, ...netns, '--user', user, '--workdir', '/data', '--mount', `type=bind,source=${join(out, 'native-qdrant')},target=/data`, '-e', 'QDRANT__STORAGE__STORAGE_PATH=/data/storage', '-e', 'QDRANT__STORAGE__SNAPSHOTS_PATH=/data/snapshots', '-e', 'QDRANT__TELEMETRY_DISABLED=true', '--entrypoint', '/qdrant/qdrant', c.images.qdrant);
+  docker('run', '-d', '--name', prefix + '-native-qdrant', ...labels, ...netns, '--user', user, '--workdir', '/data', '--mount', `type=bind,source=${join(out, 'native-qdrant')},target=/data`, '-e', 'QDRANT__STORAGE__STORAGE_PATH=/data/storage', '-e', 'QDRANT__STORAGE__SNAPSHOTS_PATH=/data/snapshots', '-e', 'QDRANT__TELEMETRY_DISABLED=true', '--entrypoint', '/qdrant/qdrant', c.images.qdrant);
   for (let attempt = 0; attempt < 60; attempt++) {
     try { if (JSON.parse(dataTool({ command: 'qdrant-inventory', url: `http://${address}:6333` })).totalCollections === manifest.qdrant.length) break; } catch { /* starting */ }
     execFileSync('sleep', ['2']);
@@ -193,7 +198,7 @@ function startNative() {
     const environment = { ...nativeEnv(files, defaults), ...off };
     const file = join(out, 'native-' + name + '.env');
     writeFileSync(file, Object.entries(environment).map(([key, value]) => `${key}=${value}`).join('\n') + '\n', { mode: 0o600 });
-    docker('run', '-d', '--name', prefix + '-native-' + name, ...label, ...netns, '--user', user, '-w', workdir, ...mounts, '--env-file', file, '--entrypoint', 'node', c.images.utility, entry);
+    docker('run', '-d', '--name', prefix + '-native-' + name, ...labels, ...netns, '--user', user, '-w', workdir, ...mounts, '--env-file', file, '--entrypoint', 'node', c.images.utility, entry);
   };
   const state = (path) => join(native, 'state', path);
   service('memory', '/opt/hivemem/ts-core', '/opt/hive-npm/current/runtime/node_modules/@hivemagnus/hivemem-server/dist/src/cli.js', [state('opt/hivemem/.env')], { HIVEMEM_TS_CORE_HOST: '0.0.0.0', HIVEMEM_TS_PERSISTENCE: 'qdrant', HIVEMEM_STORAGE_PATH: '/var/opt/hivemem', HIVEMEM_TS_TLS_CERT_FILE: '/opt/hivemem/certs/server.crt', HIVEMEM_TS_TLS_KEY_FILE: '/opt/hivemem/certs/server.key' });
@@ -277,8 +282,8 @@ function trafficSummary(log, from, to) {
 }
 // The first outage of one kind of request after an instant: from the last success before its
 // first failure to the next success.
-function outage(log, kind, from) {
-  const entries = trafficEntries(log).filter((entry) => entry.kind === kind && entry.at >= from).sort((a, b) => a.at.localeCompare(b.at));
+function outage(log, kind, from, to) {
+  const entries = trafficEntries(log).filter((entry) => entry.kind === kind && entry.at >= from && (!to || entry.at <= to)).sort((a, b) => a.at.localeCompare(b.at));
   const first = entries.findIndex((entry) => !entry.ok);
   if (first < 0) return { seconds: 0, failed: 0 };
   const recovered = entries.findIndex((entry, index) => index > first && entry.ok);
@@ -292,20 +297,45 @@ function containerTimes() {
 }
 async function backupRehearsal(trust, traffic) {
   const archive = 'rehearsal-backup-' + randomBytes(3).toString('hex');
-  say('backup: hive.sh backup on the migrated suite' + (traffic ? ', with clients still connected' : ''));
-  const backup = suiteCommand(['backup', '--archive', archive, '--yes'], 'backup');
+  // T0: every store, before the backup starts. Traffic keeps running.
+  const before = c.backupProof ? await snapshotBefore({ suite, scratchRoot: out }) : null;
+  const timesBefore = containerTimes();
+  say('backup: hive.sh backup' + (c.backupStopped ? ' --stopped' : '') + ' on the migrated suite' + (traffic ? ', with clients still connected' : ''));
+  const backup = suiteCommand(['backup', '--archive', archive, '--yes', ...(c.backupStopped ? ['--stopped'] : [])], 'backup');
   assert.equal(backup.status, 0, backup.stderr.slice(-3000));
   const times = containerTimes();
-  const stopped = times.map((item) => Date.parse(item.finished)).filter((value) => value > Date.parse(backup.startedAt));
-  const started = times.map((item) => Date.parse(item.started)).filter((value) => value > Date.parse(backup.startedAt));
-  const ingress = times.find((item) => /ingress/.test(item.name));
   const receipt = JSON.parse(readFileSync(join(suite, 'backups', archive, 'receipt.json'), 'utf8'));
   const result = {
-    archive, commandSeconds: backup.seconds, archiveBytes: statSync(join(suite, 'backups', archive, 'state.tar.gz')).size,
+    archive, mode: receipt.mode ?? 'stopped', commandSeconds: backup.seconds, archiveBytes: statSync(join(suite, 'backups', archive, 'state.tar.gz')).size,
     receipt: { verified: receipt.verified, installation: receipt.installation, sha256: receipt.sha256, dataSHA256: receipt.dataSHA256, release: receipt.release?.version },
-    stopWindow: { allContainersSeconds: (Math.max(...started) - Math.min(...stopped)) / 1000, ingressSeconds: (Date.parse(ingress.started) - Date.parse(ingress.finished)) / 1000, firstStop: new Date(Math.min(...stopped)).toISOString(), lastStart: new Date(Math.max(...started)).toISOString() },
   };
+  if (receipt.mode === 'online') {
+    result.restartedContainers = times.filter((item) => timesBefore.find((other) => other.name === item.name)?.started !== item.started).map((item) => item.name);
+    assert.deepEqual(result.restartedContainers, [], 'No container stops or restarts during an online backup');
+    result.pauses = receipt.snapshot.pauses.map((item) => ({ services: [...item.pause, ...item.stores], pausedSeconds: item.pausedSeconds, attempt: item.attempt }));
+    result.longestPauseSeconds = receipt.snapshot.longestPauseSeconds;
+    result.snapshotSeconds = receipt.snapshot.seconds;
+    result.stores = Object.fromEntries(Object.entries(receipt.snapshot.stores).map(([name, value]) => [name, { files: value.files, bytes: value.bytes, sqlite: value.sqlite.map((item) => item.path + ' ' + item.journalMode), ...(value.store ? { method: value.store.method, verified: value.store.verified } : {}) }]));
+  } else {
+    const stopped = times.map((item) => Date.parse(item.finished)).filter((value) => value > Date.parse(backup.startedAt));
+    const started = times.map((item) => Date.parse(item.started)).filter((value) => value > Date.parse(backup.startedAt));
+    const ingress = times.find((item) => /ingress/.test(item.name));
+    result.stopWindow = { allContainersSeconds: (Math.max(...started) - Math.min(...stopped)) / 1000, ingressSeconds: (Date.parse(ingress.started) - Date.parse(ingress.finished)) / 1000, firstStop: new Date(Math.min(...stopped)).toISOString(), lastStart: new Date(Math.max(...started)).toISOString() };
+  }
+  if (traffic) {
+    // Client-visible effect while the backup command ran: failures, the outage, and how long a
+    // request waited at most.
+    const during = trafficEntries(traffic.log).filter((entry) => entry.at >= backup.startedAt && entry.at <= backup.finishedAt);
+    result.clientOutage = Object.fromEntries([...new Set(during.map((entry) => entry.kind))].sort().map((kind) => {
+      const entries = during.filter((entry) => entry.kind === kind);
+      return [kind, { requests: entries.length, failed: entries.filter((entry) => !entry.ok).length, longestRequestMs: Math.max(...entries.map((entry) => entry.ms)), outage: outage(traffic.log, kind, backup.startedAt, backup.finishedAt) }];
+    }));
+  }
   result.probesAfterBackup = probes(c.address, trust);
+  if (before) {
+    say('proof: every store before, inside and after the archive');
+    result.storeProof = await proveArchive({ suite, archive, before, scratchRoot: out });
+  }
   say('restore check: hive.sh rehearse restores the archive into an isolated copy');
   const restore = suiteCommand(['rehearse', '--archive', archive, '--yes'], 'rehearse');
   assert.equal(restore.status, 0, restore.stderr.slice(-3000));
@@ -313,7 +343,6 @@ async function backupRehearsal(trust, traffic) {
   assert.equal(restored.result, 'passed');
   assert.equal(restored.archiveSHA256, receipt.sha256);
   result.restoreCheck = { seconds: restore.seconds, result: restored.result, isolated: restored.isolated, portsPublished: restored.portsPublished, archiveSHA256Matches: true };
-  if (traffic) result.clientOutage = Object.fromEntries(['api-key', 'memory-write', 'client-token'].map((kind) => [kind, outage(traffic.log, kind, backup.startedAt)]));
   return result;
 }
 // A renewal writes a new memory proxy token to the native Router file. A credential HiveMem accepts
