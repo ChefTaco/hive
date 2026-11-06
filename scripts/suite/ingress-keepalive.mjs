@@ -39,6 +39,8 @@ const id = randomBytes(5).toString('hex'), network = 'hive-keepalive-' + id;
 const names = { backend: 'hive-keepalive-backend-' + id, ingress: 'hive-keepalive-ingress-' + id };
 const docker = (...argv) => execFileSync('docker', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const delay = (ms) => new Promise((done) => setTimeout(done, ms));
+// The containers run as the invoking user, so everything they write can be removed afterwards.
+const user = `${process.getuid()}:${process.getgid()}`;
 
 // A top-level snippet, verbatim, or null when this Caddyfile has none.
 function snippet(name) {
@@ -105,10 +107,10 @@ secure.listen(9443, '0.0.0.0'); plain.listen(9080, '0.0.0.0');
   chmodSync(temporary, 0o755);
   for (const file of readdirSync(temporary)) chmodSync(join(temporary, file), 0o644);
   docker('network', 'create', network);
-  docker('run', '-d', '--name', names.backend, '--network', network, '--network-alias', 'backend', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+  docker('run', '-d', '--name', names.backend, '--network', network, '--network-alias', 'backend', '--user', user, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
     '-v', temporary + ':/config:ro', nodeImage, 'node', '/config/backend.cjs');
-  const state = join(temporary, 'state'); mkdirSync(state, { mode: 0o777 }); chmodSync(state, 0o777);
-  docker('run', '-d', '--name', names.ingress, '--network', network, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+  const state = join(temporary, 'state'); mkdirSync(state, { mode: 0o700 });
+  docker('run', '-d', '--name', names.ingress, '--network', network, '--user', user, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
     '-v', temporary + ':/config:ro', '-v', state + ':/data', '-p', '127.0.0.1::8080', ingressImage, 'caddy', 'run', '--config', '/config/Caddyfile', '--adapter', 'caddyfile');
   let port;
   for (let attempt = 0; attempt < 100 && !port; attempt++) {
