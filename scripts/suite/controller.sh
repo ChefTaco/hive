@@ -30,6 +30,29 @@ hive_checkout_release() {
   done
   if ((${#versions[@]} == 1)); then printf '%s\n' "${versions[0]}"; fi
 }
+# The release a command uses when --release is not given. The installation file records the
+# release it was set up with, and an upgrade does not rewrite that file. When it names a release
+# this controller cannot use, a checkout's own signed release is the default, so backup,
+# upgrade and rollback work from the checkout of the release now installed. A given --manifest
+# names its own version. The choice is reported; the file is never changed.
+hive_default_release() {
+  local configured own manifest
+  configured=$(jq -r '.release' "$HIVE_CONFIG")
+  if [[ -n "${HIVE_MANIFEST:-}" ]]; then
+    manifest=$(jq -r '.version // empty' "$HIVE_MANIFEST" 2>/dev/null || true)
+    if [[ -n "$manifest" && "$manifest" != "$configured" ]]; then
+      printf 'Hive: using release %s from %s; the installation file names %s\n' "$manifest" "$HIVE_MANIFEST" "$configured" >&2
+      printf '%s\n' "$manifest"; return
+    fi
+    printf '%s\n' "$configured"; return
+  fi
+  own=$(hive_checkout_release)
+  if [[ -n "$own" && "$own" != "$configured" ]] && ! jq -e --arg digest "$(hive_controller_digest)" '.controllerSHA256==$digest' "$HIVE_ROOT/releases/$configured.json" >/dev/null 2>&1; then
+    printf 'Hive: using release %s, which this checkout'"'"'s controller installs; the installation file names %s. Pass --release to choose another\n' "$own" "$configured" >&2
+    printf '%s\n' "$own"; return
+  fi
+  printf '%s\n' "$configured"
+}
 # After interactive setup and before the plan of an install or init: reach every SSH host and
 # check its installation directory. Planning alone never contacts a host.
 hive_setup_hosts_ready() {
@@ -165,6 +188,7 @@ hive_configure() {
   # Mandatory in every selection, including a prepared custom one.
   selected_json=$(jq -nc --argjson selected "$selected_json" '$selected+["hive-registry"]|unique')
   jq -e --argjson selected "$selected_json" '.components as $components|all($selected[];$components[.]!=null)' "$HIVE_MANIFEST" >/dev/null || hive_die 'Unknown selected component'
+  printf 'The console listens on this address. The default, 127.0.0.1, accepts connections from this host only (for an SSH tunnel or a local reverse proxy); 0.0.0.0, or one of this host'"'"'s addresses, serves the network.\n'
   hive_prompt bind 'HTTPS bind address' 127.0.0.1
   hive_prompt port 'HTTPS listener port' 443
   hive_prompt mode 'Configuration mode (fresh/distributed/prepared)' fresh
@@ -294,7 +318,7 @@ hive_validate() {
     (.agents|type=="array") and (.inference|type=="array")
   ' "$HIVE_CONFIG" >/dev/null || hive_die 'Invalid installation configuration'
   HIVE_ID=$(jq -r '.installation' "$HIVE_CONFIG")
-  HIVE_VERSION=${HIVE_VERSION:-$(jq -r '.release' "$HIVE_CONFIG")}
+  if [[ -z "$HIVE_VERSION" ]]; then HIVE_VERSION=$(hive_default_release); fi
   if jq -e 'has("bootstrap")' "$HIVE_CONFIG" >/dev/null; then
     if jq -e '.bootstrap|type=="object" and has("magnusConsoleOrigin")' "$HIVE_CONFIG" >/dev/null; then
       hive_die 'bootstrap.magnusConsoleOrigin is no longer supported: HiveXUI now provides the Magnus console through /api/magnus. Remove this field from the installation configuration and run the command again; review the new plan before applying it.'

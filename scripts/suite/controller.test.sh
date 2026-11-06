@@ -119,4 +119,16 @@ jq -n '{version:"9.9.0",controllerSHA256:("0"*64)}' > "$checkout/releases/9.9.0.
 [[ $(HIVE_ROOT=$checkout hive_checkout_release) == 9.9.1 ]] || fail 'The checkout release was not found'
 cp "$checkout/releases/9.9.1.json" "$checkout/releases/9.9.2.json"
 [[ -z $(HIVE_ROOT=$checkout hive_checkout_release) ]] || fail 'An ambiguous checkout release was chosen'
+rm "$checkout/releases/9.9.2.json"
+# After an upgrade the installation file still names the earlier release: the checkout's own
+# release is used, and said so, without rewriting the file.
+jq '.release="9.9.0"' "$temporary/installation.json" > "$temporary/upgraded.json"; before=$(sha256sum "$temporary/upgraded.json")
+[[ $(HIVE_ROOT=$checkout HIVE_MANIFEST= HIVE_CONFIG=$temporary/upgraded.json hive_default_release 2> "$temporary/default.log") == 9.9.1 ]] || fail 'The checkout release was not the default after an upgrade'
+grep -qF 'using release 9.9.1' "$temporary/default.log" && grep -qF 'names 9.9.0' "$temporary/default.log" || fail 'The release choice was not reported'
+[[ $(sha256sum "$temporary/upgraded.json") == "$before" ]] || fail 'The installation file was changed'
+# A file naming the release this controller pins, an unknown checkout, or an explicit manifest wins.
+jq '.release="9.9.1"' "$temporary/installation.json" > "$temporary/current.json"
+[[ $(HIVE_ROOT=$checkout HIVE_MANIFEST= HIVE_CONFIG=$temporary/current.json hive_default_release 2>&1) == 9.9.1 ]] || fail 'A matching release was reported or replaced'
+[[ $(HIVE_ROOT=$temporary/none HIVE_MANIFEST= HIVE_CONFIG=$temporary/upgraded.json hive_default_release 2>/dev/null) == 9.9.0 ]] || fail 'A release was chosen without a checkout release'
+[[ $(HIVE_ROOT=$checkout HIVE_CONFIG=$temporary/upgraded.json HIVE_MANIFEST=$checkout/releases/9.9.1.json hive_default_release 2>/dev/null) == 9.9.1 ]] || fail 'The given manifest did not name its version'
 printf 'Passed: planning, unattended guards, input injection, signature tampering, pinned rendering, privileged-mount rejection and digest-bound relaxed authentication limits and checkout release lookup.\n'
