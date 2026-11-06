@@ -202,11 +202,12 @@ function insertTrafficKey() {
   run('sqlite3', ['-cmd', '.timeout 15000', join(native, 'state/opt/hive-router/shared/data/router.db'), `INSERT INTO ClientApiKey (id,name,keyPrefix,keyHash,enabled,metadataJson,lastUsedAt,createdAt,updatedAt,expiresAt) VALUES ('${id}','rehearsal-traffic','${key.slice(0, 8)}','${salt}:${scryptSync(key, salt, 64).toString('hex')}',1,'{"consumer":"rehearsal-traffic"}',NULL,'${now}','${now}',NULL)`]);
   return { key, id };
 }
-// The rehearsal configuration turns the suite memory worker off. A production host runs it, so
-// this run does too, and the deployment input receipt is pinned again for the edited file.
+// The rehearsal configuration turns the suite memory worker off, by HIVEMEM_WORKER_ENABLED and
+// HIVE_REHEARSAL. A production host runs it, so this run does too, and the deployment input
+// receipt is pinned again for the edited file.
 function productionWorker() {
   const file = join(suite, 'config/hivemem.env');
-  writeFileSync(file, readFileSync(file, 'utf8').split('\n').filter((line) => !line.startsWith('HIVEMEM_WORKER_ENABLED=')).join('\n'));
+  writeFileSync(file, readFileSync(file, 'utf8').split('\n').filter((line) => !/^(HIVEMEM_WORKER_ENABLED|HIVE_REHEARSAL)=/.test(line)).join('\n'));
   const candidate = readdirSync(suite).find((name) => /^candidate\.[a-f0-9]{64}\.json$/.test(name));
   assert(candidate, 'prepare staged no candidate');
   const digest = run('bash', ['-c', 'die() { exit 1; }; source "$1"; deployment_inputs_digest "$2"', '_', join(controller, 'scripts/suite/input-artifacts-host.sh'), join(suite, candidate)]).trim();
@@ -689,6 +690,7 @@ async function main() {
       report.liveVerify = parseJSONLine(live.stdout);
       report.trafficDuringLiveVerify = trafficSummary(traffic.log, live.startedAt, live.finishedAt);
       report.suiteQueue = queueState(c.address, trust);
+      assert.equal(report.suiteQueue.workerEnabled, true, 'The suite memory worker runs, as in production');
     }
     if (c.backupRehearsal) {
       report.backupRehearsal = await backupRehearsal(trust, traffic);
