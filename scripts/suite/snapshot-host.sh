@@ -6,6 +6,13 @@
 # application is paused (cgroup freezer, docker pause) only while its group is captured, so
 # its datastores and files all hold the state of one instant, as if the application had been
 # killed then. Requests to that application wait for the pause and are then answered.
+#
+# The pause must not grow with the data. Everything that can be taken while the application
+# serves is taken first: its files and SQLite databases are copied, and every Qdrant collection
+# is snapshotted between two readings of its version. The pause then only proves those copies
+# still current, or brings what changed up to date: a database or file unchanged since its copy
+# is kept, a collection whose version is unchanged keeps its snapshot, and Redis forks its
+# snapshot. The Redis dump is collected, and every store is rebuilt and verified, after the pause.
 snapshot_paused=() snapshot_containers=() snapshot_watchdog='' snapshot_created='' snapshot_staging='' snapshot_succeeded=false
 snapshot_service() { jq -r --arg name "$1" "$2" "$directory/compose.json"; }
 snapshot_mount() { jq -r --arg name "$1" --arg target "$2" '[.services[$name].volumes[]?|select(.target==$target)|.source][0] // empty' "$directory/compose.json"; }
@@ -67,6 +74,15 @@ snapshot_helper() {
     --entrypoint sleep "$recovery_image" infinity >/dev/null || die 'A snapshot helper could not start'
 }
 snapshot_run() { timeout 1800 docker exec "hive-snapshot-$archive-$1" node --input-type=module -e "$snapshot_code" "$2"; }
+# snapshot_step NAME COMMAND...: runs a step and records how long it took, for the receipt. Never
+# called as a condition, so errexit still stops the backup inside the step.
+snapshot_step() {
+  local name=$1 started; shift
+  started=$(snapshot_now)
+  "$@"
+  jq -nc --arg step "$name" --arg seconds "$(snapshot_seconds "$started" "$(snapshot_now)")" '{($step):($seconds|tonumber)}' >> "$snapshot_staging/work/steps.jsonl"
+}
+snapshot_steps() { jq -sc 'add // {}' "$snapshot_staging/work/steps.jsonl" 2>/dev/null || printf '{}'; }
 snapshot_files() {
   # snapshot_files precopy|capture|verify SERVICE
   local phase=$1 service=$2 source readonly='' request
@@ -80,6 +96,7 @@ snapshot_files() {
     --mount "type=bind,source=$snapshot_staging/data/$service,target=/out" --mount "type=bind,source=$snapshot_staging/work/$service,target=/work"
   snapshot_run "files-$service" "$request"
 }
+snapshot_precopy() { snapshot_files precopy "$1" >/dev/null || die "Snapshot failed: $1"; }
 snapshot_prepare() {
   local service=$1 source
   source="$directory/data/$service"
@@ -117,13 +134,29 @@ snapshot_still_paused() {
   for id in "${snapshot_paused[@]}"; do [[ $(docker inspect -f '{{.State.Paused}}' "$id") == true ]] || return 1; done
 }
 
+# ---- Before the pause: what can be taken while the application serves. ----
+snapshot_qdrant_helper() {
+  local service=$1 config
+  config=$(snapshot_mount "$service" /config)
+  [[ -n "$config" && -f "$config/qdrant.yaml" ]] || die "Qdrant configuration is missing: $service"
+  snapshot_helper "qdrant-$service" "$(snapshot_service "$service" '.services[$name].user')" --network "container:$(snapshot_id "$service")" \
+    --mount "type=bind,source=$config,target=/config,readonly" --mount "type=bind,source=$snapshot_staging/work/$service,target=/work"
+}
+# Every collection snapshotted, with its version read before and after. The helper records each
+# snapshot it creates in the store's work directory, so a failed backup removes it again.
+snapshot_qdrant_precapture() {
+  local service=$1
+  snapshot_qdrant_helper "$service"
+  snapshot_run "qdrant-$service" '{"command":"qdrant-precapture","url":"http://127.0.0.1:6333","config":"/config/qdrant.yaml","work":"/work"}' > "$snapshot_staging/work/$service/precapture.out" || die "Qdrant snapshot failed: $service"
+}
+
 # ---- Capture: runs while the group's application is paused. ----
 snapshot_redis_capture() {
-  local service=$1 container result name source
-  container=$(snapshot_id "$service"); source="$directory/data/$service"
-  # A background save forks at once: its child holds the state of this instant. The password
-  # is read inside the container, from its own configuration, never passed in.
-  result=$(timeout 300 docker exec -i "$container" sh -s <<'EOF'
+  local service=$1 result
+  # A background save forks at once: its child holds the state of this instant, and writes it
+  # out after the pause. The password is read inside the container, from its own configuration,
+  # never passed in.
+  result=$(timeout 330 docker exec -i "$(snapshot_id "$service")" sh -s <<'EOF'
 set -eu
 REDISCLI_AUTH=$(sed -n 's/^requirepass[[:space:]]*//p' /config/redis.conf | tail -n 1); export REDISCLI_AUTH
 r() { redis-cli --no-auth-warning "$@" | tr -d '\r'; }
@@ -131,26 +164,25 @@ field() { r info persistence | sed -n "s/^$1://p"; }
 [ "$(r config get dir | sed -n 2p)" = /data ]
 name=$(r config get dbfilename | sed -n 2p)
 before=$(field rdb_saves); keys=$(r dbsize)
-case "$(r bgsave schedule)" in 'Background saving started'|'Background saving scheduled') ;; *) exit 1;; esac
-count=0
-until [ "$(field rdb_bgsave_in_progress)" = 0 ] && [ "$(field rdb_saves)" -gt "$before" ]; do
-  count=$((count + 1)); [ "$count" -lt 1200 ]; sleep 0.1
-done
-[ "$(field rdb_last_bgsave_status)" = ok ]
-printf '{"file":"%s","keys":%s}\n' "$name" "$keys"
+case "$(r bgsave schedule)" in
+  'Background saving started') ;;
+  # An append-only rewrite is running: the save forks when it ends, still inside the pause.
+  'Background saving scheduled')
+    count=0
+    until [ "$(field rdb_bgsave_in_progress)" = 1 ] || [ "$(field rdb_saves)" -gt "$before" ]; do count=$((count + 1)); [ "$count" -lt 6000 ]; sleep 0.05; done;;
+  *) exit 1;;
+esac
+printf '{"file":"%s","keys":%s,"saves":%s}\n' "$name" "$keys" "$before"
 EOF
   ) || die "Redis snapshot failed: $service"
-  name=$(jq -er .file <<< "$result") && [[ "$name" =~ ^[A-Za-z0-9._-]+$ && -f "$source/$name" && ! -L "$source/$name" ]] || die "Redis snapshot file is missing: $service"
-  cp --reflink=auto --preserve=mode,ownership,timestamps -- "$source/$name" "$snapshot_staging/data/$service/$name"
-  jq -c --arg at "$(date -u +%FT%T.%3NZ)" '{method:"redis-bgsave",file,keysAtCapture:.keys,capturedAt:$at}' <<< "$result" > "$snapshot_staging/work/$service/store.json"
+  jq -e '(.file|test("^[A-Za-z0-9._-]+$")) and (.keys|type=="number") and (.saves|type=="number")' <<< "$result" >/dev/null || die "Redis snapshot failed: $service"
+  printf '%s\n' "$result" > "$snapshot_staging/work/$service/redis-fork.json"
 }
 snapshot_qdrant_capture() {
-  local service=$1 container config result
-  container=$(snapshot_id "$service"); config=$(snapshot_mount "$service" /config)
-  [[ -n "$config" && -f "$config/qdrant.yaml" ]] || die "Qdrant configuration is missing: $service"
-  snapshot_helper "qdrant-$service" "$(snapshot_service "$service" '.services[$name].user')" --network "container:$container" --mount "type=bind,source=$config,target=/config,readonly"
-  result=$(snapshot_run "qdrant-$service" '{"command":"qdrant-snapshot","url":"http://127.0.0.1:6333","config":"/config/qdrant.yaml"}') || die "Qdrant snapshot failed: $service"
-  jq -c --arg at "$(date -u +%FT%T.%3NZ)" '{method:"qdrant-collection-snapshots",directory,snapshots,collections,aliases,capturedAt:$at}' <<< "$result" > "$snapshot_staging/work/$service/store.json"
+  local service=$1 result
+  snapshot_qdrant_helper "$service"
+  result=$(snapshot_run "qdrant-$service" '{"command":"qdrant-capture","url":"http://127.0.0.1:6333","config":"/config/qdrant.yaml","work":"/work"}') || die "Qdrant snapshot failed: $service"
+  jq -ec --arg at "$(date -u +%FT%T.%3NZ)" '{method:"qdrant-collection-snapshots",directory,snapshots,collections,aliases,reused,captured,capturedAt:$at}' <<< "$result" > "$snapshot_staging/work/$service/store.json" || die "Qdrant snapshot failed: $service"
 }
 snapshot_postgres_capture() {
   local service=$1 container user
@@ -165,15 +197,44 @@ snapshot_postgres_capture() {
 snapshot_capture() {
   local group=$1 service
   # Files first: a SQLite lock held by the paused writer is retried before any store snapshot.
-  for service in $(jq -r '.files[]' <<< "$group"); do snapshot_files capture "$service" > "$snapshot_staging/work/$service/capture.out"; done
+  for service in $(jq -r '.files[]' <<< "$group"); do snapshot_step "files:$service" snapshot_files capture "$service" > "$snapshot_staging/work/$service/capture.out"; done
   for service in $(jq -r '.stores[]' <<< "$group"); do
     case $(snapshot_store "$service") in
-      redis) snapshot_redis_capture "$service";;
-      qdrant) snapshot_qdrant_capture "$service";;
-      postgres) snapshot_postgres_capture "$service";;
+      redis) snapshot_step "redis:$service" snapshot_redis_capture "$service";;
+      qdrant) snapshot_step "qdrant:$service" snapshot_qdrant_capture "$service";;
+      postgres) snapshot_step "postgres:$service" snapshot_postgres_capture "$service";;
       *) die "No online snapshot method for $service; use --stopped";;
     esac
   done
+}
+
+# ---- After the pause: the Redis dump is collected while everything serves again. ----
+snapshot_redis_saves() {
+  # snapshot_redis_saves SERVICE SAVES wait|check: the save forked in the pause has finished, and
+  # no later save has replaced its file.
+  timeout 330 docker exec -i "$(snapshot_id "$1")" sh -s -- "$2" "$3" <<'EOF'
+set -eu
+REDISCLI_AUTH=$(sed -n 's/^requirepass[[:space:]]*//p' /config/redis.conf | tail -n 1); export REDISCLI_AUTH
+r() { redis-cli --no-auth-warning "$@" | tr -d '\r'; }
+field() { r info persistence | sed -n "s/^$1://p"; }
+before=$1 count=0
+if [ "$2" = wait ]; then
+  until [ "$(field rdb_bgsave_in_progress)" = 0 ] && [ "$(field rdb_saves)" -gt "$before" ]; do count=$((count + 1)); [ "$count" -lt 6000 ]; sleep 0.05; done
+  [ "$(field rdb_last_bgsave_status)" = ok ]
+fi
+[ "$(field rdb_bgsave_in_progress)" = 0 ] && [ "$(field rdb_saves)" = $((before + 1)) ]
+EOF
+}
+snapshot_redis_collect() {
+  local service=$1 fork name saves source
+  fork="$snapshot_staging/work/$service/redis-fork.json"; source="$directory/data/$service"
+  name=$(jq -er .file "$fork") && saves=$(jq -er .saves "$fork") || die "Redis snapshot failed: $service"
+  snapshot_redis_saves "$service" "$saves" wait || die "Redis snapshot failed: $service"
+  [[ "$name" =~ ^[A-Za-z0-9._-]+$ && -f "$source/$name" && ! -L "$source/$name" ]] || die "Redis snapshot file is missing: $service"
+  # One open of the file: a later save replaces it by rename, which the check then sees.
+  cp --reflink=auto --preserve=mode,ownership,timestamps -- "$source/$name" "$snapshot_staging/data/$service/$name"
+  snapshot_redis_saves "$service" "$saves" check || die "Redis saved again before its snapshot was copied: $service"
+  jq -c --arg at "$(date -u +%FT%T.%3NZ)" '{method:"redis-bgsave",file,keysAtCapture:.keys,capturedAt:$at}' "$fork" > "$snapshot_staging/work/$service/store.json"
 }
 
 # ---- Materialize and verify: runs while everything serves again. ----
@@ -216,12 +277,23 @@ EOF
   jq -c --argjson verified "$result" '.+{verified:$verified}' "$snapshot_staging/work/$service/store.json" > "$snapshot_staging/work/$service/store.json.next"
   mv -T -- "$snapshot_staging/work/$service/store.json.next" "$snapshot_staging/work/$service/store.json"
 }
-# Collection snapshots that Qdrant wrote into its live directory, one path per line.
+# Collection snapshots this backup had Qdrant write into its live directory, one path per line:
+# every one the helper recorded, and those in the store record.
 snapshot_qdrant_files() {
-  local store=$1 service=$2 relative
-  relative=$(jq -r .directory "$store")
-  [[ "$relative" =~ ^[A-Za-z0-9._/-]+$ && "$relative" != *..* ]] || return 1
-  jq -r --arg base "$directory/data/$service/$relative" '.snapshots|to_entries[]|select((.key|test("^[A-Za-z0-9_.-]+$")) and (.value.name|test("^[A-Za-z0-9_.-]+$")))|$base+"/"+.key+"/"+.value.name' "$store"
+  local service=$1 work="$snapshot_staging/work/$1"
+  {
+    [[ ! -f "$work/qdrant-created.jsonl" ]] || jq -c '{directory,collection,name}' "$work/qdrant-created.jsonl" 2>/dev/null || true
+    [[ ! -f "$work/store.json" ]] || jq -c 'select(.method=="qdrant-collection-snapshots") | .directory as $d | .snapshots|to_entries[]|{directory:$d,collection:.key,name:.value.name}' "$work/store.json" 2>/dev/null || true
+  } | jq -r --arg base "$directory/data/$service" 'select((.directory|type=="string") and (.directory|test("^[A-Za-z0-9._/-]+$")) and (.directory|contains("..")|not)
+      and (.collection|type=="string") and (.collection|test("^[A-Za-z0-9_.-]+$")) and (.name|type=="string") and (.name|test("^[A-Za-z0-9_.-]+$")))|$base+"/"+.directory+"/"+.collection+"/"+.name' | sort -u
+}
+# Removes those still in the live directory: superseded ones, or all of them after a failure.
+snapshot_qdrant_discard() {
+  local file
+  while IFS= read -r file; do
+    [[ ! -f "$file" || -L "$file" ]] || rm -f -- "$file" "$file.checksum"
+    rmdir -- "$(dirname -- "$file")" 2>/dev/null || true
+  done < <(snapshot_qdrant_files "$1")
 }
 snapshot_qdrant_verify() {
   local service=$1 store name image user config attempt inventory='' collection file index=0
@@ -242,6 +314,8 @@ snapshot_qdrant_verify() {
     restore+=(--snapshot "/snapshots/$index.snapshot:$collection"); index=$((index + 1))
   done < <(jq -r '.snapshots|to_entries[]|select((.key|test("^[A-Za-z0-9_.-]+$")) and (.value.name|test("^[A-Za-z0-9_.-]+$")))|[.key,.value.name]|@tsv' "$store")
   [[ $index == $(jq '.snapshots|length' "$store") && $index == $(jq '.collections|length' "$store") ]] || die "Qdrant snapshots are incomplete: $service"
+  # Snapshots taken while serving of collections written before the pause were taken again.
+  snapshot_qdrant_discard "$service"
   mapfile -t entry < <(snapshot_service "$service" '.services[$name].entrypoint[]?')
   ((${#entry[@]})) || entry=(/qdrant/qdrant)
   mapfile -t command < <(snapshot_service "$service" '.services[$name].command[]?')
@@ -299,17 +373,20 @@ snapshot_verify() {
 }
 
 snapshot_group() {
-  local group=$1 service attempt status started finished pid
+  local group=$1 service attempt status started finished pid staged
   local -a ids=()
   for service in $(jq -r '(.files+.stores)[]' <<< "$group"); do snapshot_prepare "$service"; done
-  # Ordinary files are copied first while serving; the pause only brings them up to date.
-  for service in $(jq -r '.files[]' <<< "$group"); do snapshot_files precopy "$service" >/dev/null || die "Snapshot failed: $service"; done
   for service in $(jq -r '.pause[]' <<< "$group"); do ids+=("$(snapshot_id "$service")"); done
+  : > "$snapshot_staging/work/steps.jsonl"
+  # Qdrant collections are snapshotted while serving; the pause takes again only those written since.
   for service in $(jq -r '.stores[]' <<< "$group"); do
-    [[ $(snapshot_store "$service") != qdrant ]] || snapshot_helper "qdrant-$service" "$(snapshot_service "$service" '.services[$name].user')" \
-      --network "container:$(snapshot_id "$service")" --mount "type=bind,source=$(snapshot_mount "$service" /config),target=/config,readonly"
+    if [[ $(snapshot_store "$service") == qdrant ]]; then snapshot_step "qdrant:$service" snapshot_qdrant_precapture "$service"; fi
   done
+  # Files and SQLite databases are copied last before the pause, which only brings them up to date.
+  for service in $(jq -r '.files[]' <<< "$group"); do snapshot_step "files:$service" snapshot_precopy "$service"; done
+  staged=$(snapshot_steps)
   for attempt in 1 2 3 4 5; do
+    : > "$snapshot_staging/work/steps.jsonl"
     snapshot_pause "${ids[@]}"
     started=$(snapshot_now)
     # A background subshell keeps errexit for every capture step.
@@ -319,13 +396,16 @@ snapshot_group() {
     snapshot_still_paused || die 'A paused service resumed before its capture finished'
     snapshot_resume || die 'Paused services could not be resumed'
     finished=$(snapshot_now)
-    jq -nc --argjson group "$group" --arg seconds "$(snapshot_seconds "$started" "$finished")" --argjson attempt "$attempt" \
-      '$group+{pausedSeconds:($seconds|tonumber),attempt:$attempt}' >> "$snapshot_staging/work/pauses.jsonl"
+    # The receipt keeps how long the group was paused, each step inside the pause, and the work
+    # done before it while serving.
+    jq -nc --argjson group "$group" --arg seconds "$(snapshot_seconds "$started" "$finished")" --argjson attempt "$attempt" --argjson steps "$(snapshot_steps)" --argjson staged "$staged" \
+      '$group+{pausedSeconds:($seconds|tonumber),attempt:$attempt,steps:$steps,staged:$staged}' >> "$snapshot_staging/work/pauses.jsonl"
     ((status == 0)) && break
     # A paused writer held a SQLite lock: resume it and capture again.
     ((status == 75 && attempt < 5)) || die "Snapshot failed: $(jq -r '(.pause+.files+.stores)|unique|join(", ")' <<< "$group")"
     sleep "$attempt"
   done
+  for service in $(jq -r '.stores[]' <<< "$group"); do if [[ $(snapshot_store "$service") == redis ]]; then snapshot_redis_collect "$service"; fi; done
   snapshot_verify "$group"
   for service in $(jq -r '(.files+.stores)[]' <<< "$group"); do docker rm -f "hive-snapshot-$archive-files-$service" "hive-snapshot-$archive-qdrant-$service" >/dev/null 2>&1 || true; done
 }
@@ -361,10 +441,10 @@ snapshot_finish() {
   for name in "$directory"/data/*/".hive-snapshot-$archive"; do [[ ! -d "$name" || -L "$name" ]] || rm -rf -- "$name"; done
   if [[ -n "$snapshot_staging" && -d "$snapshot_staging/work" ]]; then
     # A Qdrant snapshot that was never moved out of the live store is removed again.
-    local file
-    for name in "$snapshot_staging"/work/*/store.json; do
-      [[ -f "$name" ]] && jq -e '.method=="qdrant-collection-snapshots"' "$name" >/dev/null 2>&1 || continue
-      while IFS= read -r file; do [[ ! -f "$file" || -L "$file" ]] || rm -f -- "$file" "$file.checksum"; done < <(snapshot_qdrant_files "$name" "$(basename -- "$(dirname -- "$name")")")
+    for name in "$snapshot_staging"/work/*/; do
+      name=$(basename -- "$name")
+      [[ "$name" =~ ^[A-Za-z0-9._-]+$ && -d "$directory/data/$name" && ! -L "$directory/data/$name" ]] || continue
+      snapshot_qdrant_discard "$name"
     done
   fi
   [[ -z "$snapshot_staging" ]] || rm -rf -- "$snapshot_staging"
