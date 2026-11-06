@@ -118,9 +118,10 @@ the default shown in brackets.
 | Initial operator email | your address, for identity recovery |
 | Existing console certificate file | `/etc/hive/tls/console.crt` |
 | Protected console private key file | `/etc/hive/tls/console.key` |
-| Deploy the Magnus web terminal gateway | `no` (see [the web terminal](FULL.md#magnus-web-terminal)) |
+| Deploy the Magnus web terminal gateway | `no`. For `yes`, first create the restricted account and key in [preparing nodes](FULL.md#preparing-nodes-and-the-gateway-key) |
+| Port for Magnus host agents | blank for none. Give a port, such as `4000`, to let hosts join the Magnus fleet; see [Magnus host agents](FULL.md#magnus-host-agents) |
 | Existing external inference HTTPS endpoint | blank to skip; see [external inference](INFERENCE.md) |
-| Opt-in native agent runtime | blank to skip; see [native agents](NATIVE_AGENTS.md) |
+| Opt-in native agent runtime | blank. Release 2.0.3 pins no native agent artifacts, so none can be installed here; a Magnus host agent is installed as in [Magnus host agents](FULL.md#magnus-host-agents) |
 | Write protected installation configuration to | the default, `~/.config/hive/hive/installation.json` |
 
 `hive.sh` then prints the plan: every product, image digest and host path. Answer `y` to apply

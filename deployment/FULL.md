@@ -108,6 +108,31 @@ In a distributed configuration the gateway needs a `bootstrap.productEndpoints["
 entry like any other product, on Magnus's host. Bind it where only the console host's ingress and
 Magnus can reach it. Its `/internal` route is for Magnus and has no route through the ingress.
 
+### Preparing nodes and the gateway key
+
+The gateway signs in to each node as one restricted account, with one key. Create both before
+running setup; Hive refuses a key file it cannot read or that others can read. On a single host,
+the node is the host itself. As the account that runs `hive.sh` (UID 1000):
+
+```bash
+# On each node: a dedicated account with no sudo rights.
+sudo useradd --create-home --shell /bin/bash --comment "Hive web terminal" hive-terminal
+
+# On the Magnus host: the gateway key, owned by you and owner-only. Hive copies it.
+sudo install -d -m 0700 -o "$USER" -g "$USER" /etc/hive/fleet
+ssh-keygen -q -t ed25519 -N "" -C hive-fleet-gateway -f /etc/hive/fleet/gateway-key
+
+# On each node: authorize that key for the terminal account only.
+sudo install -d -m 0700 -o hive-terminal -g hive-terminal /home/hive-terminal/.ssh
+sudo install -m 0600 -o hive-terminal -g hive-terminal /etc/hive/fleet/gateway-key.pub \
+  /home/hive-terminal/.ssh/authorized_keys
+```
+
+Then answer `yes` to *Deploy the Magnus web terminal gateway*, `hive-terminal` to *Restricted
+SSH account on fleet nodes*, `/etc/hive/fleet/gateway-key` to the key question, and `yes` to
+grant the terminal to the initial operator if that account should use it. A terminal also needs
+a Magnus node: see [Magnus host agents](#magnus-host-agents), then approve the node below.
+
 ### Approving a node
 
 The gateway never learns a host key from a connection, and a node with no approval refuses
@@ -134,7 +159,9 @@ as the key in its configuration directory is. Restrict those backups accordingly
 
 Dispatch, ingestion, retention and notification integrations in fresh Cindertrace
 configuration start disabled until the operator reviews their product-owned
-settings. Migration rehearsals additionally enforce each product's isolated
+settings. `hive.sh` cannot yet provision a Cindertrace collector credential or turn ingestion
+on, and the configuration files under `config/` are digest-checked, so a fresh installation
+receives no security events until that follow-up ships. Migration rehearsals additionally enforce each product's isolated
 read-only mode. Restored Magnus does not consume queued work or contact agents;
 restored ChatterMost normally refuses logins and WebSocket upgrades. The separate
 coordinated authentication copy below explicitly enables its volatile, read-only
@@ -146,6 +173,66 @@ Hive does not enable checksums or alter their data automatically.
 
 All inference services, hosted APIs, model files, model storage, containers and
 hardware provisioning remain external. Full installation creates none of them.
+
+## Magnus host agents
+
+A host joins the fleet by running the Magnus agent, which calls Magnus's agent API. On a fresh
+single-host installation Magnus listens only on the suite's private network, so setup offers to
+publish that API on its own port:
+
+```text
+Port for Magnus host agents, for example 4000 (blank for none): 4000
+```
+
+The default is none. The port is published on the console bind address, with the console
+certificate, so `tls-refresh` renews it too. The installation file records it as
+`"console": {"nativeListeners": [{"port": 4000, "component": "magnus"}]}`, and the plan shows it
+as `console.magnusAgentPort`. It is offered on fresh installations only for now; a distributed
+Magnus has its own HTTPS endpoint, and adding the port to an existing installation is a follow-up.
+
+The port is not the console. The ingress serves only the routes the agent and its Hermes sync
+call (`GET /`, the heartbeat, log ingest, resource-lease, managed cron occurrence and Hermes
+registry client routes) and answers 404 to everything else, including every operator, browser
+and system route. Only the agent credentials (`x-node-token`, `x-log-token`,
+`x-hermes-registry-token`), `Content-Type` and `Accept` reach Magnus: no `Authorization`, cookie
+or `x-api-secret` passes, and `X-Forwarded-For` is the client's address. Bind the console to an
+address that only your hosts can reach, or limit the port with your network's firewall: ports
+Docker publishes bypass ufw.
+
+This release pins no native agent artifact, so the agent is installed from npm, at the same
+version as the suite's Magnus (listed in the release notes; 2.1.1 in 2.0.3), with Node.js 24.
+On each host, as root:
+
+```bash
+npm install --prefix /opt/magnus-agent @hivemagnus/magnus-agent@2.1.1
+install -d -m 0700 /opt/magnus-agent/certs
+install -m 0644 /etc/hive/tls/console.crt /opt/magnus-agent/certs/agent.crt   # the host's certificate
+install -m 0600 /etc/hive/tls/console.key /opt/magnus-agent/certs/agent.key
+```
+
+Write `/opt/magnus-agent/.env` (mode 0600). `NODE_MANAGER_SECRET` and `RESULT_SIGNING_SECRET`
+are the suite Magnus's own, from `/opt/hive/config/magnus.env`; copy them without printing them:
+
+```bash
+{ printf 'CONTROL_API_URL=https://hive.example.com:4000\nHOST_FQDN=node-1.example.com\n'
+  grep -E '^(NODE_MANAGER_SECRET|RESULT_SIGNING_SECRET)=' /opt/hive/config/magnus.env
+  printf 'TLS_CERT_PATH=/opt/magnus-agent/certs/agent.crt\nTLS_KEY_PATH=/opt/magnus-agent/certs/agent.key\nNODE_ENV=production\n'
+} | sudo install -m 0600 /dev/stdin /opt/magnus-agent/.env
+```
+
+Then check it and start the example unit from the package:
+
+```bash
+cd /opt/magnus-agent && node node_modules/@hivemagnus/magnus-agent/dist/index.js check
+cp node_modules/@hivemagnus/magnus-agent/deploy/magnus-agent.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now magnus-agent
+```
+
+The first heartbeat registers the node; it appears under **Magnus > Nodes** within a minute.
+Magnus calls the agent back on port 4100 of `HOST_FQDN`, so that name must resolve from the
+Magnus container and present the agent's certificate. See the
+[agent README](https://github.com/ChefTaco/magnus/blob/HEAD/packages/agent/README.md) for the
+unprivileged mode and every setting.
 
 ## Developer rehearsal
 

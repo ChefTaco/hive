@@ -4,6 +4,39 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- A fresh installation with Magnus can publish the Magnus agent API for host agents on its own
+  port (`console.nativeListeners: [{"port": N, "component": "magnus"}]`, offered by interactive
+  setup, off by default). The ingress serves it on the console bind address with the console
+  certificate and its own route set: the agent and Hermes sync routes only, the agent
+  credentials only, and the client address in `X-Forwarded-For`. Before this, a host agent on a
+  fresh single-host installation had no route to Magnus, so the full profile's fleet could not
+  have nodes. See [Magnus host agents](deployment/FULL.md#magnus-host-agents).
+- `npm run check:release-docs` fails when an install example names anything but the newest
+  signed release.
+- CI runs the ingress transport acceptance, which now proves the agent port's allowlist, that
+  forged identity headers on it have no effect and that the console port still refuses agent
+  credentials.
+
+### Fixed
+
+- The installation guide, README and deployment overview of 2.0.3 still installed 2.0.2.
+- FULL.md now shows how to create the web terminal's restricted node account and gateway key.
+
+### Next
+
+- Pin the Magnus native agent bundle as `agentArtifacts` in the release, so setup and
+  `agents-accept` install the agent without Node.js or npm on the host. The setup question
+  "Opt-in native agent runtime" offers runtimes the release has no artifacts for.
+- A `hive.sh` command that registers a Magnus node and writes its agent environment.
+- Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
+- Provisioning a Cindertrace collector credential and enabling ingestion from `hive.sh`; a
+  fresh installation receives no security events today.
+- An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
+
 ## [2.0.3] - 2026-11-06
 
 A controller release. `releases/2.0.3.json` pins exactly the images and versions of 2.0.2;
