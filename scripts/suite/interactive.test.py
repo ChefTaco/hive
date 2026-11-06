@@ -234,7 +234,7 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
                         ('Installation directory on the selected host', str(base / 'guided'))]
     guided_questions += [item for item in custom_questions[3:] if item[0] != 'Write protected installation configuration to']
     guided_questions += [('Write protected installation configuration to', '')]
-    review.write_text(json.dumps({'command': ['/usr/bin/env', f'HOME={guided_home}', *arguments], 'questions': guided_questions,
+    review.write_text(json.dumps({'command': ['/usr/bin/env', f'HOME={guided_home}', f'XDG_CONFIG_HOME={guided_home}/.config', *arguments], 'questions': guided_questions,
                                  'transcriptFile': str(base / 'guided-transcript.log'), 'timeoutSeconds': 30}))
     subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
     guided = json.loads(guided_output.read_text())
@@ -243,7 +243,7 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     assert f'[/opt/guided-proof]' in transcript, 'The directory has no default'
     assert 'sudo install -d -m 0750' in transcript, 'An unwritable directory gave no guidance'
     resumed = [('Installation name', 'guided-proof'), ('Continue with it instead of answering', '')]
-    review.write_text(json.dumps({'command': ['/usr/bin/env', f'HOME={guided_home}', *arguments], 'questions': resumed,
+    review.write_text(json.dumps({'command': ['/usr/bin/env', f'HOME={guided_home}', f'XDG_CONFIG_HOME={guided_home}/.config', *arguments], 'questions': resumed,
                                  'transcriptFile': str(base / 'resumed-transcript.log'), 'timeoutSeconds': 30}))
     subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
     transcript = re.sub(r'\x1b\[[0-9;]*m', '', (base / 'resumed-transcript.log').read_text())
