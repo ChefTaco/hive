@@ -274,7 +274,7 @@ function containerTimes() {
 async function backupRehearsal(trust, traffic) {
   const archive = 'rehearsal-backup-' + randomBytes(3).toString('hex');
   say('backup: hive.sh backup on the migrated suite' + (traffic ? ', with clients still connected' : ''));
-  const backup = suiteCommand(['backup', '--archive', archive], 'backup');
+  const backup = suiteCommand(['backup', '--archive', archive, '--yes'], 'backup');
   assert.equal(backup.status, 0, backup.stderr.slice(-3000));
   const times = containerTimes();
   const stopped = times.map((item) => Date.parse(item.finished)).filter((value) => value > Date.parse(backup.startedAt));
@@ -289,7 +289,7 @@ async function backupRehearsal(trust, traffic) {
   if (traffic) result.clientOutage = Object.fromEntries(['api-key', 'memory-write', 'client-token'].map((kind) => [kind, outage(traffic.log, kind, backup.startedAt, new Date(Date.now() + 1).toISOString())]));
   result.probesAfterBackup = probes(c.address, trust);
   say('restore check: hive.sh rehearse restores the archive into an isolated copy');
-  const restore = suiteCommand(['rehearse', '--archive', archive], 'rehearse');
+  const restore = suiteCommand(['rehearse', '--archive', archive, '--yes'], 'rehearse');
   assert.equal(restore.status, 0, restore.stderr.slice(-3000));
   const restored = JSON.parse(readFileSync(join(suite, 'rehearsals', archive, 'result.json'), 'utf8'));
   assert.equal(restored.result, 'passed');
