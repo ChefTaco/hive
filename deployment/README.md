@@ -194,6 +194,32 @@ strict SSH inventories on one physical host. Full setup includes both an actual
 terminal wizard and unattended installation, plus authenticated restored peers.
 Separate physical machines and existing installations retain their own gates.
 
+## When a command stops: transactions and recovery
+
+`install`, `upgrade`, `rollback`, `backup`, `rehearse`, `restore` and `adopt` each open a
+transaction on every host, recorded in the installation directory's `transaction.json` with the
+plan it belongs to. While one is open, `status` and `doctor` report
+`incomplete-transaction: HOST is in phase PHASE`, and a different plan is refused with
+`A different transaction requires recovery`.
+
+**Closed as aborted.** When a command fails in its read-only checks (staging, which verifies the
+release and pulls images; the storage compatibility check; the native agent and external
+endpoint preflight), nothing has been stopped, paused, initialized, staged or activated.
+`hive.sh` closes the transaction as `aborted`, keeps its record in `transaction.json` and
+`aborted-transaction.PLAN.json`, and says so. `doctor` treats it as closed. Fix the cause, then
+run the same command or any other. Configuration a command provisions before its transaction
+opens, such as the registry and memory credentials, is idempotent and stays.
+
+**Repeat the same command.** In any other open phase (`prepared` after data initialization or
+agent staging, `quiesced`, `backed-up`, `migrated`, `activating`, `ready`, `restoring` or
+`recovery-required`), something on the host may have changed. Repeat exactly the same command,
+from the same checkout with the same installation file and options, so it resumes its own plan;
+a backup or rollback the message names is the other way back. A `migration-started` phase is
+never replayed: the product's migration outcome is unknown and needs its own recovery.
+
+**Start fresh** only when every host's phase is `complete` or `aborted`. Never edit
+`transaction.json` by hand.
+
 ## Hive Registry
 
 Every installation runs a Hive Registry: its install catalog and lookup API, a small

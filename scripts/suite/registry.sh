@@ -198,7 +198,7 @@ hive_registry_report() {
     if ($active|length)==0 then {state:(if any($observed[];.unreachable) then "unavailable" else "not-active" end),drift:[]}
     elif $summary==null or $list==null or ($summary|type!="object") or ($list|type!="object") then {state:"unavailable",drift:[drift("registry-unavailable";"The registry did not answer on its host")]}
     else
-      ([$active[]|select(.transactionPhase!=null and .transactionPhase!="complete")|drift("incomplete-transaction";.host+" is in phase "+.transactionPhase)] +
+      ([$active[]|select(.transactionPhase!=null and .transactionPhase!="complete" and .transactionPhase!="aborted")|drift("incomplete-transaction";.host+" is in phase "+.transactionPhase)] +
        [$active[].receipt|select(.version!=$summary.release.version or .digest!=$summary.release.manifestDigest)|drift("release-mismatch";"Registry records "+($summary.release.version // "no release")+"; a host runs "+.version)] +
        [$managed[]|select(.installation.status!="installed")|drift("not-installed";.id+" is recorded as "+.installation.status)] +
        ($actual|map(. as $service|select(($managed|any(.id==$service.service and .installation.inventoryHost==$service.host))|not)|drift("unrecorded";$service.service+" runs on "+$service.host+" but is not recorded"))) +

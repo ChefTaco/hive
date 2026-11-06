@@ -22,6 +22,11 @@ fixture() {
   printf 'root\n' > "$root/data/svc/root-store"
   printf 'copy\n' > "$root/rehearsals/first/data/svc/store"; chown "$service:$service" "$root/rehearsals/first/data/svc/store"
   printf 'outside\n' > "$base/outside"; ln -sfn "$base/outside" "$root/config/link"
+  # Configuration a service owns, such as the console key and certificate the ingress reads.
+  install -d -m 700 -o "$service" -g "$service" "$root/config/ingress"
+  printf 'key\n' > "$root/config/ingress/console.key"; printf 'certificate\n' > "$root/config/ingress/console.crt"
+  chown "$service:$service" "$root/config/ingress/console.key" "$root/config/ingress/console.crt"; chmod 600 "$root/config/ingress/console.key" "$root/config/ingress/console.crt"
+  printf '{}\n' > "$root/config/runtime.json"; chown 101:101 "$root/config/runtime.json"
 }
 mkdir -p "$base"
 
@@ -36,10 +41,14 @@ done
 [[ $(stat -c %u "$base/user/data/svc/root-store") == 0 ]] || fail 'A file inside service data changed owner'
 [[ $(stat -c %u "$base/user/rehearsals/first/data/svc/store") == "$service" ]] || fail 'Rehearsal data owned by a service changed owner'
 [[ $(stat -c %u "$base/outside") == 0 ]] || fail 'A symlink target outside the installation changed owner'
+for path in config/ingress config/ingress/console.key config/ingress/console.crt; do
+  [[ $(stat -c %u:%g -- "$base/user/$path") == "$service:$service" ]] || fail "$path, which a service owns, changed owner"
+done
+[[ $(stat -c %u:%g "$base/user/config/runtime.json") == 101:101 && $(stat -c %a "$base/user/config/ingress/console.key") == 600 ]] || fail 'Configuration owned by another account changed'
 
 # A root-owned installation, as production hosts have, keeps every owner.
 fixture "$base/root"
 before=$(find "$base/root" -printf '%u:%g %m %p\n' | sort)
 restore_installation_owner "$base/root"
 [[ $(find "$base/root" -printf '%u:%g %m %p\n' | sort) == "$before" ]] || fail 'A root-owned installation changed'
-printf 'Passed: a root host side gives an ordinary owner its installation files back, keeps modes, service data and root-owned installations.\n'
+printf 'Passed: a root host side gives an ordinary owner its installation files back, keeps modes, service data, service-owned configuration such as the console key, and root-owned installations.\n'

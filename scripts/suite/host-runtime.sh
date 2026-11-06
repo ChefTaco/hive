@@ -89,6 +89,8 @@ elif [[ "$action" != adopt-check ]]; then die 'Installation ownership record is 
 identity=$(jq -er .uuid "$directory/installation.json" 2>/dev/null || true)
 transaction="$directory/transaction.json"
 phase() { jq -r '.phase // "none"' "$transaction" 2>/dev/null || printf 'none\n'; }
+# A complete transaction, or one aborted before it changed anything, lets the next plan start.
+closed() { [[ $(phase) == complete || $(phase) == aborted ]]; }
 record() {
   jq -n --arg plan "$plan" --arg phase "$1" --arg version "$version" --arg operation "$(jq -r '.operation' <<< "$input")" \
     '{schema:1,plan:$plan,phase:$phase,version:$version,operation:$operation}' | atomic_json "$transaction"
@@ -131,7 +133,7 @@ case "$action" in
     [[ $(jq -er .digest "$directory/receipt.json") == "$(jq -er .digest <<< "$input")" ]] || die 'Native acceptance requires the active signed release manifest'
     adapter_accept_agents true;;
   prepare)
-    if [[ -f "$transaction" && $(phase) != complete ]]; then
+    if [[ -f "$transaction" ]] && ! closed; then
       if [[ $(jq -r .operation <<< "$input") == restore ]]; then
         verify_archive; check_reconciliation
         cp -- "$transaction" "$directory/recovery-transaction.$(date -u +%Y%m%d%H%M%S).json"
@@ -141,7 +143,7 @@ case "$action" in
     if [[ -f "$directory/receipt.json" && $(jq -r .version "$directory/receipt.json") != "$version" ]]; then
       [[ $(jq -r .operation <<< "$input") =~ ^(upgrade|rollback|restore|rehearse)$ ]] || die 'Use upgrade or rollback for a different release'
     fi
-    if [[ ! -f "$transaction" || $(phase) == complete ]]; then record prepared; fi
+    if [[ ! -f "$transaction" ]] || closed; then record prepared; fi
     ;;
   compatibility)
     assert_transaction
@@ -315,6 +317,21 @@ case "$action" in
     record ready
     ;;
   complete) assert_transaction; record complete;;
+  abort)
+    # Only a transaction that failed in its read-only checks (stage, compatibility, preflight)
+    # closes as aborted. Those steps verify, pull images and pin this plan's inputs; nothing has
+    # quiesced, stopped, paused, initialized, staged or activated, and this proves it. Anything
+    # further keeps the transaction open for recovery.
+    assert_transaction
+    step=$(jq -r '.abortStep // ""' <<< "$input")
+    [[ "$step" =~ ^(stage|compatibility|adapters-preflight)$ ]] || die 'Only a failed stage, compatibility check or preflight can abort a transaction'
+    [[ $(phase) == prepared ]] || die "The transaction is in phase $(phase), past its read-only checks; it needs recovery: repeat the same command"
+    [[ ! -e "$directory/bootstrap.$plan.json" ]] || die 'This plan initialized data; it needs recovery: repeat the same command'
+    [[ -z $(find "$directory/agents" -mindepth 2 -maxdepth 2 \( -name "candidate.$plan.json" -o -name "run.$plan*" -o -name "preflight.$plan.log" \) -print -quit 2>/dev/null) ]] || die 'This plan staged native agents; it needs recovery: repeat the same command'
+    [[ ! -f "$directory/receipt.json" || $(jq -r .plan "$directory/receipt.json") != "$plan" ]] || die 'This plan is already active; it needs recovery: repeat the same command'
+    jq --arg step "$step" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.phase="aborted" | .abortedStep=$step | .abortedAt=$at' "$transaction" | atomic_json "$transaction"
+    cp -p -- "$transaction" "$directory/aborted-transaction.$plan.json"
+    ;;
   hold)
     assert_transaction
     # Readiness failure on a later host must not leave earlier suite writers active.

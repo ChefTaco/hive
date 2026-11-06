@@ -29,6 +29,12 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- A command that failed in its read-only checks (staging, storage compatibility, native and
+  external preflight) left its transaction open, so `doctor` reported `incomplete-transaction`
+  and every other plan was refused until the same plan succeeded. Nothing had changed on the
+  host, so the transaction now closes as `aborted`, keeping its record; `doctor` treats it as
+  closed and the next plan proceeds. From quiescence on, recovery is unchanged. See
+  [when a command stops](deployment/README.md#when-a-command-stops-transactions-and-recovery).
 - A host side that runs as root through `sudoPasswordFile` on an installation an ordinary account
   owns left root-owned archives, rehearsals, transactions and receipts that account could not
   read. Every host action now gives what it wrote back to the installation directory's owner,
