@@ -4,25 +4,11 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
-## [2.0.1] - 2026-11-05
+## [2.0.1] - 2026-11-06
 
 A controller-only release. `releases/2.0.1.json` pins exactly the images and versions of 2.0.0;
-only `hive.sh` changes.
-
-### Fixed
-
-- `hive.sh migrate-native cutover` no longer rolls back a busy installation. Verification compared
-  the running suite with the copy taken when the native services stopped, so the writes of
-  clients that reconnected in the seconds before it ran failed it: an Emberpath API key recording
-  its use, and memory traffic and the memory worker changing vectors. Verification now has two
-  phases. Preservation compares the migrated copy exactly (every row, password hash, signing key,
-  the issuer, every vector and every Redis record) after the product migrations and before the
-  suite starts, while no port is published and no product or memory worker runs. The serving
-  checks then run while clients use the suite: ports, exact certificates, a machine token signed
-  by the native key with the native issuer, native memory credentials on both ports, the signing
-  keys and the native store bytes, and the credential rows, where a client may change only
-  `ClientApiKey.lastUsedAt` and `updatedAt`. Rollback is unchanged. See
-  `deployment/MIGRATE_NATIVE.md`.
+only `hive.sh` changes. Rescanned on 2026-11-06, the images have no CRITICAL or HIGH finding
+with a fix available, and their unfixed findings are those listed for 2.0.0.
 
 ### Added
 
@@ -38,6 +24,24 @@ only `hive.sh` changes.
 - A cutover started with 2.0.0 and not finished cannot be continued by this controller: roll it
   back, then run `prepare` and `cutover` again. A suite that a 2.0.0 cutover verified passes
   `verify`, which accepts that exact verification as its receipt.
+
+### Fixed
+
+- `hive.sh migrate-native cutover` no longer rolls back a busy installation. Verification compared
+  the running suite with the copy taken when the native services stopped, so the writes of
+  clients that reconnected in the seconds before it ran failed it: an Emberpath API key recording
+  its use, and memory traffic and the memory worker changing vectors. Verification now has two
+  phases. Preservation compares the migrated copy exactly (every row, password hash, signing key,
+  the issuer, every vector and every Redis record) after the product migrations and before the
+  suite starts, while no port is published and no product or memory worker runs. The serving
+  checks then run while clients use the suite: ports, exact certificates, a machine token signed
+  by the native key with the native issuer, native memory credentials on both ports, the signing
+  keys and the native store bytes, and the credential rows, where a client may change only
+  `ClientApiKey.lastUsedAt` and `updatedAt`. Rollback is unchanged. See
+  `deployment/MIGRATE_NATIVE.md`.
+- Verification no longer passes a store it could not read. A comparison that ran while Oathweave
+  was writing could fail with `database is locked`, and that store was left out of the result
+  unchecked. Readers now wait for the lock, and an unreadable store is a violation.
 
 ## [2.0.0] - 2026-11-05
 
