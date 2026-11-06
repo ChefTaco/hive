@@ -73,6 +73,10 @@ refresh_ingress() {
   [[ -f "$caddyfile" && ! -L "$caddyfile" ]] || return 0
   template=$(jq -er .ingressTemplate <<< "$input" | base64 -d)
   grep -q 'hive-registry:8095' <<< "$template" || die 'Controller ingress template has no registry route'
+  # The Magnus host agent port imports its route set from the Caddyfile.
+  if [[ -f "$directory/config/ingress/native-listeners-magnus-agents.caddy" ]] && ! grep -q '^(magnus_agent_listener) {' <<< "$template"; then
+    die 'This installation publishes a Magnus host agent port, which this controller cannot serve; use the controller of the release that installed it'
+  fi
   ! cmp -s -- "$caddyfile" <(printf '%s\n' "$template") || return 0
   previous="$caddyfile.previous"; grep -q 'hive-registry:8095' "$caddyfile" || previous="$caddyfile.pre-registry"
   cp -p -- "$caddyfile" "$previous"

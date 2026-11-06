@@ -162,12 +162,15 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
         if label == 'Product profile': answer = 'full'
         if label == 'Write protected installation configuration to': answer = str(full_output)
         full_questions.append((label, answer))
+        # Selecting Magnus offers its host agent port, off unless a port is given.
+        if label == 'Protected console private key file': full_questions.append(('Port for Magnus host agents', ''))
     review.write_text(json.dumps({'command': arguments, 'questions': full_questions,
                                  'transcriptFile': str(base / 'full-transcript.log'), 'timeoutSeconds': 30}))
     subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
     full_config = json.loads(full_output.read_text())
     assert full_config['profile'] == 'full' and len(full_config['components']) == 18
     assert 'magnusConsoleOrigin' not in full_config['bootstrap']
+    assert 'nativeListeners' not in full_config['console'], 'The Magnus agent port was published without being asked for'
     assert full_output.stat().st_mode & 0o077 == 0
     assert not (base / 'deployment').exists(), 'Full planning contacted a host'
     subprocess.run([*arguments[:2], '--config', str(full_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
@@ -199,6 +202,18 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     plan = json.loads(subprocess.run([*arguments[:2], '--config', str(target), *arguments[2:]], check=True, stdout=subprocess.PIPE).stdout)
     assert plan['magnusTerminal'] == {'gatewaySelected': True, 'grantedToInitialOperator': False}
     print('Passed: interactive terminal gateway is off by default, and selecting it does not grant the terminal.')
+
+    # A Magnus agent port is published on the console bind address only when one is given.
+    agent_output = base / 'inventory' / 'agent-port.json'
+    agent_questions = [(label, '4000' if label == 'Port for Magnus host agents' else str(agent_output) if label == 'Write protected installation configuration to' else answer) for label, answer in full_questions]
+    agent_questions.insert([label for label, _ in agent_questions].index('Port for Magnus host agents'), ('Deploy the Magnus web terminal gateway', 'no'))
+    review.write_text(json.dumps({'command': arguments, 'questions': agent_questions, 'transcriptFile': str(base / 'agent-port-transcript.log'), 'timeoutSeconds': 30}))
+    subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
+    agent_config = json.loads(agent_output.read_text())
+    assert agent_config['console']['nativeListeners'] == [{'port': 4000, 'component': 'magnus'}]
+    assert 'only the agent routes and credentials pass' in (base / 'agent-port-transcript.log').read_text()
+    subprocess.run([*arguments[:2], '--config', str(agent_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
+    print('Passed: interactive Magnus host agent port, off by default and published only when given.')
 
     custom_output = base / 'inventory' / 'custom.json'
     custom_questions = []

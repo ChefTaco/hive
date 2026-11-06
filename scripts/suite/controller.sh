@@ -136,7 +136,7 @@ hive_configure() {
   local inference='[]' agents='[]' temporary config selected_json runtime version agent_id agent_profile agent_environment agent_service authorized
   local external_ca enrollment_endpoint enrollment_prefix enrollment_credential enrollment_ca provider_slug provider_aliases
   local product product_host product_origin product_bind product_certificate product_key product_inference trust_bundle ssh_config magnus_console
-  local gateway_deploy='' gateway_username='' gateway_key='' gateway_grant=no
+  local gateway_deploy='' gateway_username='' gateway_key='' gateway_grant=no agent_port=''
   if [[ -z "$HIVE_VERSION" ]]; then hive_prompt HIVE_VERSION 'Exact suite release version'; fi
   if [[ -z "$HIVE_MANIFEST" ]]; then
     HIVE_MANIFEST="$HIVE_ROOT/releases/$HIVE_VERSION.json"
@@ -213,6 +213,12 @@ hive_configure() {
       elif [[ "$gateway_deploy" != no ]]; then hive_die 'Answer yes or no'; fi
       [[ "$gateway_grant" == yes || "$gateway_grant" == no ]] || hive_die 'Answer yes or no'
     fi
+    # Host agents reach Magnus on its own published port; a distributed Magnus has its endpoint.
+    if [[ "$mode" == fresh ]] && jq -ne --argjson selected "$selected_json" '$selected|index("magnus")!=null' >/dev/null; then
+      printf 'Magnus host agents need to reach its agent API. Hive can publish it on its own port at %s, where only the agent routes and credentials pass.\n' "$bind"
+      hive_prompt agent_port 'Port for Magnus host agents, for example 4000 (blank for none)'
+      [[ -z "$agent_port" || ( "$agent_port" =~ ^[0-9]{4,5}$ && "$agent_port" -ge 1024 && "$agent_port" -le 65535 && "$agent_port" != "$port" ) ]] || hive_die 'Choose a port from 1024 to 65535 other than the console port, or leave it blank'
+    fi
   fi
   printf 'Inference services remain external. Hive verifies their APIs and registers providers only with an explicit Emberpath credential reference.\n'
   hive_prompt endpoint 'Existing external inference HTTPS endpoint (blank to skip)'
@@ -249,9 +255,9 @@ hive_configure() {
   done
   temporary=$(mktemp -d)
   config="$temporary/installation.json"
-  jq -n --arg id "$id" --arg directory "$directory" --arg target "$target" --arg ssh "$control_ssh" --arg architecture "$architecture" --arg origin "$origin" --arg profile "$profile" --arg version "$HIVE_VERSION" --arg bind "$bind" --arg port "$port" --arg mode "$mode" --arg username "${username:-}" --arg email "${email:-}" --arg certificate "${certificate:-}" --arg key "${private_key:-}" --arg gatewayUsername "$gateway_username" --arg gatewayKey "$gateway_key" --arg gatewayGrant "$gateway_grant" --argjson selected "$selected_json" --argjson agents "$agents" --argjson inference "$inference" --slurpfile release "$HIVE_MANIFEST" '
+  jq -n --arg id "$id" --arg directory "$directory" --arg target "$target" --arg ssh "$control_ssh" --arg architecture "$architecture" --arg origin "$origin" --arg profile "$profile" --arg version "$HIVE_VERSION" --arg bind "$bind" --arg port "$port" --arg mode "$mode" --arg username "${username:-}" --arg email "${email:-}" --arg certificate "${certificate:-}" --arg key "${private_key:-}" --arg gatewayUsername "$gateway_username" --arg gatewayKey "$gateway_key" --arg gatewayGrant "$gateway_grant" --arg agentPort "$agent_port" --argjson selected "$selected_json" --argjson agents "$agents" --argjson inference "$inference" --slurpfile release "$HIVE_MANIFEST" '
     {schema:1,installation:$id,release:$version,profile:$profile,origin:$origin,hosts:{control:({target:$target,directory:$directory,architecture:$architecture}+(if $ssh!="" then {sshConfig:$ssh} else {} end))},components:($selected|map(. as $name|{key:$name,value:({host:"control"}+(if $release[0].components[$name].kind=="static-ui" then {} elif $release[0].components[$name].kind=="datastore" then {configDirectory:($directory+"/config/"+$name)} else {envFile:($directory+"/config/"+$name+".env"),configDirectory:($directory+"/config/"+$name)} end))})|from_entries),agents:$agents,inference:$inference} +
-    (if ($selected|index("hivexui"))!=null or ($selected|index("ingress"))!=null then {console:{host:"control",bindAddress:$bind,httpsPort:($port|tonumber),runtimeFile:($directory+"/config/runtime.json")}} else {} end) +
+    (if ($selected|index("hivexui"))!=null or ($selected|index("ingress"))!=null then {console:({host:"control",bindAddress:$bind,httpsPort:($port|tonumber),runtimeFile:($directory+"/config/runtime.json")}+(if $agentPort!="" then {nativeListeners:[{port:($agentPort|tonumber),component:"magnus"}]} else {} end))} else {} end) +
     (if $mode=="fresh" or $mode=="distributed" then {bootstrap:({adminUsername:$username,adminEmail:$email,certificateFile:$certificate,privateKeyFile:$key} + (if ($selected|index("magnus-gateway"))!=null then {magnusGateway:{sshUsername:$gatewayUsername,sshPrivateKeyFile:$gatewayKey,grantTerminalToInitialOperator:($gatewayGrant=="yes")}} else {} end))} else {} end)' > "$config"
   if [[ "$mode" == distributed ]]; then
     printf 'Place products within this installation. Each product keeps its private datastore on its selected host. Every host must trust the explicit HTTPS certificate bundle.\n'
@@ -347,6 +353,17 @@ hive_validate() {
         (.=="::" or .=="::1" or (split(".")|length==4 and all(.[];test("^[0-9]{1,3}$") and (tonumber<=255)))))
     ' "$HIVE_CONFIG" >/dev/null || hive_die 'Invalid console placement: co-locate ingress and HiveXUI, supply an explicit listener and a public runtime file inside the protected installation config tree; HiveXUI cannot receive an environment file or backend configuration'
   fi
+  # A fresh installation may publish one more port on the console bind address: the Magnus
+  # control API for host agents. Migrated installations keep their own native listeners.
+  if jq -e '.nativeMigration==null and (.console.nativeListeners // [] | length>0)' "$HIVE_CONFIG" >/dev/null; then
+    jq -e '
+      . as $c | .console.nativeListeners as $listeners |
+      $c.bootstrap!=null and ($listeners|type=="array" and length==1) and
+      ($listeners[0]|type=="object" and (keys|sort)==["component","port"] and .component=="magnus" and
+        (.port|type=="number" and floor==. and .>=1024 and .<=65535) and .port!=$c.console.httpsPort) and
+      $c.components.magnus.host==$c.console.host
+    ' "$HIVE_CONFIG" >/dev/null || hive_die 'console.nativeListeners on a fresh installation is one {"port":N,"component":"magnus"}: a port from 1024 to 65535, not the console port, with Magnus on the console host. It publishes the Magnus agent API; see deployment/FULL.md#magnus-host-agents'
+  fi
   if declare -F hive_registry_validate >/dev/null; then hive_registry_validate; fi
   if declare -F hive_skills_validate >/dev/null; then hive_skills_validate; fi
   if declare -F hive_adapter_validate >/dev/null; then hive_adapter_validate; fi
@@ -416,7 +433,7 @@ hive_plan() {
     authLimits:{relaxed:$relax,products:(if $relax then [.components|keys[]|select(IN("oathweave","cindertrace","chattermost"))] else [] end)},
     magnusTerminal:{gatewaySelected:(.components["magnus-gateway"]!=null),grantedToInitialOperator:(.bootstrap.magnusGateway.grantTerminalToInitialOperator==true)},
     hosts:(.hosts|map_values({target,directory})),
-    console:(if .console then {host:.console.host,bindAddress:.console.bindAddress,httpsPort:.console.httpsPort,publicRuntimeConfigured:true} else null end),
+    console:(if .console then {host:.console.host,bindAddress:.console.bindAddress,httpsPort:.console.httpsPort,publicRuntimeConfigured:true} + (if .nativeMigration==null and .console.nativeListeners then {magnusAgentPort:.console.nativeListeners[0].port} else {} end) else null end),
     components:(.components|with_entries(.key as $name|.value=({host:.value.host,environmentConfigured:(.value|has("envFile")),configurationMounted:(.value|has("configDirectory"))}+($released[$name] // {})))),
     productEndpoints:((.bootstrap.productEndpoints // {})|map_values({origin,inferenceOrigin,bindAddress,certificateConfigured:true}|with_entries(select(.value!=null)))),
     agents:(.agents|map({host,runtime})),inference:(.inference|map({host,engine,protocol:(.protocol // "openai"),endpoint,model,credentialConfigured:has("authHeaderFile"),registrationConfigured:has("registration")}))}' "$HIVE_CONFIG"

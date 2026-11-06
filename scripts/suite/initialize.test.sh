@@ -38,6 +38,10 @@ jq --arg certificate "$temporary/wrong.crt" --arg key "$temporary/wrong.key" '.b
 if "$ROOT/hive.sh" init --config "$temporary/wrong.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/wrong.log" 2>&1; then fail 'A console certificate for another name was accepted'; fi
 grep -q 'is not valid for localhost' "$temporary/wrong.log" || fail 'The wrong-name refusal does not name the origin'
 [[ ! -e "$temporary/install" && ! -e "$temporary/interrupted" ]] || fail 'A wrong-name certificate reached initialization'
+# A Magnus host agent port needs Magnus on the console host.
+jq '.console.nativeListeners=[{"port":4000,"component":"magnus"}]' "$temporary/config.json" > "$temporary/agents.json"
+if "$ROOT/hive.sh" plan --config "$temporary/agents.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive > "$temporary/agents.log" 2>&1; then fail 'A Magnus agent port was accepted without Magnus'; fi
+grep -q 'console.nativeListeners on a fresh installation' "$temporary/agents.log" || fail 'The agent port refusal is unclear'
 reject run_init
 [[ -e "$temporary/interrupted" ]] || fail 'Initialization did not reach the injected interruption'
 [[ ! -e "$temporary/install/installation.json" && ! -d "$temporary/install/data" ]] || fail 'Configuration setup created application state'

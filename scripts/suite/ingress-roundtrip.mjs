@@ -158,8 +158,11 @@ gateway.listen(4310,'0.0.0.0');
       '-e',
       product + '_TLS_NAME=' + (product === 'HIVESKILLS' ? 'wrong.invalid' : 'localhost'),
     );
+  // A fresh installation's Magnus host agent port, as initialize-host.sh writes it.
+  writeFileSync(join(temporary, 'native-listeners-magnus-agents.caddy'), ':4000 {\n\ttls /config/console.crt /config/console.key\n\timport magnus_agent_listener\n}\n', { mode: 0o600 });
   // The gateway is optional: this ingress has it, and a second one below does not.
-  async function startIngress(name, environment, state) {
+  let agentPort;
+  async function startIngress(name, environment, state, extraPorts = []) {
     mkdirSync(state, { recursive: true, mode: 0o700 });
     docker(
       'run',
@@ -176,6 +179,7 @@ gateway.listen(4310,'0.0.0.0');
       `${state}:/data`,
       '-p',
       '127.0.0.1::8443',
+      ...extraPorts.flatMap((port) => ['-p', '127.0.0.1::' + port]),
       caddyImage,
       'caddy',
       'run',
@@ -196,6 +200,7 @@ gateway.listen(4310,'0.0.0.0');
     });
     const port = inspect.NetworkSettings.Ports['8443/tcp']?.[0]?.HostPort;
     assert(port, 'Ingress did not publish its test listener');
+    if (extraPorts.includes(4000)) agentPort = inspect.NetworkSettings.Ports['4000/tcp']?.[0]?.HostPort;
     return port;
   }
   const options = {
@@ -204,6 +209,7 @@ gateway.listen(4310,'0.0.0.0');
       ingress,
       [...env, '-e', 'MAGNUS_GATEWAY_ENDPOINT=https://magnus-gateway:4310', '-e', 'MAGNUS_GATEWAY_TLS_NAME=localhost'],
       join(temporary, 'state'),
+      [4000],
     ),
     ca: readFileSync(join(temporary, 'console.crt')),
     timeout: 5000,
@@ -564,9 +570,113 @@ gateway.listen(4310,'0.0.0.0');
     assert.equal((await request(path, headers)).status, 404, path + ' passed the registry allowlist');
   for (const authorization of ['Basic b2J2aW91c2x5OmZha2U=', 'Bearer two words', 'Bearer ', 'Bearer a,b'])
     assert.equal((await request('/api/registry/v1/products', { Authorization: authorization })).status, 401, authorization);
+  // The Magnus host agent port of a fresh installation: its own route allowlist, agent credentials
+  // only, and no header a client sends can claim an identity or an address.
+  const agents = { ...options, port: agentPort };
+  const forged = {
+    'Content-Type': 'application/json',
+    'X-Node-Token': 'obviously-fake-node-token',
+    'X-Log-Token': 'obviously-fake-log-token',
+    'X-Hermes-Registry-Token': 'obviously-fake-registry-token',
+    Authorization: 'Bearer obviously-fake-operator-token',
+    'X-Api-Secret': 'obviously-fake-system-secret',
+    'X-Fleet-Gateway-Token': 'obviously-fake-gateway-token',
+    'X-Resource-Drain-Key': 'obviously-fake-drain-key',
+    Cookie: '__Host-oathweave_sso=obviously-fake; MMAUTHTOKEN=obviously-fake',
+    'X-Forwarded-For': '203.0.113.9',
+    'X-Real-Ip': '203.0.113.9',
+    'X-Forwarded-User': 'admin',
+    'X-Forwarded-Proto': 'http',
+    'X-Hive-User': 'admin',
+    'X-Hive-Roles': 'ADMIN',
+    'X-Magnus-Work-Id': 'obviously-fake-work',
+    Origin: 'https://evil.example.com',
+  };
+  const agentRoutes = [
+    ['GET', '/'],
+    ['POST', '/api/v1/heartbeat'],
+    ['POST', '/api/v1/logs/ingest'],
+    ['POST', '/api/v1/resource-leases/claim'],
+    ['POST', '/api/v1/resource-leases/recovery-claim'],
+    ['POST', '/api/v1/resource-leases/legacy-admission'],
+    ['POST', '/api/v1/resource-leases/enrollment/node-status'],
+    ['POST', '/api/v1/resource-leases/enrollment/scheduler-status'],
+    ['POST', '/api/v1/resource-leases/enrollment/work/work-1/node-receipt'],
+    ['POST', '/api/v1/cron/managed-occurrences/admit'],
+    ['POST', '/api/v1/cron/managed-occurrences/settle'],
+    ['GET', '/api/v1/hermes-registry/manifest'],
+    ['GET', '/api/v1/hermes-registry/profiles'],
+    ['GET', '/api/v1/hermes-registry/policy'],
+    ['GET', '/api/v1/hermes-registry/artifacts/skill/example/3'],
+    ['POST', '/api/v1/hermes-registry/core/slot'],
+    ['POST', '/api/v1/hermes-registry/core/receipts'],
+    ['POST', '/api/v1/hermes-registry/tool-surface'],
+    ['POST', '/api/v1/hermes-registry/policy/receipts'],
+    ['POST', '/api/v1/hermes-registry/capture'],
+    ['POST', '/api/v1/hermes-registry/receipts'],
+    ['POST', '/api/v1/hermes-registry/inventory'],
+  ];
+  for (const [method, path] of agentRoutes) {
+    const payload = method === 'POST' ? '{"synthetic":true}' : undefined;
+    const result = await request(path, forged, method, payload, agents);
+    assert.equal(result.status, 200, method + ' ' + path + ' did not reach Magnus on the agent port');
+    const body = JSON.parse(result.body);
+    assert.equal(body.path, path, path + ' was rewritten on the agent port');
+    assert.equal(body.method, method);
+    assert.equal(body.body, payload ?? '', path + ' changed the request body');
+    assert.equal(body.headers['x-node-token'], 'obviously-fake-node-token');
+    assert.equal(body.headers['x-log-token'], 'obviously-fake-log-token');
+    assert.equal(body.headers['x-hermes-registry-token'], 'obviously-fake-registry-token');
+    for (const name of ['authorization', 'x-api-secret', 'x-fleet-gateway-token', 'x-resource-drain-key', 'cookie', 'x-real-ip', 'x-forwarded-user', 'x-hive-user', 'x-hive-roles', 'x-magnus-work-id', 'origin'])
+      assert.equal(body.headers[name], undefined, path + ' forwarded ' + name + ' from an agent port client');
+    assert.notEqual(body.headers['x-forwarded-for'], '203.0.113.9', 'The agent port trusted a client X-Forwarded-For');
+    assert.match(body.headers['x-forwarded-for'] ?? '', /^[0-9a-f.:]+$/, 'The agent port did not record the client address');
+    assert.notEqual(body.headers['x-forwarded-proto'], 'http', 'The agent port trusted a client X-Forwarded-Proto');
+    assert.deepEqual((result.cookies || []).filter(Boolean), [], path + ' let Magnus set a cookie on the agent port');
+  }
+  // Operator, admin, browser and system routes, a wrong method on an agent route and any path that
+  // could read differently upstream never reach Magnus on the agent port.
+  for (const [method, path] of [
+    ['GET', '/api/v1/nodes'],
+    ['GET', '/api/v1/console/session'],
+    ['POST', '/api/v1/commands/execute'],
+    ['POST', '/api/v1/quick-command'],
+    ['GET', '/api/v1/users'],
+    ['POST', '/api/v1/auth/login'],
+    ['POST', '/api/v1/terminal/ticket'],
+    ['POST', '/api/v1/fleet-gateway/sessions'],
+    ['GET', '/api/v1/resource-leases/admission/node-1'],
+    ['POST', '/api/v1/resource-leases/admission/node-1/close'],
+    ['POST', '/api/v1/resource-leases/enrollment/node-1/begin'],
+    ['POST', '/api/v1/resource-leases/enrollment/dashboard/status'],
+    ['POST', '/api/v1/resource-leases/transfer/authority-snapshot'],
+    ['POST', '/api/v1/hermes-registry/clients'],
+    ['POST', '/api/v1/hermes-registry/revisions'],
+    ['GET', '/api/v1/hermes-registry/status'],
+    ['POST', '/api/v1/cron/sync'],
+    ['GET', '/api/v1/heartbeat'],
+    ['DELETE', '/api/v1/heartbeat'],
+    ['GET', '/api/docs/openapi.json'],
+    ['GET', '/metrics'],
+    ['GET', '/api/magnus/console/session'],
+    ['GET', '/'.repeat(2) + 'api/v1/heartbeat'],
+    ['POST', '/api/v1/heartbeat/../users'],
+    ['POST', '/api/v1/%2e%2e/users'],
+    ['POST', '/api/v1/heartbeat%2f..%2fusers'],
+    ['POST', '/api/v1/resource-leases/enrollment/work/a/b/node-receipt'],
+  ]) {
+    const result = await request(path, forged, method, method === 'POST' ? '{}' : undefined, agents);
+    assert.equal(result.status, 404, method + ' ' + path + ' passed the agent port allowlist: ' + result.body.slice(0, 200));
+    assert.doesNotMatch(result.body, /"path"/, method + ' ' + path + ' reached Magnus from the agent port');
+  }
+  // The console port keeps refusing agent credentials and agent routes.
+  const consoleHeartbeat = await request('/api/magnus/heartbeat', { Authorization: headers.Authorization, 'X-Node-Token': 'obviously-fake-node-token', 'Content-Type': 'application/json' }, 'POST', '{}');
+  assert.equal(consoleHeartbeat.status, 404, 'The console port served an agent route');
+  const consoleSession = JSON.parse((await request('/api/magnus/console/session', { Authorization: headers.Authorization, 'X-Node-Token': 'obviously-fake-node-token' })).body);
+  assert.equal(consoleSession.headers['x-node-token'], undefined, 'The console port forwarded x-node-token');
   passed = true;
   console.log(
-    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming, WebSocket transport, the Magnus route allowlist with machine credentials stripped, and the exact fleet gateway browser routes with Origin and Sec-Fetch-Site intact.',
+    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming, WebSocket transport, the Magnus route allowlist with machine credentials stripped, the exact fleet gateway browser routes with Origin and Sec-Fetch-Site intact, and the Magnus host agent port with its own allowlist and no client-asserted identity.',
   );
 } catch (error) {
   for (const container of containers) {

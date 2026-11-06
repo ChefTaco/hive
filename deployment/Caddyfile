@@ -54,6 +54,67 @@
 	header_up X-Forwarded-For {client_ip}
 }
 
+# The published port for Magnus host agents, on a fresh installation whose console.nativeListeners
+# names magnus. It goes around the browser allowlist below, so it has its own: only the routes
+# the Magnus agent and its Hermes sync call, with their own credentials (x-node-token,
+# x-log-token, x-hermes-registry-token). No Authorization, cookie, x-api-secret, gateway token
+# or other header passes, so no operator, browser or system request can be served here, and
+# X-Forwarded-For is the client's address, never one the client sent. Everything else is 404.
+(magnus_agent_listener) {
+	@magnus_agent_unsafe_path expression <<CEL
+		{http.request.orig_uri}.matches(r"(?i)^[^?]*(//|/\.\.?(/|\?|$)|\\|%(2f|5c|2e|25|[01][0-9a-f]|7f))")
+		CEL
+	handle @magnus_agent_unsafe_path {
+		respond "API unavailable" 404
+	}
+	@magnus_agent expression <<CEL
+		({method} == "GET" && (
+			{path} == "/"
+			|| {path} == "/api/v1/hermes-registry/manifest"
+			|| {path} == "/api/v1/hermes-registry/profiles"
+			|| {path} == "/api/v1/hermes-registry/policy"
+			|| {path}.matches("^/api/v1/hermes-registry/artifacts/[^/]+/[^/]+/[^/]+$")
+		))
+		|| ({method} == "POST" && (
+			{path} == "/api/v1/heartbeat"
+			|| {path} == "/api/v1/logs/ingest"
+			|| {path} == "/api/v1/resource-leases/claim"
+			|| {path} == "/api/v1/resource-leases/recovery-claim"
+			|| {path} == "/api/v1/resource-leases/legacy-admission"
+			|| {path} == "/api/v1/resource-leases/enrollment/node-status"
+			|| {path} == "/api/v1/resource-leases/enrollment/scheduler-status"
+			|| {path}.matches("^/api/v1/resource-leases/enrollment/work/[^/]+/node-receipt$")
+			|| {path} == "/api/v1/cron/managed-occurrences/admit"
+			|| {path} == "/api/v1/cron/managed-occurrences/settle"
+			|| {path} == "/api/v1/hermes-registry/core/slot"
+			|| {path} == "/api/v1/hermes-registry/core/receipts"
+			|| {path} == "/api/v1/hermes-registry/tool-surface"
+			|| {path} == "/api/v1/hermes-registry/policy/receipts"
+			|| {path} == "/api/v1/hermes-registry/capture"
+			|| {path} == "/api/v1/hermes-registry/receipts"
+			|| {path} == "/api/v1/hermes-registry/inventory"
+		))
+		CEL
+	handle @magnus_agent {
+		reverse_proxy {$MAGNUS_ENDPOINT:https://unconfigured.invalid} {
+			import stateless_backend {$MAGNUS_TLS_NAME:unconfigured.invalid}
+			header_up -*
+			header_up Content-Type {http.request.header.Content-Type}
+			header_up Accept {http.request.header.Accept}
+			header_up X-Node-Token {http.request.header.X-Node-Token}
+			header_up X-Log-Token {http.request.header.X-Log-Token}
+			header_up X-Hermes-Registry-Token {http.request.header.X-Hermes-Registry-Token}
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+	handle {
+		respond "API unavailable" 404
+	}
+	handle_errors {
+		respond "Service unavailable" 503
+	}
+}
+
 # The Magnus fleet gateway's browser routes. Default deny, as for magnus_backend, except
 # that the gateway also needs Origin and Sec-Fetch-Site: without them its cross-origin
 # check is silently off. A header set here is sent even when empty, and the gateway
@@ -488,7 +549,8 @@
 	}
 }
 
-# Present only on a migrated installation: the native listeners its clients already use.
+# Present only on a migrated installation: the native listeners its clients already use. On a
+# fresh installation with a Magnus agent port, native-listeners-magnus-agents.caddy serves it.
 import /config/native-listeners*.caddy
 
 # Container-local readiness only; never published on the host.

@@ -113,6 +113,15 @@ jobs:
       - name: Ingress upstream keep-alive regression
         run: npm run test:suite:ingress-keepalive
 
+      - name: Ingress routes, credential stripping and the Magnus host agent port
+        if: matrix.node == '24.22.1'
+        timeout-minutes: 10
+        run: |
+          latest=$(ls releases | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.json$' | sort -V | tail -n 1)
+          export HIVE_INGRESS_TEST_IMAGE=$(jq -r .components.ingress.image "releases/$latest")
+          export HIVEXUI_TEST_IMAGE=$(jq -r .components.hivexui.image "releases/$latest")
+          npm run test:suite:ingress
+
       - name: Online backup with the host side as root through sudo
         if: matrix.node == '24.22.1'
         timeout-minutes: 25
