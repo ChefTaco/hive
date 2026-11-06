@@ -32,13 +32,20 @@ offered by every release but never selected by a profile. Inference stays extern
 
 ## Install the suite
 
-On a Linux host with Docker Engine and Compose, from a checkout of the release tag:
+On a fresh Ubuntu 22.04/24.04 or Debian 12/13 host (amd64 or arm64), from a checkout of the
+release tag:
 
 ```bash
-git clone --branch v2.0.2 https://github.com/ChefTaco/hive.git
-cd hive
+git clone --branch v2.0.2 https://github.com/ChefTaco/hive.git && cd hive
+sudo ./scripts/install-prerequisites.sh --directory /opt/hive   # Docker Engine, Compose, jq, ...
+# log out and back in for the docker group, then:
+sudo ./scripts/console-certificate.sh tailscale    # or bring your own certificate and key
 ./hive.sh --release 2.0.2          # terminal setup, then review and apply the plan
 ```
+
+[Install Hive on one host](deployment/QUICKSTART.md) walks through each step: the setup
+questions and their answers, other certificate sources, the first sign-in, backups, upgrades,
+certificate renewal, firewalls and managing the host from another machine.
 
 `hive.sh` verifies `releases/2.0.2.json` against `releases/2.0.2.json.sig` with the publisher key
 in `trust/publisher.pub` before it reads anything else, and refuses a manifest pinned to a different

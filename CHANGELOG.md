@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `scripts/install-prerequisites.sh` installs what `hive.sh` needs on Ubuntu 22.04 and 24.04 and
+  Debian 12 and 13 (amd64, arm64): Docker Engine and the Compose plugin from Docker's apt
+  repository, after checking its signing key, and the tools the controller and host scripts use.
+  It shows its plan before changing anything, is safe to re-run, adds the operator to the
+  `docker` group, can create the installation directory, and has `--check`, `--dry-run` and
+  `--controller` modes. It refuses unsupported systems, snap Docker and rootless Docker.
+- `scripts/console-certificate.sh` issues the console certificate with `tailscale cert`, owned
+  by the operator with an owner-only key, checks any certificate the way the installer does, and
+  renews it into a running installation, weekly from a systemd timer if asked.
+- [Install Hive on one host](deployment/QUICKSTART.md): a step-by-step guide from a bare host
+  to a signed-in console, with every setup question, certificate choices, backups, upgrades,
+  firewall notes, controller-over-SSH setup and common errors.
+
 ## [2.0.2] - 2026-11-06
 
 `releases/2.0.2.json` pins Oathweave 2.0.2, Emberpath 2.0.2 and HiveMem 1.3.2, which ship

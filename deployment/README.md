@@ -1,5 +1,9 @@
 # Console ingress candidate
 
+> **New installation?** Start with [Install Hive on one host](QUICKSTART.md): prerequisites,
+> console certificate, setup answers, first sign-in, backups and upgrades, step by step. This page
+> is the reference for what the controller assembles.
+
 The shell controller assembles ingress and the static console in the console
 host's Compose project. The signed manifest identifies their `ingress` and
 `static-ui` service kinds; installation JSON supplies the console host, explicit
@@ -24,7 +28,8 @@ git clone --branch v2.0.2 https://github.com/ChefTaco/hive.git && cd hive
 ```
 
 The signed services run as UID/GID 1000 (HiveXUI as 101), so run fresh setup as that account or as
-a host administrator. To install from separately downloaded files, pass `--manifest`, `--signature`
+a host administrator. `scripts/install-prerequisites.sh` installs what the controller and hosts need, and
+`scripts/console-certificate.sh` gets, checks and renews the console certificate. To install from separately downloaded files, pass `--manifest`, `--signature`
 and `--trust-key`; check the key's fingerprint against the one in the release notes first.
 [docs/RELEASING.md](../docs/RELEASING.md) describes how a release is built, signed and verified.
 
