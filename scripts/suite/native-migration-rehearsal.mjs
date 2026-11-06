@@ -261,12 +261,16 @@ function trafficSummary(log, from, to) {
   }
   return summary;
 }
-// The longest time no request of a kind succeeded, between two instants.
-function outage(log, kind, from, to) {
-  const entries = trafficEntries(log).filter((entry) => entry.kind === kind && entry.at >= from && entry.at <= to).sort((a, b) => a.at.localeCompare(b.at));
-  let longest = 0, lastOk = from;
-  for (const entry of entries) if (entry.ok) { longest = Math.max(longest, Date.parse(entry.at) - Date.parse(lastOk)); lastOk = entry.at; }
-  return { seconds: longest / 1000, requests: entries.length, failed: entries.filter((entry) => !entry.ok).length };
+// The first outage of one kind of request after an instant: from the last success before its
+// first failure to the next success.
+function outage(log, kind, from) {
+  const entries = trafficEntries(log).filter((entry) => entry.kind === kind && entry.at >= from).sort((a, b) => a.at.localeCompare(b.at));
+  const first = entries.findIndex((entry) => !entry.ok);
+  if (first < 0) return { seconds: 0, failed: 0 };
+  const recovered = entries.findIndex((entry, index) => index > first && entry.ok);
+  const began = first > 0 ? entries[first - 1].at : from;
+  if (recovered < 0) return { seconds: null, failed: entries.length - first, recovered: false };
+  return { seconds: (Date.parse(entries[recovered].at) - Date.parse(began)) / 1000, failed: recovered - first, lastSuccessBefore: began, firstSuccessAfter: entries[recovered].at };
 }
 function containerTimes() {
   const ids = run('docker', ['compose', '-f', join(suite, 'compose.json'), 'ps', '-aq']).trim().split('\n').filter(Boolean);
@@ -287,7 +291,6 @@ async function backupRehearsal(trust, traffic) {
     receipt: { verified: receipt.verified, installation: receipt.installation, sha256: receipt.sha256, dataSHA256: receipt.dataSHA256, release: receipt.release?.version },
     stopWindow: { allContainersSeconds: (Math.max(...started) - Math.min(...stopped)) / 1000, ingressSeconds: (Date.parse(ingress.started) - Date.parse(ingress.finished)) / 1000, firstStop: new Date(Math.min(...stopped)).toISOString(), lastStart: new Date(Math.max(...started)).toISOString() },
   };
-  if (traffic) result.clientOutage = Object.fromEntries(['api-key', 'memory-write', 'client-token'].map((kind) => [kind, outage(traffic.log, kind, backup.startedAt, new Date(Date.now() + 1).toISOString())]));
   result.probesAfterBackup = probes(c.address, trust);
   say('restore check: hive.sh rehearse restores the archive into an isolated copy');
   const restore = suiteCommand(['rehearse', '--archive', archive, '--yes'], 'rehearse');
@@ -296,6 +299,7 @@ async function backupRehearsal(trust, traffic) {
   assert.equal(restored.result, 'passed');
   assert.equal(restored.archiveSHA256, receipt.sha256);
   result.restoreCheck = { seconds: restore.seconds, result: restored.result, isolated: restored.isolated, portsPublished: restored.portsPublished, archiveSHA256Matches: true };
+  if (traffic) result.clientOutage = Object.fromEntries(['api-key', 'memory-write', 'client-token'].map((kind) => [kind, outage(traffic.log, kind, backup.startedAt)]));
   return result;
 }
 // A renewal writes a new memory proxy token to the native Router file. A credential HiveMem accepts
