@@ -5,6 +5,7 @@ import os
 import pathlib
 import platform
 import pty
+import re
 import select
 import signal
 import subprocess
@@ -219,3 +220,44 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     assert custom_output.stat().st_mode & 0o077 == 0
     subprocess.run([*arguments[:2], '--config', str(custom_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
     print('Passed: interactive custom selection adds the identity/console foundation, omits unselected products and matches unattended planning.')
+
+    # New-user guidance: an unwritable directory is asked for again before anything else, an SSH
+    # target asks for its SSH configuration, and a repeated setup continues with its saved file.
+    guided_home = base / 'guided-home'
+    guided_output = guided_home / '.config' / 'hive' / 'guided-proof' / 'installation.json'
+    unwritable = base / 'read-only'
+    unwritable.mkdir(mode=0o500)
+    guided_questions = [('Installation name', 'guided-proof'),
+                        ('Installation directory on the selected host', str(unwritable / 'hive')),
+                        ('Host SSH target', 'local'),
+                        ('must be a canonical absolute path', ''),
+                        ('Installation directory on the selected host', str(base / 'guided'))]
+    guided_questions += [item for item in custom_questions[3:] if item[0] != 'Write protected installation configuration to']
+    guided_questions += [('Write protected installation configuration to', '')]
+    review.write_text(json.dumps({'command': ['/usr/bin/env', f'HOME={guided_home}', *arguments], 'questions': guided_questions,
+                                 'transcriptFile': str(base / 'guided-transcript.log'), 'timeoutSeconds': 30}))
+    subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
+    guided = json.loads(guided_output.read_text())
+    assert guided['hosts']['control']['directory'] == str(base / 'guided')
+    transcript = (base / 'guided-transcript.log').read_text()
+    assert f'[/opt/guided-proof]' in transcript, 'The directory has no default'
+    assert 'sudo install -d -m 0750' in transcript, 'An unwritable directory gave no guidance'
+    resumed = [('Installation name', 'guided-proof'), ('Continue with it instead of answering', '')]
+    review.write_text(json.dumps({'command': ['/usr/bin/env', f'HOME={guided_home}', *arguments], 'questions': resumed,
+                                 'transcriptFile': str(base / 'resumed-transcript.log'), 'timeoutSeconds': 30}))
+    subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
+    transcript = re.sub(r'\x1b\[[0-9;]*m', '', (base / 'resumed-transcript.log').read_text())
+    assert f'./hive.sh install --config {guided_output} --release 0.1.0' in transcript, 'A repeated setup did not offer to continue'
+    assert '"installation": "guided-proof"' in transcript, 'A continued setup did not plan the saved configuration'
+    remote_output = base / 'inventory' / 'remote.json'
+    remote_questions = [('Installation name', 'remote-proof'), ('Installation directory on the selected host', '/opt/remote-proof'),
+                        ('Host SSH target', 'deploy@hive.example.com'),
+                        ('Protected SSH configuration for the selected host', '/opt/credentials/ssh-config')]
+    remote_questions += [item for item in custom_questions[3:] if item[0] != 'Write protected installation configuration to']
+    remote_questions += [('Write protected installation configuration to', str(remote_output))]
+    review.write_text(json.dumps({'command': arguments, 'questions': remote_questions,
+                                 'transcriptFile': str(base / 'remote-transcript.log'), 'timeoutSeconds': 30}))
+    subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
+    remote = json.loads(remote_output.read_text())
+    assert remote['hosts']['control'] == {'target': 'deploy@hive.example.com', 'directory': '/opt/remote-proof', 'architecture': architecture, 'sshConfig': '/opt/credentials/ssh-config'}
+    print('Passed: interactive directory default and writability guidance, SSH configuration for an SSH target, and continuing a saved setup.')

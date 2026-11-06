@@ -34,11 +34,13 @@ hive_checkout_release() {
 # check its installation directory. Planning alone never contacts a host.
 hive_setup_hosts_ready() {
   local remote
+  # hive_validate sets it for every other command; the transport payload names the installation.
+  HIVE_ID=$(jq -r .installation "$HIVE_CONFIG")
   while IFS= read -r remote; do
     if ! hive_host "$remote" "$(declare -f hive_writable_directory)"'
       set -euo pipefail; read -r input; directory=$(jq -r .directory <<< "$input")
       hive_writable_directory "$directory" || { printf "%s on %s cannot be created or written by %s. Create it there first: sudo install -d -m 0750 -o %s -g %s %s\n" "$directory" "$(hostname)" "$(id -un)" "$(id -un)" "$(id -gn)" "$directory" >&2; exit 1; }'; then
-      hive_die "Host $remote is not ready: see above. SSH runs non-interactively, so this must work first: ssh -o BatchMode=yes -o StrictHostKeyChecking=yes $(jq -r --arg host "$remote" '.hosts[$host].target' "$HIVE_CONFIG") true. Then continue with: ./hive.sh install --config $HIVE_CONFIG --release $HIVE_VERSION"
+      hive_die "Host $remote is not ready: see above. If SSH failed, make this work without a prompt first: ssh -o BatchMode=yes -o StrictHostKeyChecking=yes $(jq -r --arg host "$remote" '.hosts[$host].target' "$HIVE_CONFIG") true. Then continue with: ./hive.sh install --config $HIVE_CONFIG --release $HIVE_VERSION"
     fi
   done < <(jq -r '.hosts|to_entries[]|select(.value.target!="local")|.key' "$HIVE_CONFIG")
 }
@@ -87,6 +89,16 @@ Secrets belong in protected environment/configuration files, never CLI arguments
 EOF
 }
 
+# The directory is canonical and either exists and is writable, or can be created in its nearest
+# existing ancestor.
+hive_writable_directory() {
+  local path=$1 parent
+  [[ "$path" == /* && "$path" != / && "$path" == "$(realpath -m -- "$path")" ]] || return 1
+  parent=$path
+  while [[ ! -e "$parent" && "$parent" != / ]]; do parent=$(dirname -- "$parent"); done
+  [[ -d "$parent" && -w "$parent" ]]
+}
+
 hive_prompt() {
   local variable=$1 label=$2 fallback=${3:-} answer
   read -r -p "$label${fallback:+ [$fallback]}: " answer
@@ -96,7 +108,7 @@ hive_prompt() {
 hive_configure() {
   [[ -t 0 ]] || hive_die 'Interactive setup requires a terminal; use --config FILE --non-interactive'
   hive_need openssl; hive_need sha256sum
-  local id directory origin profile output endpoint model credential engine protocol target bind port architecture selected mode certificate private_key username email
+  local resume control_ssh='' existing id directory origin profile output endpoint model credential engine protocol target bind port architecture selected mode certificate private_key username email
   local inference='[]' agents='[]' temporary config selected_json runtime version agent_id agent_profile agent_environment agent_service authorized
   local external_ca enrollment_endpoint enrollment_prefix enrollment_credential enrollment_ca provider_slug provider_aliases
   local product product_host product_origin product_bind product_certificate product_key product_inference trust_bundle ssh_config magnus_console
@@ -116,8 +128,28 @@ hive_configure() {
   jq -e '.components["hive-registry"]!=null' "$HIVE_MANIFEST" >/dev/null || hive_die 'This release has no Hive Registry. The registry is mandatory: use a release whose signed manifest includes hive-registry.'
   jq -e --arg version "$HIVE_VERSION" '.schema==1 and .version==$version and (.components|keys|all(.[];test("^[a-z][a-z0-9-]{0,47}$")))' "$HIVE_MANIFEST" >/dev/null || hive_die 'Release metadata does not match the requested version'
   hive_prompt id 'Installation name'
-  hive_prompt directory 'Installation directory on the selected host (absolute)'
+  [[ "$id" =~ ^[a-z][a-z0-9-]{0,47}$ ]] || hive_die 'An installation name starts with a lowercase letter and has only lowercase letters, digits and hyphens'
+  # A setup that stopped after writing its configuration continues from that file.
+  existing="${XDG_CONFIG_HOME:-${HOME:-$PWD}/.config}/hive/$id/installation.json"
+  if [[ -e "$existing" || -L "$existing" ]]; then
+    printf 'Installation %s already has a configuration: %s\n' "$id" "$existing"
+    hive_prompt resume 'Continue with it instead of answering the setup questions again (yes/no)' yes
+    [[ "$resume" == yes ]] || hive_die "Choose another installation name, or move $existing away first"
+    printf 'Continuing with it. The same step unattended: ./hive.sh install --config %s --release %s\n' "$existing" "$HIVE_VERSION"
+    HIVE_CONFIG=$existing
+    return 0
+  fi
+  hive_prompt directory 'Installation directory on the selected host (absolute)' "/opt/$id"
   hive_prompt target 'Host SSH target (local or deploy@host)' local
+  if [[ "$target" == local ]]; then
+    # Checked now, not after the plan: fresh setup creates this directory as the current account.
+    while ! hive_writable_directory "$directory"; do
+      printf '%s must be a canonical absolute path that %s can create or write. To use it, create it in another terminal with:\n  sudo install -d -m 0750 -o %s -g %s %s\n' "$directory" "$(id -un)" "$(id -un)" "$(id -gn)" "$directory"
+      hive_prompt directory 'Installation directory on the selected host (absolute)' "$directory"
+    done
+  else
+    hive_prompt control_ssh 'Protected SSH configuration for the selected host (blank for your default SSH settings)'
+  fi
   architecture=$(uname -m); case "$architecture" in x86_64) architecture=amd64;; aarch64) architecture=arm64;; esac
   hive_prompt architecture 'Host architecture (amd64/arm64)' "$architecture"
   hive_prompt origin 'Console HTTPS origin'
@@ -192,8 +224,8 @@ hive_configure() {
   done
   temporary=$(mktemp -d)
   config="$temporary/installation.json"
-  jq -n --arg id "$id" --arg directory "$directory" --arg target "$target" --arg architecture "$architecture" --arg origin "$origin" --arg profile "$profile" --arg version "$HIVE_VERSION" --arg bind "$bind" --arg port "$port" --arg mode "$mode" --arg username "${username:-}" --arg email "${email:-}" --arg certificate "${certificate:-}" --arg key "${private_key:-}" --arg gatewayUsername "$gateway_username" --arg gatewayKey "$gateway_key" --arg gatewayGrant "$gateway_grant" --argjson selected "$selected_json" --argjson agents "$agents" --argjson inference "$inference" --slurpfile release "$HIVE_MANIFEST" '
-    {schema:1,installation:$id,release:$version,profile:$profile,origin:$origin,hosts:{control:{target:$target,directory:$directory,architecture:$architecture}},components:($selected|map(. as $name|{key:$name,value:({host:"control"}+(if $release[0].components[$name].kind=="static-ui" then {} elif $release[0].components[$name].kind=="datastore" then {configDirectory:($directory+"/config/"+$name)} else {envFile:($directory+"/config/"+$name+".env"),configDirectory:($directory+"/config/"+$name)} end))})|from_entries),agents:$agents,inference:$inference} +
+  jq -n --arg id "$id" --arg directory "$directory" --arg target "$target" --arg ssh "$control_ssh" --arg architecture "$architecture" --arg origin "$origin" --arg profile "$profile" --arg version "$HIVE_VERSION" --arg bind "$bind" --arg port "$port" --arg mode "$mode" --arg username "${username:-}" --arg email "${email:-}" --arg certificate "${certificate:-}" --arg key "${private_key:-}" --arg gatewayUsername "$gateway_username" --arg gatewayKey "$gateway_key" --arg gatewayGrant "$gateway_grant" --argjson selected "$selected_json" --argjson agents "$agents" --argjson inference "$inference" --slurpfile release "$HIVE_MANIFEST" '
+    {schema:1,installation:$id,release:$version,profile:$profile,origin:$origin,hosts:{control:({target:$target,directory:$directory,architecture:$architecture}+(if $ssh!="" then {sshConfig:$ssh} else {} end))},components:($selected|map(. as $name|{key:$name,value:({host:"control"}+(if $release[0].components[$name].kind=="static-ui" then {} elif $release[0].components[$name].kind=="datastore" then {configDirectory:($directory+"/config/"+$name)} else {envFile:($directory+"/config/"+$name+".env"),configDirectory:($directory+"/config/"+$name)} end))})|from_entries),agents:$agents,inference:$inference} +
     (if ($selected|index("hivexui"))!=null or ($selected|index("ingress"))!=null then {console:{host:"control",bindAddress:$bind,httpsPort:($port|tonumber),runtimeFile:($directory+"/config/runtime.json")}} else {} end) +
     (if $mode=="fresh" or $mode=="distributed" then {bootstrap:({adminUsername:$username,adminEmail:$email,certificateFile:$certificate,privateKeyFile:$key} + (if ($selected|index("magnus-gateway"))!=null then {magnusGateway:{sshUsername:$gatewayUsername,sshPrivateKeyFile:$gatewayKey,grantTerminalToInitialOperator:($gatewayGrant=="yes")}} else {} end))} else {} end)' > "$config"
   if [[ "$mode" == distributed ]]; then
@@ -521,7 +553,10 @@ hive_main() {
   if [[ -z "$HIVE_CONFIG" ]]; then
     [[ "$interactive" == true ]] || hive_die '--config is required'
     hive_configure
+    case "$command" in install|init) hive_setup_hosts_ready;; esac
   fi
+  # A renewal timer outlives the release in the configuration file; it runs this checkout's release.
+  if [[ "$command" == tls-refresh && -z "$HIVE_VERSION" && -z "$HIVE_MANIFEST" ]]; then HIVE_VERSION=$(hive_checkout_release); fi
   HIVE_OPERATION=$command
   trap 'if [[ -n "${HIVE_REGISTRY_TEMPORARY:-}" ]]; then rm -f -- "$HIVE_REGISTRY_TEMPORARY"; fi' EXIT
   hive_registry_configuration "$command"
