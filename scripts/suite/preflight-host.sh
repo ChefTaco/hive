@@ -3,11 +3,12 @@
 set -euo pipefail
 read -r input
 directory=$(jq -r .directory <<< "$input")
+prerequisites='Install the prerequisites on this host with: sudo ./scripts/install-prerequisites.sh (from the release checkout)'
 for tool in docker jq flock openssl tar gzip sha256sum stat find sort curl df realpath timeout; do
-  command -v "$tool" >/dev/null
+  command -v "$tool" >/dev/null || { printf 'Required tool missing on this host: %s. %s\n' "$tool" "$prerequisites" >&2; exit 1; }
 done
-docker info >/dev/null
-docker compose version >/dev/null
+docker info >/dev/null || { printf 'Docker is not reachable by %s on this host: the daemon is not running, or the account is not in the docker group (log in again after joining it). %s\n' "$(id -un)" "$prerequisites" >&2; exit 1; }
+docker compose version >/dev/null || { printf 'The Docker Compose plugin is missing on this host. %s\n' "$prerequisites" >&2; exit 1; }
 case $(uname -m) in x86_64|aarch64) ;; *) printf 'Unsupported host architecture\n' >&2; exit 1;; esac
 [[ "$directory" == "$(realpath -m -- "$directory")" ]] || { printf 'Installation path must be canonical and contain no symlink ancestors\n' >&2; exit 1; }
 parent=$directory
@@ -36,7 +37,7 @@ if [[ -e "$directory/installation.json" ]]; then
   [[ $(jq -r .installation "$directory/installation.json") == "$(jq -r .installation <<< "$input")" ]]
 fi
 if jq -e '.bootstrap.productEndpoints!=null' <<< "$input" >/dev/null; then
-  command -v ss >/dev/null
+  command -v ss >/dev/null || { printf 'Required tool missing on this host: ss (iproute2). %s\n' "$prerequisites" >&2; exit 1; }
   while IFS=$'\t' read -r component target port bind hostname; do
     config=$(jq -er --arg name "$component" '.placements[$name].configDirectory' <<< "$input")
     for file in tls.crt tls.key authority.pem; do [[ -f "$config/$file" && ! -L "$config/$file" && -r "$config/$file" ]]; done
@@ -56,7 +57,7 @@ if jq -e '.bootstrap.productEndpoints!=null' <<< "$input" >/dev/null; then
   done < <(jq -r '. as $input | .placements|keys[]|. as $name|$input.bootstrap.productEndpoints[$name]|select(.!=null)|. as $endpoint| [{name:$name,url:.origin,target:({oathweave:4200,emberpath:9443,hivemem:18790,hiveskills:4030,magnus:4000,"magnus-gateway":4310,cindertrace:4101,chattermost:8065}[$name])}] + (if $name=="emberpath" then [{name:$name,url:.inferenceOrigin,target:4020}] else [] end)|.[]|. as $listener|(.url|capture("^https://(?<hostname>[^:]+)(?::(?<port>[0-9]+))?$"))|[$name,($listener.target|tostring),(.port // "443"),$endpoint.bindAddress,.hostname]|@tsv' <<< "$input")
 fi
 if jq -e '.console!=null' <<< "$input" >/dev/null; then
-  command -v ss >/dev/null
+  command -v ss >/dev/null || { printf 'Required tool missing on this host: ss (iproute2). %s\n' "$prerequisites" >&2; exit 1; }
   runtime=$(jq -r .console.runtimeFile <<< "$input")
   hive_check_public_runtime "$runtime" || { printf 'Invalid or missing public console runtime\n' >&2; exit 1; }
   [[ "$runtime" == "$(realpath -m -- "$runtime")" ]]
@@ -68,7 +69,10 @@ if jq -e '.console!=null' <<< "$input" >/dev/null; then
   (( (8#$permissions & 077) == 0 ))
   hostname=$(jq -r '.origin|sub("^https://";"")|split(":")[0]' <<< "$input")
   openssl x509 -in "$config/console.crt" -noout -checkend 86400 >/dev/null
-  openssl x509 -in "$config/console.crt" -noout -checkhost "$hostname" >/dev/null
+  hostname_option=-verify_hostname; [[ ! "$hostname" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || hostname_option=-verify_ip
+  # x509 -checkhost exits 0 on a mismatch; verify fails. The leaf is its own trust anchor here.
+  openssl verify -partial_chain -no_check_time -trusted "$config/console.crt" "$hostname_option" "$hostname" "$config/console.crt" >/dev/null 2>&1 ||
+    { printf 'Console certificate is not valid for %s, the name in the console origin\n' "$hostname" >&2; exit 1; }
   certificate_key=$(openssl x509 -in "$config/console.crt" -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum)
   private_key=$(openssl pkey -in "$config/console.key" -pubout -outform DER 2>/dev/null | sha256sum)
   [[ "$certificate_key" == "$private_key" ]] || { printf 'Console certificate and private key do not match\n' >&2; exit 1; }

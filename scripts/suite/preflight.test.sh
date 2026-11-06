@@ -48,4 +48,23 @@ cp "$temporary/key.good" "$temporary/install/config/ingress/console.key"
 ln -s "$temporary/install" "$temporary/linked"
 jq --arg directory "$temporary/linked" '.hosts.control.directory=$directory' "$temporary/config.json" > "$temporary/symlink.json"
 reject "$ROOT/hive.sh" doctor --config "$temporary/symlink.json"
-printf 'Passed: read-only host preflight, secret-file permissions, certificate/key matching, public-runtime rejection, capacity and symlink refusal.\n'
+# A console certificate for another name is refused; x509 -checkhost would exit 0 for it.
+cp "$temporary/install/config/ingress/console.crt" "$temporary/certificate.good"
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$temporary/install/config/ingress/console.key" -out "$temporary/install/config/ingress/console.crt" -subj '/CN=wrong.example.com' -addext 'subjectAltName=DNS:wrong.example.com' -days 2 >/dev/null 2>&1
+chmod 600 "$temporary/install/config/ingress/console.key"
+reject "$ROOT/hive.sh" doctor --config "$temporary/config.json"
+grep -q 'not valid for hive.example.com' "$temporary/result" || fail 'Wrong-name refusal does not name the origin'
+cp "$temporary/certificate.good" "$temporary/install/config/ingress/console.crt"; cp "$temporary/key.good" "$temporary/install/config/ingress/console.key"
+"$ROOT/hive.sh" doctor --config "$temporary/config.json" > "$temporary/result" || fail 'Restored certificate was refused'
+# A missing host tool is named, with the command that installs it.
+mkdir "$temporary/no-timeout"
+IFS=: read -ra directories <<< "$PATH"
+for directory in "${directories[@]}"; do
+  for tool in "$directory"/*; do
+    name=${tool##*/}
+    [[ -x "$tool" && "$name" != timeout && ! -e "$temporary/no-timeout/$name" ]] && ln -s "$tool" "$temporary/no-timeout/$name"
+  done
+done
+PATH=$temporary/no-timeout reject "$ROOT/hive.sh" doctor --config "$temporary/config.json"
+grep -q 'Required tool missing on this host: timeout.*install-prerequisites.sh' "$temporary/result" || fail 'A missing host tool was not named'
+printf 'Passed: read-only host preflight, secret-file permissions, certificate/key matching, public-runtime rejection, capacity and symlink refusal, wrong-name certificates and named missing tools.\n'

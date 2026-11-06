@@ -28,6 +28,14 @@ SH
 chmod 700 "$temporary/bin/openssl"
 export PATH="$temporary/bin:$PATH"
 run_init() { "$ROOT/hive.sh" init --config "$temporary/config.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes; }
+# A certificate for another name is refused before anything is created: x509 -checkhost
+# would report the mismatch and still exit 0.
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$temporary/wrong.key" -out "$temporary/wrong.crt" -subj '/CN=wrong.example.com' -addext 'subjectAltName=DNS:wrong.example.com' -days 2 >/dev/null 2>&1
+chmod 600 "$temporary/wrong.key"
+jq --arg certificate "$temporary/wrong.crt" --arg key "$temporary/wrong.key" '.bootstrap.certificateFile=$certificate | .bootstrap.privateKeyFile=$key' "$temporary/config.json" > "$temporary/wrong.json"
+if "$ROOT/hive.sh" init --config "$temporary/wrong.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/wrong.log" 2>&1; then fail 'A console certificate for another name was accepted'; fi
+grep -q 'is not valid for localhost' "$temporary/wrong.log" || fail 'The wrong-name refusal does not name the origin'
+[[ ! -e "$temporary/install" && ! -e "$temporary/interrupted" ]] || fail 'A wrong-name certificate reached initialization'
 reject run_init
 [[ -e "$temporary/interrupted" ]] || fail 'Initialization did not reach the injected interruption'
 [[ ! -e "$temporary/install/installation.json" && ! -d "$temporary/install/data" ]] || fail 'Configuration setup created application state'

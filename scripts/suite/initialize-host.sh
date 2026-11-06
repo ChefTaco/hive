@@ -12,20 +12,22 @@ origin=$(jq -er .origin <<< "$input")
 state="$directory/config/.initializer"
 die() { printf 'Hive initialization: %s\n' "$*" >&2; exit 1; }
 [[ "$directory" == "$(realpath -m -- "$directory")" && ! -L "$directory" ]] || die 'Installation path must be canonical without symlinks'
-for tool in openssl jq docker flock sha256sum cmp base64 stat find; do command -v "$tool" >/dev/null || die 'Required initialization tool is missing'; done
-docker info >/dev/null
+for tool in openssl jq docker flock sha256sum cmp base64 stat find; do command -v "$tool" >/dev/null || die "Required tool missing on this host: $tool. Install the prerequisites with: sudo ./scripts/install-prerequisites.sh"; done
+docker info >/dev/null || die "Docker is not reachable by $(id -un) on this host: start it, or log in again after joining the docker group"
 has_component() { jq -e --arg name "$1" '.placements[$name]!=null' <<< "$input" >/dev/null; }
 distributed=$(jq -r '.bootstrap.productEndpoints!=null' <<< "$input")
 console_hostname=${origin#https://}; console_hostname=${console_hostname%%:*}
 certificate_references=()
 check_certificate() {
-  local certificate=$1 private_key=$2 hostname=$3 permissions hostname_option=-checkhost
-  [[ ! "$hostname" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || hostname_option=-checkip
+  local certificate=$1 private_key=$2 hostname=$3 permissions hostname_option=-verify_hostname
+  [[ ! "$hostname" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || hostname_option=-verify_ip
   for path in "$certificate" "$private_key"; do
     [[ -f "$path" && ! -L "$path" && -r "$path" && "$path" == "$(realpath -m -- "$path")" ]] || die 'Product certificate/key reference is invalid'
   done
   permissions=$(stat -c %a "$private_key"); (( (8#$permissions & 077)==0 )) || die 'Product private key must be owner-only'
-  openssl x509 -in "$certificate" -noout "$hostname_option" "$hostname" >/dev/null || die 'Product certificate hostname does not match its configured endpoint'
+  # x509 -checkhost exits 0 on a mismatch; verify fails. The leaf is its own trust anchor here:
+  # this checks only the name, and the expiry check below covers time.
+  openssl verify -partial_chain -no_check_time -trusted "$certificate" "$hostname_option" "$hostname" "$certificate" >/dev/null 2>&1 || die "Certificate $certificate is not valid for $hostname, the name in its configured origin"
   openssl x509 -in "$certificate" -noout -checkend 86400 >/dev/null || die 'Product certificate expires within one day'
   [[ $(openssl x509 -in "$certificate" -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum) == "$(openssl pkey -in "$private_key" -pubout -outform DER 2>/dev/null | sha256sum)" ]] || die 'Product certificate and private key do not match'
   certificate_references+=("$certificate" "$private_key")
@@ -89,7 +91,7 @@ while [[ ! -d "$parent" && "$parent" != / ]]; do parent=$(dirname -- "$parent");
 available=$(df -Pm -- "$parent" | awk 'NR==2 {print $4}')
 required=$(jq -r '.minimumFreeMiB // 2048' <<< "$input")
 (( available>=required )) || die 'Insufficient disk space for initialization'
-command -v ss >/dev/null || die 'Console preflight requires ss from iproute2'
+command -v ss >/dev/null || die 'Required tool missing on this host: ss (iproute2). Install the prerequisites with: sudo ./scripts/install-prerequisites.sh'
 while IFS= read -r port; do
   [[ -z $(ss -H -lnt "sport = :$port") ]] || die 'Requested HTTPS port is already occupied'
 done < <(jq -r '. as $input | (.console.httpsPort // empty), (.placements|keys[]|. as $name|$input.bootstrap.productEndpoints[$name]|select(.!=null)|(.origin,.inferenceOrigin // empty)|capture("^https://[^:]+(?::(?<port>[0-9]+))?$")|.port // "443")' <<< "$input")
