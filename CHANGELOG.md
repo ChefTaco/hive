@@ -18,6 +18,18 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Changed
 
+- `hive.sh backup` takes its archive while the suite keeps serving. No container stops or
+  restarts: each application pauses only while its own stores are captured, typically for well
+  under a second, and its requests wait instead of failing. SQLite is copied with the online
+  backup API, Redis with `BGSAVE`, Qdrant with a storage snapshot, PostgreSQL with
+  `pg_basebackup`, and files are copied while serving and brought up to date in the pause. Each
+  store is rebuilt and verified by its own product image before the archive is written, and the
+  archive is verified while the suite serves. The archive has the stopped layout, so `rehearse`
+  and `restore` (including an earlier controller's) accept it, and stopped archives keep
+  restoring. The receipt records `"mode": "online"` and every pause. `--stopped` keeps the
+  previous behaviour. A failed backup resumes every service and keeps no archive. Upgrades and
+  rollbacks still back up with the suite stopped. See `deployment/BACKUPS.md`.
+
 - `hive-set-admin-password` accepts the protected token file as its only argument
   (`hive-set-admin-password FILE`), as well as `--token-file FILE`. A token value given as an
   argument is still refused.

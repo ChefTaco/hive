@@ -213,6 +213,8 @@ case "$action" in
     verify_archive
     record backed-up
     ;;
+  # The default backup: every store is captured while the suite serves (snapshot-host.sh).
+  snapshot) snapshot_online;;
   migrate)
     assert_transaction
     assert_deployment_inputs "$directory/candidate.$plan.json"

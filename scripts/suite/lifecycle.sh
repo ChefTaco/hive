@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 
 hive_action() {
-  local host=$1
-  HIVE_HOST_ACTION=$2 hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/public-runtime.sh" "$HIVE_ROOT/scripts/suite/integrity-host.sh" "$HIVE_ROOT/scripts/suite/input-artifacts-host.sh" "$HIVE_ROOT/scripts/suite/native-initialization-host.sh" "$HIVE_ROOT/scripts/suite/adapters-host.sh" "$HIVE_ROOT/scripts/suite/inference-registration.sh" "$HIVE_ROOT/scripts/suite/initialize-migrations-host.sh" "$HIVE_ROOT/scripts/suite/host-runtime.sh")"
+  local host=$1 file script=''
+  local -a files=(public-runtime.sh integrity-host.sh input-artifacts-host.sh native-initialization-host.sh adapters-host.sh inference-registration.sh initialize-migrations-host.sh host-runtime.sh)
+  # The online backup ships only the definitions it runs. The host script travels as one
+  # command-line argument, which the kernel bounds at 128 KiB.
+  [[ "$2" != snapshot ]] || files=(integrity-host.sh adapters-host.sh snapshot-host.sh host-runtime.sh)
+  for file in "${files[@]}"; do script+=$(cat "$HIVE_ROOT/scripts/suite/$file")$'\n'; done
+  HIVE_HOST_ACTION=$2 hive_host "$host" "$script"
 }
 
 hive_all() {
@@ -84,9 +89,20 @@ hive_lifecycle() {
     backup)
       HIVE_ARCHIVE=${HIVE_ARCHIVE:-"backup-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 4)"}
       hive_all prepare || hive_die 'Backup transaction could not be prepared'
-      hive_all quiesce || hive_hold
-      hive_all backup || hive_hold
-      hive_all resume-current || hive_hold
+      if [[ "${HIVE_BACKUP_STOPPED:-false}" == true ]]; then
+        # The original backup: every container stops while its state is archived.
+        hive_all quiesce || hive_hold
+        hive_all backup || hive_hold
+        hive_all resume-current || hive_hold
+      else
+        local host
+        # Each host reads store kinds and storage formats from the verified release manifest.
+        while IFS= read -r host; do
+          hive_transfer "$host" "$HIVE_MANIFEST" "manifest.$HIVE_PLAN_DIGEST.json"
+        done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
+        HIVE_SNAPSHOT_TOOL=$(base64 -w0 "$HIVE_ROOT/scripts/suite/snapshot-data.mjs")
+        hive_all snapshot || hive_die 'Online backup failed; the suite kept serving and no archive was kept on the failed host. --stopped takes the backup with the suite stopped'
+      fi
       printf 'Verified archive ID: %s\n' "$HIVE_ARCHIVE"
       ;;
     rehearse)
