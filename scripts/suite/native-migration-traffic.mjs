@@ -29,10 +29,16 @@ function request(kind, name, port, path, extra) {
   return new Promise((done) => {
     inflight++;
     const started = Date.now();
-    execFile('curl', ['-sS', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '10', '--resolve', `${name}:${port}:${c.address}`, '--cacert', c.trust, ...extra, `https://${name}:${port}${path}`], { encoding: 'utf8' }, (error, stdout) => {
+    // The answer is kept only to record why a request failed: the start of its error body.
+    const answer = join(work, 'answer-' + kind + '-' + started + '-' + Math.random().toString(36).slice(2));
+    execFile('curl', ['-sS', '-o', answer, '-w', '%{http_code}', '--max-time', '10', '--resolve', `${name}:${port}:${c.address}`, '--cacert', c.trust, ...extra, `https://${name}:${port}${path}`], { encoding: 'utf8' }, (error, stdout) => {
       inflight--;
       const status = (stdout || '').trim() || '000';
-      appendFileSync(c.log, JSON.stringify({ at: new Date(started).toISOString(), ms: Date.now() - started, kind, port, status, ok: /^2/.test(status) && !error }) + '\n', { mode: 0o600 });
+      const ok = /^2/.test(status) && !error;
+      let reason;
+      if (!ok) { try { reason = readFileSync(answer, 'utf8').slice(0, 200); } catch { reason = error ? String(error.message ?? error).split('\n').pop().slice(0, 200) : undefined; } }
+      rmSync(answer, { force: true });
+      appendFileSync(c.log, JSON.stringify({ at: new Date(started).toISOString(), ms: Date.now() - started, kind, port, status, ok, ...(reason ? { reason } : {}) }) + '\n', { mode: 0o600 });
       done();
     });
   });
