@@ -4,45 +4,6 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
-
-### Added
-
-- `scripts/install-prerequisites.sh` installs what `hive.sh` needs on Ubuntu 22.04 and 24.04 and
-  Debian 12 and 13 (amd64, arm64): Docker Engine and the Compose plugin from Docker's apt
-  repository, after checking its signing key, and the tools the controller and host scripts use.
-  It shows its plan before changing anything, is safe to re-run, adds the operator to the
-  `docker` group, can create the installation directory, and has `--check`, `--dry-run` and
-  `--controller` modes. It refuses unsupported systems, snap Docker and rootless Docker.
-- `scripts/console-certificate.sh` issues the console certificate with `tailscale cert`, owned
-  by the operator with an owner-only key, checks any certificate the way the installer does, and
-  renews it into a running installation, weekly from a systemd timer if asked.
-- `hive.sh tls-refresh` installs a renewed console certificate into a fresh installation: it
-  checks the files at `bootstrap.certificateFile` and `privateKeyFile`, copies them into the
-  ingress, records them in the initialization receipt and restarts only the ingress.
-  Repeating `install` keeps working afterwards. Without `--release` it uses the release that
-  pins the checkout's own controller. `scripts/console-certificate.sh renew` and its weekly
-  timer run it.
-- [Install Hive on one host](deployment/QUICKSTART.md): a step-by-step guide from a bare host
-  to a signed-in console, with every setup question, certificate choices, backups, upgrades,
-  firewall notes, controller-over-SSH setup and common errors.
-
-### Fixed
-
-- The console certificate name check never failed: `openssl x509 -checkhost` exits 0 when the
-  name does not match, so a console certificate for another name passed setup and `doctor`.
-  Setup and host preflight now use `openssl verify -verify_hostname` (or `-verify_ip`) and
-  refuse it, naming the origin.
-- Host preflight and setup name a missing tool, an unreachable Docker daemon or a missing
-  Compose plugin, with the command that installs the prerequisites, instead of failing silently.
-- `install` no longer prints "Review the plan, then run install" while it installs, and ends
-  with the console origin, where the initial sign-in is, and the next commands.
-- Interactive setup offers `/opt/ID` as the installation directory and asks again, with the
-  command that creates it, when a local directory cannot be created; it asks for an SSH
-  configuration file for an SSH target; before an install it connects to each SSH host and
-  checks its directory; and a repeated setup offers to continue with the configuration it
-  already wrote instead of asking every question and then refusing.
-
 ## [2.0.2] - 2026-11-06
 
 `releases/2.0.2.json` pins Oathweave 2.0.2, Emberpath 2.0.2 and HiveMem 1.3.2, which ship
@@ -50,7 +11,10 @@ together: they carry Emberpath's self-renewing HiveMem service credential. Every
 exactly as in 2.0.1: HiveSkills 1.3.1, HiveXUI 0.1.1, Magnus 2.1.1 (with the optional fleet
 gateway), Cindertrace 0.2.1, ChatterMost 0.4.1, Emberfold 0.2.1, `hive-registry:2.0.2`,
 `hive-ingress:2.0.2` and the hardened datastores. The publisher key is unchanged (fingerprint
-`c0d0665a70969f37c8f1cffbdcf8e54df13626f8dbd4b5759a7c44843d86d1b2`).
+`c0d0665a70969f37c8f1cffbdcf8e54df13626f8dbd4b5759a7c44843d86d1b2`). The controller also
+backs up a running suite online, fixes the ingress keep-alive race behind occasional POST 503s,
+checks console certificate names for real, and adds a guided single-host installation
+([deployment/QUICKSTART.md](deployment/QUICKSTART.md)).
 
 ### Upgrading
 
@@ -80,6 +44,24 @@ gateway), Cindertrace 0.2.1, ChatterMost 0.4.1, Emberfold 0.2.1, `hive-registry:
 
 ### Added
 
+- `scripts/install-prerequisites.sh` installs what `hive.sh` needs on Ubuntu 22.04 and 24.04 and
+  Debian 12 and 13 (amd64, arm64): Docker Engine and the Compose plugin from Docker's apt
+  repository, after checking its signing key, and the tools the controller and host scripts use.
+  It shows its plan before changing anything, is safe to re-run, adds the operator to the
+  `docker` group, can create the installation directory, and has `--check`, `--dry-run` and
+  `--controller` modes. It refuses unsupported systems, snap Docker and rootless Docker.
+- `scripts/console-certificate.sh` issues the console certificate with `tailscale cert`, owned
+  by the operator with an owner-only key, checks any certificate the way the installer does, and
+  renews it into a running installation, weekly from a systemd timer if asked.
+- `hive.sh tls-refresh` installs a renewed console certificate into a fresh installation: it
+  checks the files at `bootstrap.certificateFile` and `privateKeyFile`, copies them into the
+  ingress, records them in the initialization receipt and restarts only the ingress.
+  Repeating `install` keeps working afterwards. Without `--release` it uses the release that
+  pins the checkout's own controller. `scripts/console-certificate.sh renew` and its weekly
+  timer run it.
+- [Install Hive on one host](deployment/QUICKSTART.md): a step-by-step guide from a bare host
+  to a signed-in console, with every setup question, certificate choices, backups, upgrades,
+  firewall notes, controller-over-SSH setup and common errors.
 - Emberpath's HiveMem credential renews itself. `hive.sh migrate-native prepare`, `hive.sh upgrade`
   and `hive.sh install` declare an Oathweave machine client for Emberpath wherever it serves
   HiveMem-backed endpoints, with its secret generated on the host and never printed. Emberpath
@@ -112,6 +94,19 @@ gateway), Cindertrace 0.2.1, ChatterMost 0.4.1, Emberfold 0.2.1, `hive-registry:
 
 ### Fixed
 
+- The console certificate name check never failed: `openssl x509 -checkhost` exits 0 when the
+  name does not match, so a console certificate for another name passed setup and `doctor`.
+  Setup and host preflight now use `openssl verify -verify_hostname` (or `-verify_ip`) and
+  refuse it, naming the origin.
+- Host preflight and setup name a missing tool, an unreachable Docker daemon or a missing
+  Compose plugin, with the command that installs the prerequisites, instead of failing silently.
+- `install` no longer prints "Review the plan, then run install" while it installs, and ends
+  with the console origin, where the initial sign-in is, and the next commands.
+- Interactive setup offers `/opt/ID` as the installation directory and asks again, with the
+  command that creates it, when a local directory cannot be created; it asks for an SSH
+  configuration file for an SSH target; before an install it connects to each SSH host and
+  checks its directory; and a repeated setup offers to continue with the configuration it
+  already wrote instead of asking every question and then refusing.
 - The ingress no longer fails an occasional POST with `503 Service unavailable`. It kept idle
   upstream connections for Caddy's default of two minutes, while the products, all Node servers,
   close an idle keep-alive connection after five seconds. A request sent on a connection at the
