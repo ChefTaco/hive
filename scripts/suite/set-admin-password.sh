@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Sets the password of the one administrator account a migrated installation signs in
 # with, using its one-use reset token. Run it on the suite host, as root, on a terminal:
-#   sudo /path/to/installation/bin/hive-set-admin-password [--token-file FILE]
+#   sudo /path/to/installation/bin/hive-set-admin-password [[--token-file] FILE]
 # Both secrets are read without echo and leave this script only on curl's standard input,
 # so neither reaches a command line, the environment, a log or shell history. The token is
 # never a command-line value: use the prompt or a protected file. The running identity
@@ -12,11 +12,15 @@ umask 077
 ulimit -c 0 2>/dev/null || true
 unset HISTFILE
 die() { printf 'Hive: %s\n' "$*" >&2; exit 1; }
+usage='Usage: hive-set-admin-password [[--token-file] FILE]. The token and the password are never command-line values.'
 token_file=''
-if (($#)); then
-  [[ $# == 2 && $1 == --token-file ]] || die 'Usage: hive-set-admin-password [--token-file FILE]. The token and the password are never command-line values.'
-  token_file=$2
-fi
+case $# in
+  0) ;;
+  1) [[ $1 != -* ]] || die "$usage"; token_file=$1;;
+  2) [[ $1 == --token-file ]] || die "$usage"; token_file=$2;;
+  *) die "$usage";;
+esac
+[[ ! "$token_file" =~ ^hive-reset\. ]] || die "$usage"
 for tool in jq curl; do command -v "$tool" >/dev/null || die "Required tool missing: $tool"; done
 script=$(readlink -f -- "${BASH_SOURCE[0]}")
 target=$(dirname -- "$(dirname -- "$script")")/migration/reset-target.json

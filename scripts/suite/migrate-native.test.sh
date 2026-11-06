@@ -329,6 +329,11 @@ printf '%s\n' "$token" > "$temporary/token-file"; chmod 644 "$temporary/token-fi
 refused 'must be owner-only' owner --token-file "$temporary/token-file"
 chmod 600 "$temporary/token-file"
 printf '%s\n%s\n' "$secret_password" "$secret_password" | owner --token-file "$temporary/token-file" > /dev/null 2>&1 || fail 'A protected token file is accepted'
+printf '%s\n%s\n' "$secret_password" "$secret_password" | owner "$temporary/token-file" > "$temporary/owner-positional.out" 2>&1 || fail 'A protected token file is accepted as the only argument'
+! grep -qF -e "$secret_password" -e "$token" "$temporary/owner-positional.out" || fail 'A secret was printed'
+refused 'never command-line values' owner --token-file
+refused 'never command-line values' owner "$temporary/token-file" extra
+refused 'never command-line values' owner -f "$temporary/token-file"
 CURL_STATUS=429 CURL_REPLY='{}' refused 'Too many attempts' owner <<< "$token"$'\none\none'
 export CURL_STATUS=400 CURL_REPLY='{"message":"Invalid or expired reset token"}'
 refused 'Invalid or expired' owner <<< "$token"$'\none\none'

@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- `hive-set-admin-password` accepts the protected token file as its only argument
+  (`hive-set-admin-password FILE`), as well as `--token-file FILE`. A token value given as an
+  argument is still refused.
+
 ## [2.0.1] - 2026-11-06
 
 A controller-only release. `releases/2.0.1.json` pins exactly the images and versions of 2.0.0;

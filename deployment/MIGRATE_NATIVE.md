@@ -234,8 +234,8 @@ owner sets a new password once, per installation, with a one-use token:
    ```
 
    or, from the controller, `hive.sh migrate-native set-admin-password --config FILE`. It prompts for
-   the token and the new password without echo. A protected file can replace the token prompt:
-   `--token-file FILE`. Neither secret can be given as an argument. They leave the script only on
+   the token and the new password without echo. A protected, owner-only file can replace the token prompt:
+   `hive-set-admin-password FILE` (or `--token-file FILE`). Neither secret can be given as an argument. They leave the script only on
    standard input of the request to the identity service, so they appear in no command line,
    environment, log or history.
 3. Sign in to the console at the installation's origin, then delete the token file.
