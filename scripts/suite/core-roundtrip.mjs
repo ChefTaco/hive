@@ -125,21 +125,25 @@ try {
     registryImage,
   );
   const images = {};
+  // Local images NAME:TAG, built by build-candidates.sh. HIVE_CANDIDATE_TAG selects another set.
+  const candidate = process.env.HIVE_CANDIDATE_TAG || 'candidate';
+  assert.match(candidate, /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/, 'Invalid HIVE_CANDIDATE_TAG');
   for (const product of ['hive-registry', 'oathweave', 'emberpath', 'hivemem', 'hiveskills', 'hivexui']) {
     const tag = registry + '/' + id + '/' + product + ':candidate';
     tags.push(tag);
-    docker('tag', product + ':candidate', tag);
-    docker('push', tag);
-    images[product] = JSON.parse(
+    docker('tag', product + ':' + candidate, tag);
+    // A pulled multi-platform image is pushed as this platform's manifest, under its own digest.
+    const pushed = /digest: (sha256:[a-f0-9]{64})/.exec(docker('push', tag))?.[1];
+    images[product] = pushed ? registry + '/' + id + '/' + product + '@' + pushed : JSON.parse(
       docker('image', 'inspect', tag, '--format', '{{json .RepoDigests}}'),
     ).find((value) => value.startsWith(registry + '/' + id + '/' + product + '@sha256:'));
     assert(images[product], 'Pushed candidate digest is missing');
   }
   const ingressTag = registry + '/' + id + '/ingress:candidate';
   tags.push(ingressTag);
-  docker('tag', 'hive-ingress:candidate', ingressTag);
-  docker('push', ingressTag);
-  images.ingress = JSON.parse(
+  docker('tag', 'hive-ingress:' + candidate, ingressTag);
+  const pushedIngress = /digest: (sha256:[a-f0-9]{64})/.exec(docker('push', ingressTag))?.[1];
+  images.ingress = pushedIngress ? registry + '/' + id + '/ingress@' + pushedIngress : JSON.parse(
     docker('image', 'inspect', ingressTag, '--format', '{{json .RepoDigests}}'),
   ).find((value) => value.startsWith(registry + '/' + id + '/ingress@sha256:'));
   const user = `${process.getuid()}:${process.getgid()}`;
@@ -382,6 +386,15 @@ try {
     (await request(routes.emberpath, null, { Authorization: 'Bearer ' + tokens.oathweave })).status,
     401,
   );
+  // A fresh Emberpath serves no HiveMem-backed endpoints: the console reaches HiveMem and
+  // Oathweave directly. It holds no memory token that could expire and no HiveMem identity.
+  const modelEnvironment = parseEnv(readFileSync(join(owned, 'config/emberpath.env'), 'utf8'));
+  assert(!modelEnvironment.HIVE_ROUTER_MEMORY_PROXY_TOKEN && !modelEnvironment.EMBERPATH_HIVEMEM_CLIENT_ID, 'A fresh Emberpath holds no memory credential');
+  for (const path of ['/api/emberpath/memory/dashboard-data', '/api/emberpath/hive/actors']) {
+    const refused = await request(path, null, { Authorization: 'Bearer ' + tokens.emberpath });
+    assert.equal(refused.status, 403, 'Console tokens use the owning product API: ' + path);
+    assert.equal(refused.body.error, 'PRODUCT_API_REQUIRED');
+  }
   assert.equal((await request('/api/oathweave/browser/logout', {}, headers)).status, 200);
   if (process.argv.includes('--browser-review')) {
     put(join(output, 'browser-credentials.json'), {

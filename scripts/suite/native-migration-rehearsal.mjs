@@ -14,6 +14,10 @@
 //                   rehearse a restore of the archive
 //   signIn          false skips the sign-in fork, the reset rehearsal and the browser
 //   refreshMemoryToken  renew the Router memory proxy token natively, then run refresh-memory-token
+//   memoryCredential    true or {renewalSeconds, intervalSeconds}: prove the self-renewing Emberpath
+//                       memory credential, including after the copied native token has expired
+//   upgrade             {version, images}: after the migration, hive.sh upgrade of the migrated
+//                       suite with this tree's controller to a release with these product images
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes, scryptSync } from 'node:crypto';
@@ -21,6 +25,7 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, read
 import { join, resolve } from 'node:path';
 import { parseEnv } from 'node:util';
 import { applySuiteCatalog, hiveRegistryComponent } from './suite-catalog.mjs';
+import { memoryCredentialRehearsal } from './memory-credential-rehearsal.mjs';
 
 const args = process.argv.slice(2);
 assert(args[0] === '--config' && args[1], 'Usage: native-migration-rehearsal.mjs --config PRIVATE_JSON [--cleanup]');
@@ -29,7 +34,9 @@ assert(configStat.isFile() && configStat.uid === process.getuid() && (configStat
 const c = JSON.parse(readFileSync(args[1], 'utf8'));
 const root = resolve(import.meta.dirname, '../..');
 const controller = c.controllerRoot ? resolve(c.controllerRoot) : root;
-const hiveScript = join(controller, 'hive.sh');
+let hiveScript = join(controller, 'hive.sh');
+// After an upgrade, later commands use the upgraded release and its configuration.
+let installationFile = 'installation.json', releaseFile = 'release.json';
 const out = c.output, prefix = 'hive-mn-' + c.host;
 const run = (program, argv, options = {}) => execFileSync(program, argv, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024, ...options });
 const docker = (...argv) => run('docker', argv).trim();
@@ -43,7 +50,7 @@ const hasSkills = () => existsSync(join(c.restored, 'state/opt/hive-skills/share
 const logName = (label) => { let name = 'hive-' + label + '.log'; for (let index = 2; existsSync(join(out, name)); index++) name = 'hive-' + label + '-' + index + '.log'; return name; };
 const suiteCommand = (argv, label) => {
   const started = Date.now();
-  const result = spawnSync(hiveScript, [...argv, '--config', join(out, 'installation.json'), '--manifest', join(out, 'release.json'), '--trust-key', join(out, 'publisher.pub'), '--non-interactive'], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  const result = spawnSync(hiveScript, [...argv, '--config', join(out, installationFile), '--manifest', join(out, releaseFile), '--trust-key', join(out, 'publisher.pub'), '--non-interactive'], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
   writeFileSync(join(out, logName(label)), result.stdout + '\n--- stderr\n' + result.stderr, { mode: 0o600 });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr, seconds: (Date.now() - started) / 1000, startedAt: new Date(started).toISOString(), finishedAt: new Date().toISOString() };
 };
@@ -71,26 +78,33 @@ assert(!existsSync(out), 'Choose a new output directory: earlier evidence is ret
 mkdirSync(out, { recursive: true, mode: 0o700 });
 
 // ---- A signed release with exact images, in a private registry for this run. ----
+let registry = null;
+function pushImage(name, image, track = 'migrate') {
+  const tag = `${registry}/${track}/${name}:candidate`;
+  docker('tag', image, tag);
+  // A pulled multi-platform release image holds only this platform's content, so the push
+  // carries that platform's manifest, under its own digest.
+  const pushed = /digest: (sha256:[a-f0-9]{64})/.exec(docker('push', tag))?.[1];
+  const reference = pushed ? `${registry}/${track}/${name}@${pushed}` : JSON.parse(docker('image', 'inspect', tag, '--format', '{{json .RepoDigests}}')).find((value) => value.startsWith(`${registry}/${track}/${name}@sha256:`));
+  const revision = docker('image', 'inspect', tag, '--format', '{{index .Config.Labels "org.opencontainers.image.revision"}}');
+  docker('rmi', tag);
+  return { reference, revision };
+}
 function release() {
   const template = JSON.parse(readFileSync(c.template, 'utf8'));
   const names = ['oathweave', 'oathweave-redis', 'emberpath', 'hivemem', 'hivemem-qdrant', 'hiveskills', 'hivexui', 'ingress'];
   const manifest = { schema: 1, version: c.version ?? '0.1.0', networks: { 'identity-data': template.networks['identity-data'], 'memory-data': template.networks['memory-data'] }, components: Object.fromEntries(names.map((name) => [name, template.components[name]])), profiles: {} };
   const user = process.getuid() + ':' + process.getgid();
   const port = Number(docker('run', '-d', '--name', prefix + '-images', '--label', 'hive.migration.rehearsal=' + c.host, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--user', user, '--tmpfs', `/var/lib/registry:uid=${process.getuid()},gid=${process.getgid()},mode=700`, '-p', '127.0.0.1::5000', c.images.registry) && docker('inspect', prefix + '-images', '--format', '{{(index (index .NetworkSettings.Ports "5000/tcp") 0).HostPort}}'));
-  const registry = '127.0.0.1:' + port;
+  registry = '127.0.0.1:' + port;
   for (let attempt = 0; attempt < 30; attempt++) { if (spawnSync('curl', ['-fsS', '-o', '/dev/null', `http://${registry}/v2/`]).status === 0) break; execFileSync('sleep', ['1']); }
   manifest.components['hive-registry'] = hiveRegistryComponent('pending', user);
   const local = { oathweave: c.images.oathweave, emberpath: c.images.emberpath, hivemem: c.images.hivemem, hiveskills: c.images.hiveskills, hivexui: c.images.hivexui, ingress: c.images.ingress, 'hive-registry': c.images.registryProduct };
   const revisions = {};
   for (const [name, image] of Object.entries(local)) {
-    const tag = `${registry}/migrate/${name}:candidate`;
-    docker('tag', image, tag);
-    // A pulled multi-platform release image holds only this platform's content, so the push
-    // carries that platform's manifest, under its own digest.
-    const pushed = /digest: (sha256:[a-f0-9]{64})/.exec(docker('push', tag))?.[1];
-    manifest.components[name].image = pushed ? `${registry}/migrate/${name}@${pushed}` : JSON.parse(docker('image', 'inspect', tag, '--format', '{{json .RepoDigests}}')).find((value) => value.startsWith(`${registry}/migrate/${name}@sha256:`));
-    revisions[name] = docker('image', 'inspect', tag, '--format', '{{index .Config.Labels "org.opencontainers.image.revision"}}');
-    docker('rmi', tag);
+    const pushed = pushImage(name, image);
+    manifest.components[name].image = pushed.reference;
+    revisions[name] = pushed.revision;
   }
   manifest.components['hive-registry'].service.user = user;
   for (const component of Object.values(manifest.components)) if (component.service?.user !== '101:101') component.service.user = user;
@@ -598,6 +612,29 @@ function secretsAbsent(secretsList) {
   return { evidenceFilesScanned: files.length, evidenceHits: found, containerLogHits: logHits, auditFileHits: auditHits };
 }
 
+// ---- An existing migrated suite moves to a new release with hive.sh upgrade, using this tree. ----
+function upgradeSuite() {
+  const manifest = JSON.parse(readFileSync(join(out, 'release.json'), 'utf8'));
+  const from = { version: manifest.version, images: Object.fromEntries(Object.keys(c.upgrade.images).map((name) => [name, manifest.components[name].image])) };
+  manifest.version = c.upgrade.version;
+  const revisions = {};
+  for (const [name, image] of Object.entries(c.upgrade.images)) { const pushed = pushImage(name, image, 'upgrade'); manifest.components[name].image = pushed.reference; revisions[name] = pushed.revision; }
+  put('release-upgrade.json', manifest);
+  run('openssl', ['pkeyutl', '-sign', '-inkey', join(out, 'publisher.key'), '-rawin', '-in', join(out, 'release-upgrade.json'), '-out', join(out, 'release-upgrade.json.sig')]);
+  const config = JSON.parse(readFileSync(join(out, 'installation.json'), 'utf8'));
+  config.release = c.upgrade.version;
+  put('installation-upgrade.json', config);
+  const before = readFileSync(join(suite, 'config/emberpath.env'), 'utf8');
+  hiveScript = join(root, 'hive.sh'); installationFile = 'installation-upgrade.json'; releaseFile = 'release-upgrade.json';
+  const upgraded = suiteCommand(['upgrade', '--yes'], 'upgrade');
+  assert.equal(upgraded.status, 0, upgraded.stderr.slice(-3000));
+  const compose = JSON.parse(readFileSync(join(suite, 'compose.json'), 'utf8'));
+  const receipt = JSON.parse(readFileSync(join(suite, 'receipt.json'), 'utf8'));
+  for (const name of Object.keys(c.upgrade.images)) assert.equal(compose.services[name].image, manifest.components[name].image, name + ' runs the upgraded image');
+  assert.equal(receipt.version, c.upgrade.version);
+  return { from, to: { version: c.upgrade.version, images: Object.fromEntries(Object.keys(c.upgrade.images).map((name) => [name, manifest.components[name].image])), revisions }, seconds: upgraded.seconds, controller: 'this tree', emberpathCredentialAddedByUpgrade: !/^EMBERPATH_HIVEMEM_CLIENT_ID=/m.test(before) && /^EMBERPATH_HIVEMEM_CLIENT_ID=/m.test(readFileSync(join(suite, 'config/emberpath.env'), 'utf8')) };
+}
+
 async function main() {
   const startedAt = new Date().toISOString();
   const report = { schema: 1, host: c.host, installation: c.installation, startedAt, productionContacted: false };
@@ -696,6 +733,26 @@ async function main() {
       report.suiteQueue = queueState(c.address, trust);
       assert.equal(report.suiteQueue.workerEnabled, true, 'The suite memory worker runs, as in production');
     }
+    const memoryCredential = () => memoryCredentialRehearsal({ out, suite, fqdn: c.fqdn, address: c.address, trust, say });
+    if (c.upgrade) {
+      say('before upgrade: the migrated Router depends on its copied static memory token');
+      const before = memoryCredential();
+      report.beforeUpgrade = { configuration: before.configuration(), staticToken: before.staticOnly() };
+      assert.equal(report.beforeUpgrade.configuration.emberpath.clientId, null, 'The earlier release has no self-renewing credential');
+      assert(report.beforeUpgrade.staticToken.failsOnceExpired, 'Before the upgrade, memory features fail once the static token expires: ' + JSON.stringify(report.beforeUpgrade.staticToken));
+      say('upgrade: hive.sh upgrade to ' + c.upgrade.version + ' with this controller');
+      report.upgrade = upgradeSuite();
+      assert(report.upgrade.emberpathCredentialAddedByUpgrade, 'The upgrade adds the self-renewing credential');
+      const verified = hive('verify');
+      assert.equal(verified.status, 0, verified.stdout.slice(-2000) + verified.stderr.slice(-2000));
+      report.liveVerifyAfterUpgrade = parseJSONLine(verified.stdout);
+    }
+    if (c.memoryCredential) {
+      report.memoryCredential = memoryCredential().proof(c.memoryCredential === true ? {} : c.memoryCredential);
+      const verified = hive('verify');
+      assert.equal(verified.status, 0, verified.stdout.slice(-2000) + verified.stderr.slice(-2000));
+      report.liveVerifyAfterMemoryCredential = parseJSONLine(verified.stdout);
+    }
     if (c.backupRehearsal) {
       report.backupRehearsal = await backupRehearsal(trust, traffic);
       if (traffic) {
@@ -733,7 +790,7 @@ async function main() {
     if (hasSkills()) { report.rowCounts.nativeSkills = tableCounts(join(native, 'state/opt/hive-skills/shared/data/registry.sqlite')); report.rowCounts.suiteSkills = tableCounts(join(suite, 'data/hiveskills/registry.sqlite')); }
     report.auditFiles = (() => { const directory = join(native, 'state/opt/hive-iam/audit-logs'), result = { files: 0, identical: 0, grown: 0, bytes: 0 }; for (const name of readdirSync(directory)) { result.files++; result.bytes += statSync(join(directory, name)).size; const a = readFileSync(join(directory, name)), b = readFileSync(join(suite, 'data/oathweave/iam/audit-logs', name)); if (a.equals(b)) result.identical++; else if (b.subarray(0, a.length).equals(a)) result.grown++; else throw Error('An audit file changed: ' + name); } return result; })();
     report.auditChain = 'Native Oathweave, Emberpath, HiveMem and HiveSkills keep no hash chain. Audit rows and files are compared by content instead.';
-    const statusReply = spawnSync(hiveScript, ['status', '--config', join(out, 'installation.json'), '--manifest', join(out, 'release.json'), '--trust-key', join(out, 'publisher.pub'), '--non-interactive'], { encoding: 'utf8' });
+    const statusReply = spawnSync(hiveScript, ['status', '--config', join(out, installationFile), '--manifest', join(out, releaseFile), '--trust-key', join(out, 'publisher.pub'), '--non-interactive'], { encoding: 'utf8' });
     assert.equal(statusReply.status, 0, statusReply.stderr.slice(-1500));
     const status = JSON.parse(statusReply.stdout);
     report.status = { containers: status.containers.map((container) => `${container.Service}: ${container.State}/${container.Health || '-'}`), registry: { state: status.registry.state, products: status.registry.products, drift: status.registry.drift } };
