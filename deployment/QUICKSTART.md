@@ -2,7 +2,7 @@
 
 This guide takes a freshly installed Ubuntu or Debian server to a running Hive suite with every
 product, signed in through the console. Each step is safe to repeat. The examples use the release
-`2.0.2`, the console name `hive.example.com` and the installation directory `/opt/hive`; use your
+`2.0.3`, the console name `hive.example.com` and the installation directory `/opt/hive`; use your
 own values.
 
 ## What you need
@@ -24,7 +24,7 @@ own values.
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git    # only if git is missing
-git clone --branch v2.0.2 https://github.com/ChefTaco/hive.git
+git clone --branch v2.0.3 https://github.com/ChefTaco/hive.git
 cd hive
 ```
 
@@ -97,7 +97,7 @@ as above. Step 9 installs a renewed certificate.
 ## 4. Run the setup
 
 ```bash
-./hive.sh --release 2.0.2
+./hive.sh --release 2.0.3
 ```
 
 `hive.sh` checks the release signature first, then asks these questions. Press Enter to accept
@@ -127,11 +127,11 @@ the default shown in brackets.
 it. The first install pulls the images and takes a few minutes; later commands take seconds.
 
 If it stops after writing the configuration file, fix the cause and run `./hive.sh --release
-2.0.2` again: after the installation name it offers to continue with the saved file instead of
+2.0.3` again: after the installation name it offers to continue with the saved file instead of
 asking everything again. Unattended, the same step is:
 
 ```bash
-./hive.sh install --config ~/.config/hive/hive/installation.json --release 2.0.2
+./hive.sh install --config ~/.config/hive/hive/installation.json --release 2.0.3
 ```
 
 ## 5. Check the installation
