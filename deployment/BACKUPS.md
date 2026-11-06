@@ -29,6 +29,10 @@ For each group, the controller:
 | PostgreSQL (Magnus, Cindertrace, ChatterMost) | `pg_basebackup` over the local socket, with its WAL streamed | `pg_verifybackup`, then recovery by the product image to a cleanly shut down cluster, then `pg_checksums` |
 | Files (attachments, skill archives, audit logs, keys, certificates) | Copied while serving, then brought up to date while paused: an unchanged file is kept, a file that only grew gains its new tail, anything else is copied again | SHA-256 of every file, in the archive's `snapshot.json` |
 
+The staging lives beside the backups, owner-only. Every staging directory mounted into a product
+container belongs to that product's service user and is private to it; the host side runs as root
+on a production host, so it never relies on its own ownership.
+
 The ingress is never paused. Its files (certificates and their locks) are written by atomic
 rename, so each copy is one complete version. Static UI services hold no state.
 
@@ -108,7 +112,9 @@ that write every store in a fixed order every 20 ms. It checks that no container
 every client request is answered, that every store in the archive holds the same instant in
 write order, that the archive rehearses and restores, that stopped archives, including one from
 an earlier controller (`--old-controller DIR`), rehearse and restore, and that failures keep
-serving and keep nothing. On a migrated installation, `scripts/suite/native-migration-rehearsal.mjs`
+serving and keep nothing. `npm run test:suite:online-backup:sudo` runs the same acceptance with the
+host side as root through `sudo -S` over SSH, as on a production host, with every service as a
+non-root user; CI runs it. On a migrated installation, `scripts/suite/native-migration-rehearsal.mjs`
 with `backupRehearsal` and `backupProof` (see [MIGRATE_NATIVE.md](MIGRATE_NATIVE.md#rehearsing))
 backs up under live client traffic and inventories every store before the backup, in the
 archive and after it: every record unchanged throughout must be in the archive exactly, and

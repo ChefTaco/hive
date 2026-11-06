@@ -4,6 +4,58 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.0.3] - 2026-11-06
+
+A controller release. `releases/2.0.3.json` pins exactly the images and versions of 2.0.2;
+only `hive.sh` changes. The publisher key is unchanged (fingerprint
+`c0d0665a70969f37c8f1cffbdcf8e54df13626f8dbd4b5759a7c44843d86d1b2`).
+
+### Upgrading
+
+- Upgrade any 2.0.2 installation that takes online backups: on a host whose host side runs as root
+  (`sudoPasswordFile`, as production hosts use), every online backup of an installation with
+  HiveMem failed in 2.0.2. It failed safely: every service kept serving and no archive was kept.
+  `--stopped` backups were not affected. Run the upgrade from a checkout of `v2.0.3`; no option
+  is needed even though the installation file still names an earlier release.
+
+### Security
+
+- Rescanned on 2026-11-06, the images have no CRITICAL or HIGH finding with a fix available, on
+  linux/amd64 and linux/arm64. Since 2.0.2, the vulnerability database lists three more HIGH
+  findings with no fix available upstream: CVE-2026-85091 (zlib1g) in every image on a Debian
+  base, and CVE-2026-119374 and CVE-2026-119379 (libsqlite3-0) in `hive-postgres` and
+  `hive-qdrant`. The other unfixed findings are those listed for 2.0.0.
+
+### Fixed
+
+- The online backup works when the host side runs as root. The directory it stages a Qdrant
+  store's collection snapshots in, for the verification Qdrant that rebuilds the store, was
+  created by the host side, so as root it was root's and owner-only; Qdrant, running as its
+  service user, could not read the snapshots and stopped, and the backup reported that a snapshot
+  helper could not start. The directory now belongs to the service user and stays private to it.
+  Every other staging directory and file the online backup, rehearsal and restore mount into a
+  product container already belonged to that product's service user.
+- Commands use the checkout's own signed release when the installation file names a release this
+  controller cannot run. An upgrade leaves the file unchanged, so from the new checkout `backup`,
+  `upgrade` and `rollback` refused with `Signed release requires different controller source`
+  unless given `--release`. The choice is reported, the file is never rewritten, `--release`
+  still chooses, and `--manifest` uses that manifest's version.
+- A migrated Emberpath signs in through Oathweave. It kept the native Router's
+  `HIVE_ROUTER_AUTH_MODE=os`, which checks OS passwords with `pamtester`, which the product image
+  does not have: its own password sign-in could never succeed and `check` reported auth-mode FAIL.
+  Migration, and the next `hive.sh upgrade` of an installation migrated earlier, set `iam-oidc`
+  when the native Router's Oathweave client is configured. Console access is unchanged: it uses
+  Oathweave tokens, which Emberpath accepts in either mode.
+- Interactive setup explains the console bind address: the default, 127.0.0.1, serves this host
+  only.
+
+### Added
+
+- `npm run test:suite:online-backup:sudo` runs the online backup acceptance with the host side as
+  root through `sudo -S` over SSH, the way production hosts run it, while every service runs as a
+  non-root user; CI runs it. `scripts/suite/sudo-host.sh` provides that host for the distributed
+  and native-migration rehearsals too.
+
 ## [2.0.2] - 2026-11-06
 
 `releases/2.0.2.json` pins Oathweave 2.0.2, Emberpath 2.0.2 and HiveMem 1.3.2, which ship

@@ -211,6 +211,16 @@ when that leaf has under seven days left, `tls-refresh` issues a new one from th
 same names and key, kept with the suite configuration. **Schedule `tls-refresh` at least weekly.**
 Renew any certificate near expiry before `cutover`.
 
+### Emberpath sign-in
+
+A native Router that checked OS passwords through PAM (`HIVE_ROUTER_AUTH_MODE=os`) cannot do so
+in the suite: the Emberpath image has no `pamtester`, and the accounts are now Oathweave's. When
+the native Router has an Oathweave client (`HIVE_ROUTER_IAM_CLIENT_ID` and its secret), `prepare`
+sets `HIVE_ROUTER_AUTH_MODE=iam-oidc`, and `hive.sh upgrade` does the same for an installation
+migrated earlier. Emberpath's own password sign-in then goes through Oathweave, and its `check`
+passes. Console access does not depend on it: the console signs in through Oathweave and calls
+Emberpath with Oathweave tokens, which Emberpath accepts in either mode.
+
 ### Memory credential
 
 The native Router reached HiveMem with `HIVE_ROUTER_MEMORY_PROXY_TOKEN`, an admin token valid for

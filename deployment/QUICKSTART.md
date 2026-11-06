@@ -182,10 +182,13 @@ The upgrade shows its plan and takes a backup with the suite stopped first, so t
 unavailable for about a minute. `./hive.sh rollback` from the same checkout returns to the
 previous release. Read the release notes and [UPGRADING](../UPGRADING.md) first.
 
-The installation file keeps the release it was installed with. From the new checkout, pass
-`--release X.Y.Z` to `backup`, `upgrade` and `rollback`, or set `"release"` in the file to the new
-version; without it they refuse with `Signed release requires different controller source`.
-`status`, `doctor` and `tls-refresh` work either way. Run `schedule` again from the new checkout
+The installation file keeps the release it was installed with, and an upgrade does not rewrite
+it. From 2.0.3, a checkout uses its own signed release when the file names one this controller
+cannot run, and says so (`Hive: using release X.Y.Z, which this checkout's controller installs`),
+so `backup`, `upgrade` and `rollback` work from the new checkout without options. `--release`
+chooses another release, and `--manifest` uses that manifest's version. Earlier controllers need
+`--release X.Y.Z`, or `"release"` set in the file, or they refuse with `Signed release requires
+different controller source`. Run `schedule` again from the new checkout
 (step 9).
 
 ## 9. Keep the certificate current
