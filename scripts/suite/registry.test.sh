@@ -119,6 +119,13 @@ cmp -s "$directory/config/ingress/Caddyfile" "$ROOT/deployment/Caddyfile" || fai
 sha_before=$(sha256sum "$directory/config/ingress/Caddyfile"); printf 'altered\n' > "$directory/config/ingress/Caddyfile.pre-registry"
 HIVE_OPERATION=upgrade hive_registry_refresh_ingress
 [[ $(sha256sum "$directory/config/ingress/Caddyfile") == "$sha_before" && $(cat "$directory/config/ingress/Caddyfile.pre-registry") == altered ]] || fail 'A current Caddyfile was replaced again'
+# A Caddyfile from an earlier release that already routes the registry is replaced too, so a
+# changed upstream transport reaches existing installations; the previous file is retained.
+printf '# earlier release\nreverse_proxy http://hive-registry:8095\n' > "$directory/config/ingress/Caddyfile"
+HIVE_OPERATION=upgrade hive_registry_refresh_ingress
+cmp -s "$directory/config/ingress/Caddyfile" "$ROOT/deployment/Caddyfile" || fail 'Upgrade did not install the current Caddyfile'
+[[ $(head -n 1 "$directory/config/ingress/Caddyfile.previous") == '# earlier release' && $(cat "$directory/config/ingress/Caddyfile.pre-registry") == altered ]] || fail 'The earlier Caddyfile was not retained as Caddyfile.previous'
+[[ $(jq -r --arg path "$directory/config/ingress/Caddyfile" '.files[$path]' "$directory/config/.initializer/receipt.json") == $(sha256sum "$directory/config/ingress/Caddyfile"|cut -d ' ' -f1) ]] || fail 'The initializer receipt does not record the replaced Caddyfile'
 
 # A registry failure never reaches completion. A failed start holds; a failed record does not stop services.
 (

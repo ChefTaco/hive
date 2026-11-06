@@ -110,6 +110,9 @@ jobs:
       - name: Canonical test, OpenAPI, migration, restore, and release gates
         run: npm run test
 
+      - name: Ingress upstream keep-alive regression
+        run: npm run test:suite:ingress-keepalive
+
       - name: Real Qdrant process recovery and bounded corpus drill
         timeout-minutes: 8
         env:

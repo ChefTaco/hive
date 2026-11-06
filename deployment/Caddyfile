@@ -4,12 +4,23 @@
 	auto_https disable_redirects
 }
 
+# Upstream connections stay idle for at most 2 seconds. The products are Node servers, which close
+# an idle keep-alive connection after 5 seconds; a connection kept longer can be reused at the
+# instant the backend closes it, and a request that is not retried (a POST) then fails.
 (verified_backend) {
 	flush_interval -1
 	transport http {
 		tls
 		tls_server_name {args[0]}
 		tls_trust_pool file /config/backend-ca.pem
+		keepalive 2s
+	}
+}
+
+# Plain HTTP upstreams on the private network, with the same idle limit.
+(plain_backend) {
+	transport http {
+		keepalive 2s
 	}
 }
 
@@ -63,6 +74,7 @@
 # registry. Default deny: GET only, an explicit route list, no cookies, and only a
 # well-formed bearer credential. The registry decides what that credential may see.
 (hive_registry_backend) {
+	import plain_backend
 	header_up -*
 	header_up Authorization {http.request.header.Authorization}
 	header_up Accept {http.request.header.Accept}
@@ -93,6 +105,7 @@
 	handle @registry_ready {
 		rewrite * /health/ready
 		reverse_proxy http://hive-registry:8095 {
+			import plain_backend
 			header_up -*
 			header_up Accept {http.request.header.Accept}
 			header_down -Set-Cookie
@@ -432,6 +445,7 @@
 	# its own bearer token remains mandatory and is supplied by the native client.
 	handle_path /api/emberfold/* {
 		reverse_proxy http://emberfold:8096 {
+			import plain_backend
 			header_up -Cookie
 			header_down -Set-Cookie
 		}
@@ -463,6 +477,7 @@
 	}
 	handle {
 		reverse_proxy http://hivexui:8080 {
+			import plain_backend
 			header_up -Cookie
 			header_up -Authorization
 			header_down -Set-Cookie

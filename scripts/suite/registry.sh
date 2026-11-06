@@ -95,8 +95,8 @@ hive_registry_provision() {
   hive_registry_action "$host" registry-provision "$(jq -nc --arg user "$user" '{serviceUser:$user}')" || hive_die 'Hive Registry credentials and configuration could not be prepared; no service was changed'
 }
 
-# A release that adds the registry brings its ingress route: this step replaces a
-# Caddyfile that lacks it and retains the previous file beside it.
+# The release's ingress configuration: this step replaces a Caddyfile that differs from the
+# controller's, such as one without the registry route, and retains the previous file beside it.
 hive_registry_refresh_ingress() {
   hive_registry_placed || return 0
   HIVE_BOOTSTRAP_INGRESS=${HIVE_BOOTSTRAP_INGRESS:-$(base64 -w0 "$HIVE_ROOT/deployment/Caddyfile")}

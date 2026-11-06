@@ -63,15 +63,19 @@ provision() {
       ;;
   esac
 }
-# A release that adds the registry brings the ingress route with it. Fresh installs
-# publish the current Caddyfile already. The previous file is retained beside it.
+# The ingress configuration belongs to the release: an upgrade, rollback or adoption installs
+# this controller's Caddyfile wherever it differs, such as a release that adds the registry
+# route or changes an upstream transport. Fresh installs publish it already. The previous file
+# is retained beside it (Caddyfile.pre-registry when it had no registry route, otherwise
+# Caddyfile.previous). The ingress reads it when it next starts.
 refresh_ingress() {
-  local caddyfile="$directory/config/ingress/Caddyfile" template receipt="$directory/config/.initializer/receipt.json"
+  local caddyfile="$directory/config/ingress/Caddyfile" template receipt="$directory/config/.initializer/receipt.json" previous
   [[ -f "$caddyfile" && ! -L "$caddyfile" ]] || return 0
-  ! grep -q 'hive-registry:8095' "$caddyfile" || return 0
   template=$(jq -er .ingressTemplate <<< "$input" | base64 -d)
   grep -q 'hive-registry:8095' <<< "$template" || die 'Controller ingress template has no registry route'
-  cp -p -- "$caddyfile" "$caddyfile.pre-registry"
+  ! cmp -s -- "$caddyfile" <(printf '%s\n' "$template") || return 0
+  previous="$caddyfile.previous"; grep -q 'hive-registry:8095' "$caddyfile" || previous="$caddyfile.pre-registry"
+  cp -p -- "$caddyfile" "$previous"
   printf '%s\n' "$template" > "$caddyfile.new"
   chown --reference="$caddyfile" "$caddyfile.new"; chmod --reference="$caddyfile" "$caddyfile.new"
   sync -f "$caddyfile.new"; mv -T -- "$caddyfile.new" "$caddyfile"

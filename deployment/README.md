@@ -194,9 +194,10 @@ Independent installations never share one. See the [API reference](../docs/hive-
 `hive.sh` is the normal writer. The signed manifest is the source: each component's
 `catalog` block is generated from `scripts/suite/suite-catalog.json`. A configuration or a
 release without the registry is refused. `upgrade` and `adopt` add it to an existing
-installation without rewriting the configuration file; a release that adds it also
-installs the ingress route, keeping the previous file as `Caddyfile.pre-registry`.
-Adoption restarts nothing, so its route starts with the next ingress restart.
+installation without rewriting the configuration file. `upgrade`, `rollback` and `adopt`
+also install the release's Caddyfile wherever the installed one differs, keeping the previous
+file as `Caddyfile.pre-registry` when it had no registry route and as `Caddyfile.previous`
+otherwise. Adoption restarts nothing, so its route starts with the next ingress restart.
 
 ```bash
 ./hive.sh registry list --config FILE           # also: installed, summary, history

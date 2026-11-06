@@ -73,6 +73,18 @@ gateway), Cindertrace 0.2.1, ChatterMost 0.4.1, Emberfold 0.2.1, `hive-registry:
 
 ### Fixed
 
+- The ingress no longer fails an occasional POST with `503 Service unavailable`. It kept idle
+  upstream connections for Caddy's default of two minutes, while the products, all Node servers,
+  close an idle keep-alive connection after five seconds. A request sent on a connection at the
+  instant its backend closed it failed: a GET was retried on a new connection, but a POST, such as
+  a memory write or search, was not. Clients saw it rarely, and more often under load, such as
+  during an online backup. Every upstream transport now closes idle connections after two
+  seconds (`keepalive 2s` in `deployment/Caddyfile`), and `npm run test:suite:ingress-keepalive`
+  reproduces the race against the real ingress image.
+- `hive.sh upgrade`, `rollback` and `adopt` install the release's Caddyfile wherever the
+  installed one differs, keeping the previous file as `Caddyfile.previous`. Before, an
+  installation that already had the Hive Registry route kept its Caddyfile, so the transport fix
+  reaches existing and migrated installations with their 2.0.2 upgrade.
 - The README and `deployment/README.md` install the current release, and
   `deployment/MIGRATE_NATIVE.md` documents the memory credential, the token-file argument and
   when `refresh-memory-token` is still needed. `deployment/BACKUPS.md` describes online backups.
