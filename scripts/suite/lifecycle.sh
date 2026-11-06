@@ -86,6 +86,7 @@ hive_lifecycle() {
       # command failed, so the installation cannot look finished with a wrong catalog.
       hive_registry_complete || hive_registry_failed "$operation"
       hive_all complete || hive_hold
+      if [[ "$operation" == install ]]; then hive_install_summary; fi
       ;;
     backup)
       HIVE_ARCHIVE=${HIVE_ARCHIVE:-"backup-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 4)"}

@@ -92,4 +92,31 @@ jq -e '
 ' "$temporary/suite-relaxed.compose.json" >/dev/null || fail 'Relaxed render did not reach each selected product'
 # Only the product environment differs: env files and mounted inputs stay pinned as they are.
 [[ $(jq -Sc 'del(.services[].environment)' "$temporary/suite-default.compose.json") == "$(jq -Sc 'del(.services[].environment)' "$temporary/suite-relaxed.compose.json")" ]] || fail 'Relaxed limits changed more than the product environment'
-printf 'Passed: planning, unattended guards, input injection, signature tampering, pinned rendering, privileged-mount rejection and digest-bound relaxed authentication limits.\n'
+# Setup reaches each SSH host before the plan and checks its installation directory.
+mkdir -p "$temporary/ssh-bin" "$temporary/remote-parent"
+printf '#!/usr/bin/env bash\nexec bash -c "${@: -1}"\n' > "$temporary/ssh-bin/ssh"; chmod 700 "$temporary/ssh-bin/ssh"
+jq --arg d "$temporary/remote-parent/hive" '.hosts.control.target="deploy@hive.example.com" | .hosts.control.directory=$d' "$temporary/installation.json" > "$temporary/remote.json"
+( set -u; unset HIVE_ID; PATH=$temporary/ssh-bin:$PATH HIVE_CONFIG=$temporary/remote.json hive_setup_hosts_ready ) || fail 'A reachable SSH host with a writable directory was refused'
+chmod 500 "$temporary/remote-parent"
+if ( set -u; unset HIVE_ID; PATH=$temporary/ssh-bin:$PATH HIVE_CONFIG=$temporary/remote.json hive_setup_hosts_ready ) > "$temporary/ready.log" 2>&1; then
+  [[ $(id -u) == 0 ]] || fail 'An unwritable SSH host directory was accepted'
+else grep -q "$temporary/remote-parent/hive on .* cannot be created" "$temporary/ready.log" || fail 'The unwritable SSH host directory was not named'; fi
+chmod 700 "$temporary/remote-parent"
+# A finished install names the console, the initial sign-in file and the next commands.
+jq --arg key /opt/certificates/console.key '.bootstrap={adminUsername:"admin",adminEmail:"alice@example.com",certificateFile:"/opt/certificates/console.crt",privateKeyFile:$key}' "$temporary/installation.json" > "$temporary/fresh.json"
+summary=$(source "$ROOT/scripts/suite/initialize.sh"; HIVE_CONFIG=$temporary/fresh.json HIVE_ID=example-suite hive_install_summary)
+for expected in 'Installed Hive 0.1.0 as installation example-suite' "Console:  $(jq -r .origin "$temporary/fresh.json")/" \
+  'SEED_ADMIN_PASSWORD from /opt/hive/config/initial-credentials.env' "./hive.sh status --config $temporary/fresh.json" "./hive.sh tls-refresh --config $temporary/fresh.json"; do
+  grep -qF -- "$expected" <<< "$summary" || fail "The install summary lacks: $expected"
+done
+# tls-refresh without --release runs the one release that pins this exact controller.
+checkout=$temporary/checkout
+while IFS= read -r file; do mkdir -p "$checkout/$(dirname "$file")"; cp "$ROOT/$file" "$checkout/$file"; done < <(hive_runtime_files)
+mkdir -p "$checkout/releases"
+digest=$(HIVE_ROOT=$checkout hive_controller_digest)
+jq -n --arg digest "$digest" '{version:"9.9.1",controllerSHA256:$digest}' > "$checkout/releases/9.9.1.json"
+jq -n '{version:"9.9.0",controllerSHA256:("0"*64)}' > "$checkout/releases/9.9.0.json"
+[[ $(HIVE_ROOT=$checkout hive_checkout_release) == 9.9.1 ]] || fail 'The checkout release was not found'
+cp "$checkout/releases/9.9.1.json" "$checkout/releases/9.9.2.json"
+[[ -z $(HIVE_ROOT=$checkout hive_checkout_release) ]] || fail 'An ambiguous checkout release was chosen'
+printf 'Passed: planning, unattended guards, input injection, signature tampering, pinned rendering, privileged-mount rejection and digest-bound relaxed authentication limits and checkout release lookup.\n'
