@@ -648,8 +648,10 @@ function secretsAbsent(secretsList) {
 function upgradeSuite() {
   const current = JSON.parse(readFileSync(join(out, 'release.json'), 'utf8'));
   const published = c.upgrade.published;
-  // A published release replaces every selected image; a rebuilt one only the images given.
-  const names = published ? Object.keys(current.components) : Object.keys(c.upgrade.images);
+  // A published release replaces the image of every component this installation selects; a
+  // rebuilt one only the images given.
+  const selected = Object.keys(JSON.parse(readFileSync(join(out, 'installation.json'), 'utf8')).components);
+  const names = published ? Object.keys(current.components).filter((name) => selected.includes(name)) : Object.keys(c.upgrade.images);
   const from = { version: current.version, images: Object.fromEntries(names.map((name) => [name, current.components[name].image])) };
   const revisions = {};
   let manifest;
@@ -769,9 +771,12 @@ async function main() {
     assert.equal(cut.status, 0, cut.stderr.slice(-3000));
     const verification = JSON.parse(readFileSync(join(suite, 'migration/verification.json'), 'utf8'));
     assert(verification.passed);
-    const preserved = JSON.parse(readFileSync(join(suite, 'migration/preserved.json'), 'utf8'));
-    assert(preserved.passed);
-    report.preserved = { checkedAt: preserved.checkedAt, servingWhenChecked: preserved.serving, runningServices: preserved.runningServices, failures: preserved.failures, accounts: preserved.accounts, keyring: preserved.keyring, issuer: preserved.issuer, vectors: preserved.vectors, redis: preserved.redis, recordChanges: Object.fromEntries(Object.entries(preserved.records).map(([name, value]) => [name, value.changed])) };
+    // 2.0.0 verified the cutover only (verification.json); its preservation receipt came with 2.0.1.
+    const preservedFile = join(suite, 'migration/preserved.json');
+    assert(existsSync(preservedFile) || controller !== root, 'This controller writes a preservation receipt');
+    const preserved = existsSync(preservedFile) ? JSON.parse(readFileSync(preservedFile, 'utf8')) : null;
+    if (preserved) assert(preserved.passed);
+    report.preserved = !preserved ? { receipt: 'none: written by controllers from 2.0.1' } : { checkedAt: preserved.checkedAt, servingWhenChecked: preserved.serving, runningServices: preserved.runningServices, failures: preserved.failures, accounts: preserved.accounts, keyring: preserved.keyring, issuer: preserved.issuer, vectors: preserved.vectors, redis: preserved.redis, recordChanges: Object.fromEntries(Object.entries(preserved.records).map(([name, value]) => [name, value.changed])) };
     report.verification = { failures: verification.failures, receipt: verification.receipt, probes: verification.probes.map((p) => `${p.port}${p.path} ${p.status}`), tls: verification.tls, nativeToken: verification.nativeToken, memoryCredential: verification.memoryCredential, credentials: verification.credentials, invariants: verification.invariants };
     if (traffic) {
       report.trafficDuringCutover = trafficSummary(traffic.log, cut.startedAt, cut.finishedAt);
