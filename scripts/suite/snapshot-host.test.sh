@@ -75,16 +75,25 @@ case "$command" in
         precopy) printf '{"files":1,"bytes":1}\n';;
         capture) [[ ! -f "$data/state.db" ]] || cp "$data/state.db" "$out/state.db"; printf '{"sqlite":0}\n';;
         verify) printf '{"files":1,"bytes":1,"sqlite":[]}\n';;
-        qdrant-snapshot)
-          live=$STUB_DATA/hivemem-qdrant/snapshots/memories; mkdir -p "$live"; printf 'vectors' > "$live/memories-1.snapshot"
-          jq -nc --arg sum "$(sha256sum "$live/memories-1.snapshot" | cut -d ' ' -f1)" '{directory:"snapshots",snapshots:{memories:{name:"memories-1.snapshot",checksum:$sum,size:7}},collections:{memories:3},aliases:[]}';;
-        qdrant-inventory) printf '{"collections":{"memories":{"points":3,"contentSHA256":"synthetic"}}}\n';;
+        # While serving, both collections are snapshotted; memories is written before the pause, so
+        # the pause takes it again and keeps the notes snapshot.
+        qdrant-precapture)
+          live=$STUB_DATA/hivemem-qdrant/snapshots; mkdir -p "$live/memories" "$live/notes"; printf 'old' > "$live/memories/memories-0.snapshot"; printf 'notes' > "$live/notes/notes-0.snapshot"
+          printf '%s\n' '{"directory":"snapshots","collection":"memories","name":"memories-0.snapshot"}' '{"directory":"snapshots","collection":"notes","name":"notes-0.snapshot"}' >> "$work/qdrant-created.jsonl"
+          printf '{"versioned":true,"collections":2,"clean":1}\n';;
+        qdrant-capture)
+          live=$STUB_DATA/hivemem-qdrant/snapshots; printf 'vectors' > "$live/memories/memories-1.snapshot"
+          printf '%s\n' '{"directory":"snapshots","collection":"memories","name":"memories-1.snapshot"}' >> "$work/qdrant-created.jsonl"
+          jq -nc --arg sum "$(sha256sum "$live/memories/memories-1.snapshot" | cut -d ' ' -f1)" --arg notes "$(sha256sum "$live/notes/notes-0.snapshot" | cut -d ' ' -f1)" \
+            '{directory:"snapshots",snapshots:{memories:{name:"memories-1.snapshot",checksum:$sum,size:7},notes:{name:"notes-0.snapshot",checksum:$notes,size:5}},collections:{memories:3,notes:1},aliases:[],reused:1,captured:1}';;
+        qdrant-inventory) printf '{"collections":{"memories":{"points":3,"contentSHA256":"synthetic"},"notes":{"points":1,"contentSHA256":"synthetic"}}}\n';;
         qdrant-aliases) printf '{"aliases":[]}\n';;
       esac
       exit 0
     fi
     script=$(cat 2>/dev/null || true)
-    if [[ "$script" == *'bgsave'* ]]; then log "redis-bgsave $(service_of "$target")"; failing redis-bgsave && exit 1; printf '{"file":"dump.rdb","keys":2}\n'; exit 0; fi
+    if [[ "$script" == *'bgsave schedule'* ]]; then log "redis-bgsave $(service_of "$target")"; failing redis-bgsave && exit 1; printf '{"file":"dump.rdb","keys":2,"saves":4}\n'; exit 0; fi
+    if [[ "$script" == *'rdb_last_bgsave_status'* ]]; then log "redis-${!#} $(service_of "$target")"; failing "redis-${!#}" && exit 1; [[ "${*: -2:1}" == 4 ]] || exit 1; exit 0; fi
     if [[ "$script" == *'appendonly yes'* ]]; then mkdir -p "$(mount_of "$target" /data)/appendonlydir"; touch "$(mount_of "$target" /data)/appendonlydir/appendonly.aof.manifest"; printf '{"loaded":2,"expiredAtLoad":0,"keys":2}\n'; exit 0; fi
     if [[ "$1" == pg_basebackup ]]; then
       log "pg_basebackup $(service_of "$target")"; failing pg_basebackup && exit 1
@@ -146,6 +155,10 @@ jq -e --arg uuid "$uuid" '.mode=="online" and .verified==true and .uuid==$uuid a
 jq -e '[.snapshot.pauses[].pause[0]]==["hivemem","magnus","oathweave"]' "$receipt" >/dev/null || fail 'The identity provider is not captured last'
 jq -e '.snapshot.stores["oathweave-redis"].store.method=="redis-bgsave" and .snapshot.stores["hivemem-qdrant"].store.method=="qdrant-collection-snapshots" and .snapshot.stores["magnus-postgres"].store.method=="pg_basebackup"' "$receipt" >/dev/null || fail 'A store snapshot method is missing'
 jq -e '.snapshot.stores["hivemem-qdrant"].store.verified.collections.memories.points==3 and .snapshot.stores["oathweave-redis"].store.verified.loaded==2' "$receipt" >/dev/null || fail 'A materialized store was not verified'
+jq -e '.snapshot.stores["hivemem-qdrant"].store | .reused==1 and .captured==1 and .snapshots.notes.name=="notes-0.snapshot" and .snapshots.memories.name=="memories-1.snapshot"' "$receipt" >/dev/null || fail 'A collection unchanged since its snapshot was not reused'
+# Each pause records its steps, and the work done before it while serving.
+jq -e '.snapshot.pauses[]|select(.pause==["hivemem"])|(.steps|has("files:hivemem") and has("qdrant:hivemem-qdrant")) and (.staged|has("files:hivemem") and has("qdrant:hivemem-qdrant"))' "$receipt" >/dev/null || fail 'The pause steps are not recorded'
+jq -e '.snapshot.pauses[]|select(.pause==["oathweave"])|.steps|has("redis:oathweave-redis")' "$receipt" >/dev/null || fail 'The Redis pause step is not recorded'
 [[ $(jq -r .sha256 "$receipt") == $(sha256sum "$directory/backups/online-a/state.tar.gz" | cut -d ' ' -f1) ]] || fail 'Archive checksum differs'
 [[ $(phase) == complete ]] || fail 'The transaction is not closed'
 for service in ingress oathweave-redis hivemem-qdrant magnus-postgres hivexui; do ! calls | grep -qx "pause $service" || fail "$service was paused"; done
@@ -156,16 +169,19 @@ for service in oathweave hivemem magnus; do
   before "unpause $service" "verify files-$service"
 done
 before 'pause oathweave' 'redis-bgsave oathweave-redis'; before 'redis-bgsave oathweave-redis' 'unpause oathweave'
-before 'pause hivemem' 'qdrant-snapshot qdrant-hivemem-qdrant'; before 'qdrant-snapshot qdrant-hivemem-qdrant' 'unpause hivemem'
+before 'unpause oathweave' 'redis-wait oathweave-redis'; before 'redis-wait oathweave-redis' 'redis-check oathweave-redis'
+before 'qdrant-precapture qdrant-hivemem-qdrant' 'pause hivemem'
+before 'pause hivemem' 'qdrant-capture qdrant-hivemem-qdrant'; before 'qdrant-capture qdrant-hivemem-qdrant' 'unpause hivemem'
+! calls | grep -q '^qdrant-snapshot' || fail 'Every collection was snapshotted while paused'
 before 'pause magnus' 'pg_basebackup magnus-postgres'; before 'pg_basebackup magnus-postgres' 'unpause magnus'
 # Stores are rebuilt as stopped stores; nothing temporary stays in the live directories.
 tar -tzf "$directory/backups/online-a/state.tar.gz" > "$temporary/members"
 for member in data/oathweave/state.db data/oathweave-redis/dump.rdb data/oathweave-redis/appendonlydir/appendonly.aof.manifest data/magnus-postgres/pgdata/PG_VERSION compose.json receipt.json installation.json; do grep -qx "$member" "$temporary/members" || fail "Archive member is missing: $member"; done
 ! grep -q 'hive-snapshot\|storage.snapshot\|\.online-' "$temporary/members" || fail 'A temporary file was archived'
-[[ ! -e "$directory/data/hivemem-qdrant/snapshots/memories/memories-1.snapshot" && -z $(find "$directory/data/magnus-postgres" -name '.hive-snapshot-*') ]] || fail 'A store temporary stayed in the live data'
+[[ -z $(find "$directory/data/hivemem-qdrant/snapshots" -type f) && -z $(find "$directory/data/magnus-postgres" -name '.hive-snapshot-*') ]] || fail 'A store temporary stayed in the live data'
 [[ -z $(find "$directory/backups" -mindepth 1 -maxdepth 1 -name '.online-*') ]] || fail 'Staging was left behind'
 [[ -z $(ls "$STUB_STATE/paused") ]] || fail 'A service stayed paused'
-printf 'Passed: online backup captures each group in one pause, in order, with every store method.\n'
+printf 'Passed: online backup captures each group in one pause, in order, with every store method; Qdrant snapshots are taken while serving and reused when unchanged; the Redis dump is collected after the pause.\n'
 
 # ---- Archive compatibility: a repeated ID verifies the existing archive, in either format. ----
 cp -a "$directory/backups/online-a" "$directory/backups/stopped-a"
@@ -183,7 +199,7 @@ failed() {
   [[ -z $(find "$directory/backups" -mindepth 1 -maxdepth 1 -name '.online-*') ]] || fail 'Staging was left behind'
   [[ -z $(ls "$STUB_STATE/paused") ]] || fail 'A service stayed paused'
   [[ $(cd "$directory/backups" && find online-a stopped-a -type f -print0 | sort -z | xargs -0 sha256sum) == "$kept" ]] || fail 'Another archive changed or was removed'
-  [[ ! -e "$directory/data/hivemem-qdrant/snapshots/memories/memories-1.snapshot" && -z $(find "$directory/data/magnus-postgres" -name '.hive-snapshot-*') ]] || fail 'A store temporary stayed in the live data'
+  [[ -z $(find "$directory/data/hivemem-qdrant/snapshots" -type f 2>/dev/null) && -z $(find "$directory/data/magnus-postgres" -name '.hive-snapshot-*') ]] || fail 'A store temporary stayed in the live data'
   { calls | grep '^pause' || true; } | sed 's/^pause/unpause/' | while read -r expected; do calls | grep -qx "$expected" || fail "Not resumed: $expected"; done
 }
 # ---- Refusals before anything pauses. ----
@@ -197,7 +213,7 @@ rm -f "$STUB_STATE/down"
 printf 'Passed: refusals for disk space and an unhealthy service change nothing.\n'
 
 # ---- Failures while paused and after: services resume, no archive, nothing pruned. ----
-for step in redis-bgsave qdrant-snapshot pg_basebackup 'capture files-magnus' 'verify files-hivemem'; do
+for step in redis-bgsave redis-wait redis-check qdrant-precapture qdrant-capture pg_basebackup 'precopy files-oathweave' 'capture files-magnus' 'verify files-hivemem'; do
   STUB_FAIL=$step failed "fail-$(tr -c 'a-z' '-' <<< "$step" | sed 's/-*$//')" 'online backup failed'
   [[ $(phase) == complete ]] || fail "A failed backup left its transaction open: $step"
 done

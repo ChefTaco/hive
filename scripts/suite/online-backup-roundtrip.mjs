@@ -8,7 +8,11 @@
 // the archive verifies, rehearses and restores; stopped archives, including ones written by
 // an earlier controller (--old-controller DIR), still rehearse and restore; a failed backup
 // leaves every service serving, keeps no archive, and removes no other archive.
-// Usage: online-backup-roundtrip.mjs [--old-controller EXTRACTED_RELEASE] [--keep]
+// Every pause must stay within a budget (--pause-budget SECONDS, default 2) on a data set of a
+// real installation's size (--seed-scale, default 1: about 500 MiB, with 80 Qdrant collections and
+// 30,000 vectors, a large SQLite database that keeps being written and one that is not, and Redis
+// keys), so a pause that grows with the data fails the acceptance.
+// Usage: online-backup-roundtrip.mjs [--old-controller EXTRACTED_RELEASE] [--seed-scale N] [--pause-budget SECONDS] [--keep]
 // Inside scripts/suite/sudo-host.sh the host side runs as root through sudo -S over SSH, as on a
 // production host (npm run test:suite:online-backup:sudo).
 import assert from 'node:assert/strict';
@@ -26,6 +30,9 @@ const root = resolve(import.meta.dirname, '../..');
 const argument = (name) => { const index = process.argv.indexOf(name); return index > 0 ? process.argv[index + 1] : undefined; };
 const oldController = argument('--old-controller') && resolve(argument('--old-controller'));
 const keep = process.argv.includes('--keep');
+const seedScale = Number(argument('--seed-scale') ?? 1);
+const pauseBudget = Number(argument('--pause-budget') ?? 2);
+assert(seedScale >= 0 && pauseBudget > 0, 'Usage: --seed-scale N --pause-budget SECONDS');
 const temp = mkdtempSync(join(tmpdir(), 'hive-online-backup-'));
 const owned = join(temp, 'installation');
 const id = 'online-' + randomBytes(4).toString('hex');
@@ -64,6 +71,38 @@ await redis('AUTH', process.env.REDIS_PASSWORD);
 const qdrant = (path, method, body) => fetch('http://probe-qdrant:6333' + path, { method, headers: { 'api-key': process.env.QDRANT_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => { if (!r.ok) throw Error('qdrant ' + r.status); return r.json(); });
 await fetch('http://probe-qdrant:6333/collections/ticks', { method: 'PUT', headers: { 'api-key': process.env.QDRANT_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ vectors: { size: 4, distance: 'Cosine' } }) });
 const insertWal = wal.prepare('INSERT INTO ticks VALUES (?, ?)'), insertJournal = journal.prepare('INSERT INTO ticks VALUES (?, ?)');
+// A data set of a real installation's size, written once before the probe serves: many Qdrant
+// collections, mostly small, a few with thousands of vectors; a large rollback-journal database
+// that the ticks keep writing; a large database nothing writes, such as a kept migration copy;
+// and Redis keys.
+const scale = Number(process.env.SEED_SCALE || 0), seeded = scale > 0;
+const sizes = [11785, 8944, 2814, 1631, 1296, 900, 729, 189, 139, 134, 119, 113, 111, 88, 85, ...Array(22).fill(0), ...Array.from({ length: 43 }, (_, i) => (i * 37) % 80 + 1)].map((n) => Math.round(n * scale));
+const seedName = (index) => 'seed-' + String(index).padStart(2, '0');
+const seedVector = (index, value) => Array.from({ length: index % 3 ? 768 : 4 }, (_, k) => Math.sin(value * 31 + k));
+if (seeded && !existsSync('/data/seeded')) {
+  const pad = (database, mib) => { database.exec('CREATE TABLE IF NOT EXISTS pad(id INTEGER PRIMARY KEY, b BLOB)'); const insert = database.prepare('INSERT INTO pad(b) VALUES (?)'); database.exec('BEGIN'); for (let i = 0; i < mib * 16; i++) insert.run(randomBytes(65536)); database.exec('COMMIT'); };
+  pad(journal, Math.round(96 * scale));
+  const archive = new DatabaseSync('/data/archive.db'); pad(archive, Math.round(96 * scale)); archive.close();
+  await Promise.all(Array.from({ length: Math.round(16384 * scale) }, (_, i) => redis('SET', 'pad:' + i, randomBytes(512).toString('hex'))));
+  const words = 'memory agent vector backup pause store collection writer reader point payload consistent snapshot restore journal'.split(' ');
+  const queue = sizes.map((count, index) => [index, count]);
+  await Promise.all(Array.from({ length: 8 }, async () => {
+    while (queue.length) {
+      const [index, count] = queue.shift();
+      await fetch('http://probe-qdrant:6333/collections/' + seedName(index), { method: 'PUT', headers: { 'api-key': process.env.QDRANT_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ vectors: { size: index % 3 ? 768 : 4, distance: 'Cosine' } }) });
+      for (let offset = 0; offset < count; offset += 128) {
+        const points = [];
+        for (let k = offset; k < Math.min(count, offset + 128); k++) points.push({ id: k + 1, vector: seedVector(index, k), payload: { id: seedName(index) + ':' + k, content: Array.from({ length: 200 }, (_, w) => words[(k * 7 + w * 13) % words.length]).join(' '), created_at: new Date(0).toISOString() } });
+        await qdrant('/collections/' + seedName(index) + '/points?wait=true', 'PUT', { points });
+      }
+    }
+  }));
+  // As on a serving installation, the optimizer has finished with every collection.
+  for (let index = 0; index < sizes.length; index++) {
+    for (;;) { const info = await fetch('http://probe-qdrant:6333/collections/' + seedName(index), { headers: { 'api-key': process.env.QDRANT_KEY } }).then((r) => r.json()); if (info.result.status === 'green') break; await new Promise((done) => setTimeout(done, 200)); }
+  }
+  writeFileSync('/data/seeded', '');
+}
 http.createServer((req, res) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ n })); }).listen(8080, '0.0.0.0');
 const rehearsal = process.env.HIVE_REHEARSAL === 'true';
 for (;;) {
@@ -75,6 +114,8 @@ for (;;) {
   writeFileSync('/data/state.json.next', JSON.stringify({ n: next })); renameSync('/data/state.json.next', '/data/state.json');
   await redis('SET', 'tick', next); await redis('SET', 'expiring:' + next, 'x', 'PX', 600000);
   await qdrant('/collections/ticks/points?wait=true', 'PUT', { points: [{ id: next, vector: [1, next % 7, 2, 3], payload: { n: next } }] });
+  // A product also writes now and then to one of its larger collections.
+  if (seeded && next % 25 === 0) await qdrant('/collections/' + seedName(1) + '/points?wait=true', 'PUT', { points: [{ id: 1000000 + next, vector: seedVector(1, next), payload: { id: 'tick:' + next, content: 'tick ' + next } }] });
   n = next;
 }
 `;
@@ -98,7 +139,7 @@ try {
   registryImage = await startRegistryImage(id);
   for (const name of ['probe', 'probe-redis', 'probe-qdrant', 'ledger', 'ledger-postgres', 'hive-registry']) mkdirSync(join(owned, 'config', name), { recursive: true, mode: 0o700 });
   put(join(owned, 'config', 'probe', 'service.mjs'), probe);
-  put(join(owned, 'config', 'probe.env'), `REDIS_PASSWORD=${secrets.redis}\nQDRANT_KEY=${secrets.qdrant}\n`);
+  put(join(owned, 'config', 'probe.env'), `REDIS_PASSWORD=${secrets.redis}\nQDRANT_KEY=${secrets.qdrant}\nSEED_SCALE=${seedScale}\n`);
   put(join(owned, 'config', 'probe-redis', 'redis.conf'), `bind 0.0.0.0\nprotected-mode yes\ndir /data\nappendonly yes\nappendfsync everysec\nrequirepass ${secrets.redis}\n`);
   put(join(owned, 'config', 'probe-qdrant', 'qdrant.yaml'), `log_level: WARN\ntelemetry_disabled: true\nstorage:\n  storage_path: /data/storage\n  snapshots_path: /data/snapshots\nservice:\n  host: 0.0.0.0\n  http_port: 6333\n  api_key: ${secrets.qdrant}\n`);
   put(join(owned, 'config', 'ledger', 'ledger.sh'), ledger);
@@ -120,7 +161,7 @@ try {
       'probe-redis': datastore('oathweave-redis', 'redis-aof-v1'),
       'probe-qdrant': datastore('hivemem-qdrant', 'qdrant-v1.18.3'),
       'ledger-postgres': { ...datastore('magnus-postgres', 'ledger-postgres-17'), service: { ...release.components['magnus-postgres'].service, user, networks: ['default'], environment: { PGDATA: '/data/pgdata', POSTGRES_DB: 'ledger', POSTGRES_USER: 'ledger', POSTGRES_PASSWORD_FILE: '/config/password', POSTGRES_INITDB_ARGS: '--data-checksums' }, healthcheck: { test: ['CMD', 'pg_isready', '-h', '127.0.0.1', '-U', 'ledger', '-d', 'ledger'], interval: '1s', timeout: '5s', retries: 60 } } },
-      probe: { image: images.node, kind: 'application', storageFormat: 'probe-v1', readableFormats: ['probe-v1'], catalog: fixtureCatalog('probe'), service: { user, command: ['node', '/config/service.mjs'], depends_on: { 'probe-redis': { condition: 'service_healthy' }, 'probe-qdrant': { condition: 'service_healthy' } }, healthcheck: { test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:8080/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"], interval: '1s', timeout: '3s', retries: 30 } } },
+      probe: { image: images.node, kind: 'application', storageFormat: 'probe-v1', readableFormats: ['probe-v1'], catalog: fixtureCatalog('probe'), service: { user, command: ['node', '/config/service.mjs'], depends_on: { 'probe-redis': { condition: 'service_healthy' }, 'probe-qdrant': { condition: 'service_healthy' } }, healthcheck: { test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:8080/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"], interval: '1s', timeout: '3s', retries: 30, start_period: '900s' } } },
       ledger: { image: images.postgres, kind: 'application', storageFormat: 'ledger-v1', readableFormats: ['ledger-v1'], catalog: fixtureCatalog('ledger'), service: { user, command: ['bash', '/config/ledger.sh'], depends_on: { 'ledger-postgres': { condition: 'service_healthy' } }, healthcheck: { test: ['CMD', 'bash', '-c', 'test -s /data/ledger.log'], interval: '1s', timeout: '3s', retries: 60 } } },
     },
   };
@@ -173,6 +214,10 @@ try {
       return { ticks: rows.length, longestGapMs: longest };
     } finally { database.close(); }
   };
+  // A pause that grows with the data, or with the number of collections, fails here.
+  const withinBudget = (receipt) => {
+    for (const item of receipt.snapshot.pauses) assert(item.pausedSeconds < pauseBudget, `The ${[...item.pause, ...item.stores].join(', ')} pause took ${item.pausedSeconds} s, over the ${pauseBudget} s budget`);
+  };
   const backup = async (archive, extra = []) => {
     const before = containers(), client = poll();
     await new Promise((done) => setTimeout(done, 1500));
@@ -194,11 +239,13 @@ try {
   assert(online.requests.length > 20 && online.requests.every((item) => item.ok), 'Every client request was answered');
   report.online = {
     seconds: online.seconds, archiveBytes: online.bytes, longestPauseSeconds: online.receipt.snapshot.longestPauseSeconds,
-    pauses: online.receipt.snapshot.pauses.map((item) => ({ services: [...item.pause, ...item.stores], pausedSeconds: item.pausedSeconds, attempt: item.attempt })),
+    pauses: online.receipt.snapshot.pauses.map((item) => ({ services: [...item.pause, ...item.stores], pausedSeconds: item.pausedSeconds, attempt: item.attempt, ...(item.steps ? { steps: item.steps, staged: item.staged } : {}) })),
     clientRequests: online.requests.length, clientFailures: online.requests.filter((item) => !item.ok).length, longestClientWaitMs: Math.max(...online.requests.map((item) => item.ms)),
-    writerTicks: online.ticks, stores: Object.fromEntries(Object.entries(online.receipt.snapshot.stores).map(([name, value]) => [name, { files: value.files, bytes: value.bytes, method: value.store?.method ?? 'files', ...(value.store?.verified ? { verified: value.store.verified } : {}) }])),
+    writerTicks: online.ticks, stores: Object.fromEntries(Object.entries(online.receipt.snapshot.stores).map(([name, value]) => [name, { files: value.files, bytes: value.bytes, method: value.store?.method ?? 'files', ...(value.store?.reused !== undefined ? { reusedSnapshots: value.store.reused, pausedSnapshots: value.store.captured } : {}), ...(value.store?.verified ? { verified: value.store.verified } : {}) }])),
   };
-  assert(online.receipt.snapshot.longestPauseSeconds < 10, 'Each pause stays within seconds');
+  report.online.dataBytes = Number(execute('du', ['-sk', join(owned, 'data')]).split('\t')[0]) * 1024;
+  report.online.pauseBudgetSeconds = pauseBudget;
+  withinBudget(online.receipt);
   say(`online backup: ${online.seconds}s, longest pause ${online.receipt.snapshot.longestPauseSeconds}s, longest client wait ${report.online.longestClientWaitMs} ms, ${online.bytes} bytes`);
 
   // Every store of the archive, read back independently of the controller.
@@ -221,7 +268,7 @@ try {
     try {
       run(name + '-redis', ['--mount', `type=bind,source=${join(data, 'probe-redis')},target=/data`, '--mount', `type=bind,source=${join(owned, 'config', 'probe-redis')},target=/config,readonly`, images.redis, 'redis-server', '/config/redis.conf']);
       let redis;
-      for (let attempt = 0; attempt < 60 && !redis; attempt++) { try { redis = docker('exec', '-e', 'REDISCLI_AUTH=' + secrets.redis, name + '-redis', 'sh', '-c', 'redis-cli --no-auth-warning get tick; redis-cli --no-auth-warning --scan --pattern "expiring:*" | wc -l; redis-cli --no-auth-warning pttl "$(redis-cli --no-auth-warning --scan --pattern "expiring:*" | head -1)"').split('\n'); if (redis[0] === '') redis = undefined; } catch { execute('sleep', ['0.5']); } }
+      for (let attempt = 0; attempt < 60 && !redis; attempt++) { try { redis = docker('exec', '-e', 'REDISCLI_AUTH=' + secrets.redis, name + '-redis', 'sh', '-c', 'redis-cli --no-auth-warning get tick; redis-cli --no-auth-warning --scan --pattern "expiring:*" | wc -l; redis-cli --no-auth-warning pttl "$(redis-cli --no-auth-warning --scan --pattern "expiring:*" | head -1)"').split('\n'); if (!/^[0-9]+$/.test(redis[0])) redis = undefined; } catch { execute('sleep', ['0.5']); } }
       result.redis = { tick: Number(redis[0]), expiringKeys: Number(redis[1]), ttlMs: Number(redis[2]) };
       run(name + '-qdrant', ['--workdir', '/data', '--mount', `type=bind,source=${join(data, 'probe-qdrant')},target=/data`, '--mount', `type=bind,source=${join(owned, 'config', 'probe-qdrant')},target=/config,readonly`, '--entrypoint', '/qdrant/qdrant', images.qdrant, '--config-path', '/config/qdrant.yaml']);
       let points;
@@ -321,7 +368,8 @@ try {
   const second = await backup('online-b');
   assert(second.requests.every((item) => item.ok));
   consistent(inspect('online-b'), true, false);
-  report.secondOnline = { seconds: second.seconds, longestPauseSeconds: second.receipt.snapshot.longestPauseSeconds, longestClientWaitMs: Math.max(...second.requests.map((item) => item.ms)) };
+  report.secondOnline = { seconds: second.seconds, longestPauseSeconds: second.receipt.snapshot.longestPauseSeconds, pauses: second.receipt.snapshot.pauses.map((item) => ({ services: [...item.pause, ...item.stores], pausedSeconds: item.pausedSeconds, attempt: item.attempt })), longestClientWaitMs: Math.max(...second.requests.map((item) => item.ms)) };
+  withinBudget(second.receipt);
 
   // ---- Restores: the online archive, then the stopped one. Writers stop for reconciliation. ----
   // Each restore is its own reviewed plan: the controller keeps one restore's evidence per plan.

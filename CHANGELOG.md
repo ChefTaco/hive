@@ -38,6 +38,26 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- The online backup's pauses no longer grow with the data. An application was paused for the
+  whole capture of its group, which included a snapshot of every Qdrant collection, a full copy of
+  every SQLite database and the write of the Redis dump; on an installation with 80 collections
+  and a few hundred MiB of SQLite, the memory and identity groups paused for many seconds, and
+  clients with shorter timeouts saw errors. Now everything that can be taken while the application
+  serves is taken first, and the pause only proves those copies current or brings what changed up
+  to date:
+  - Qdrant collections are snapshotted while serving, between two readings of each collection's
+    version (its shards' operation numbers, queued updates, points, segments and configuration).
+    While paused, only collections written or created since are snapshotted again. A Qdrant that
+    reports no versions has every collection snapshotted while paused, as before.
+  - SQLite databases are copied while serving. While paused, in one read transaction, a database
+    unchanged since its copy is kept without being read again, and any other is compared with its
+    copy and only what differs is written; a WAL database's log is copied with it and checkpointed
+    into the copy afterwards. Files changed shortly before their copy are compared by content.
+  - Redis forks its snapshot while the application is paused; the dump is written and collected
+    after the pause.
+  Each group still holds the state of one instant. The receipt now records each pause's steps
+  (`steps`) and the work done before it (`staged`). The online backup acceptance seeds a data set
+  of a real installation's size and fails when any pause exceeds a budget (2 s by default).
 - A command that failed in its read-only checks (staging, storage compatibility, native and
   external preflight) left its transaction open, so `doctor` reported `incomplete-transaction`
   and every other plan was refused until the same plan succeeded. Nothing had changed on the

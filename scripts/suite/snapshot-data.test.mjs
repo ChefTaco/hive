@@ -3,11 +3,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { busyError, capture, precopy, verify, walk, qdrantConfigText } from './snapshot-data.mjs';
+import { busyError, capture, precopy, verify, walk, qdrantConfigText, qdrantCapture, qdrantPrecapture, qdrantVersionsFrom, RACY_MS } from './snapshot-data.mjs';
 
 const fixture = () => {
   const root = mkdtempSync(join(tmpdir(), 'hive-snapshot-'));
@@ -15,8 +16,11 @@ const fixture = () => {
   return { root, source: join(root, 'data'), target: join(root, 'out'), work: join(root, 'work') };
 };
 const rows = (file) => { const database = new DatabaseSync(file, { readOnly: true }); try { return database.prepare('SELECT count(*) AS c FROM t').get().c; } finally { database.close(); } };
+// Waits until files written so far are no longer recent enough to be compared by content.
+const settled = () => new Promise((done) => setTimeout(done, RACY_MS + 50));
+const precopied = (work) => JSON.parse(readFileSync(join(work, 'precopy.json'), 'utf8'));
 
-test('a live WAL database is copied at the capture instant, in WAL mode, without sidecars', async () => {
+test('a live WAL database is pre-copied while serving and brought up to date at the capture instant, in WAL mode, without sidecars', async () => {
   const { root, source, target, work } = fixture();
   try {
     const live = new DatabaseSync(join(source, 'live.db'));
@@ -25,10 +29,11 @@ test('a live WAL database is copied at the capture instant, in WAL mode, without
     for (let index = 0; index < 500; index++) insert.run('before ' + index);
     assert(existsSync(join(source, 'live.db-wal')), 'The writer keeps committed frames in the WAL');
     precopy({ source, target, work });
-    assert(!existsSync(join(target, 'live.db')), 'A database is never pre-copied as a file');
+    assert(existsSync(join(target, 'live.db')) && existsSync(join(target, 'live.db-wal')), 'The database and its log are pre-copied while serving');
+    assert.equal(precopied(work)['live.db'].clean, false, 'A database written just before is not trusted by its times');
     for (let index = 0; index < 250; index++) insert.run('after ' + index);
     const result = await capture({ source, target, work });
-    assert.equal(result.sqlite, 1);
+    assert.equal(result.sqlite, 1); assert.equal(result.sqliteKept, 0);
     for (let index = 0; index < 100; index++) insert.run('later ' + index);
     const verified = verify({ target, work });
     assert.deepEqual(verified.sqlite, [{ path: 'live.db', journalMode: 'wal', pages: verified.sqlite[0].pages }]);
@@ -77,7 +82,9 @@ test('files: unchanged are kept, appended gain their tail, replaced and rewritte
     rmSync(join(source, 'gone.txt'));
     writeFileSync(join(source, 'new.txt'), 'new');
     const result = await capture({ source, target, work });
-    assert.deepEqual(result, { sqlite: 0, kept: 2, appended: 1, copied: 3, removed: 1 });
+    assert.deepEqual({ ...result, compared: undefined, written: undefined }, { sqlite: 0, sqliteKept: 0, kept: 2, appended: 1, copied: 3, removed: 1, compared: undefined, written: undefined });
+    // Every file here changed just before its pre-copy, so even the unchanged ones were compared.
+    assert(result.compared >= 3 * 1024 * 1024);
     for (const name of ['blob.bin', 'logs/audit.jsonl', 'state.json', 'rewritten.txt', 'new.txt', 'orphan-journal']) assert.deepEqual(readFileSync(join(target, name)), readFileSync(join(source, name)), name);
     assert(!existsSync(join(target, 'gone.txt')));
     const verified = verify({ target, work });
@@ -113,6 +120,175 @@ test('excluded store paths are neither copied nor pruned from a materialized sto
     assert(!existsSync(join(target, 'temp-123.rdb')));
     assert.equal(readFileSync(join(target, 'extra.txt'), 'utf8'), 'kept');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a database unchanged since its pre-copy is kept while paused without being read again', async () => {
+  const { root, source, target, work } = fixture();
+  try {
+    for (const [name, mode] of [['kept.db', 'DELETE'], ['kept-wal.db', 'WAL']]) {
+      const database = new DatabaseSync(join(source, name));
+      database.exec(`PRAGMA journal_mode=${mode}; CREATE TABLE t(n INTEGER PRIMARY KEY, b BLOB)`);
+      const insert = database.prepare('INSERT INTO t(b) VALUES (?)');
+      for (let index = 0; index < 64; index++) insert.run(Buffer.alloc(16384, index));
+      database.close();
+    }
+    await settled();
+    precopy({ source, target, work });
+    assert.equal(precopied(work)['kept.db'].clean, true); assert.equal(precopied(work)['kept-wal.db'].clean, true);
+    const result = await capture({ source, target, work });
+    assert.equal(result.sqlite, 2); assert.equal(result.sqliteKept, 2);
+    assert.equal(result.compared, 0, 'Nothing was read again while paused');
+    const verified = verify({ target, work });
+    assert.deepEqual(verified.sqlite.map((item) => [item.path, item.journalMode]).sort(), [['kept-wal.db', 'wal'], ['kept.db', 'rollback']]);
+    assert.deepEqual(readdirSync(target).sort(), ['kept-wal.db', 'kept.db']);
+    assert.equal(rows(join(target, 'kept.db')), 64); assert.equal(rows(join(target, 'kept-wal.db')), 64);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a database changed after its pre-copy is brought up to date by writing only what differs', async () => {
+  const { root, source, target, work } = fixture();
+  try {
+    const live = new DatabaseSync(join(source, 'journal.db'));
+    live.exec('CREATE TABLE t(n INTEGER PRIMARY KEY, b BLOB)');
+    const insert = live.prepare('INSERT INTO t(b) VALUES (?)');
+    live.exec('BEGIN'); for (let index = 0; index < 256; index++) insert.run(Buffer.alloc(16384, 1)); live.exec('COMMIT');
+    await settled();
+    precopy({ source, target, work });
+    assert.equal(precopied(work)['journal.db'].clean, true);
+    // A commit in place, after the copy: the change counter moves, the size does not.
+    live.exec('UPDATE t SET b = zeroblob(16384) WHERE n = 3');
+    const result = await capture({ source, target, work });
+    assert.equal(result.sqliteKept, 0);
+    const size = statSync(join(source, 'journal.db')).size;
+    assert(result.compared === size && result.written > 0 && result.written < size, 'Only the chunks that changed were written');
+    assert.deepEqual(readFileSync(join(target, 'journal.db')), readFileSync(join(source, 'journal.db')), 'The copy equals the paused database');
+    verify({ target, work });
+    const copy = new DatabaseSync(join(target, 'journal.db'), { readOnly: true });
+    try { assert.equal(copy.prepare('SELECT count(*) AS c FROM t WHERE b = zeroblob(16384)').get().c, 1); } finally { copy.close(); }
+    live.close();
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a database whose log restarted after its pre-copy is not kept', async () => {
+  const { root, source, target, work } = fixture();
+  try {
+    const live = new DatabaseSync(join(source, 'live.db'));
+    live.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE t(n INTEGER PRIMARY KEY, v TEXT)');
+    const insert = live.prepare('INSERT INTO t(v) VALUES (?)');
+    for (let index = 0; index < 50; index++) insert.run('before ' + index);
+    await settled();
+    precopy({ source, target, work });
+    assert.equal(precopied(work)['live.db'].clean, true);
+    // A full checkpoint, then a commit that restarts the log from its start.
+    live.exec('PRAGMA wal_checkpoint(TRUNCATE)'); insert.run('after');
+    const result = await capture({ source, target, work });
+    assert.equal(result.sqliteKept, 0);
+    verify({ target, work });
+    assert.equal(rows(join(target, 'live.db')), 51);
+    live.close();
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test(`a file changed within ${RACY_MS} ms before its pre-copy is compared while paused, not kept by its times`, async () => {
+  const { root, source, target, work } = fixture();
+  try {
+    writeFileSync(join(source, 'old.bin'), Buffer.alloc(2 * 1024 * 1024, 2)); await settled();
+    writeFileSync(join(source, 'fresh.bin'), Buffer.alloc(2 * 1024 * 1024, 1));
+    precopy({ source, target, work });
+    assert.equal(precopied(work)['fresh.bin'].racy, true); assert.equal(precopied(work)['old.bin'].racy, false);
+    // A change the times cannot show: in place, same size, times put back.
+    const times = statSync(join(source, 'fresh.bin'));
+    writeFileSync(join(source, 'fresh.bin'), Buffer.alloc(2 * 1024 * 1024, 3), { flag: 'r+' });
+    utimesSync(join(source, 'fresh.bin'), times.atime, times.mtime);
+    const result = await capture({ source, target, work });
+    assert.equal(result.compared, 2 * 1024 * 1024, 'Only the recently changed file was compared');
+    assert.deepEqual(readFileSync(join(target, 'fresh.bin')), readFileSync(join(source, 'fresh.bin')));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// A Qdrant that answers what the helper asks, with versions the test changes between steps.
+async function fakeQdrant(collections, options = {}) {
+  const snapshots = [];
+  const server = createServer((request, response) => {
+    const url = new URL(request.url, 'http://qdrant'), send = (status, result) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ result })); };
+    let body = '';
+    request.on('data', (chunk) => { body += chunk; });
+    request.on('end', () => {
+      if (request.headers['api-key'] !== 'synthetic-key') return send(403, null);
+      if (url.pathname === '/telemetry') return send(200, { collections: { collections: Object.entries(collections).map(([id, item]) => ({ id, config: item.config ?? { params: { size: 4 } },
+        shards: [{ id: 0, remote: [], local: { num_points: item.points, segments: [{ info: { uuid: item.segment ?? 'segment-1' } }], update_queue: options.unversioned ? { length: 0 } : { length: item.queued ?? 0, op_num: item.operation } } }] })) } });
+      if (url.pathname === '/collections') return send(200, { collections: Object.keys(collections).map((name) => ({ name })) });
+      if (url.pathname === '/aliases') return send(200, { aliases: [] });
+      const match = /^\/collections\/([^/]+)\/(snapshots|points\/count)$/.exec(url.pathname);
+      if (!match) return send(404, null);
+      const name = decodeURIComponent(match[1]), item = collections[name];
+      if (!item) return send(404, null);
+      if (match[2] === 'points/count') return send(200, { count: item.points });
+      const snapshot = name + '-' + snapshots.length + '.snapshot';
+      snapshots.push(snapshot); options.onSnapshot?.(name);
+      return send(200, { name: snapshot, checksum: 'sum-' + snapshot, size: 1 });
+    });
+  });
+  await new Promise((done) => server.listen(0, '127.0.0.1', done));
+  return { url: 'http://127.0.0.1:' + server.address().port, snapshots, close: () => new Promise((done) => server.close(done)) };
+}
+const qdrantFixture = () => {
+  const root = mkdtempSync(join(tmpdir(), 'hive-qdrant-'));
+  writeFileSync(join(root, 'qdrant.yaml'), 'storage:\n  snapshots_path: /data/snapshots\nservice:\n  api_key: synthetic-key\n');
+  return { root, config: join(root, 'qdrant.yaml'), created: () => readFileSync(join(root, 'qdrant-created.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).name).sort() };
+};
+
+test('Qdrant: while paused only collections written since their snapshot, or created since, are snapshotted again', async () => {
+  const { root, config, created } = qdrantFixture();
+  // busy is written while its own snapshot is taken, so that snapshot is not trusted either.
+  const collections = { quiet: { operation: 5, points: 3 }, written: { operation: 7, points: 2 }, busy: { operation: 1, points: 1 }, removed: { operation: 2, points: 4 } };
+  const qdrant = await fakeQdrant(collections, { onSnapshot: (name) => { if (name === 'busy' && qdrant.snapshots.length < 5) collections.busy.operation++; } });
+  try {
+    const staged = await qdrantPrecapture({ url: qdrant.url, config, work: root });
+    assert.deepEqual({ ...staged, seconds: undefined }, { versioned: true, collections: 4, clean: 3, seconds: undefined });
+    collections.written.operation++; collections.written.points++;
+    delete collections.removed; collections.added = { operation: 1, points: 1 };
+    const result = await qdrantCapture({ url: qdrant.url, config, work: root });
+    assert.equal(result.reused, 1); assert.equal(result.captured, 3);
+    assert.deepEqual(Object.keys(result.snapshots).sort(), ['added', 'busy', 'quiet', 'written']);
+    assert.match(result.snapshots.quiet.name, /^quiet-[0-3]\.snapshot$/, 'The quiet collection keeps its snapshot taken while serving');
+    assert.match(result.snapshots.written.name, /^written-[4-7]\.snapshot$/);
+    assert.deepEqual(result.collections, { added: 1, busy: 1, quiet: 3, written: 3 });
+    assert.deepEqual(created(), [...qdrant.snapshots].sort(), 'Every snapshot created is recorded, for removal of the ones not kept');
+  } finally { await qdrant.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('Qdrant: a write still queued, a changed configuration or no versions mean a new snapshot', async () => {
+  const { root, config } = qdrantFixture();
+  const collections = { queued: { operation: 1, points: 1 }, configured: { operation: 1, points: 1 }, quiet: { operation: 1, points: 1 } };
+  const qdrant = await fakeQdrant(collections);
+  try {
+    await qdrantPrecapture({ url: qdrant.url, config, work: root });
+    collections.configured.config = { params: { size: 4 }, hnsw_config: { m: 32 } };
+    // A write the paused writer sent before the pause lands while the capture waits for it.
+    collections.queued.queued = 1;
+    setTimeout(() => { collections.queued.queued = 0; collections.queued.operation++; }, 60);
+    const result = await qdrantCapture({ url: qdrant.url, config, work: root });
+    assert.equal(result.reused, 1); assert.match(result.snapshots.quiet.name, /^quiet-[0-2]\.snapshot$/);
+    // Never settling, the capture snapshots everything.
+    collections.quiet.queued = 1;
+    assert.equal((await qdrantCapture({ url: qdrant.url, config, work: root, settle: 3 })).reused, 0);
+  } finally { await qdrant.close(); rmSync(root, { recursive: true, force: true }); }
+  const old = qdrantFixture(), unversioned = await fakeQdrant({ only: { operation: 1, points: 1 } }, { unversioned: true });
+  try {
+    assert.deepEqual(await qdrantPrecapture({ url: unversioned.url, config: old.config, work: old.root }), { versioned: false });
+    assert.equal(unversioned.snapshots.length, 0, 'Nothing is snapshotted while serving without versions');
+    const result = await qdrantCapture({ url: unversioned.url, config: old.config, work: old.root });
+    assert.equal(result.reused, 0); assert.equal(result.captured, 1);
+  } finally { await unversioned.close(); rmSync(old.root, { recursive: true, force: true }); }
+});
+
+test('Qdrant versions come from per-shard operation numbers and refuse what they cannot vouch for', () => {
+  const telemetry = (queue, remote = []) => ({ collections: { collections: [{ id: 'a', config: { params: {} }, shards: [{ id: 0, remote, local: { num_points: 1, segments: [{ info: { uuid: 's' } }], update_queue: queue } }] }] } });
+  assert.equal(qdrantVersionsFrom(telemetry({ length: 0, op_num: 4 })).a.shards[0].operation, 4);
+  assert.equal(qdrantVersionsFrom(telemetry({ length: 0 })), null, 'No operation number');
+  assert.equal(qdrantVersionsFrom(telemetry({ length: 0, op_num: 4 }, [{ peer_id: 2 }])), null, 'A remote shard');
+  assert.equal(qdrantVersionsFrom({}), null);
 });
 
 test('links and special files are refused, as by the stopped backup', () => {
