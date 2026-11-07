@@ -230,9 +230,10 @@ any fleet host, with `--ssh-config FILE` and `--sudo-password-file FILE` as that
    offers to approve it (`--trust` agrees unattended), so the terminal works at once.
 
 Running it again repairs the installation, or upgrades the agent in place to the version a newer
-release pins. `./hive.sh magnus-agent status --config FILE` shows the installed version, the
-service state, Magnus's last heartbeat and the web terminal approval; `remove` stops and removes
-the agent, and with `--trust` also revokes the approval. Magnus keeps its record of the node.
+release pins. `./hive.sh magnus-agent status --config FILE` prints one JSON document: the
+installed version, the service state, Magnus's last heartbeat and the web terminal approval;
+`remove` stops and removes the agent, and with `--trust` also revokes the approval. Magnus keeps
+its record of the node.
 
 The agent's listener certificate is the console certificate on the console host, renewed with it:
 `console-certificate.sh renew` and its weekly timer restart the agent after a renewal; after a

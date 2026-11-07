@@ -163,6 +163,11 @@ HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet HIVE_AGENT_TRUST=true cont
 /usr/bin/grep -q 'The web terminal can open sessions on this node' "$temporary/controller.log" || fail 'The approval was not reported'
 ! /usr/bin/grep -q '^{' "$temporary/controller.log" || fail 'A raw audit record reached the terminal'
 [[ $(stat -c %a "$temporary/magnus-trust.log") == 600 ]] && /usr/bin/grep -q '^{' "$temporary/magnus-trust.log" || fail 'The audit record was not kept in the owner-only log'
+# status is one JSON document, with the node's web terminal approval in it.
+stub docker 'case "$*" in *"trust list"*) echo "{\"nodeId\":\"node-1\",\"host\":\"node-1.example.com\",\"port\":22,\"fingerprints\":[\"SHA256:example\"]}";;
+  *) printf "{\"id\":\"node-1\",\"name\":\"node-1.example.com\",\"status\":\"ONLINE\",\"lastHeartbeatAt\":\"%s\"}\n" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)";; esac'
+HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller status || { cat "$temporary/controller.log" >&2; fail 'status failed'; }
+/usr/bin/jq -e '.service=="active" and .node.status=="ONLINE" and .webTerminalApproval.nodeId=="node-1"' "$temporary/controller.log" >/dev/null || { cat "$temporary/controller.log" >&2; fail 'status is not one JSON document with the approval'; }
 : > "$log"
 HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet HIVE_AGENT_TRUST=true controller remove || { cat "$temporary/controller.log" >&2; fail 'remove with --trust failed'; }
 /usr/bin/grep -q 'trust remove --node-id node-1 --approved-by .* --approval-ref magnus-agent-remove' "$log" || fail 'The approval was not revoked with the gateway CLI arguments'

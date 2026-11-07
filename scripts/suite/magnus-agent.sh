@@ -84,12 +84,15 @@ hive_magnus_agent() {
   case "$subcommand" in
     status)
       record=$(hive_magnus_agent_node_record "$fqdn" 2>/dev/null || printf 'null\n')
-      jq -n --arg host "$HIVE_AGENT_HOST" --arg fqdn "$fqdn" --argjson preflight "$preflight" --argjson node "${record:-null}" \
-        '{host:$host,hostFqdn:$fqdn,installedVersion:(($preflight.installedVersion|if .=="" then null else . end) // $node.agentVersion?),service:$preflight.service,node:$node}'
+      # The web terminal approval of this node, when the suite has the gateway; one JSON document.
+      local approval=null
       if [[ -n "$record" && "$record" != null ]] && jq -e '.components["magnus-gateway"]!=null' "$HIVE_CONFIG" >/dev/null; then
-        printf 'Web terminal approvals:\n'
-        HIVE_CONFIG=${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG} hive_magnus_trust list 2>/dev/null | grep -F -- "$(jq -r .id <<< "$record")" || printf '  none for this node\n'
+        approval=$(HIVE_CONFIG=${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG} hive_magnus_trust list 2>/dev/null |
+          jq -Rc --arg id "$(jq -r .id <<< "$record")" 'fromjson? | select(.nodeId==$id)' | head -n 1)
+        approval=${approval:-false}
       fi
+      jq -n --arg host "$HIVE_AGENT_HOST" --arg fqdn "$fqdn" --argjson preflight "$preflight" --argjson node "${record:-null}" --argjson approval "$approval" \
+        '{host:$host,hostFqdn:$fqdn,installedVersion:(($preflight.installedVersion|if .=="" then null else . end) // $node.agentVersion?),service:$preflight.service,node:$node,webTerminalApproval:$approval}'
       return;;
     remove)
       hive_magnus_agent_confirm "$HIVE_CONFIRMED" "Stop and remove the Magnus agent on $HIVE_AGENT_HOST?" || hive_die 'Cancelled; nothing was changed'
