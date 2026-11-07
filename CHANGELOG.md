@@ -6,6 +6,30 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Next
+
+- Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
+  host Node.js. The setup question "Opt-in native agent runtime" offers runtimes the release
+  has no artifacts for.
+- A bring-your-own certificate for `magnus-agent install` on a host without Tailscale.
+- Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
+- An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
+
+## [2.0.5] - 2026-11-07
+
+`releases/2.0.5.json` pins exactly the images and versions of 2.0.4 except Oathweave, now 2.0.3.
+The controller is unchanged (`controllerSHA256` equals 2.0.4's), and so is the publisher key
+(fingerprint `c0d0665a70969f37c8f1cffbdcf8e54df13626f8dbd4b5759a7c44843d86d1b2`).
+
+### Security
+
+- Oathweave 2.0.3 updates `@simplewebauthn/server` to 14.1.0, which fixes GHSA-2g3p-m8c9-hhwh:
+  certificate revocation lists are processed only for attestation certificates that chain to a
+  trusted anchor. Oathweave requests no attestation, but a passkey registration response can
+  still carry an attestation certificate chain.
+- Rescanned on 2026-11-07, the images have no CRITICAL or HIGH finding with a fix available, on
+  linux/amd64 and linux/arm64, and their unfixed findings are exactly those listed for 2.0.4.
+
 ### Dependencies
 
 - Oathweave (`services/hive-iam`): `@simplewebauthn/server` 14 (includes the fix for
@@ -16,15 +40,6 @@ All notable changes to this project are documented in this file. The format is b
   standalone deployment lock) are updated together.
 - Router: dotenv 18, Hono 4.13.16 and `@hono/node-server` 2.1.6. HiveSkills, HiveMem core and the
   IAM SDK: minor and patch updates.
-
-### Next
-
-- Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
-  host Node.js. The setup question "Opt-in native agent runtime" offers runtimes the release
-  has no artifacts for.
-- A bring-your-own certificate for `magnus-agent install` on a host without Tailscale.
-- Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
-- An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
 
 ## [2.0.4] - 2026-11-07
 
