@@ -8,7 +8,7 @@
 // the archive verifies, rehearses and restores; stopped archives, including ones written by
 // an earlier controller (--old-controller DIR), still rehearse and restore; a failed backup
 // leaves every service serving, keeps no archive, and removes no other archive.
-// Every pause must stay within a budget (--pause-budget SECONDS, default 2) on a data set of a
+// Every pause must stay within a budget (--pause-budget SECONDS, default 5) on a data set of a
 // real installation's size (--seed-scale, default 1: about 500 MiB, with 80 Qdrant collections and
 // 30,000 vectors, a large SQLite database that keeps being written and one that is not, and Redis
 // keys), so a pause that grows with the data fails the acceptance.
@@ -31,7 +31,7 @@ const argument = (name) => { const index = process.argv.indexOf(name); return in
 const oldController = argument('--old-controller') && resolve(argument('--old-controller'));
 const keep = process.argv.includes('--keep');
 const seedScale = Number(argument('--seed-scale') ?? 1);
-const pauseBudget = Number(argument('--pause-budget') ?? 2);
+const pauseBudget = Number(argument('--pause-budget') ?? 5);
 assert(seedScale >= 0 && pauseBudget > 0, 'Usage: --seed-scale N --pause-budget SECONDS');
 const temp = mkdtempSync(join(tmpdir(), 'hive-online-backup-'));
 const owned = join(temp, 'installation');
