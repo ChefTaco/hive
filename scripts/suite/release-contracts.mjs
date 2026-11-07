@@ -10,9 +10,9 @@ import { hiveRegistryComponent } from './suite-catalog.mjs';
 // Each is the upstream image at an exact digest with unused, vulnerable tooling removed.
 export const DATASTORE_IMAGES = Object.freeze({
   redis: 'ghcr.io/cheftaco/hive-redis@sha256:91cbdfcaf13a1c9c06fc168ddf0a1fafc5d4a1efadfc9b613ca7a366407880f2', // 8.2.10-1
-  qdrant: 'ghcr.io/cheftaco/hive-qdrant@sha256:31c04aefc86c20c52dfb8916ba5b3327a04ad32dc6303485dde18f1a48d0b20a', // 1.18.3-1
-  postgres17: 'ghcr.io/cheftaco/hive-postgres@sha256:3afbd9fd4bac38bb0336462a02bd9013a61e10a1d682f75267ba3b765bee7a8d', // 17.11-1
-  postgres18: 'ghcr.io/cheftaco/hive-postgres@sha256:83aa72178c7bdb4b056249985447fcb36aa0cf5137b98344d85ccd99e40cd0e0', // 18.6-1
+  qdrant: 'ghcr.io/cheftaco/hive-qdrant@sha256:9cc1a19b58d263decd071ac6017e3702cf1423a3d748065546026823481e0827', // 1.18.3-2
+  postgres17: 'ghcr.io/cheftaco/hive-postgres@sha256:a09fd1d3ef969e21b532e8ea93537c8b9001eda56e709f5fad55d500c956d381', // 17.11-2
+  postgres18: 'ghcr.io/cheftaco/hive-postgres@sha256:dcb12bad768145e678454580eece1204dc69c6d9d91bd5e2588f80b4085d8c2d', // 18.6-2
 });
 export const DATASTORE_VERSIONS = Object.freeze({ redis: '8.2.10', qdrant: '1.18.3', postgres17: '17.11', postgres18: '18.6' });
 
