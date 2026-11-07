@@ -211,7 +211,7 @@ heartbeat() {
     const response = await fetch("https://localhost:" + (process.env.CONTROL_API_PORT || "4000") + "/api/v1/nodes?pageSize=100&query=" + encodeURIComponent(fqdn), { headers: { "x-api-secret": process.env.API_SECRET } });
     const body = await response.json();
     const node = (body.data || []).find((item) => item.hostname === fqdn || item.name === fqdn);
-    console.log(JSON.stringify(node ? { id: node.id, name: node.name, status: node.status, lastHeartbeatAt: node.lastHeartbeatAt } : null));'
+    console.log(JSON.stringify(node ? { id: node.id, name: node.name, status: node.status, lastHeartbeatAt: node.lastHeartbeatAt, agentVersion: node.agent?.version ?? null } : null));'
 }
 
 case "$action" in

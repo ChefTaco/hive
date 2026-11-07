@@ -76,7 +76,7 @@ hive_magnus_agent() {
     status)
       record=$(hive_magnus_agent_node_record "$fqdn" 2>/dev/null || printf 'null\n')
       jq -n --arg host "$HIVE_AGENT_HOST" --arg fqdn "$fqdn" --argjson preflight "$preflight" --argjson node "${record:-null}" \
-        '{host:$host,hostFqdn:$fqdn,installedVersion:($preflight.installedVersion|if .=="" then null else . end),service:$preflight.service,node:$node}'
+        '{host:$host,hostFqdn:$fqdn,installedVersion:(($preflight.installedVersion|if .=="" then null else . end) // $node.agentVersion?),service:$preflight.service,node:$node}'
       if [[ -n "$record" && "$record" != null ]] && jq -e '.components["magnus-gateway"]!=null' "$HIVE_CONFIG" >/dev/null; then
         printf 'Web terminal approvals:\n'
         HIVE_CONFIG=${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG} hive_magnus_trust list 2>/dev/null | grep -F -- "$(jq -r .id <<< "$record")" || printf '  none for this node\n'
