@@ -122,7 +122,7 @@ jq -n --arg dir "$temporary/install" '{schema:1,installation:"example-suite",ori
 controller() { (
   export HIVE_ROOT=$ROOT; source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/magnus-gateway.sh"; source "$ROOT/scripts/suite/magnus-agent.sh"
   HIVE_CONFIG=$temporary/config.json HIVE_MANIFEST=$temporary/release.json HIVE_VERSION=9.9.9 HIVE_ID=example-suite
-  HIVE_AGENT_TARGET=${HIVE_AGENT_TARGET:-} HIVE_AGENT_SSH_CONFIG='' HIVE_AGENT_SUDO_FILE='' HIVE_AGENT_INSTALL_NODE=false HIVE_AGENT_TRUST=false HIVE_CONFIRMED=true
+  HIVE_AGENT_TARGET=${HIVE_AGENT_TARGET:-} HIVE_AGENT_SSH_CONFIG='' HIVE_AGENT_SUDO_FILE='' HIVE_AGENT_INSTALL_NODE=false HIVE_AGENT_TRUST=${HIVE_AGENT_TRUST:-false} HIVE_CONFIRMED=true
   hive_magnus_agent "$@"
 ) < /dev/null > "$temporary/controller.log" 2>&1; }
 jq -n '{components:{magnus:{agentPackage:{name:"@hivemagnus/magnus-agent",version:"2.1.1",integrity:("sha512-"+("A"*86)+"==")}}}}' > "$temporary/release.json"
@@ -153,4 +153,18 @@ grep -q 'Magnus accepted the heartbeat: node node-1 (node-1.example.com), ONLINE
 /usr/bin/grep -qx "NODE_MANAGER_SECRET=$node_secret" "$agent/.env" && grep -qx 'MAGNUS_AGENT_TLS_RENEWAL=tailscale' "$agent/.env" && grep -qx 'HOST_FQDN=node-1.example.com' "$agent/.env" || fail 'The fleet host environment is wrong'
 [[ $(stat -c %a "$agent/certs/agent.key") == 600 ]] || fail 'The tailscale key is not owner-only'
 no_secret "$log" "$temporary/controller.log"
-printf 'Passed: Magnus agent Node.js range and NodeSource key, pinned package integrity, root-only credentials never in arguments or output, idempotent repair and upgrade, removal, and controller refusals.\n'
+# With the web terminal gateway, the host key read on the host is approved; the gateway's audit
+# record goes to an owner-only log, not the terminal, and remove --trust revokes it.
+jq -n '{services:{"magnus-gateway":{}}}' > "$temporary/install/compose.json"
+jq '.components["magnus-gateway"]={host:"control"}' "$temporary/config.json" > "$temporary/next.json"; mv "$temporary/next.json" "$temporary/config.json"
+: > "$log"
+HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet HIVE_AGENT_TRUST=true controller install || { cat "$temporary/controller.log" >&2; fail 'An install with approval failed'; }
+/usr/bin/grep -q 'trust add --node-id node-1 --host node-1.example.com --fingerprint SHA256:.* --approved-by .* --approval-ref magnus-agent-install' "$log" || fail 'The host key was not approved with the gateway CLI'
+/usr/bin/grep -q 'The web terminal can open sessions on this node' "$temporary/controller.log" || fail 'The approval was not reported'
+! /usr/bin/grep -q '^{' "$temporary/controller.log" || fail 'A raw audit record reached the terminal'
+[[ $(stat -c %a "$temporary/magnus-trust.log") == 600 ]] && /usr/bin/grep -q '^{' "$temporary/magnus-trust.log" || fail 'The audit record was not kept in the owner-only log'
+: > "$log"
+HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet HIVE_AGENT_TRUST=true controller remove || { cat "$temporary/controller.log" >&2; fail 'remove with --trust failed'; }
+/usr/bin/grep -q 'trust remove --node-id node-1 --approved-by .* --approval-ref magnus-agent-remove' "$log" || fail 'The approval was not revoked with the gateway CLI arguments'
+[[ ! -e "$agent" ]] || fail 'remove kept the agent'
+printf 'Passed: Magnus agent Node.js range and NodeSource key, pinned package integrity, root-only credentials never in arguments or output, idempotent repair and upgrade, removal with revocation, the web terminal approval kept out of the terminal, and controller refusals.\n'

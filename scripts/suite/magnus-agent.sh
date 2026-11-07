@@ -45,6 +45,15 @@ hive_magnus_agent_action() {
   fi
 }
 
+# The gateway's audit records of an approval go to an owner-only log beside the installation
+# file, not to the terminal.
+hive_magnus_agent_trust() {
+  local log
+  log="$(dirname -- "${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG}")/magnus-trust.log"
+  (umask 077; touch "$log")
+  HIVE_CONFIG=${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG} hive_magnus_trust "$@" >> "$log" 2>&1 || { tail -n 5 -- "$log" >&2; return 1; }
+}
+
 hive_magnus_agent_confirm() { # FLAG QUESTION
   [[ "$1" != true ]] || return 0
   [[ -t 0 ]] || return 1
@@ -85,10 +94,12 @@ hive_magnus_agent() {
     remove)
       hive_magnus_agent_confirm "$HIVE_CONFIRMED" "Stop and remove the Magnus agent on $HIVE_AGENT_HOST?" || hive_die 'Cancelled; nothing was changed'
       record=$(hive_magnus_agent_node_record "$fqdn" 2>/dev/null || printf 'null\n')
-      hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-remove '{}' true >/dev/null || hive_die 'The agent could not be removed; see above'
+      hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-remove \
+        "$(jq -nc --arg root "${HIVE_MAGNUS_AGENT_ROOT:-}" 'if $root!="" then {root:$root} else {} end')" true >/dev/null || hive_die 'The agent could not be removed; see above'
       printf 'Removed the Magnus agent from %s. Magnus keeps its record of the node.\n' "$HIVE_AGENT_HOST"
       if [[ "$HIVE_AGENT_TRUST" == true && -n "$record" && "$record" != null ]] && jq -e '.components["magnus-gateway"]!=null' "$HIVE_CONFIG" >/dev/null; then
-        HIVE_CONFIG=${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG} hive_magnus_trust remove --node-id "$(jq -r .id <<< "$record")" --host "$fqdn" && printf 'Revoked the web terminal approval for this node.\n'
+        hive_magnus_agent_trust remove --node-id "$(jq -r .id <<< "$record")" --approved-by "${USER:-operator}" --approval-ref magnus-agent-remove &&
+          printf 'Revoked the web terminal approval for this node.\n'
       fi
       return;;
   esac
@@ -147,9 +158,9 @@ hive_magnus_agent() {
     fingerprint=$(hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-host-key '{}' | jq -r .fingerprint) || hive_die 'The host key could not be read'
     printf 'Host key read on %s: %s\n' "$HIVE_AGENT_HOST" "$fingerprint"
     if hive_magnus_agent_confirm "$HIVE_AGENT_TRUST" "Approve this host key for the web terminal?"; then
-      HIVE_CONFIG=${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG} hive_magnus_trust add --node-id "$(jq -r .id <<< "$record")" --host "$fqdn" --fingerprint "$fingerprint" \
+      hive_magnus_agent_trust add --node-id "$(jq -r .id <<< "$record")" --host "$fqdn" --fingerprint "$fingerprint" \
         --approved-by "${USER:-operator}" --approval-ref magnus-agent-install || hive_die 'The web terminal approval failed; the agent is installed'
-      printf 'The web terminal can open sessions on this node.\n'
+      printf 'The web terminal can open sessions on this node. The approval is recorded in %s.\n' "$(dirname -- "${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG}")/magnus-trust.log"
     else
       printf 'Not approved for the web terminal. Later: ./hive.sh magnus-trust add --config FILE --node-id %s --host %s --fingerprint %s --approved-by NAME --approval-ref REF\n' "$(jq -r .id <<< "$record")" "$fqdn" "$fingerprint"
     fi
