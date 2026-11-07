@@ -38,6 +38,13 @@ case "\$*" in
   *) exit 99;;
 esac
 SH
+# Record every jq argv, including short-lived processes, without relying on timing ps.
+cat > "$temporary/bin/jq" <<SH
+#!/usr/bin/env bash
+printf '%s\\0' "\$@" >> '$temporary/jq-arguments'
+exec /usr/bin/jq "\$@"
+SH
+chmod 700 "$temporary/bin/jq"
 chmod 700 "$temporary/bin/docker"
 export PATH="$temporary/bin:$PATH"
 env_value() { sed -n "s/^$1='\(.*\)'\$/\1/p" "$install/config/cindertrace.env"; }
@@ -49,7 +56,7 @@ secret="$install/config/.credentials/cindertrace-collectors/edge"
 ! grep -qF "$(cat "$secret")" "$temporary/add.log" || fail 'add printed the credential'
 grep -qF "$secret" "$temporary/add.log" || { cat "$temporary/add.log" >&2; fail "add did not name the credential file"; }
 [[ $(env_value SECURITY_INGEST_ENABLED) == true ]] || fail 'Ingestion is not on'
-env_value SECURITY_FUSION_COLLECTOR_CREDENTIALS_JSON | jq -e --arg secret "$(cat "$secret")" '.edge=={secret:$secret,allowedSources:["hive","tailscale"],displayName:"edge"} and length==1' >/dev/null || fail 'The collector registry is wrong'
+env_value SECURITY_FUSION_COLLECTOR_CREDENTIALS_JSON | jq -e --rawfile secret "$secret" '.edge=={secret:($secret|rtrimstr("\n")),allowedSources:["hive","tailscale"],displayName:"edge"} and length==1' >/dev/null || fail 'The collector registry is wrong'
 [[ $(grep -c '^SECURITY_INGEST_ENABLED=' "$install/config/cindertrace.env") == 1 ]] && grep -qx 'SECURITY_WRITES_ENABLED=true' "$install/config/cindertrace.env" || fail 'Other settings changed'
 [[ $(stat -c %a "$install/config/cindertrace.env") == 600 ]] || fail 'The environment is no longer owner-only'
 jq -e --arg path "$install/config/cindertrace.env" --arg sha "$(sha256sum "$install/config/cindertrace.env" | cut -d ' ' -f1)" '.files[$path]==$sha' "$install/config/.initializer/receipt.json" >/dev/null || fail 'The initializer record was not moved'
@@ -64,6 +71,13 @@ reject hive cindertrace-collector add edge --sources wazuh
 grep -q 'already exists with other sources' "$temporary/rejection.log" || fail 'A source change was not refused clearly'
 
 hive cindertrace-collector add lab --sources wazuh > /dev/null
+# Neither an individual secret nor the combined registry may reach process arguments.
+python3 - "$install/config/.credentials/cindertrace-collectors" "$temporary/jq-arguments" <<'CHECK'
+import pathlib, sys
+store, arguments = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]).read_bytes()
+for name in ('edge', 'lab'):
+    assert store.joinpath(name).read_bytes().strip() not in arguments, 'Collector secret reached process arguments'
+CHECK
 hive cindertrace-collector list > "$temporary/list.json"
 jq -e 'map(.id)==["edge","lab"] and all(.[]; has("credentialFile") and (has("secret")|not))' "$temporary/list.json" >/dev/null || fail 'list is wrong or shows a secret'
 ! grep -qF "$(cat "$secret")" "$temporary/list.json" || fail 'list printed a credential'

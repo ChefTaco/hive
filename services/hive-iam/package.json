@@ -22,9 +22,9 @@
     "deploy:iam-core": "bash scripts/deploy-iam-core.sh"
   },
   "overrides": {
-    "@hono/node-server": "2.1.5",
+    "@hono/node-server": "2.1.6",
     "fast-uri": "3.1.9",
-    "hono": "4.13.13",
+    "hono": "4.13.16",
     "npm": {
       "brace-expansion": "5.0.9",
       "ip-address": "10.4.0",

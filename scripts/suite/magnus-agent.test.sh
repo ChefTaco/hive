@@ -24,11 +24,12 @@ stub apt-get 'if [[ "$*" == *nodejs* ]]; then echo v24.22.1 > "'"$temporary"'/no
 stub curl 'while (($#)); do [[ "$1" == -o ]] && cp "'"$temporary"'/nodesource.asc" "$2"; shift; done'
 stub gpg 'printf "fpr:::::::::%s:\n" "$(cat "'"$temporary"'/fingerprint")"'
 stub npm 'case "$1" in
-  pack) v=${@: -1}; v=${v##*@}; printf "fixture-%s\n" "$v" > "magnus-agent-$v.tgz"; echo "magnus-agent-$v.tgz";;
-  install) prefix=$3; tarball=${@: -1}; v=${tarball##*magnus-agent-}; v=${v%.tgz}
-    mkdir -p "$prefix/node_modules/@hivemagnus/magnus-agent/dist"; printf "{\"version\":\"%s\"}\n" "$v" > "$prefix/node_modules/@hivemagnus/magnus-agent/package.json"
-    touch "$prefix/node_modules/@hivemagnus/magnus-agent/dist/index.js";;
+  pack) v=${@: -1}; v=${v##*@}; cp "'"$temporary"'/fixtures/magnus-agent-$v.tgz" "magnus-agent-$v.tgz"; echo "magnus-agent-$v.tgz";;
+  ci) [[ "$*" == *--ignore-scripts* && "$*" == *--registry=https://registry.npmjs.org/* && "$*" == *--omit=dev* ]] || exit 99
+    [[ ! -f "'"$temporary"'/fail-ci" ]] || exit 98;;
+  *) exit 97;;
 esac'
+
 stub node 'if [[ "$1" == --version ]]; then [[ -f "'"$temporary"'/node-version" ]] || exit 127; cat "'"$temporary"'/node-version"; exit; fi
 case "$2" in
   check) [[ -f "$4" ]];;
@@ -43,7 +44,16 @@ ssh-keygen -q -t ed25519 -N '' -f "$temporary/ssh_host_ed25519_key" -C fixture
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 30 -subj /CN=hive.example.com -addext subjectAltName=DNS:hive.example.com \
   -keyout "$temporary/console.key" -out "$temporary/console.crt" 2>/dev/null; chmod 600 "$temporary/console.key"
 printf 'NODE_ENV=production\nNODE_MANAGER_SECRET=%s\nRESULT_SIGNING_SECRET=%s\n' "$node_secret" "$result_secret" > "$temporary/magnus.env"; chmod 600 "$temporary/magnus.env"
-integrity() { printf 'sha512-%s' "$(printf 'fixture-%s\n' "$1" | openssl dgst -sha512 -binary | base64 -w0)"; }
+# Real archives exercise extraction and lock validation; only the npm transport is stubbed.
+mkdir -p "$temporary/fixtures"
+for version in 2.1.1 2.1.2; do
+  mkdir -p "$temporary/fixture/package/dist"
+  jq -n --arg version "$version" '{name:"@hivemagnus/magnus-agent",version:$version,dependencies:{"fixture-dependency":"1.0.0"}}' > "$temporary/fixture/package/package.json"
+  jq -n --slurpfile package "$temporary/fixture/package/package.json" '{name:$package[0].name,version:$package[0].version,lockfileVersion:3,packages:{"":$package[0],"node_modules/fixture-dependency":{version:"1.0.0",resolved:"https://registry.npmjs.org/fixture-dependency/-/fixture-dependency-1.0.0.tgz",integrity:("sha512-"+("A"*86)+"==")}}}' > "$temporary/fixture/package/npm-shrinkwrap.json"
+  touch "$temporary/fixture/package/dist/index.js"
+  tar -czf "$temporary/fixtures/magnus-agent-$version.tgz" -C "$temporary/fixture" package
+done
+integrity() { printf 'sha512-%s' "$(openssl dgst -sha512 -binary "$temporary/fixtures/magnus-agent-$1.tgz" | base64 -w0)"; }
 host() { # ACTION REQUEST
   jq -nc --arg action "$1" --argjson request "$2" '{action:$action,magnusAgent:$request}' |
     bash "$ROOT/scripts/suite/magnus-agent-host.sh" > "$temporary/out" 2> "$temporary/err"
@@ -80,6 +90,23 @@ if host magnus-agent-install "$(request 2.1.1 "sha512-$(printf 'B%.0s' {1..86})=
 grep -q 'does not match the integrity' "$temporary/err" || fail 'The integrity refusal is unclear'
 [[ ! -e "$agent/node_modules" ]] || fail 'A refused package was installed'
 
+# A correctly signed top-level package without a shrinkwrap is still refused.
+cp "$temporary/fixtures/magnus-agent-2.1.1.tgz" "$temporary/original.tgz"
+rm -f "$temporary/fixture/package/npm-shrinkwrap.json"
+jq '.version="2.1.1"' "$temporary/fixture/package/package.json" > "$temporary/manifest.json"; mv "$temporary/manifest.json" "$temporary/fixture/package/package.json"
+tar -czf "$temporary/fixtures/magnus-agent-2.1.1.tgz" -C "$temporary/fixture" package
+if host magnus-agent-install "$(request 2.1.1)"; then fail 'Installed an unlocked agent'; fi
+grep -q 'no locked dependency graph' "$temporary/err" || fail 'The missing shrinkwrap refusal is unclear'
+[[ ! -e "$agent/node_modules" ]] || fail 'An unlocked package replaced the agent'
+cp "$temporary/original.tgz" "$temporary/fixtures/magnus-agent-2.1.1.tgz"
+# A complete-looking lock must match the signed package dependencies.
+tar -xzf "$temporary/original.tgz" -C "$temporary/fixture"
+jq '.packages[""].dependencies={}' "$temporary/fixture/package/npm-shrinkwrap.json" > "$temporary/lock.json"; mv "$temporary/lock.json" "$temporary/fixture/package/npm-shrinkwrap.json"
+tar -czf "$temporary/fixtures/magnus-agent-2.1.1.tgz" -C "$temporary/fixture" package
+if host magnus-agent-install "$(request 2.1.1)"; then fail 'Installed a mismatched shrinkwrap'; fi
+grep -q 'incomplete or does not match' "$temporary/err" || fail 'The lock mismatch refusal is unclear'
+cp "$temporary/original.tgz" "$temporary/fixtures/magnus-agent-2.1.1.tgz"
+
 # A fresh install: root-only environment with the credentials, the agent's own service setup.
 : > "$log"
 host magnus-agent-install "$(request 2.1.1)" || { cat "$temporary/err" >&2; fail 'install failed'; }
@@ -97,6 +124,10 @@ no_secret "$log" "$temporary/out" "$temporary/err"
 host magnus-agent-install "$(request 2.1.1)" || fail 'repeat failed'
 jq -e '.changed==false' "$temporary/out" >/dev/null || fail 'A repeat reported a change'
 ! /usr/bin/grep -q '^npm ' "$log" && ! /usr/bin/grep -q 'install-service' "$log" && ! /usr/bin/grep -q 'systemctl restart' "$log" || fail 'A repeat reinstalled or restarted'
+touch "$temporary/fail-ci"
+if host magnus-agent-install "$(request 2.1.2)"; then fail 'Accepted a failed locked install'; fi
+[[ $(readlink "$agent/current") == versions/2.1.1 ]] || fail 'A failed locked install switched the active agent'
+rm "$temporary/fail-ci"
 host magnus-agent-install "$(request 2.1.2)" || { cat "$temporary/err" >&2; fail 'upgrade failed'; }
 [[ $(readlink "$agent/current") == versions/2.1.2 && $(jq -r .version "$temporary/out") == 2.1.2 ]] || fail 'The upgrade did not switch versions'
 rm -f "$temporary/active"; : > "$log"

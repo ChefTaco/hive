@@ -218,7 +218,11 @@ any fleet host, with `--ssh-config FILE` and `--sudo-password-file FILE` as that
    without consent it stops and prints the manual steps;
 2. downloads exactly the agent version the release pins for its Magnus
    (`components.magnus.agentPackage`) and installs it only if the tarball matches the pinned
-   npm integrity;
+   npm integrity. The tarball must include a complete standalone `npm-shrinkwrap.json`, which
+   pins every registry dependency and its integrity. The staged install uses `npm ci` with
+   lifecycle scripts disabled and an explicit public npm registry, then runs the agent check
+   before replacing a package. Older unlocked tarballs are refused; this controller requires a
+   new locked Magnus agent artifact in a newly signed suite release;
 3. writes `/opt/magnus-agent/.env`, root-only, with `CONTROL_API_URL` from the console name and
    the agent port. The node credentials come from the Magnus host's own configuration; for
    another host they stream through the controller on standard input only. They are never

@@ -90,12 +90,46 @@ fetch_package() {
   local work=$1 version integrity file actual
   version=$(jq -er .package.version <<< "$request"); integrity=$(jq -er .package.integrity <<< "$request")
   [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$integrity" =~ ^sha512-[A-Za-z0-9+/]{86}==$ ]] || die 'The release pins no valid agent package'
-  (cd "$work" && npm pack --silent "$package@$version" > "$work/pack.out" 2>"$work/pack.err") || die "npm could not download $package@$version"
+  (cd "$work" && npm pack --silent --ignore-scripts --registry=https://registry.npmjs.org/ "$package@$version" > "$work/pack.out" 2>"$work/pack.err") || die "npm could not download $package@$version"
   file="$work/$(tail -n 1 "$work/pack.out")"
   [[ -f "$file" && ! -L "$file" ]] || die 'npm did not produce the package tarball'
   actual="sha512-$(openssl dgst -sha512 -binary "$file" | base64 -w0)"
   [[ "$actual" == "$integrity" ]] || die "The $package@$version tarball does not match the integrity this release pins; nothing was installed"
   printf '%s\n' "$file"
+}
+
+# The signed tarball must carry a complete standalone shrinkwrap, not only semver ranges.
+# Resolve only its locked registry URLs and integrities, and never execute dependency scripts.
+install_locked_package() {
+  local prefix=$1 tarball=$2 work=$3 member candidate target
+  candidate="$work/package"
+  while IFS= read -r member; do
+    [[ "$member" == package/* && "$member" != *'/../'* && "$member" != */.. && "$member" != *'/./'* ]] || die 'Unsafe path in the agent archive'
+  done < <(tar -tzf "$tarball")
+  tar -tvzf "$tarball" | awk 'substr($0,1,1)!="-" && substr($0,1,1)!="d" {bad=1} END {exit bad}' || die 'The agent archive contains links or special files'
+  mkdir -p "$candidate"
+  tar --extract --gzip --file "$tarball" --directory "$candidate" --strip-components=1 --no-same-owner --no-same-permissions
+  [[ -f "$candidate/npm-shrinkwrap.json" && -f "$candidate/package.json" ]] || die 'The agent package has no locked dependency graph; use a release with npm-shrinkwrap.json'
+  jq -e --slurpfile package "$candidate/package.json" --arg name "$package" --arg version "$(jq -r .package.version <<< "$request")" '
+    .lockfileVersion==3 and .name==$name and .version==$version and
+    $package[0].name==$name and $package[0].version==$version and
+    .packages[""].dependencies==$package[0].dependencies and
+    (.packages|to_entries|all(.key=="" or
+      ((.key|startswith("node_modules/")) and (.value.version|type=="string") and
+       (.value.resolved|type=="string" and startswith("https://registry.npmjs.org/")) and
+       (.value.integrity|type=="string" and test("^sha512-[A-Za-z0-9+/]{86}==$")) and
+       (.value.link // false | not))))' "$candidate/npm-shrinkwrap.json" >/dev/null || die 'The agent shrinkwrap is incomplete or does not match the signed package'
+  : > "$work/user.npmrc"; : > "$work/global.npmrc"
+  npm ci --prefix "$candidate" --omit=dev --ignore-scripts --no-audit --no-fund --loglevel=error \
+    --registry=https://registry.npmjs.org/ --userconfig="$work/user.npmrc" --globalconfig="$work/global.npmrc" --cache="$work/npm-cache" > "$work/install.log" 2>&1 ||
+    die 'The locked agent dependencies could not be installed; the previous agent was retained'
+  # Check the staged runtime before replacing any installed package or switching current.
+  node "$candidate/dist/index.js" check --env-file "$root/.env" >/dev/null 2> "$work/check.log" || die 'The staged agent check failed; the previous agent was retained'
+  target="$prefix/node_modules/$package"
+  [[ ! -L "$prefix" && ! -L "$prefix/node_modules" && ! -L "$prefix/node_modules/@hivemagnus" && ! -L "$target" ]] || die 'Unsafe agent package destination'
+  install -d -m 0755 "$prefix/node_modules/@hivemagnus"
+  [[ ! -e "$target" ]] || mv -T -- "$target" "$work/previous-package"
+  mv -T -- "$candidate" "$target"
 }
 
 write_environment() {
@@ -151,14 +185,15 @@ install_agent() {
   current=$(installed_version)
   if [[ "$current" != "$wanted" ]]; then
     work=$(mktemp -d)
+    trap 'rm -rf -- "${work:-}"' EXIT
     tarball=$(fetch_package "$work") || { rm -rf -- "$work"; exit 1; }
     if [[ -L "$root/current" ]]; then
       # An upgrade in the agent's own versioned layout, as its self-upgrade does it.
       install -d -m 0755 "$root/versions/$wanted"
-      npm install --prefix "$root/versions/$wanted" --omit=dev --no-audit --no-fund --loglevel=error "$tarball" >/dev/null
+      install_locked_package "$root/versions/$wanted" "$tarball" "$work"
       ln -sfn "versions/$wanted" "$root/current.new" && mv -T -- "$root/current.new" "$root/current"
     else
-      npm install --prefix "$root" --omit=dev --no-audit --no-fund --loglevel=error "$tarball" >/dev/null
+      install_locked_package "$root" "$tarball" "$work"
       fresh=true
     fi
     rm -rf -- "$work"

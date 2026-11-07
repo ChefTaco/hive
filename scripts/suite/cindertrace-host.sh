@@ -84,14 +84,14 @@ credentials=$(jq -c 'map({key:.id,value:{secret:"",allowedSources,displayName:.i
 while IFS= read -r collector; do
   value=$(cat -- "$(secret_file "$collector")")
   [[ "$value" =~ ^[0-9a-f]{64}$ ]] || die "The credential file of $collector is invalid; remove and add the collector again"
-  credentials=$(jq -c --arg id "$collector" --arg secret "$value" '.[$id].secret=$secret' <<< "$credentials")
+  credentials=$(jq -c --arg id "$collector" --rawfile secret "$(secret_file "$collector")" '.[$id].secret=($secret|rtrimstr("\n"))' <<< "$credentials")
 done < <(jq -r '.[].id' <<< "$all")
 enabled=false; [[ $(jq length <<< "$all") == 0 ]] || enabled=true
-wanted=$(jq -nc --arg enabled "$enabled" --arg credentials "$credentials" '{SECURITY_INGEST_ENABLED:$enabled,SECURITY_FUSION_COLLECTOR_CREDENTIALS_JSON:$credentials}')
+wanted=$(jq -c --arg enabled "$enabled" '{SECURITY_INGEST_ENABLED:$enabled,SECURITY_FUSION_COLLECTOR_CREDENTIALS_JSON:tojson}' <<< "$credentials")
 changes='{}'
 for key in SECURITY_INGEST_ENABLED SECURITY_FUSION_COLLECTOR_CREDENTIALS_JSON; do
   current=$(get "$key")
-  [[ "$current" == "$(jq -r --arg key "$key" '.[$key]' <<< "$wanted")" ]] || changes=$(jq -c --arg key "$key" --argjson wanted "$wanted" '.+{($key):$wanted[$key]}' <<< "$changes")
+  [[ "$current" == "$(jq -r --arg key "$key" '.[$key]' <<< "$wanted")" ]] || changes=$(jq -nc --arg key "$key" 'input as $changes | input as $wanted | $changes+{($key):$wanted[$key]}' <<< "$changes"$'\n'"$wanted")
 done
 if [[ "$changes" != '{}' ]]; then
   # The plan's pinned deployment inputs include this environment. Move the pin only when nothing

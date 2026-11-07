@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Security
+
+- Keep Cindertrace collector secrets and secret-bearing JSON out of process arguments. Read credential files and JSON through files or stdin; test every `jq` invocation rather than sampling short-lived processes.
+- Require a complete, integrity-bearing `npm-shrinkwrap.json` inside the signed Magnus agent tarball. Install the staged package with `npm ci --omit=dev --ignore-scripts` against the public registry, and check it before changing the installed agent. Unlocked packages from earlier releases are refused; publish a new locked agent artifact and a newly signed suite release before using this controller.
+- Align legacy IAM workspace overrides and its lock with Hono 4.13.16 and `@hono/node-server` 2.1.6, retaining the SimpleWebAuthn 14.1.0 update. Test `text/ping` CSRF and raw request-target backslashes.
+
 ### Next
 
 - Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
