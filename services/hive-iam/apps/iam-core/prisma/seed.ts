@@ -4,7 +4,7 @@ import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
 import * as argon2 from 'argon2'
 import { planSeedClientSecret } from './seed-client-secret.js'
 
-const ARGON2_OPTIONS: argon2.Options = {
+const ARGON2_OPTIONS: argon2.HashOptions = {
   type: argon2.argon2id,
   memoryCost: 65536,
   timeCost: 3,

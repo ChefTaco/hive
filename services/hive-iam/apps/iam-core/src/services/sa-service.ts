@@ -5,7 +5,7 @@ import { prisma } from '../db/client.js'
 import { ApiError } from '../types/index.js'
 import { checkIpAllowlist } from '../utils/ip-allowlist.js'
 
-const ARGON2_OPTIONS: argon2.Options = {
+const ARGON2_OPTIONS: argon2.HashOptions = {
   type: argon2.argon2id,
   memoryCost: 65536,
   timeCost: 3,
