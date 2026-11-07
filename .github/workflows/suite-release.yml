@@ -168,7 +168,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then echo "::error::Release $GITHUB_REF_NAME already exists"; exit 1; fi
           {
-            awk -v heading="## $version" 'index($0, heading)==1 {on=1; next} on && /^## / {exit} on' CHANGELOG.md
+            awk -v heading="## $version" -v bracketed="## [$version]" '$0==heading || index($0, heading " ")==1 || index($0, bracketed)==1 {on=1; next} on && /^## / {exit} on' CHANGELOG.md
             printf '\n## Install\n\n```bash\ngit clone --branch %s https://github.com/%s.git hive && cd hive\n./hive.sh --release %s\n```\n\n' "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" "$version"
             printf 'The manifest, its signature and the publisher key are attached and also in the tagged tree.\n\n'
             printf -- '- Publisher key fingerprint (SHA-256 of the DER public key): `%s`\n' "$(openssl pkey -pubin -in trust/publisher.pub -outform DER | sha256sum | cut -d ' ' -f1)"

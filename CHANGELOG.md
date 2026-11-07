@@ -6,12 +6,6 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
-### Security
-
-- Keep Cindertrace collector secrets and secret-bearing JSON out of process arguments. Read credential files and JSON through files or stdin; test every `jq` invocation rather than sampling short-lived processes.
-- Require a complete, integrity-bearing `npm-shrinkwrap.json` inside the signed Magnus agent tarball. Install the staged package with `npm ci --omit=dev --ignore-scripts` against the public registry, and check it before changing the installed agent. Unlocked packages from earlier releases are refused; publish a new locked agent artifact and a newly signed suite release before using this controller.
-- Align legacy IAM workspace overrides and its lock with Hono 4.13.16 and `@hono/node-server` 2.1.6, retaining the SimpleWebAuthn 14.1.0 update. Test `text/ping` CSRF and raw request-target backslashes.
-
 ### Next
 
 - Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
@@ -20,6 +14,22 @@ All notable changes to this project are documented in this file. The format is b
 - A bring-your-own certificate for `magnus-agent install` on a host without Tailscale.
 - Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
 - An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
+
+## [2.0.6] - 2026-11-07
+
+The publisher key is unchanged: DER SHA-256 `c0d0665a70969f37c8f1cffbdcf8e54df13626f8dbd4b5759a7c44843d86d1b2`.
+
+### Security
+
+- Keep Cindertrace collector secrets and secret-bearing JSON out of process arguments. Read credential files and JSON through files or stdin; test every `jq` invocation rather than sampling short-lived processes.
+- Require a complete, integrity-bearing `npm-shrinkwrap.json` inside the signed Magnus agent tarball. Install the staged package with `npm ci --omit=dev --ignore-scripts` against the public registry, and check it before changing the installed agent. Unlocked packages from earlier releases are refused; publish a new locked agent artifact and a newly signed suite release before using this controller.
+- Align legacy IAM workspace overrides and its lock with Hono 4.13.16 and `@hono/node-server` 2.1.6, retaining the SimpleWebAuthn 14.1.0 update. Test `text/ping` CSRF and raw request-target backslashes.
+
+### Release
+
+- Refresh the ingress with `golang.org/x/net` 0.62.0 (CVE-2026-78661) and the hardened Qdrant/PostgreSQL images with patched zlib (CVE-2026-76844 and CVE-2026-85091). Keep the datastore binaries and storage formats unchanged. Both architectures pass the image gate with no fixable HIGH or CRITICAL findings; unfixed distribution findings remain.
+- Pin Oathweave 2.0.4 and Magnus server, fleet gateway and host-agent package 2.1.2. The dashboard artifact includes Next.js 16.4.5; the HTTP adapter is 2.1.6. Preserve the SimpleWebAuthn 14.1.0 fix.
+- No datastore format or schema change relative to Hive 2.0.5. Existing installations use the reviewed upgrade plan, pre-change backup and restored-copy rehearsal. Native agent runtime artifacts remain external to this release.
 
 ## [2.0.5] - 2026-11-07
 
