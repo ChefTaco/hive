@@ -6,13 +6,6 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
-### Added
-
-- `hive.sh --release latest` resolves the latest published suite release once and launches its
-  matching tagged controller. Exact versions remain selectable, retained checkouts leave the
-  original checkout untouched, and manifest signatures and controller digests remain enforced.
-  API errors, dirty retained checkouts and publisher-key changes stop before setup.
-
 ### Next
 
 - Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
@@ -25,6 +18,13 @@ All notable changes to this project are documented in this file. The format is b
 ## [2.0.6] - 2026-11-07
 
 The publisher key is unchanged: DER SHA-256 `c0d0665a70969f37c8f1cffbdcf8e54df13626f8dbd4b5759a7c44843d86d1b2`.
+
+### Added
+
+- `hive.sh --release latest` resolves the latest published suite release once and launches its
+  matching tagged controller. Exact versions remain selectable, retained checkouts leave the
+  original checkout untouched, and manifest signatures and controller digests remain enforced.
+  API errors, dirty retained checkouts and publisher-key changes stop before setup.
 
 ### Security
 

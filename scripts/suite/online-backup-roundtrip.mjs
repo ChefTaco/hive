@@ -254,7 +254,10 @@ try {
     mkdirSync(where, { mode: 0o700 });
     execute('tar', ['-xzf', join(owned, 'backups', archive, 'state.tar.gz'), '-C', where, 'data']);
     const data = join(where, 'data');
-    const sqlite = (file) => { const database = new DatabaseSync(file, { readOnly: true }); try { const row = database.prepare('SELECT count(*) AS rows, coalesce(max(n),0) AS n, coalesce(min(n),0) AS first FROM ticks').get(); return { rows: Number(row.rows), n: Number(row.n), first: Number(row.first), integrity: database.prepare('PRAGMA integrity_check').get().integrity_check, journal: database.prepare('PRAGMA journal_mode').get().journal_mode }; } finally { database.close(); } };
+    // These are disposable extracted copies. A stopped writer may leave a hot rollback
+    // journal; SQLite must recover its committed state before an integrity/read check.
+    // The archive itself stays untouched, just as when a real restore starts the service.
+    const sqlite = (file) => { const database = new DatabaseSync(file); try { const row = database.prepare('SELECT count(*) AS rows, coalesce(max(n),0) AS n, coalesce(min(n),0) AS first FROM ticks').get(); return { rows: Number(row.rows), n: Number(row.n), first: Number(row.first), integrity: database.prepare('PRAGMA integrity_check').get().integrity_check, journal: database.prepare('PRAGMA journal_mode').get().journal_mode }; } finally { database.close(); } };
     const result = { wal: sqlite(join(data, 'probe', 'wal.db')), journal: sqlite(join(data, 'probe', 'journal.db')) };
     const lines = readFileSync(join(data, 'probe', 'events.log'), 'utf8').trim().split('\n').map(Number);
     result.log = { lines: lines.length, n: lines.at(-1), contiguous: lines.every((value, index) => value === lines[0] + index) };
