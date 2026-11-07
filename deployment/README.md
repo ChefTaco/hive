@@ -45,10 +45,10 @@ never rebuilt; a change takes a new version.
 | Image | Built from | Changes from upstream |
 |---|---|---|
 | `hive-registry` | `services/hive-registry/Dockerfile` on `node:24.22.1-bookworm-slim` | npm, npx, corepack, yarn and apt removed |
-| `hive-ingress` | `deployment/ingress.Dockerfile` | Caddy 2.11.7 compiled from its module with Go 1.26.10, `golang.org/x/net` v0.60.0 and go-jose v4.1.6 (`deployment/caddy/go.mod` and `go.sum`), on the official Caddy 2.11.7 Alpine image with curl removed and Alpine packages upgraded |
-| `hive-postgres` 17.11-1, 18.6-1 | `deployment/datastores/postgres.Dockerfile` | gosu and apt removed. The suite runs PostgreSQL as its non-root service owner, so the entrypoint never reaches its root-only gosu step; initdb and data checksums are unchanged |
+| `hive-ingress` | `deployment/ingress.Dockerfile` | Caddy 2.11.7 compiled from its module with Go 1.26.10, `golang.org/x/net` v0.62.0 and go-jose v4.1.6 (`deployment/caddy/go.mod` and `go.sum`), on the official Caddy 2.11.7 Alpine image with curl removed and Alpine packages upgraded |
+| `hive-postgres` 17.11-2, 18.6-2 | `deployment/datastores/postgres.Dockerfile` | gosu and apt removed. The suite runs PostgreSQL as its non-root service owner, so the entrypoint never reaches its root-only gosu step; initdb and data checksums are unchanged |
 | `hive-redis` 8.2.10-1 | `deployment/datastores/redis.Dockerfile` | pending Debian security updates applied, apt removed |
-| `hive-qdrant` 1.18.3-1 | `deployment/datastores/qdrant.Dockerfile` | pending Debian security updates applied, apt and the unused web dashboard (`/qdrant/static`) removed; the Qdrant binary and its storage format are upstream's |
+| `hive-qdrant` 1.18.3-2 | `deployment/datastores/qdrant.Dockerfile` | pending Debian security updates applied, apt and the unused web dashboard (`/qdrant/static`) removed; the Qdrant binary and its storage format are upstream's |
 
 To rebuild one locally, pass the base digest from `deployment/images.json`, for example
 `docker build -f deployment/datastores/postgres.Dockerfile --build-arg
@@ -57,7 +57,7 @@ pending distribution updates are pinned by the digest that was published, not re
 byte for byte.
 
 Qdrant stays on 1.18.x so existing storage opens unchanged. A copy of 1.18.1-written production
-storage opened with `hive-qdrant` 1.18.3-1 returned the same collections, point counts and exact
+storage opened with `hive-qdrant` 1.18.3-2 returned the same collections, point counts and exact
 vector query results as upstream 1.18.1.
 
 `scripts/release/scan-suite-images.sh releases/X.Y.Z.json` is the release gate: every pinned
