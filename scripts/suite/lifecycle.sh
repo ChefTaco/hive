@@ -2,8 +2,8 @@
 
 hive_action() {
   local host=$1 file script=''
-  local -a files=(public-runtime.sh integrity-host.sh input-artifacts-host.sh native-initialization-host.sh adapters-host.sh inference-registration.sh initialize-migrations-host.sh host-runtime.sh)
-  [[ "$2" != snapshot ]] || files=(integrity-host.sh adapters-host.sh snapshot-host.sh host-runtime.sh)
+  local -a files=(ownership-host.sh public-runtime.sh integrity-host.sh input-artifacts-host.sh native-initialization-host.sh adapters-host.sh inference-registration.sh initialize-migrations-host.sh host-runtime.sh)
+  [[ "$2" != snapshot ]] || files=(ownership-host.sh integrity-host.sh adapters-host.sh snapshot-host.sh host-runtime.sh)
   for file in "${files[@]}"; do script+=$(cat "$HIVE_ROOT/scripts/suite/$file")$'\n'; done
   # The host script travels as one command-line argument, which the kernel bounds at 128 KiB.
   # The online backup ships only the definitions it runs, compressed; it is the same code.
@@ -28,6 +28,7 @@ hive_hold() {
 
 hive_stage() {
   local host temporary
+  HIVE_PREPARED_HOSTS=()
   temporary=$(mktemp -d)
   hive_need tar
   hive_runtime_files > "$temporary/controller-files"
@@ -42,16 +43,34 @@ hive_stage() {
   done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
   while IFS= read -r host; do
     hive_action "$host" prepare || { rm -rf -- "$temporary"; hive_die 'Host preparation failed'; }
+    HIVE_PREPARED_HOSTS+=("$host")
     hive_transfer "$host" "$temporary/$host.json" "candidate.$HIVE_PLAN_DIGEST.json"
     hive_transfer "$host" "$HIVE_MANIFEST" "manifest.$HIVE_PLAN_DIGEST.json"
     hive_transfer "$host" "$HIVE_SIGNATURE" "signature.$HIVE_PLAN_DIGEST"
     hive_transfer "$host" "$HIVE_TRUST_KEY" "trust.$HIVE_PLAN_DIGEST.pub"
     hive_transfer "$host" "$temporary/controller.tar.gz" "controller.$HIVE_PLAN_DIGEST.tar.gz"
-    hive_action "$host" stage || { rm -rf -- "$temporary"; hive_die 'Host staging failed before quiescence'; }
-    hive_action "$host" compatibility || { rm -rf -- "$temporary"; hive_die 'Storage compatibility check failed before quiescence'; }
-    hive_action "$host" adapters-preflight || { rm -rf -- "$temporary"; hive_die 'Native agent or external endpoint reference preflight failed'; }
+    hive_action "$host" stage || { rm -rf -- "$temporary"; hive_abort stage 'Host staging failed before quiescence'; }
+    hive_action "$host" compatibility || { rm -rf -- "$temporary"; hive_abort compatibility 'Storage compatibility check failed before quiescence'; }
+    hive_action "$host" adapters-preflight || { rm -rf -- "$temporary"; hive_abort adapters-preflight 'Native agent or external endpoint reference preflight failed'; }
   done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
   rm -rf -- "$temporary"
+}
+
+# A failure in the read-only checks before quiescence changed nothing, so the open transaction
+# closes as aborted on every host it reached, and the next plan can start. A host that refuses
+# keeps its transaction for recovery.
+hive_abort() {
+  local step=$1 message=$2 host aborted=true
+  # migrate-native keeps its own staging and recovery unchanged.
+  ! jq -e '.nativeMigration!=null' "$HIVE_CONFIG" >/dev/null 2>&1 || hive_die "$message"
+  for host in "${HIVE_PREPARED_HOSTS[@]}"; do
+    if ! HIVE_ABORT_STEP=$step hive_action "$host" abort >/dev/null 2>&1; then
+      aborted=false
+      printf 'Hive: the transaction on %s stays open; repeat the same command to recover\n' "$host" >&2
+    fi
+  done
+  [[ "$aborted" == true ]] || hive_die "$message"
+  hive_die "$message. Nothing was changed, so the transaction is closed as aborted; fix the cause, then run this or any other command"
 }
 
 hive_lifecycle() {

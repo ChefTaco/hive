@@ -108,6 +108,31 @@ In a distributed configuration the gateway needs a `bootstrap.productEndpoints["
 entry like any other product, on Magnus's host. Bind it where only the console host's ingress and
 Magnus can reach it. Its `/internal` route is for Magnus and has no route through the ingress.
 
+### Preparing nodes and the gateway key
+
+The gateway signs in to each node as one restricted account, with one key. Create both before
+running setup; Hive refuses a key file it cannot read or that others can read. On a single host,
+the node is the host itself. As the account that runs `hive.sh` (UID 1000):
+
+```bash
+# On each node: a dedicated account with no sudo rights.
+sudo useradd --create-home --shell /bin/bash --comment "Hive web terminal" hive-terminal
+
+# On the Magnus host: the gateway key, owned by you and owner-only. Hive copies it.
+sudo install -d -m 0700 -o "$USER" -g "$USER" /etc/hive/fleet
+ssh-keygen -q -t ed25519 -N "" -C hive-fleet-gateway -f /etc/hive/fleet/gateway-key
+
+# On each node: authorize that key for the terminal account only.
+sudo install -d -m 0700 -o hive-terminal -g hive-terminal /home/hive-terminal/.ssh
+sudo install -m 0600 -o hive-terminal -g hive-terminal /etc/hive/fleet/gateway-key.pub \
+  /home/hive-terminal/.ssh/authorized_keys
+```
+
+Then answer `yes` to *Deploy the Magnus web terminal gateway*, `hive-terminal` to *Restricted
+SSH account on fleet nodes*, `/etc/hive/fleet/gateway-key` to the key question, and `yes` to
+grant the terminal to the initial operator if that account should use it. A terminal also needs
+a Magnus node: [installing the agent](#installing-the-agent) adds one and approves its host key.
+
 ### Approving a node
 
 The gateway never learns a host key from a connection, and a node with no approval refuses
@@ -134,7 +159,8 @@ as the key in its configuration directory is. Restrict those backups accordingly
 
 Dispatch, ingestion, retention and notification integrations in fresh Cindertrace
 configuration start disabled until the operator reviews their product-owned
-settings. Migration rehearsals additionally enforce each product's isolated
+settings. Ingestion starts with the first collector: see
+[sending security events to Cindertrace](#sending-security-events-to-cindertrace). Migration rehearsals additionally enforce each product's isolated
 read-only mode. Restored Magnus does not consume queued work or contact agents;
 restored ChatterMost normally refuses logins and WebSocket upgrades. The separate
 coordinated authentication copy below explicitly enables its volatile, read-only
@@ -146,6 +172,125 @@ Hive does not enable checksums or alter their data automatically.
 
 All inference services, hosted APIs, model files, model storage, containers and
 hardware provisioning remain external. Full installation creates none of them.
+
+## Magnus host agents
+
+A host joins the fleet by running the Magnus agent, which calls Magnus's agent API. On a fresh
+single-host installation Magnus listens only on the suite's private network, so setup offers to
+publish that API on its own port:
+
+```text
+Port for Magnus host agents, for example 4000 (blank for none): 4000
+```
+
+The default is none. The port is published on the console bind address, with the console
+certificate, so `tls-refresh` renews it too. The installation file records it as
+`"console": {"nativeListeners": [{"port": 4000, "component": "magnus"}]}`, and the plan shows it
+as `console.magnusAgentPort`. It is offered on fresh installations only for now; a distributed
+Magnus has its own HTTPS endpoint, and adding the port to an existing installation is a follow-up.
+
+The port is not the console. The ingress serves only the routes the agent and its Hermes sync
+call (`GET /`, the heartbeat, log ingest, resource-lease, managed cron occurrence and Hermes
+registry client routes) and answers 404 to everything else, including every operator, browser
+and system route. Only the agent credentials (`x-node-token`, `x-log-token`,
+`x-hermes-registry-token`), `Content-Type` and `Accept` reach Magnus: no `Authorization`, cookie
+or `x-api-secret` passes, and `X-Forwarded-For` is the client's address. Bind the console to an
+address that only your hosts can reach, or limit the port with your network's firewall: ports
+Docker publishes bypass ufw.
+
+### Installing the agent
+
+One command installs the agent on the Magnus host, from the release checkout:
+
+```bash
+./hive.sh magnus-agent install --config FILE
+```
+
+It runs on the host through the same transport as every other `hive.sh` step: locally (asking
+for your sudo password, as the agent is a root service), or over SSH with the host's
+`sudoPasswordFile`. `--host ID` names another inventory host, and `--host deploy@node-1.example.com`
+any fleet host, with `--ssh-config FILE` and `--sudo-password-file FILE` as that host needs. It:
+
+1. checks the host: systemd, port 4100 free for the agent, and Node.js against the agent's
+   `^24.22.1 || ^26.13.0`. Without a suitable Node.js it offers to install Node.js 24 from
+   NodeSource's signed apt repository, after checking its key fingerprint
+   `6F71F525282841EEDAF851B42F59B5F99B1BE0B4`; `--install-node` agrees unattended, and
+   without consent it stops and prints the manual steps;
+2. downloads exactly the agent version the release pins for its Magnus
+   (`components.magnus.agentPackage`) and installs it only if the tarball matches the pinned
+   npm integrity;
+3. writes `/opt/magnus-agent/.env`, root-only, with `CONTROL_API_URL` from the console name and
+   the agent port. The node credentials come from the Magnus host's own configuration; for
+   another host they stream through the controller on standard input only. They are never
+   printed and never a command-line value;
+4. runs the agent's `check`, then its own `install-service`, which sets up the versioned layout
+   and unit that Magnus-driven upgrades use, and starts it;
+5. waits up to two minutes for Magnus to accept the first heartbeat and reports the node ID;
+6. with the web terminal gateway, reads the host's SSH host key fingerprint on the host and
+   offers to approve it (`--trust` agrees unattended), so the terminal works at once.
+
+Running it again repairs the installation, or upgrades the agent in place to the version a newer
+release pins. `./hive.sh magnus-agent status --config FILE` prints one JSON document: the
+installed version, the service state, Magnus's last heartbeat and the web terminal approval;
+`remove` stops and removes the agent, and with `--trust` also revokes the approval. Magnus keeps
+its record of the node.
+
+The agent's listener certificate is the console certificate on the console host, renewed with it:
+`console-certificate.sh renew` and its weekly timer restart the agent after a renewal; after a
+manual `tls-refresh`, run `sudo systemctl restart magnus-agent`. On any other host, the agent
+gets a `tailscale cert` for the host's MagicDNS name and renews it itself.
+
+Magnus calls the agent back on port 4100 of its host name, so that name must resolve from the
+Magnus container. See the
+[agent README](https://github.com/ChefTaco/magnus/blob/HEAD/packages/agent/README.md) for every
+agent setting.
+
+## Sending security events to Cindertrace
+
+A fresh Cindertrace ingests nothing until a collector exists. Each collector signs its events
+with its own credential and may send only the sources it is allowed. Create one with `hive.sh`,
+from the release checkout:
+
+```bash
+./hive.sh cindertrace-collector add edge --sources tailscale --config FILE
+```
+
+The credential is generated on the Cindertrace host into
+`config/.credentials/cindertrace-collectors/edge` (mode 0600) and is never printed or passed
+as an argument. The command turns ingestion on, records the change for later `install`,
+`upgrade` and backup runs, and recreates only Cindertrace. `list` shows each collector, its
+sources and credential file; `remove ID` revokes one, and removing the last turns ingestion
+off. Sources are `unifi_dns`, `unifi_ids`, `netflow`, `wazuh`, `tailscale`, `magnus`, `hive`
+and `chattermost`. Collectors survive upgrades: they live in the installation, not the release.
+
+Collectors send to `https://hive.example.com/api/v1/security-fusion/ingest/events` through the
+console origin. Cindertrace's own collector, `node services/security-collector/dist/index.js`
+in the Cindertrace image the release pins, reads `CINDERTRACE_API_URL=https://hive.example.com`,
+`SECURITY_FUSION_COLLECTOR_ID=edge` and `SECURITY_FUSION_INGEST_SECRET` from that file, plus its
+source settings, such as `TAILSCALE_LOCAL_ENABLED=true`; see Cindertrace's
+[integrations](https://github.com/ChefTaco/cindertrace/blob/HEAD/docs/INTEGRATIONS.md).
+
+Any client can send a batch the same way. The signature is HMAC-SHA256, keyed with the
+credential, over `COLLECTOR_ID.TIMESTAMP.NONCE.BODY`. A test event from the Cindertrace host:
+
+```bash
+secret=/opt/hive/config/.credentials/cindertrace-collectors/edge
+now=$(date -u +%Y-%m-%dT%H:%M:%S.000Z) id=test-$(date +%s) nonce=$(openssl rand -hex 16)
+body=$(jq -cn --arg now "$now" --arg id "$id" '{schemaVersion:"1.0",collectorId:"edge",sentAt:$now,
+  events:[{schemaVersion:"1.0",eventId:$id,source:"tailscale",sourceEventId:$id,kind:"device.login",
+  observedAt:$now,severity:"medium",confidence:0.9,summary:"Test event",entities:[],attributes:{},evidence:[]}]}')
+signature=$(printf '%s' "edge.$now.$nonce.$body" | openssl dgst -sha256 -hmac "$(cat "$secret")" -r | cut -d ' ' -f1)
+curl -sS -H 'Content-Type: application/json' -H "x-security-collector-id: edge" \
+  -H "x-security-timestamp: $now" -H "x-security-nonce: $nonce" -H "x-security-signature: $signature" \
+  --data "$body" https://hive.example.com/api/v1/security-fusion/ingest/events
+```
+
+It answers `202` with the stored count, and the event appears under **Cindertrace > Events**.
+A batch with a bad signature is refused with `401` and leaves no trace. A batch that is signed
+but refused, for example `403` for a source the collector may not send or `400` for an invalid
+event, marks the collector's *Cursor health* as `ERROR` under **Cindertrace > Sources**. The
+mark records only that last refusal: the collector's next accepted batch sets it back to
+`HEALTHY`.
 
 ## Developer rehearsal
 

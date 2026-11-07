@@ -15,6 +15,7 @@ if ! docker image inspect hive-registry:candidate >/dev/null 2>&1; then
   docker pull --quiet "$image" >/dev/null && docker tag "$image" hive-registry:candidate
 fi
 status=0
-"$root/scripts/suite/sudo-host.sh" --scratch "$scratch" -- node "$root/scripts/suite/online-backup-roundtrip.mjs" "$@" || status=$?
+"$root/scripts/suite/sudo-host.sh" --scratch "$scratch" -- bash "$root/scripts/suite/ownership-host.test.sh" "$scratch/ownership" || status=$?
+((status != 0)) || "$root/scripts/suite/sudo-host.sh" --scratch "$scratch" -- node "$root/scripts/suite/online-backup-roundtrip.mjs" "$@" || status=$?
 if ((status == 0)); then rm -rf -- "$scratch"; else printf 'Private evidence retained at %s\n' "$scratch" >&2; fi
 exit "$status"

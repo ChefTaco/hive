@@ -4,6 +4,104 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Next
+
+- Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
+  host Node.js. The setup question "Opt-in native agent runtime" offers runtimes the release
+  has no artifacts for.
+- A bring-your-own certificate for `magnus-agent install` on a host without Tailscale.
+- Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
+- An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
+
+## [2.0.4] - 2026-11-07
+
+`releases/2.0.4.json` pins exactly the images and versions of 2.0.3 and now also the Magnus agent
+package, `@hivemagnus/magnus-agent` 2.1.1 with its registry integrity
+(`components.magnus.agentPackage`). The rest of the release is the controller. The publisher key
+is unchanged (fingerprint `c0d0665a70969f37c8f1cffbdcf8e54df13626f8dbd4b5759a7c44843d86d1b2`).
+
+### Security
+
+- Rescanned on 2026-11-07, the images have no CRITICAL or HIGH finding with a fix available, on
+  linux/amd64 and linux/arm64, and their unfixed findings are exactly those listed for 2.0.3.
+- The ingress links `github.com/go-jose/go-jose/v3` v3.0.5 (GHSA-mgcc-cww5-fp2q,
+  GHSA-4w3g-jfj2-cw2q, GHSA-vvm8-gf78-28g4; no patched v3 release). Its only importer in the
+  build is `go.step.sm/crypto/jose`, through Caddy's PKI app (`caddypki`, the smallstep
+  authority). The newest `smallstep/certificates` (v0.30.2) does not build with the
+  `go.step.sm/crypto` release that moved to go-jose v4, so no update removes it yet. The suite's
+  ingress never configures that app: its configuration has only the `http` and `tls` apps,
+  certificates are loaded from files, there is no automation, internal issuer or `acme_server`,
+  and the admin API is off, so the vulnerable parsing is not reachable.
+
+
+### Added
+
+- A fresh installation with Magnus can publish the Magnus agent API for host agents on its own
+  port (`console.nativeListeners: [{"port": N, "component": "magnus"}]`, offered by interactive
+  setup, off by default). The ingress serves it on the console bind address with the console
+  certificate and its own route set: the agent and Hermes sync routes only, the agent
+  credentials only, and the client address in `X-Forwarded-For`. Before this, a host agent on a
+  fresh single-host installation had no route to Magnus, so the full profile's fleet could not
+  have nodes. See [Magnus host agents](deployment/FULL.md#magnus-host-agents).
+- `hive.sh magnus-agent install|status|remove` installs the Magnus agent on the Magnus host or
+  another fleet host through the controller's transport. It checks Node.js against the agent's
+  engines and, with consent, installs Node.js 24 from NodeSource's signed apt repository with a
+  pinned key fingerprint; installs exactly the agent version the release pins, verified against
+  the tarball integrity the release manifest now records (`components.magnus.agentPackage`,
+  from the release inputs and checked against the registry when publishing); moves the node
+  credentials into a root-only environment without printing them or passing them as arguments;
+  sets up the agent's own upgradeable service; waits for Magnus to accept its first heartbeat;
+  and offers to approve the host key for the web terminal. It is idempotent and upgrades in place.
+- `hive.sh cindertrace-collector add ID --sources SOURCE[,SOURCE]`, `list` and `remove ID`
+  provision the credentials Cindertrace collectors sign events with. A credential is generated
+  on the Cindertrace host into an owner-only file and never printed; Cindertrace ingests while a
+  collector exists, and only Cindertrace is recreated. Before this, a fresh installation could
+  not receive security events without editing its digest-checked environment. See
+  [sending security events](deployment/FULL.md#sending-security-events-to-cindertrace).
+- `npm run check:release-docs` fails when an install example names anything but the newest
+  signed release.
+- CI runs the ingress transport acceptance, which now proves the agent port's allowlist, that
+  forged identity headers on it have no effect and that the console port still refuses agent
+  credentials.
+
+### Fixed
+
+- The online backup's pauses no longer grow with the data. An application was paused for the
+  whole capture of its group, which included a snapshot of every Qdrant collection, a full copy of
+  every SQLite database and the write of the Redis dump; on an installation with 80 collections
+  and a few hundred MiB of SQLite, the memory and identity groups paused for many seconds, and
+  clients with shorter timeouts saw errors. Now everything that can be taken while the application
+  serves is taken first, and the pause only proves those copies current or brings what changed up
+  to date:
+  - Qdrant collections are snapshotted while serving, between two readings of each collection's
+    version (its shards' operation numbers, queued updates, points, segments and configuration).
+    While paused, only collections written or created since are snapshotted again. A Qdrant that
+    reports no versions has every collection snapshotted while paused, as before.
+  - SQLite databases are copied while serving. While paused, in one read transaction, a database
+    unchanged since its copy is kept without being read again, and any other is compared with its
+    copy and only what differs is written; a WAL database's log is copied with it and checkpointed
+    into the copy afterwards. Files changed shortly before their copy are compared by content.
+  - Redis forks its snapshot while the application is paused; the dump is written and collected
+    after the pause.
+  Each group still holds the state of one instant. The receipt now records each pause's steps
+  (`steps`) and the work done before it (`staged`). The online backup acceptance seeds a data set
+  of a real installation's size and fails when any pause exceeds a budget (2 s by default).
+- A command that failed in its read-only checks (staging, storage compatibility, native and
+  external preflight) left its transaction open, so `doctor` reported `incomplete-transaction`
+  and every other plan was refused until the same plan succeeded. Nothing had changed on the
+  host, so the transaction now closes as `aborted`, keeping its record; `doctor` treats it as
+  closed and the next plan proceeds. From quiescence on, recovery is unchanged. See
+  [when a command stops](deployment/README.md#when-a-command-stops-transactions-and-recovery).
+- A host side that runs as root through `sudoPasswordFile` on an installation an ordinary account
+  owns left root-owned archives, rehearsals, transactions and receipts that account could not
+  read. Every host action now gives what it wrote back to the installation directory's owner,
+  keeping modes; service data and root-owned installations, as on production hosts, are
+  unchanged.
+- The installation guide, README and deployment overview of 2.0.3 still installed 2.0.2.
+- FULL.md now shows how to create the web terminal's restricted node account and gateway key.
+
 ## [2.0.3] - 2026-11-06
 
 A controller release. `releases/2.0.3.json` pins exactly the images and versions of 2.0.2;

@@ -210,6 +210,13 @@ jq 'del(.services.emberpath)' "$directory/compose.json" > "$HIVE_FIXTURE/next"; 
 jq '.release.version="9.9.9"' "$HIVE_FIXTURE/installation.json" > "$HIVE_FIXTURE/next"; mv "$HIVE_FIXTURE/next" "$HIVE_FIXTURE/installation.json"; expect_drift release-mismatch; reset_fixture
 jq '(.products[]|select(.id=="emberpath")|.versions[0].image)="example.com/wrong@sha256:'"$(printf 'c%.0s' {1..64})"'"' "$HIVE_FIXTURE/products.json" > "$HIVE_FIXTURE/next"; mv "$HIVE_FIXTURE/next" "$HIVE_FIXTURE/products.json"; expect_drift catalog-mismatch; reset_fixture
 printf '{"phase":"ready"}' > "$directory/transaction.json"; expect_drift incomplete-transaction; reset_fixture
+# A transaction aborted in its read-only checks changed nothing: it is not drift, but a prepared one is.
+printf '{"phase":"prepared"}' > "$directory/transaction.json"; expect_drift incomplete-transaction; reset_fixture
+printf '{"phase":"aborted","abortedStep":"compatibility"}' > "$directory/transaction.json"
+[[ $(status | jq -r .state) == in-sync ]] || { status >&2; fail 'An aborted transaction was reported as drift'; }
+hive_registry_doctor > "$temporary/doctor.log" || fail 'Doctor failed on an aborted transaction'
+grep -q 'in sync' "$temporary/doctor.log" || fail 'Doctor did not report an aborted transaction as in sync'
+reset_fixture
 touch "$HIVE_FIXTURE/unavailable"
 [[ $(status | jq -r .state) == unavailable ]] || fail 'An unreachable registry was not reported'
 reset_fixture

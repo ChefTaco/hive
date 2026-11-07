@@ -2,7 +2,7 @@
 
 This guide takes a freshly installed Ubuntu or Debian server to a running Hive suite with every
 product, signed in through the console. Each step is safe to repeat. The examples use the release
-`2.0.2`, the console name `hive.example.com` and the installation directory `/opt/hive`; use your
+`2.0.4`, the console name `hive.example.com` and the installation directory `/opt/hive`; use your
 own values.
 
 ## What you need
@@ -24,7 +24,7 @@ own values.
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git    # only if git is missing
-git clone --branch v2.0.2 https://github.com/ChefTaco/hive.git
+git clone --branch v2.0.4 https://github.com/ChefTaco/hive.git
 cd hive
 ```
 
@@ -97,7 +97,7 @@ as above. Step 9 installs a renewed certificate.
 ## 4. Run the setup
 
 ```bash
-./hive.sh --release 2.0.2
+./hive.sh --release 2.0.4
 ```
 
 `hive.sh` checks the release signature first, then asks these questions. Press Enter to accept
@@ -118,20 +118,21 @@ the default shown in brackets.
 | Initial operator email | your address, for identity recovery |
 | Existing console certificate file | `/etc/hive/tls/console.crt` |
 | Protected console private key file | `/etc/hive/tls/console.key` |
-| Deploy the Magnus web terminal gateway | `no` (see [the web terminal](FULL.md#magnus-web-terminal)) |
+| Deploy the Magnus web terminal gateway | `no`. For `yes`, first create the restricted account and key in [preparing nodes](FULL.md#preparing-nodes-and-the-gateway-key) |
+| Port for Magnus host agents | blank for none. Give a port, such as `4000`, to let hosts join the Magnus fleet; see [Magnus host agents](FULL.md#magnus-host-agents) |
 | Existing external inference HTTPS endpoint | blank to skip; see [external inference](INFERENCE.md) |
-| Opt-in native agent runtime | blank to skip; see [native agents](NATIVE_AGENTS.md) |
+| Opt-in native agent runtime | blank. Release 2.0.4 pins no native agent artifacts, so none can be installed here; a Magnus host agent is installed as in [Magnus host agents](FULL.md#magnus-host-agents) |
 | Write protected installation configuration to | the default, `~/.config/hive/hive/installation.json` |
 
 `hive.sh` then prints the plan: every product, image digest and host path. Answer `y` to apply
 it. The first install pulls the images and takes a few minutes; later commands take seconds.
 
 If it stops after writing the configuration file, fix the cause and run `./hive.sh --release
-2.0.2` again: after the installation name it offers to continue with the saved file instead of
+2.0.4` again: after the installation name it offers to continue with the saved file instead of
 asking everything again. Unattended, the same step is:
 
 ```bash
-./hive.sh install --config ~/.config/hive/hive/installation.json --release 2.0.2
+./hive.sh install --config ~/.config/hive/hive/installation.json --release 2.0.4
 ```
 
 ## 5. Check the installation
@@ -217,6 +218,20 @@ certificate you renew another way, add `--no-tailscale`, or run `tls-refresh` fr
 client's deploy hook. Run these on the console host. After an upgrade, run `schedule` again from
 the new release's checkout, so the timer uses its `hive.sh`.
 
+## 10. Optional: add this host to the Magnus fleet
+
+With the full profile and a port for Magnus host agents, one command installs the Magnus agent on
+this host, waits for Magnus to accept its first heartbeat and, with the web terminal, approves
+the host's SSH key so a terminal opens at once:
+
+```bash
+./hive.sh magnus-agent install --config ~/.config/hive/hive/installation.json
+```
+
+It asks before installing Node.js 24 from NodeSource when the host has no suitable Node.js, and
+asks for your sudo password, as the agent runs as a root service. See
+[installing the agent](FULL.md#installing-the-agent).
+
 ## Firewall and ports
 
 The suite publishes only the console listener. Docker inserts its own firewall rules, so a port
@@ -267,6 +282,7 @@ installation directory is owned by root:
 | `Installation ... already has a configuration` | Answer `yes` to continue with it, or choose another installation name |
 | `permission denied while trying to connect to the docker API` | Log out and back in after joining the `docker` group, then run `./scripts/install-prerequisites.sh --check` |
 | `Required tool missing on this host: ...` | Run `sudo ./scripts/install-prerequisites.sh` on that host, then `./scripts/install-prerequisites.sh --check` |
+| `incomplete-transaction` from `doctor`, or `A different transaction requires recovery` | A command stopped part-way. Repeat exactly the same command; see [when a command stops](README.md#when-a-command-stops-transactions-and-recovery) |
 | `Requested HTTPS port is already occupied` | Something else listens on the port: `sudo ss -lntp 'sport = :443'`. Stop it or choose another port |
 | `Console certificate and private key do not match`, or `... is not valid for NAME` | Check the files with `./scripts/console-certificate.sh check --cert FILE --key FILE --name NAME` |
 | `Permission denied (publickey,password)`, or `Host control is not ready` | The controller's SSH key or host key is not accepted; see [Managing the host from another machine](#managing-the-host-from-another-machine) |

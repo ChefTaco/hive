@@ -2,15 +2,25 @@
 // container, as the owning service user, with one service's live /data mounted. Prints JSON
 // summaries only: never a secret, a row or file content.
 //
-// precopy  copies the service's ordinary files while it serves, so the pause stays short.
-// capture  runs while the service is paused: every SQLite database is copied with the SQLite
-//          online backup API (one read transaction, so a consistent snapshot that also includes
-//          committed WAL frames), and each file is brought up to date with the paused state.
-// verify   runs after the pause, against the copy only: SQLite integrity and journal mode.
-import { DatabaseSync, backup } from 'node:sqlite';
+// The pause must not grow with the data: everything that can be copied while the service serves
+// is copied then, and the pause only proves that copy still current, or brings it up to date.
+//
+// precopy  copies the service's files while it serves, SQLite databases (and a WAL database's
+//          log) as bytes too, and records each one's version: its file identity and times, and for
+//          a database its change counter and log header.
+// capture  runs while the service is paused. Every SQLite database is read in one read
+//          transaction, so a writer paused inside a commit is reported busy and retried; within it
+//          a database whose version is unchanged since its pre-copy is kept as copied, and any
+//          other is brought up to date by comparing it with its copy and writing only what
+//          differs. The copy is then exactly the committed state of the pause instant: the
+//          database file, and for a WAL database the log, whose committed frames SQLite replays.
+//          Each file is brought up to date the same way.
+// verify   runs after the pause, against the copy only: a WAL copy's log is checkpointed into it,
+//          then SQLite integrity and journal mode are checked.
+import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import {
-  closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync,
+  appendFileSync, closeSync, existsSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync,
   rmSync, chmodSync, utimesSync, writeFileSync, writeSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -19,6 +29,9 @@ const HEADER = 'SQLite format 3\0';
 const SIDECARS = ['-wal', '-shm', '-journal'];
 const TAIL = 64 * 1024;
 const CHUNK = 1024 * 1024;
+// File times come from a coarse clock: a file changed shortly before it was read can change again
+// without a new time. Such a file is compared by content while paused, never kept by its times.
+export const RACY_MS = 1000;
 // A paused writer can hold a SQLite lock that blocks readers. The shell resumes the service and
 // retries the whole capture when this status is returned.
 export const BUSY_EXIT = 75;
@@ -96,8 +109,62 @@ function copyFrom(source, target, mode, offset = 0) {
     chmodSync(target, mode);
     const after = fstatSync(input, { bigint: true });
     const stable = before.size === after.size && before.mtimeNs === after.mtimeNs && before.ctimeNs === after.ctimeNs;
-    return { bytes: position, ino: String(after.ino), mtimeNs: String(after.mtimeNs), ctimeNs: String(after.ctimeNs), stable, tail: tailDigest(source, position) };
+    return { bytes: position, ino: String(after.ino), mtimeNs: String(after.mtimeNs), ctimeNs: String(after.ctimeNs), changedMs: Math.max(Number(after.mtimeMs), Number(after.ctimeMs)), stable, tail: tailDigest(source, position) };
   } finally { closeSync(input); }
+}
+
+// Brings a copy up to date with an open file: both are read, and only the chunks that differ
+// are written. Reports whether anything within the copy's earlier length changed, or only a tail
+// was added.
+export function syncFrom(input, target, mode) {
+  const size = Number(fstatSync(input).size);
+  const output = openSync(target, existsSync(target) ? 'r+' : 'w', 0o600);
+  const wanted = Buffer.allocUnsafe(CHUNK), held = Buffer.allocUnsafe(CHUNK);
+  let position = 0, written = 0, rewrote = false;
+  try {
+    const length = Number(fstatSync(output).size);
+    while (position < size) {
+      const read = readSync(input, wanted, 0, Math.min(CHUNK, size - position), position);
+      if (read === 0) break;
+      const have = position < length ? readSync(output, held, 0, Math.min(read, length - position), position) : 0;
+      if (have !== read || wanted.compare(held, 0, read, 0, read) !== 0) {
+        if (have > 0 && wanted.compare(held, 0, have, 0, have) !== 0) rewrote = true;
+        writeSync(output, wanted, 0, read, position); written += read;
+      }
+      position += read;
+    }
+    if (length > position) rewrote = true;
+    ftruncateSync(output, position);
+  } finally { closeSync(output); }
+  chmodSync(target, mode);
+  return { compared: position, written, rewrote };
+}
+
+const readAt = (descriptor, position, length) => { const buffer = Buffer.alloc(length); return buffer.subarray(0, readSync(descriptor, buffer, 0, length, position)).toString('hex'); };
+const openIfPresent = (path) => { try { return openSync(path, 'r'); } catch (error) { if (vanished(error)) return null; throw error; } };
+const fileVersion = (descriptor) => {
+  const state = fstatSync(descriptor, { bigint: true });
+  return { ino: String(state.ino), size: Number(state.size), mtimeNs: String(state.mtimeNs), ctimeNs: String(state.ctimeNs), changedMs: Math.max(Number(state.mtimeMs), Number(state.ctimeMs)) };
+};
+const walMode = (descriptor) => readAt(descriptor, 18, 1) === '02';
+// What a database's committed state is made of: the database file, with the change counter every
+// rollback-journal commit increments, and in WAL mode the log, whose header changes when the log
+// restarts and which only grows otherwise; an empty log, as a reader creates, holds nothing. A
+// rollback journal with content may be hot.
+function databaseVersion(file, database, log) {
+  const logged = log !== null && Number(fstatSync(log).size) > 0;
+  const version = { database: { ...fileVersion(database), counter: readAt(database, 24, 4) }, log: logged ? { ...fileVersion(log), header: readAt(log, 0, 32) } : null, journal: false };
+  const journal = openIfPresent(file + '-journal');
+  if (journal !== null) try { version.journal = Number(fstatSync(journal).size) > 0 && /[^0]/.test(readAt(journal, 0, 28)); } finally { closeSync(journal); }
+  return version;
+}
+const versionKey = (version) => JSON.stringify([version.database && { ...version.database, changedMs: 0 }, version.log && { ...version.log, changedMs: 0 }, version.journal]);
+export const sameDatabaseVersion = (a, b) => Boolean(a && b) && !a.journal && !b.journal && versionKey(a) === versionKey(b);
+export const racy = (version, at) => at - Math.max(version.database.changedMs, version.log?.changedMs ?? 0) < RACY_MS;
+function databaseVersionAt(file) {
+  const database = openSync(file, 'r');
+  let log = null;
+  try { if (walMode(database)) log = openIfPresent(file + '-wal'); return databaseVersion(file, database, log); } finally { if (log !== null) closeSync(log); closeSync(database); }
 }
 
 function tailDigest(file, length) {
@@ -116,52 +183,121 @@ export function precopy({ source, target, work, exclude = [] }) {
   const state = {};
   let bytes = 0;
   for (const entry of entries) {
+    const from = join(source, entry.path), to = join(target, entry.path);
+    if (entry.kind === 'sqlite') {
+      // Copied as bytes while the writer writes, so the copy may be torn: it is kept only if the
+      // database's version was the same before and after, and is then one committed state.
+      let record;
+      try {
+        const before = databaseVersionAt(from);
+        const copied = copyFrom(from, to, entry.mode);
+        const log = before.log ? copyFrom(from + '-wal', to + '-wal', entry.mode) : null;
+        if (!before.log) rmSync(to + '-wal', { force: true });
+        const after = databaseVersionAt(from);
+        record = { database: true, version: after, clean: copied.stable && (log?.stable ?? true) && sameDatabaseVersion(before, after) && !racy(after, Date.now()) };
+        bytes += copied.bytes + (log?.bytes ?? 0);
+      } catch (error) { if (vanished(error)) continue; throw error; }
+      state[entry.path] = record;
+      continue;
+    }
     if (entry.kind !== 'file') continue;
     let copied;
-    try { copied = copyFrom(join(source, entry.path), join(target, entry.path), entry.mode); } catch (error) { if (vanished(error)) continue; throw error; }
-    state[entry.path] = { size: copied.bytes, ino: copied.ino, mtimeNs: copied.mtimeNs, ctimeNs: copied.ctimeNs, stable: copied.stable, tail: copied.tail };
+    try { copied = copyFrom(from, to, entry.mode); } catch (error) { if (vanished(error)) continue; throw error; }
+    state[entry.path] = { size: copied.bytes, ino: copied.ino, mtimeNs: copied.mtimeNs, ctimeNs: copied.ctimeNs, stable: copied.stable, tail: copied.tail, racy: Date.now() - copied.changedMs < RACY_MS };
     bytes += copied.bytes;
   }
   writeFileSync(join(work, 'precopy.json'), JSON.stringify(state), { mode: 0o600 });
   return { files: Object.keys(state).length, bytes };
 }
 
+const changing = (path) => { const error = Error('A file changed while it was captured: ' + path); error.busy = true; return error; };
+
+// A database at the pause instant, inside one read transaction: a writer paused inside a commit
+// holds a lock that makes the read busy, so the capture is retried with the writer resumed. A
+// writer that only reserved the database has changed nothing in it yet.
+function captureDatabase(from, to, prior, mode, path) {
+  let database;
+  try {
+    database = new DatabaseSync(from, { readOnly: true, timeout: 100 });
+    database.exec('BEGIN');
+    database.prepare('SELECT count(*) AS n FROM sqlite_schema').get();
+  } catch (error) {
+    try { database?.close(); } catch {}
+    // Node reports SQLITE_BUSY and SQLITE_LOCKED without an error code.
+    if (busyError(error)) { const busy = Error('SQLite database is locked: ' + path); busy.busy = true; throw busy; }
+    throw error;
+  }
+  let file = null, log = null;
+  try {
+    file = openSync(from, 'r');
+    const wal = walMode(file);
+    if (wal) log = openIfPresent(from + '-wal');
+    // The read lock was granted, so SQLite found no hot journal: a journal left by a writer that
+    // only reserved the database has changed nothing in it.
+    const version = { ...databaseVersion(from, file, log), journal: false };
+    const journalMode = wal ? 'wal' : 'rollback', logged = version.log !== null;
+    // Unchanged since a clean pre-copy: that copy is this committed state, and is not read again.
+    if (prior?.database && prior.clean && sameDatabaseVersion(prior.version, version) && existsSync(to) && (!logged || existsSync(to + '-wal'))) return { journalMode, kept: true, log: logged, compared: 0, written: 0 };
+    // Otherwise the copy is brought up to date, writing only what differs. A WAL database's log
+    // is copied with it: the committed frames in it are replayed by SQLite, an uncommitted tail
+    // left by a paused writer is not.
+    let compared = 0, written = 0;
+    if (logged) { const synced = syncFrom(log, to + '-wal', mode); compared += synced.compared; written += synced.written; } else rmSync(to + '-wal', { force: true });
+    const synced = syncFrom(file, to, mode);
+    compared += synced.compared; written += synced.written;
+    if (versionKey({ ...databaseVersion(from, file, log), journal: false }) !== versionKey(version)) throw changing(path);
+    return { journalMode, kept: false, log: logged, compared, written };
+  } finally {
+    // Closing these descriptors also drops this process's POSIX locks on the database, the read
+    // lock included; nothing is read after this point.
+    if (log !== null) closeSync(log);
+    if (file !== null) closeSync(file);
+    try { database.exec('COMMIT'); } catch {}
+    database.close();
+  }
+}
+
 // While the service is paused nothing changes its files, so this is the consistent state.
-// A file unchanged since the pre-copy is kept. A file that only grew, on the same inode and
-// with the end of the earlier copy unchanged, gains its new tail. Any other file is copied again.
+// A file unchanged since the pre-copy is kept, unless it had changed just before it was read
+// (RACY_MS): then it is compared by content. A file that only grew, on the same inode and with
+// the end of the earlier copy unchanged, gains its new tail. Any other file is copied again.
 export async function capture({ source, target, work, exclude = [] }) {
   const previous = existsSync(join(work, 'precopy.json')) ? JSON.parse(readFileSync(join(work, 'precopy.json'), 'utf8')) : {};
   const entries = walk(source, exclude);
   directories(target, entries);
-  const result = { sqlite: [], kept: 0, appended: 0, copied: 0, removed: 0 };
+  const result = { sqlite: [], kept: 0, appended: 0, copied: 0, removed: 0, compared: 0, written: 0 };
   const expected = new Set(entries.filter((entry) => entry.type === 'directory' || entry.kind === 'file' || entry.kind === 'sqlite').map((entry) => entry.path));
   for (const entry of entries) {
     const from = join(source, entry.path), to = join(target, entry.path);
     if (entry.kind === 'sqlite') {
-      rmSync(to, { force: true });
-      for (const suffix of SIDECARS) rmSync(to + suffix, { force: true });
-      let database;
-      try {
-        database = new DatabaseSync(from, { readOnly: true, timeout: 100 });
-        // One step copies every page inside a single read transaction.
-        await backup(database, to, { rate: 2147483647 });
-      } catch (error) {
-        // A writer paused inside a write transaction holds the lock. The backup step then
-        // fails with SQLITE_BUSY or SQLITE_LOCKED, which Node reports without an error code.
-        if (busyError(error)) { const busy = Error('SQLite database is locked: ' + entry.path); busy.busy = true; throw busy; }
-        throw error;
-      } finally { database?.close(); }
-      chmodSync(to, entry.mode);
-      result.sqlite.push({ path: entry.path, journalMode: journalMode(from), mode: entry.mode, mtimeMs: entry.mtimeMs });
+      rmSync(to + '-shm', { force: true }); rmSync(to + '-journal', { force: true });
+      let outcome;
+      try { outcome = captureDatabase(from, to, previous[entry.path], entry.mode, entry.path); } catch (error) {
+        if (!vanished(error)) throw error;
+        expected.delete(entry.path); continue;
+      }
+      if (outcome.log) expected.add(entry.path + '-wal');
+      result.compared += outcome.compared; result.written += outcome.written;
+      result.sqlite.push({ path: entry.path, journalMode: outcome.journalMode, mode: entry.mode, mtimeMs: entry.mtimeMs, kept: outcome.kept });
       continue;
     }
     if (entry.kind !== 'file') continue;
     const prior = previous[entry.path];
-    const same = prior && prior.stable && prior.ino === entry.ino && prior.ctimeNs === entry.ctimeNs && prior.mtimeNs === entry.mtimeNs && prior.size === entry.size && existsSync(to);
-    if (same) { result.kept++; continue; }
+    const same = prior && !prior.database && prior.stable && prior.ino === entry.ino && prior.ctimeNs === entry.ctimeNs && prior.mtimeNs === entry.mtimeNs && prior.size === entry.size && existsSync(to);
+    if (same && !prior.racy) { result.kept++; continue; }
     let grew, copied;
     try {
-      grew = prior && prior.stable && prior.ino === entry.ino && entry.size > prior.size && existsSync(to) && lstatSync(to).size === prior.size && tailDigest(from, prior.size) === prior.tail;
+      if (prior && !prior.database && prior.stable && prior.ino === entry.ino && existsSync(to) && (same || prior.racy)) {
+        // Changed just before its pre-copy: its times prove nothing, so its content is compared.
+        const input = openSync(from, 'r');
+        let synced, stable;
+        try { const before = fileVersion(input); synced = syncFrom(input, to, entry.mode); stable = versionKey({ database: before }) === versionKey({ database: fileVersion(input) }); } finally { closeSync(input); }
+        if (!stable) throw changing(entry.path);
+        result.compared += synced.compared; result.written += synced.written;
+        if (synced.written === 0) result.kept++; else if (synced.rewrote) result.copied++; else result.appended++;
+        continue;
+      }
+      grew = prior && !prior.database && prior.stable && prior.ino === entry.ino && entry.size > prior.size && existsSync(to) && lstatSync(to).size === prior.size && tailDigest(from, prior.size) === prior.tail;
       copied = copyFrom(from, to, entry.mode, grew ? prior.size : 0);
     } catch (error) {
       // Only a service that is not paused, such as the edge, can remove a file now.
@@ -169,7 +305,8 @@ export async function capture({ source, target, work, exclude = [] }) {
       expected.delete(entry.path); entry.kind = 'vanished'; continue;
     }
     // Only a service that is not paused, such as the edge, can change a file now: capture again.
-    if (!copied.stable) { const changing = Error('A file changed while it was captured: ' + entry.path); changing.busy = true; throw changing; }
+    if (!copied.stable) throw changing(entry.path);
+    result.written += copied.bytes - (grew ? prior.size : 0);
     if (grew) result.appended++; else result.copied++;
   }
   // Anything the pre-copy wrote that the paused service no longer has.
@@ -186,7 +323,7 @@ export async function capture({ source, target, work, exclude = [] }) {
   for (const entry of entries) if (entry.kind === 'file') utimesSync(join(target, entry.path), entry.mtimeMs / 1000, entry.mtimeMs / 1000);
   for (const entry of [...entries].reverse()) if (entry.type === 'directory') { chmodSync(join(target, entry.path), entry.mode); utimesSync(join(target, entry.path), entry.mtimeMs / 1000, entry.mtimeMs / 1000); }
   writeFileSync(join(work, 'capture.json'), JSON.stringify(result), { mode: 0o600 });
-  return { sqlite: result.sqlite.length, kept: result.kept, appended: result.appended, copied: result.copied, removed: result.removed };
+  return { sqlite: result.sqlite.length, sqliteKept: result.sqlite.filter((item) => item.kept).length, kept: result.kept, appended: result.appended, copied: result.copied, removed: result.removed, compared: result.compared, written: result.written };
 }
 
 export function verify({ target, work }) {
@@ -197,6 +334,11 @@ export function verify({ target, work }) {
     const database = new DatabaseSync(file);
     let pages;
     try {
+      // A WAL copy holds its committed frames in its log: they are folded into the database.
+      if (existsSync(file + '-wal')) {
+        const checkpoint = database.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get();
+        if (checkpoint.busy !== 0) throw Error('SQLite log could not be checkpointed in the copy: ' + item.path);
+      }
       // The copy keeps the source journal mode, so the product opens it as it left it.
       const mode = database.prepare('PRAGMA journal_mode').get().journal_mode;
       if (item.journalMode === 'wal' && mode !== 'wal') database.exec('PRAGMA journal_mode=WAL');
@@ -233,36 +375,127 @@ export function qdrantConfigText(text) {
 const qdrantConfig = (file) => qdrantConfigText(readFileSync(file, 'utf8'));
 async function qdrant(url, config) {
   const { apiKey, snapshots } = qdrantConfig(config);
-  const json = async (path, init = {}) => {
+  // A collection the product removed meanwhile answers 404: optional requests then return null.
+  const json = async (path, init = {}, optional = false) => {
     const response = await fetch(url + path, { ...init, headers: { 'Content-Type': 'application/json', ...(apiKey ? { 'api-key': apiKey } : {}) } });
+    if (optional && response.status === 404) { await response.body?.cancel(); return null; }
     if (!response.ok) throw Error('Qdrant request failed: ' + response.status + ' ' + path.split('?')[0]);
     return (await response.json()).result;
   };
   return { json, snapshots };
 }
-const collectionNames = async (json) => (await json('/collections')).collections.map((item) => item.name).sort();
-const countPoints = async (json, name) => (await json('/collections/' + encodeURIComponent(name) + '/points/count', { method: 'POST', body: JSON.stringify({ exact: true }) })).count;
-
-// One snapshot per collection, several at a time: Qdrant spends most of a snapshot on fixed
-// per-collection work, so this keeps the writer's pause short. Aliases are recorded too.
-export async function qdrantSnapshot({ url, config, width = 16 }) {
-  const { json, snapshots } = await qdrant(url, config);
-  if (!snapshots.startsWith('/data/')) throw Error('The Qdrant snapshot directory must be inside its data directory');
-  const names = await collectionNames(json);
+const collectionNames = async (json) => {
+  const names = (await json('/collections')).collections.map((item) => item.name).sort();
   for (const name of names) if (!/^[A-Za-z0-9_.-]{1,255}$/.test(name)) throw Error('A Qdrant collection name needs the stopped backup: ' + name);
+  return names;
+};
+const countPoints = async (json, name, optional = false) => (await json('/collections/' + encodeURIComponent(name) + '/points/count', { method: 'POST', body: JSON.stringify({ exact: true }) }, optional))?.count;
+const snapshotDirectory = (snapshots) => {
+  if (!snapshots.startsWith('/data/')) throw Error('The Qdrant snapshot directory must be inside its data directory');
+  return snapshots.slice('/data/'.length);
+};
+
+const canonical = (value) => Array.isArray(value) ? value.map(canonical)
+  : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])) : value;
+// The version of every collection, from Qdrant's own telemetry. Every write to a shard is a
+// numbered operation in its write-ahead log; a collection whose operation number, queued updates,
+// point count, segments and configuration are all the same at two moments was not written in
+// between. Null when this Qdrant does not report it: then every collection is snapshotted while
+// the writer is paused, as before.
+export function qdrantVersionsFrom(telemetry) {
+  const collections = telemetry?.collections?.collections;
+  if (!Array.isArray(collections)) return null;
+  const versions = {};
+  for (const item of collections) {
+    const shards = [];
+    for (const shard of item.shards ?? []) {
+      const local = shard.local, queue = local?.update_queue;
+      if (!local || (shard.remote ?? []).length || typeof queue?.length !== 'number' || typeof queue.op_num !== 'number') return null;
+      shards.push({ id: shard.id, operation: queue.op_num, queued: queue.length, points: local.num_points ?? null, segments: sha((local.segments ?? []).map((segment) => segment.info?.uuid ?? '').sort().join(',')) });
+    }
+    if (typeof item.id !== 'string' || !shards.length) return null;
+    versions[item.id] = { config: sha(JSON.stringify(canonical(item.config ?? null))), shards: shards.sort((a, b) => a.id - b.id) };
+  }
+  return versions;
+}
+const qdrantVersions = async (json) => qdrantVersionsFrom(await json('/telemetry?details_level=4'));
+const idle = (version) => version.shards.every((shard) => shard.queued === 0);
+const sameVersion = (a, b) => Boolean(a && b) && JSON.stringify(a) === JSON.stringify(b);
+const sameVersions = (a, b) => Boolean(a && b) && JSON.stringify(Object.keys(a).sort()) === JSON.stringify(Object.keys(b).sort()) && Object.keys(a).every((name) => sameVersion(a[name], b[name]));
+// The collections whose snapshot taken while serving still holds their paused state.
+export function reusableCollections(previous, versions, names) {
+  if (!previous?.versioned || !versions) return [];
+  const clean = new Set(previous.clean);
+  return names.filter((name) => clean.has(name) && previous.snapshots[name] && previous.collections[name] !== undefined && sameVersion(previous.versions[name], versions[name]));
+}
+
+// One snapshot per collection, several at a time. Each one is recorded as soon as Qdrant wrote it
+// into its live directory, so a failed backup removes it again.
+async function snapshotCollections(json, names, width, { directory, journal, optional = false }) {
   const queue = [...names], created = {};
   await Promise.all(Array.from({ length: Math.min(width, names.length) }, async () => {
     while (queue.length) {
       const name = queue.shift();
-      const result = await json('/collections/' + encodeURIComponent(name) + '/snapshots?wait=true', { method: 'POST' });
+      const result = await json('/collections/' + encodeURIComponent(name) + '/snapshots?wait=true', { method: 'POST' }, optional);
+      if (!result) continue;
+      if (journal) appendFileSync(journal, JSON.stringify({ directory, collection: name, name: result.name }) + '\n', { mode: 0o600 });
       created[name] = { name: result.name, checksum: result.checksum, size: result.size };
     }
   }));
-  const collections = {};
-  for (const name of names) collections[name] = await countPoints(json, name);
-  const aliases = (await json('/aliases')).aliases.map((item) => ({ alias: item.alias_name, collection: item.collection_name }));
-  return { directory: snapshots.slice('/data/'.length), snapshots: created, collections, aliases };
+  return created;
 }
+const qdrantAliasList = async (json) => (await json('/aliases')).aliases.map((item) => ({ alias: item.alias_name, collection: item.collection_name }));
+
+// While the product serves: a snapshot and an exact point count of every collection, between two
+// readings of every collection's version. A collection written meanwhile is not clean, and is
+// snapshotted again while paused.
+export async function qdrantPrecapture({ url, config, work, width = 16 }) {
+  const { json, snapshots } = await qdrant(url, config);
+  const directory = snapshotDirectory(snapshots), started = Date.now();
+  const before = await qdrantVersions(json);
+  if (!before) { writeFileSync(join(work, 'qdrant-precapture.json'), JSON.stringify({ versioned: false }), { mode: 0o600 }); return { versioned: false }; }
+  const names = await collectionNames(json);
+  const created = await snapshotCollections(json, names, width, { directory, journal: join(work, 'qdrant-created.jsonl'), optional: true });
+  const collections = {};
+  await Promise.all(Object.keys(created).map(async (name) => { const count = await countPoints(json, name, true); if (count !== undefined) collections[name] = count; }));
+  const versions = await qdrantVersions(json);
+  const clean = Object.keys(collections).filter((name) => before[name] && idle(before[name]) && sameVersion(before[name], versions?.[name])).sort();
+  writeFileSync(join(work, 'qdrant-precapture.json'), JSON.stringify({ versioned: Boolean(versions), directory, snapshots: created, collections, versions, clean }), { mode: 0o600 });
+  return { versioned: Boolean(versions), collections: names.length, clean: clean.length, seconds: (Date.now() - started) / 1000 };
+}
+
+// While the writer is paused. First every write it sent before the pause lands: the versions are
+// read until no update is queued and two readings agree. Then a collection whose version still
+// equals the clean one its earlier snapshot was taken at is reused, and every other collection,
+// one created meanwhile included, is snapshotted now. Aliases are recorded too.
+export async function qdrantCapture({ url, config, work, width = 16, settle = 40 }) {
+  const { json, snapshots } = await qdrant(url, config);
+  const directory = snapshotDirectory(snapshots);
+  const file = join(work ?? '/nonexistent', 'qdrant-precapture.json');
+  const previous = work && existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : { versioned: false };
+  let versions = null;
+  if (previous.versioned) {
+    let last = await qdrantVersions(json);
+    for (let attempt = 0; last && attempt < settle; attempt++) {
+      await new Promise((done) => setTimeout(done, 25));
+      const next = await qdrantVersions(json);
+      if (next && Object.values(next).every(idle) && sameVersions(last, next)) { versions = next; break; }
+      last = next;
+    }
+  }
+  const names = await collectionNames(json);
+  const reused = new Set(reusableCollections(previous, versions, names));
+  const fresh = names.filter((name) => !reused.has(name));
+  const created = await snapshotCollections(json, fresh, width, { directory, journal: work ? join(work, 'qdrant-created.jsonl') : null });
+  const counts = Object.fromEntries(await Promise.all(fresh.map(async (name) => [name, await countPoints(json, name)])));
+  const result = { directory, snapshots: {}, collections: {}, aliases: await qdrantAliasList(json), reused: reused.size, captured: fresh.length };
+  for (const name of names) {
+    result.snapshots[name] = reused.has(name) ? previous.snapshots[name] : created[name];
+    result.collections[name] = reused.has(name) ? previous.collections[name] : counts[name];
+  }
+  return result;
+}
+
 // Recreates recorded aliases in a restored store, then reports what it holds.
 export async function qdrantAliases({ url, config, aliases }) {
   const { json } = await qdrant(url, config);
@@ -270,8 +503,6 @@ export async function qdrantAliases({ url, config, aliases }) {
   return { aliases: (await json('/aliases')).aliases.map((item) => ({ alias: item.alias_name, collection: item.collection_name })) };
 }
 
-const canonical = (value) => Array.isArray(value) ? value.map(canonical)
-  : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])) : value;
 // Point counts and a content digest of every collection: ids, vectors and payloads.
 export async function qdrantInventory({ url, config }) {
   const { json } = await qdrant(url, config);
@@ -294,7 +525,8 @@ async function main(request) {
     case 'precopy': return precopy(request);
     case 'capture': return capture(request);
     case 'verify': return verify(request);
-    case 'qdrant-snapshot': return qdrantSnapshot(request);
+    case 'qdrant-precapture': return qdrantPrecapture(request);
+    case 'qdrant-capture': return qdrantCapture(request);
     case 'qdrant-inventory': return qdrantInventory(request);
     case 'qdrant-aliases': return qdrantAliases(request);
     default: throw Error('Unknown snapshot command');

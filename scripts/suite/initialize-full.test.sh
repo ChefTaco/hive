@@ -158,6 +158,30 @@ for arguments in 'shell' 'add --node-id bad;value' 'add --unknown value'; do
 done
 reject "$ROOT/hive.sh" plan --node-id node-1 --config "$temporary/granted.json" --non-interactive
 [[ $(wc -l < "$temporary/compose.log") == 2 ]] || fail 'A refused host-key request reached the gateway'
+# A Magnus host agent port: one agent-only listener, published on the console bind address with
+# the console certificate, and nothing else accepted in console.nativeListeners.
+agent_config() {
+  jq --arg old "$temporary/install" --arg new "$temporary/$1" --argjson listeners "$2" '
+    walk(if type=="string" then (split($old)|join($new)) else . end) | .installation=("synthetic-"+($new|split("/")|last)) | .console.nativeListeners=$listeners
+  ' "$temporary/config.json" > "$temporary/$1.json"
+}
+agent_config agents '[{"port":4000,"component":"magnus"}]'
+gateway_init agents > "$temporary/agents.log"
+fragment="$temporary/agents/config/ingress/native-listeners-magnus-agents.caddy"
+[[ -f "$fragment" && $(stat -c %a "$fragment") == 600 ]] || fail 'The Magnus agent listener was not written owner-only'
+grep -qx ':4000 {' "$fragment" && grep -qx $'\ttls /config/console.crt /config/console.key' "$fragment" && grep -qx $'\timport magnus_agent_listener' "$fragment" || fail 'The Magnus agent listener is not the reviewed route set'
+grep -q '^(magnus_agent_listener) {' "$temporary/agents/config/ingress/Caddyfile" || fail 'The installed Caddyfile lacks the agent route set'
+[[ ! -e "$temporary/install/config/ingress/native-listeners-magnus-agents.caddy" ]] || fail 'An agent port was published without being asked for'
+"$ROOT/hive.sh" plan --config "$temporary/agents.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive | jq -e '.console.magnusAgentPort==4000' >/dev/null || fail 'The plan does not show the agent port'
+rendered=$(source "$ROOT/scripts/suite/controller.sh"; HIVE_ROOT=$ROOT HIVE_CONFIG=$temporary/agents.json HIVE_MANIFEST=$temporary/release.json HIVE_SIGNATURE=$temporary/release.json.sig HIVE_TRUST_KEY=$temporary/publisher.pub HIVE_VERSION=0.1.0; hive_validate; hive_manifest >/dev/null; hive_render control)
+jq -e --arg bind "$(jq -r .console.bindAddress "$temporary/agents.json")" '.services.ingress.ports|any(.target==4000 and .published=="4000" and .host_ip==$bind)' <<< "$rendered" >/dev/null || fail 'The agent port is not published on the console bind address'
+jq -e '.services.magnus.ports==null' <<< "$rendered" >/dev/null || fail 'Magnus itself was published'
+for listeners in '[{"port":4000,"component":"cindertrace"}]' '[{"port":65426,"component":"magnus"}]' '[{"port":80,"component":"magnus"}]' \
+  '[{"port":4000,"component":"magnus"},{"port":4001,"component":"magnus"}]' '[{"port":4000,"component":"magnus","upstream":"magnus:4000"}]'; do
+  agent_config refused "$listeners"
+  reject "$ROOT/hive.sh" plan --config "$temporary/refused.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive
+  grep -q 'console.nativeListeners on a fresh installation' "$temporary/rejection.log" || fail "An invalid agent listener was not refused: $listeners"
+done
 # Configurations that still carry the removed external console link get a clear refusal.
 jq '.bootstrap.magnusConsoleOrigin="https://fleet.example.com"' "$temporary/config.json" > "$temporary/config.valid.json.pending"
 cp "$temporary/config.json" "$temporary/config.valid.json"; mv "$temporary/config.valid.json.pending" "$temporary/config.json"
@@ -168,4 +192,4 @@ cp "$temporary/release.json" "$temporary/release.valid.json"
 jq 'del(.components.chattermost.initialization)' "$temporary/release.valid.json" > "$temporary/release.json"
 openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/release.json" -out "$temporary/release.json.sig"
 reject run_init
-printf 'Passed: full fresh configuration, independent native credentials and datastores, seven browser products with HiveXUI as the Magnus console, the fleet gateway and its terminal grant off by default and each a separate explicit opt-in, protected product-owned hash preparation, disabled automatic dispatch/migrations, stable repeat and required migration artifact refusal.\n'
+printf 'Passed: full fresh configuration, independent native credentials and datastores, seven browser products with HiveXUI as the Magnus console, the fleet gateway and its terminal grant off by default and each a separate explicit opt-in, protected product-owned hash preparation, disabled automatic dispatch/migrations, stable repeat, required migration artifact refusal and the opt-in Magnus host agent listener.\n'
