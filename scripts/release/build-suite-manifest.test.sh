@@ -39,4 +39,13 @@ if "$root/scripts/release/check-suite-release.sh" 9.9.9 >/dev/null 2>&1; then ec
 jq '.controllerSHA256=("0"*64)' "$temporary/original.json" > "$temporary/release.json"
 openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/release.json" -out "$temporary/release.json.sig"
 if "$root/scripts/release/check-suite-release.sh" 9.9.9 >/dev/null 2>&1; then echo 'A different controller digest passed' >&2; exit 1; fi
+# The Magnus agent package is pinned when the inputs name it, and only as Magnus's own version.
+integrity="sha512-$(printf 'A%.0s' {1..86})=="
+jq --arg integrity "$integrity" '.magnusAgent={name:"@hivemagnus/magnus-agent",version:"1.0.0",integrity:$integrity}' "$temporary/inputs.json" > "$temporary/agent-inputs.json"
+node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/agent-inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/agent.json" >/dev/null
+jq -e --arg integrity "$integrity" '.components.magnus.agentPackage=={name:"@hivemagnus/magnus-agent",version:"1.0.0",integrity:$integrity}' "$temporary/agent.json" >/dev/null || { echo 'The agent package was not pinned' >&2; exit 1; }
+for change in '.magnusAgent.version="1.0.1"' '.magnusAgent.name="magnus-agent"' '.magnusAgent.integrity="sha1-abc"' '.magnusAgent.extra=true'; do
+  jq "$change" "$temporary/agent-inputs.json" > "$temporary/bad-inputs.json"
+  if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo "An invalid agent pin passed: $change" >&2; exit 1; fi
+done
 echo 'build-suite-manifest: ok'

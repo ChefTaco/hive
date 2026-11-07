@@ -15,6 +15,15 @@ All notable changes to this project are documented in this file. The format is b
   credentials only, and the client address in `X-Forwarded-For`. Before this, a host agent on a
   fresh single-host installation had no route to Magnus, so the full profile's fleet could not
   have nodes. See [Magnus host agents](deployment/FULL.md#magnus-host-agents).
+- `hive.sh magnus-agent install|status|remove` installs the Magnus agent on the Magnus host or
+  another fleet host through the controller's transport. It checks Node.js against the agent's
+  engines and, with consent, installs Node.js 24 from NodeSource's signed apt repository with a
+  pinned key fingerprint; installs exactly the agent version the release pins, verified against
+  the tarball integrity the release manifest now records (`components.magnus.agentPackage`,
+  from the release inputs and checked against the registry when publishing); moves the node
+  credentials into a root-only environment without printing them or passing them as arguments;
+  sets up the agent's own upgradeable service; waits for Magnus to accept its first heartbeat;
+  and offers to approve the host key for the web terminal. It is idempotent and upgrades in place.
 - `hive.sh cindertrace-collector add ID --sources SOURCE[,SOURCE]`, `list` and `remove ID`
   provision the credentials Cindertrace collectors sign events with. A credential is generated
   on the Cindertrace host into an owner-only file and never printed; Cindertrace ingests while a
@@ -45,10 +54,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Next
 
-- Pin the Magnus native agent bundle as `agentArtifacts` in the release, so setup and
-  `agents-accept` install the agent without Node.js or npm on the host. The setup question
-  "Opt-in native agent runtime" offers runtimes the release has no artifacts for.
-- A `hive.sh` command that registers a Magnus node and writes its agent environment.
+- Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
+  host Node.js. The setup question "Opt-in native agent runtime" offers runtimes the release
+  has no artifacts for.
+- A bring-your-own certificate for `magnus-agent install` on a host without Tailscale.
 - Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
 - An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
 

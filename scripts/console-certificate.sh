@@ -147,7 +147,11 @@ case "$command" in
     check_pair "$source_certificate" "$source_key" "$hostname"
     # hive.sh keeps the installation's protected files owned by the account that installed it.
     if [[ "$account" == root ]]; then "$hive/hive.sh" tls-refresh --config "$config"
-    else runuser -u "$account" -- "$hive/hive.sh" tls-refresh --config "$config"; fi;;
+    else runuser -u "$account" -- "$hive/hive.sh" tls-refresh --config "$config"; fi
+    # A Magnus agent on this host serves the same certificate files; it reads them at start.
+    if [[ -f /opt/magnus-agent/.env ]] && grep -qxF "TLS_CERT_PATH=$source_certificate" /opt/magnus-agent/.env && systemctl is-active --quiet magnus-agent 2>/dev/null; then
+      systemctl restart magnus-agent && say 'Restarted the Magnus agent, which serves the same certificate.'
+    fi;;
   schedule)
     need_root; installation; release_checkout
     command -v systemctl >/dev/null && [[ -d /run/systemd/system ]] || die 'systemd is not running; schedule renew with your own scheduler instead'

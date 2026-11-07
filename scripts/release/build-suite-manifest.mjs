@@ -40,6 +40,15 @@ for (const [name, product] of Object.entries(products)) {
   assert(Array.isArray(product.platforms) && product.platforms.includes('linux/amd64'), name + ': platforms must include linux/amd64');
 }
 const repository = (reference) => reference.replace(/[:@].*$/, '');
+// The Magnus agent package hive.sh magnus-agent installs: Magnus's own version, with the npm
+// tarball integrity reviewed into the inputs. Publishing checks it against the registry.
+const magnusAgent = inputs.magnusAgent;
+if (magnusAgent !== undefined) {
+  assert.deepEqual(Object.keys(magnusAgent).sort(), ['integrity', 'name', 'version'], 'magnusAgent has name, version and integrity');
+  assert.equal(magnusAgent.name, '@hivemagnus/magnus-agent', 'magnusAgent.name must be @hivemagnus/magnus-agent');
+  assert.equal(magnusAgent.version, products.magnus.version, 'magnusAgent.version must be the Magnus version');
+  assert.match(magnusAgent.integrity, /^sha512-[A-Za-z0-9+/]{86}==$/, 'magnusAgent.integrity must be an npm sha512 integrity');
+}
 
 // Index digest of a published tag, checked against the platforms the inputs promise.
 function buildx(...command) {
@@ -87,6 +96,13 @@ manifest.controllerSHA256 = controllerSHA256;
 for (const [name, product] of Object.entries(products)) if (product.version && manifest.components[name]) manifest.components[name].version = product.version;
 const datastoreVersion = { [DATASTORE_IMAGES.redis]: DATASTORE_VERSIONS.redis, [DATASTORE_IMAGES.qdrant]: DATASTORE_VERSIONS.qdrant, [DATASTORE_IMAGES.postgres17]: DATASTORE_VERSIONS.postgres17, [DATASTORE_IMAGES.postgres18]: DATASTORE_VERSIONS.postgres18 };
 for (const component of Object.values(manifest.components)) if (component.kind === 'datastore') component.version = datastoreVersion[component.image] ?? assert.fail('Unreviewed datastore image ' + component.image);
+if (magnusAgent) {
+  if (!args.check && !args.pinned) {
+    const published = execFileSync('npm', ['view', `${magnusAgent.name}@${magnusAgent.version}`, 'dist.integrity'], { encoding: 'utf8' }).trim();
+    assert.equal(published, magnusAgent.integrity, `${magnusAgent.name}@${magnusAgent.version}: the registry integrity differs from the inputs`);
+  }
+  manifest.components.magnus.agentPackage = { ...magnusAgent };
+}
 applySuiteCatalog(manifest);
 const document = JSON.stringify(manifest, null, 2) + '\n';
 

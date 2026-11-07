@@ -131,7 +131,7 @@ sudo install -m 0600 -o hive-terminal -g hive-terminal /etc/hive/fleet/gateway-k
 Then answer `yes` to *Deploy the Magnus web terminal gateway*, `hive-terminal` to *Restricted
 SSH account on fleet nodes*, `/etc/hive/fleet/gateway-key` to the key question, and `yes` to
 grant the terminal to the initial operator if that account should use it. A terminal also needs
-a Magnus node: see [Magnus host agents](#magnus-host-agents), then approve the node below.
+a Magnus node: [installing the agent](#installing-the-agent) adds one and approves its host key.
 
 ### Approving a node
 
@@ -198,40 +198,51 @@ or `x-api-secret` passes, and `X-Forwarded-For` is the client's address. Bind th
 address that only your hosts can reach, or limit the port with your network's firewall: ports
 Docker publishes bypass ufw.
 
-This release pins no native agent artifact, so the agent is installed from npm, at the same
-version as the suite's Magnus (listed in the release notes; 2.1.1 in 2.0.3), with Node.js 24.
-On each host, as root:
+### Installing the agent
+
+One command installs the agent on the Magnus host, from the release checkout:
 
 ```bash
-npm install --prefix /opt/magnus-agent @hivemagnus/magnus-agent@2.1.1
-install -d -m 0700 /opt/magnus-agent/certs
-install -m 0644 /etc/hive/tls/console.crt /opt/magnus-agent/certs/agent.crt   # the host's certificate
-install -m 0600 /etc/hive/tls/console.key /opt/magnus-agent/certs/agent.key
+./hive.sh magnus-agent install --config FILE
 ```
 
-Write `/opt/magnus-agent/.env` (mode 0600). `NODE_MANAGER_SECRET` and `RESULT_SIGNING_SECRET`
-are the suite Magnus's own, from `/opt/hive/config/magnus.env`; copy them without printing them:
+It runs on the host through the same transport as every other `hive.sh` step: locally (asking
+for your sudo password, as the agent is a root service), or over SSH with the host's
+`sudoPasswordFile`. `--host ID` names another inventory host, and `--host deploy@node-1.example.com`
+any fleet host, with `--ssh-config FILE` and `--sudo-password-file FILE` as that host needs. It:
 
-```bash
-{ printf 'CONTROL_API_URL=https://hive.example.com:4000\nHOST_FQDN=node-1.example.com\n'
-  grep -E '^(NODE_MANAGER_SECRET|RESULT_SIGNING_SECRET)=' /opt/hive/config/magnus.env
-  printf 'TLS_CERT_PATH=/opt/magnus-agent/certs/agent.crt\nTLS_KEY_PATH=/opt/magnus-agent/certs/agent.key\nNODE_ENV=production\n'
-} | sudo install -m 0600 /dev/stdin /opt/magnus-agent/.env
-```
+1. checks the host: systemd, port 4100 free for the agent, and Node.js against the agent's
+   `^24.22.1 || ^26.13.0`. Without a suitable Node.js it offers to install Node.js 24 from
+   NodeSource's signed apt repository, after checking its key fingerprint
+   `6F71F525282841EEDAF851B42F59B5F99B1BE0B4`; `--install-node` agrees unattended, and
+   without consent it stops and prints the manual steps;
+2. downloads exactly the agent version the release pins for its Magnus
+   (`components.magnus.agentPackage`) and installs it only if the tarball matches the pinned
+   npm integrity;
+3. writes `/opt/magnus-agent/.env`, root-only, with `CONTROL_API_URL` from the console name and
+   the agent port. The node credentials come from the Magnus host's own configuration; for
+   another host they stream through the controller on standard input only. They are never
+   printed and never a command-line value;
+4. runs the agent's `check`, then its own `install-service`, which sets up the versioned layout
+   and unit that Magnus-driven upgrades use, and starts it;
+5. waits up to two minutes for Magnus to accept the first heartbeat and reports the node ID;
+6. with the web terminal gateway, reads the host's SSH host key fingerprint on the host and
+   offers to approve it (`--trust` agrees unattended), so the terminal works at once.
 
-Then check it and start the example unit from the package:
+Running it again repairs the installation, or upgrades the agent in place to the version a newer
+release pins. `./hive.sh magnus-agent status --config FILE` shows the installed version, the
+service state, Magnus's last heartbeat and the web terminal approval; `remove` stops and removes
+the agent, and with `--trust` also revokes the approval. Magnus keeps its record of the node.
 
-```bash
-cd /opt/magnus-agent && node node_modules/@hivemagnus/magnus-agent/dist/index.js check
-cp node_modules/@hivemagnus/magnus-agent/deploy/magnus-agent.service /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now magnus-agent
-```
+The agent's listener certificate is the console certificate on the console host, renewed with it:
+`console-certificate.sh renew` and its weekly timer restart the agent after a renewal; after a
+manual `tls-refresh`, run `sudo systemctl restart magnus-agent`. On any other host, the agent
+gets a `tailscale cert` for the host's MagicDNS name and renews it itself.
 
-The first heartbeat registers the node; it appears under **Magnus > Nodes** within a minute.
-Magnus calls the agent back on port 4100 of `HOST_FQDN`, so that name must resolve from the
-Magnus container and present the agent's certificate. See the
-[agent README](https://github.com/ChefTaco/magnus/blob/HEAD/packages/agent/README.md) for the
-unprivileged mode and every setting.
+Magnus calls the agent back on port 4100 of its host name, so that name must resolve from the
+Magnus container. See the
+[agent README](https://github.com/ChefTaco/magnus/blob/HEAD/packages/agent/README.md) for every
+agent setting.
 
 ## Sending security events to Cindertrace
 

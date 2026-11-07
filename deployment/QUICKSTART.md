@@ -218,6 +218,20 @@ certificate you renew another way, add `--no-tailscale`, or run `tls-refresh` fr
 client's deploy hook. Run these on the console host. After an upgrade, run `schedule` again from
 the new release's checkout, so the timer uses its `hive.sh`.
 
+## 10. Optional: add this host to the Magnus fleet
+
+With the full profile and a port for Magnus host agents, one command installs the Magnus agent on
+this host, waits for Magnus to accept its first heartbeat and, with the web terminal, approves
+the host's SSH key so a terminal opens at once:
+
+```bash
+./hive.sh magnus-agent install --config ~/.config/hive/hive/installation.json
+```
+
+It asks before installing Node.js 24 from NodeSource when the host has no suitable Node.js, and
+asks for your sudo password, as the agent runs as a root service. See
+[installing the agent](FULL.md#installing-the-agent).
+
 ## Firewall and ports
 
 The suite publishes only the console listener. Docker inserts its own firewall rules, so a port
