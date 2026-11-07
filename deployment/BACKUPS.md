@@ -140,7 +140,7 @@ data is on another filesystem, the data side needs room for one store snapshot.
 
 `npm run test:suite:online-backup` runs real Redis, Qdrant and PostgreSQL images, and writers
 that write every store in a fixed order every 20 ms. It checks that no container restarts, that
-every client request is answered, that every pause stays within a budget (2 s by default,
+every client request is answered, that every pause stays within a budget (5 s by default,
 `--pause-budget`) on a data set of a real installation's size (`--seed-scale`: 80 Qdrant
 collections with 30,000 vectors, a large SQLite database that keeps being written and one that is
 not, and Redis keys), that every store in the archive holds the same instant in write order, that the archive rehearses and restores, that stopped archives, including one from

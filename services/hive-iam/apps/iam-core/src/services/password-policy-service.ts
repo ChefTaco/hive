@@ -2,7 +2,7 @@ import argon2 from 'argon2'
 import { prisma } from '../db/client.js'
 import { ApiError } from '../types/index.js'
 
-const ARGON2_OPTIONS: argon2.Options = {
+const ARGON2_OPTIONS: argon2.HashOptions = {
   type: argon2.argon2id,
   memoryCost: 65536,
   timeCost: 3,

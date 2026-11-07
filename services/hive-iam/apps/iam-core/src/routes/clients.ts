@@ -12,7 +12,7 @@ import { assertMayGrantPermissions, assertMayManageClient, resolveActor } from '
 import { clientCredentialsPermissionCeiling } from '../services/token-service.js'
 import { parseJsonFields, parseJsonFieldsArray } from '../utils/serialize.js'
 
-const ARGON2_OPTIONS: argon2.Options = {
+const ARGON2_OPTIONS: argon2.HashOptions = {
   type: argon2.argon2id,
   memoryCost: 65536,
   timeCost: 3,

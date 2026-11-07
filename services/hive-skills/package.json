@@ -21,7 +21,7 @@
     "postbuild": "node ../../scripts/build-release-runtime.mjs services/hive-skills --copy"
   },
   "dependencies": {
-    "@hono/node-server": "2.1.5",
+    "@hono/node-server": "2.1.6",
     "hono": "^4.13.1"
   },
   "devDependencies": {

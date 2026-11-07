@@ -6,6 +6,17 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Dependencies
+
+- Oathweave (`services/hive-iam`): `@simplewebauthn/server` 14 (includes the fix for
+  GHSA-2g3p-m8c9-hhwh), BullMQ 6, nanoid 6, dotenv 18, argon2 0.45, `@hono/swagger-ui` 0.6,
+  Prisma 7.10, Hono 4.13.16 and `@hono/node-server` 2.1.6. argon2 0.45 renames the `Options`
+  type to `HashOptions`; hashes keep the same encoding, and stored 0.43 hashes verify.
+  BullMQ 6 processes audit jobs that BullMQ 5 queued. Both lock files (workspace and the
+  standalone deployment lock) are updated together.
+- Router: dotenv 18, Hono 4.13.16 and `@hono/node-server` 2.1.6. HiveSkills, HiveMem core and the
+  IAM SDK: minor and patch updates.
+
 ### Next
 
 - Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
