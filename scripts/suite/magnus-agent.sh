@@ -145,7 +145,8 @@ hive_magnus_agent() {
   started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   result=$(HIVE_HOST_SECRET_FILE=$secrets hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-install "$request" true) || { [[ -z "$secrets" ]] || rm -f -- "$secrets"; hive_die 'The agent was not installed; see above'; }
   [[ -z "$secrets" ]] || rm -f -- "$secrets"
-  printf 'Magnus agent %s on %s: service %s.\n' "$(jq -r .version <<< "$result")" "$HIVE_AGENT_HOST" "$(jq -r .service <<< "$result")"
+  printf 'Magnus agent %s on %s: service %s%s.\n' "$(jq -r .version <<< "$result")" "$HIVE_AGENT_HOST" "$(jq -r .service <<< "$result")" \
+    "$(jq -r 'if .changed==false then ", already up to date and left running" else "" end' <<< "$result")"
 
   # Bounded wait for Magnus to accept the agent's heartbeat.
   local attempt
@@ -160,7 +161,11 @@ hive_magnus_agent() {
   if jq -e '.components["magnus-gateway"]!=null' "$HIVE_CONFIG" >/dev/null; then
     fingerprint=$(hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-host-key '{}' | jq -r .fingerprint) || hive_die 'The host key could not be read'
     printf 'Host key read on %s: %s\n' "$HIVE_AGENT_HOST" "$fingerprint"
-    if hive_magnus_agent_confirm "$HIVE_AGENT_TRUST" "Approve this host key for the web terminal?"; then
+    if HIVE_CONFIG=${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG} hive_magnus_trust list 2>/dev/null |
+      jq -Re --arg id "$(jq -r .id <<< "$record")" --arg host "$fqdn" --arg fingerprint "$fingerprint" \
+        'fromjson? | select(.nodeId==$id and .host==$host and (.fingerprints|index($fingerprint)))' >/dev/null; then
+      printf 'The web terminal approval of this host key is already in place.\n'
+    elif hive_magnus_agent_confirm "$HIVE_AGENT_TRUST" "Approve this host key for the web terminal?"; then
       hive_magnus_agent_trust add --node-id "$(jq -r .id <<< "$record")" --host "$fqdn" --fingerprint "$fingerprint" \
         --approved-by "${USER:-operator}" --approval-ref magnus-agent-install || hive_die 'The web terminal approval failed; the agent is installed'
       printf 'The web terminal can open sessions on this node. The approval is recorded in %s.\n' "$(dirname -- "${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG}")/magnus-trust.log"
