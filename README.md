@@ -33,24 +33,33 @@ offered by every release but never selected by a profile. Inference stays extern
 ## Install the suite
 
 On a fresh Ubuntu 22.04/24.04 or Debian 12/13 host (amd64 or arm64), from a checkout of the
-release tag:
+launcher:
 
 ```bash
-git clone --branch v2.0.6 https://github.com/ChefTaco/hive.git && cd hive
+git clone https://github.com/ChefTaco/hive.git && cd hive
 sudo ./scripts/install-prerequisites.sh --directory /opt/hive   # Docker Engine, Compose, jq, ...
 # log out and back in for the docker group, then:
 sudo ./scripts/console-certificate.sh tailscale    # or bring your own certificate and key
-./hive.sh --release 2.0.6          # terminal setup, then review and apply the plan
+./hive.sh --release latest         # terminal setup, then review and apply the plan
 ```
 
 [Install Hive on one host](deployment/QUICKSTART.md) walks through each step: the setup
 questions and their answers, other certificate sources, the first sign-in, backups, upgrades,
 certificate renewal, firewalls and managing the host from another machine.
 
-`hive.sh` verifies `releases/2.0.6.json` against `releases/2.0.6.json.sig` with the publisher key
+`--release latest` resolves GitHub’s latest published, non-prerelease suite release once, prints
+the exact version, and runs its tagged controller. To choose a version, use `./hive.sh --release
+2.0.6` instead. The launcher retains release checkouts under
+`${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`; keep them for later commands and certificate
+renewal timers. It leaves the original checkout and current working directory unchanged. After
+setup, change to the printed release checkout for the lifecycle commands below; return to the
+original launcher checkout when selecting a new release with `--release latest`.
+
+For example, release 2.0.6 verifies `releases/2.0.6.json` against `releases/2.0.6.json.sig` with the publisher key
 in `trust/publisher.pub` before it reads anything else, and refuses a manifest pinned to a different
 controller. The setup writes a protected installation file that the same commands accept
-unattended:
+unattended. Use the exact version setup reported for repeatable planning and applying
+(the following is an example for 2.0.6):
 
 ```bash
 ./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 2.0.6

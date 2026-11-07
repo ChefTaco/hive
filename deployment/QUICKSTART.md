@@ -1,9 +1,9 @@
 # Install Hive on one host
 
 This guide takes a freshly installed Ubuntu or Debian server to a running Hive suite with every
-product, signed in through the console. Each step is safe to repeat. The examples use the release
-`2.0.6`, the console name `hive.example.com` and the installation directory `/opt/hive`; use your
-own values.
+product, signed in through the console. Each step is safe to repeat. The launcher selects the
+latest published suite release; you can also select an exact version. The examples use the
+console name `hive.example.com` and the installation directory `/opt/hive`; use your own values.
 
 ## What you need
 
@@ -20,16 +20,20 @@ own values.
 - **No model runtime.** Inference stays external. You can connect an OpenAI-compatible,
   Ollama or llama.cpp endpoint during setup or later; Hive downloads no model.
 
-## 1. Get the release
+## 1. Get the launcher
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git    # only if git is missing
-git clone --branch v2.0.6 https://github.com/ChefTaco/hive.git
+git clone https://github.com/ChefTaco/hive.git
 cd hive
 ```
 
-Run every later command from this checkout. The signed release pins the exact controller source,
-so `hive.sh` refuses a checkout of a different version.
+Run the preparation commands from this checkout. `--release latest` resolves the published
+release once and runs its matching tagged controller; an exact `--release 2.0.6` selects that
+version instead. The launcher prints the version and retained checkout path, under
+`${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`. The signed release still pins the exact
+controller source. After setup, switch to the retained release checkout printed by the launcher
+for later commands and certificate renewal timers. Keep that directory.
 
 ## 2. Install the prerequisites
 
@@ -97,11 +101,13 @@ as above. Step 9 installs a renewed certificate.
 ## 4. Run the setup
 
 ```bash
-./hive.sh --release 2.0.6
+./hive.sh --release latest
 ```
 
-`hive.sh` checks the release signature first, then asks these questions. Press Enter to accept
-the default shown in brackets.
+`latest` excludes draft and prerelease releases and requires GitHub access; if lookup fails,
+setup stops. It never silently uses a cached older release. To choose a version, replace
+`latest` with that exact version. `hive.sh` checks the release signature first, then asks these
+questions. Press Enter to accept the default shown in brackets.
 
 | Question | Answer |
 |---|---|
@@ -128,12 +134,16 @@ the default shown in brackets.
 it. The first install pulls the images and takes a few minutes; later commands take seconds.
 
 If it stops after writing the configuration file, fix the cause and run `./hive.sh --release
-2.0.6` again: after the installation name it offers to continue with the saved file instead of
-asking everything again. Unattended, the same step is:
+X.Y.Z` again, replacing `X.Y.Z` with the exact version it reported: after the installation name
+it offers to continue with the saved file instead of asking everything again. Use that exact version for retries and for planning then applying,
+so a new release cannot change the plan between commands. Unattended, for example with 2.0.6:
 
 ```bash
 ./hive.sh install --config ~/.config/hive/hive/installation.json --release 2.0.6
 ```
+
+After setup, change to the retained release checkout path printed by the launcher before
+following steps 5–10. Keep that directory: certificate renewal timers refer to it.
 
 ## 5. Check the installation
 
@@ -172,15 +182,16 @@ restores and rehearsals.
 
 ## 8. Upgrade
 
-Each release is its own checkout. Clone the new tag next to the old one and upgrade from it:
+Return to the original launcher checkout (from step 1). It can select and retain the new release
+controller for you; older tagged controllers may not support `latest`:
 
 ```bash
-git clone --branch vX.Y.Z https://github.com/ChefTaco/hive.git hive-X.Y.Z && cd hive-X.Y.Z
-./hive.sh upgrade --config ~/.config/hive/hive/installation.json --release X.Y.Z
+./hive.sh upgrade --config ~/.config/hive/hive/installation.json --release latest
 ```
 
-The upgrade shows its plan and takes a backup with the suite stopped first, so the console is
-unavailable for about a minute. `./hive.sh rollback` from the same checkout returns to the
+Use an exact version instead of `latest` to review and apply a specific release. The upgrade
+shows its plan and takes a backup with the suite stopped first, so the console is unavailable
+for about a minute. After upgrading, switch to the new retained checkout the launcher printed. `./hive.sh rollback` from the same checkout returns to the
 previous release. Read the release notes and [UPGRADING](../UPGRADING.md) first.
 
 The installation file keeps the release it was installed with, and an upgrade does not rewrite

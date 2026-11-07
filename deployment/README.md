@@ -20,12 +20,22 @@ key `trust/publisher.pub`; the same three files are attached to its
 datastore and initialization image by multi-architecture digest (linux/amd64 and linux/arm64),
 lists the `core` and `full` profiles, the mandatory Hive Registry and the optional
 `magnus-gateway`, and pins the controller source with `controllerSHA256`, so install it from a
-checkout of the same tag:
+checkout of the same tag. The launcher downloads that checkout for you:
 
 ```bash
-git clone --branch v2.0.6 https://github.com/ChefTaco/hive.git && cd hive
-./hive.sh --release 2.0.6
+git clone https://github.com/ChefTaco/hive.git && cd hive
+./hive.sh --release latest
 ```
+
+Replace `latest` with an exact version, such as `2.0.6`, to select it explicitly. The launcher
+resolves `latest` only for `install`/`init`, `plan` and `upgrade`, and reports the exact version
+before starting setup. It retains matching tagged controllers under
+`${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`, verifies their clean Git checkout and signed
+manifest against the original publisher key, and checks the signed source digest before executing
+the controller. The selected controller also enforces its normal release checks.
+Do not remove a retained checkout used by a certificate renewal timer. API failures never fall
+back to an older release. Custom `--manifest`, `--signature` and `--trust-key` inputs require an
+exact version and keep the existing local-controller behavior.
 
 The signed services run as UID/GID 1000 (HiveXUI as 101), so run fresh setup as that account or as
 a host administrator. `scripts/install-prerequisites.sh` installs what the controller and hosts need, and

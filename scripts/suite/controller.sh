@@ -2,9 +2,10 @@
 
 hive_die() { printf 'Hive: %s\n' "$*" >&2; exit 1; }
 hive_need() { command -v "$1" >/dev/null || hive_die "Required tool missing: $1"; }
+# Keep this a literal printf list: the launcher parses it without executing downloaded code.
 hive_runtime_files() {
   printf '%s\n' LICENSE hive.sh deployment/Caddyfile \
-    scripts/suite/controller.sh scripts/suite/lifecycle.sh scripts/suite/host-runtime.sh \
+    scripts/suite/controller.sh scripts/suite/release-launcher.sh scripts/suite/lifecycle.sh scripts/suite/host-runtime.sh \
     scripts/suite/skills-integration.sh scripts/suite/skills-integration-host.sh scripts/suite/skills-preparation-host.sh \
     scripts/suite/adapters.sh scripts/suite/native-initialization-host.sh scripts/suite/adapters-host.sh scripts/suite/inference-registration.sh \
     scripts/suite/public-runtime.sh scripts/suite/preflight-host.sh scripts/suite/initialize.sh \
@@ -75,7 +76,7 @@ hive_usage() {
   cat <<'EOF'
 Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent]
   --config FILE          Installation JSON (required for unattended use)
-  --release VERSION      Override the exact release version
+  --release VERSION      Exact release version, or latest for setup, plan and upgrade
   --manifest FILE        Signed release manifest (default releases/VERSION.json)
   --signature FILE       Detached manifest signature (default MANIFEST.sig)
   --trust-key FILE       Publisher public key (default trust/publisher.pub)
