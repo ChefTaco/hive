@@ -36,25 +36,25 @@ On a fresh Ubuntu 22.04/24.04 or Debian 12/13 host (amd64 or arm64), from a chec
 release tag:
 
 ```bash
-git clone --branch v2.0.3 https://github.com/ChefTaco/hive.git && cd hive
+git clone --branch v2.0.4 https://github.com/ChefTaco/hive.git && cd hive
 sudo ./scripts/install-prerequisites.sh --directory /opt/hive   # Docker Engine, Compose, jq, ...
 # log out and back in for the docker group, then:
 sudo ./scripts/console-certificate.sh tailscale    # or bring your own certificate and key
-./hive.sh --release 2.0.3          # terminal setup, then review and apply the plan
+./hive.sh --release 2.0.4          # terminal setup, then review and apply the plan
 ```
 
 [Install Hive on one host](deployment/QUICKSTART.md) walks through each step: the setup
 questions and their answers, other certificate sources, the first sign-in, backups, upgrades,
 certificate renewal, firewalls and managing the host from another machine.
 
-`hive.sh` verifies `releases/2.0.3.json` against `releases/2.0.3.json.sig` with the publisher key
+`hive.sh` verifies `releases/2.0.4.json` against `releases/2.0.4.json.sig` with the publisher key
 in `trust/publisher.pub` before it reads anything else, and refuses a manifest pinned to a different
 controller. The setup writes a protected installation file that the same commands accept
 unattended:
 
 ```bash
-./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 2.0.3
-./hive.sh install --config ~/.config/hive/ID/installation.json --release 2.0.3 --non-interactive --yes
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 2.0.4
+./hive.sh install --config ~/.config/hive/ID/installation.json --release 2.0.4 --non-interactive --yes
 ./hive.sh status  --config ~/.config/hive/ID/installation.json
 ./hive.sh doctor  --config ~/.config/hive/ID/installation.json
 ```

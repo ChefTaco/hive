@@ -23,8 +23,8 @@ lists the `core` and `full` profiles, the mandatory Hive Registry and the option
 checkout of the same tag:
 
 ```bash
-git clone --branch v2.0.3 https://github.com/ChefTaco/hive.git && cd hive
-./hive.sh --release 2.0.3
+git clone --branch v2.0.4 https://github.com/ChefTaco/hive.git && cd hive
+./hive.sh --release 2.0.4
 ```
 
 The signed services run as UID/GID 1000 (HiveXUI as 101), so run fresh setup as that account or as

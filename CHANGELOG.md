@@ -6,6 +6,36 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Next
+
+- Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
+  host Node.js. The setup question "Opt-in native agent runtime" offers runtimes the release
+  has no artifacts for.
+- A bring-your-own certificate for `magnus-agent install` on a host without Tailscale.
+- Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
+- An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
+
+## [2.0.4] - 2026-11-07
+
+`releases/2.0.4.json` pins exactly the images and versions of 2.0.3 and now also the Magnus agent
+package, `@hivemagnus/magnus-agent` 2.1.1 with its registry integrity
+(`components.magnus.agentPackage`). The rest of the release is the controller. The publisher key
+is unchanged (fingerprint `c0d0665a70969f37c8f1cffbdcf8e54df13626f8dbd4b5759a7c44843d86d1b2`).
+
+### Security
+
+- Rescanned on 2026-11-07, the images have no CRITICAL or HIGH finding with a fix available, on
+  linux/amd64 and linux/arm64, and their unfixed findings are exactly those listed for 2.0.3.
+- The ingress links `github.com/go-jose/go-jose/v3` v3.0.5 (GHSA-mgcc-cww5-fp2q,
+  GHSA-4w3g-jfj2-cw2q, GHSA-vvm8-gf78-28g4; no patched v3 release). Its only importer in the
+  build is `go.step.sm/crypto/jose`, through Caddy's PKI app (`caddypki`, the smallstep
+  authority). The newest `smallstep/certificates` (v0.30.2) does not build with the
+  `go.step.sm/crypto` release that moved to go-jose v4, so no update removes it yet. The suite's
+  ingress never configures that app: its configuration has only the `http` and `tls` apps,
+  certificates are loaded from files, there is no automation, internal issuer or `acme_server`,
+  and the admin API is off, so the vulnerable parsing is not reachable.
+
+
 ### Added
 
 - A fresh installation with Magnus can publish the Magnus agent API for host agents on its own
@@ -71,15 +101,6 @@ All notable changes to this project are documented in this file. The format is b
   unchanged.
 - The installation guide, README and deployment overview of 2.0.3 still installed 2.0.2.
 - FULL.md now shows how to create the web terminal's restricted node account and gateway key.
-
-### Next
-
-- Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
-  host Node.js. The setup question "Opt-in native agent runtime" offers runtimes the release
-  has no artifacts for.
-- A bring-your-own certificate for `magnus-agent install` on a host without Tailscale.
-- Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
-- An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
 
 ## [2.0.3] - 2026-11-06
 
