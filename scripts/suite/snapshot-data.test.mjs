@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -40,6 +41,36 @@ test('a live WAL database is pre-copied while serving and brought up to date at 
     assert.deepEqual(readdirSync(target).sort(), ['live.db'], 'No -wal or -shm sidecar is copied or left behind');
     assert.equal(readFileSync(join(target, 'live.db')).subarray(18, 20).toString('hex'), '0202', 'The copy stays in WAL mode');
     assert.equal(rows(join(target, 'live.db')), 750, 'The copy holds every row committed at capture, WAL frames included');
+    live.close();
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('an Ardent Project Studio volume keeps its database and the content-addressed files it names as one unit', async () => {
+  const { root, source, target, work } = fixture();
+  try {
+    // The layout ArdentStudio writes in /data: studio.sqlite (WAL), blobs/aa/bb/<sha256>, blobs/tmp.
+    const blob = (content) => { const sha = createHash('sha256').update(content).digest('hex'); const dir = join(source, 'blobs', sha.slice(0, 2), sha.slice(2, 4)); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, sha), content); return sha; };
+    mkdirSync(join(source, 'blobs', 'tmp'), { recursive: true });
+    const live = new DatabaseSync(join(source, 'studio.sqlite'));
+    live.exec('PRAGMA journal_mode=WAL; CREATE TABLE t(n INTEGER PRIMARY KEY, sha TEXT NOT NULL)');
+    const insert = live.prepare('INSERT INTO t(sha) VALUES (?)');
+    insert.run(blob('reference file'));
+    precopy({ source, target, work });
+    // Written while serving, after the pre-copy: a new blob first, then the row that names it.
+    insert.run(blob(Buffer.alloc(2 * 1024 * 1024, 3)));
+    writeFileSync(join(source, 'blobs', 'tmp', 'upload-in-progress'), 'partial');
+    await capture({ source, target, work });
+    const verified = verify({ target, work });
+    assert.deepEqual(verified.sqlite.map((entry) => [entry.path, entry.journalMode]), [['studio.sqlite', 'wal']]);
+    const copy = new DatabaseSync(join(target, 'studio.sqlite'), { readOnly: true });
+    try {
+      const named = copy.prepare('SELECT sha FROM t ORDER BY n').all().map((row) => row.sha);
+      assert.equal(named.length, 2, 'The copy holds every row committed at capture');
+      for (const sha of named) {
+        const file = join(target, 'blobs', sha.slice(0, 2), sha.slice(2, 4), sha);
+        assert.equal(createHash('sha256').update(readFileSync(file)).digest('hex'), sha, 'A file the database names is missing or differs');
+      }
+    } finally { copy.close(); }
     live.close();
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

@@ -22,13 +22,16 @@ openssl and Docker Compose on the controller; no Node.js runtime.
 | [**Cindertrace**](https://github.com/ChefTaco/cindertrace) | Security event collection and response |
 | [**ChatterMost**](https://github.com/ChefTaco/ChatterMost) | Mattermost-compatible team chat for people and agents |
 | [**Emberfold**](https://github.com/ChefTaco/emberfold) | Context engine HTTP service |
+| [**Ardent Project Studio**](https://github.com/ChefTaco/ArdentStudio) | Team projects for Ardent agents: team assignment, the conversation room and deliverable review |
 | [**Hive Registry**](services/hive-registry) | Mandatory per-installation install catalog and lookup API (not the skills registry) |
 | **Hive Ingress** | The single HTTPS entry point, with explicit browser and native path mappings |
 
 The `core` profile installs Oathweave, Emberpath, HiveMem, HiveSkills, HiveXUI, the ingress and the
 Registry with their private Redis and Qdrant stores. The `full` profile adds Magnus, Cindertrace,
 ChatterMost (each with its own private PostgreSQL) and Emberfold. The Magnus web terminal gateway is
-offered by every release but never selected by a profile. Inference stays external.
+offered by every release but never selected by a profile. Ardent Project Studio is offered once its
+image is published and is never selected by a profile either; interactive setup suggests it with the
+full profile. Inference stays external.
 
 ## Install the suite
 

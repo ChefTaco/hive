@@ -60,6 +60,12 @@ server.on('upgrade',(req,socket)=>{const accept=crypto.createHash('sha1').update
 server.listen(9443,'0.0.0.0');
 const plain=http.createServer((req,res)=>{res.setHeader('Set-Cookie','MMSID=obviously-fake-forged');res.setHeader('Content-Type','application/json');res.end(JSON.stringify({path:req.url,authorization:req.headers.authorization,cookie:req.headers.cookie,origin:req.headers.origin}));});
 plain.listen(8096,'0.0.0.0');
+const studio=http.createServer((req,res)=>{
+ res.setHeader('Set-Cookie','hive_studio_forged=obviously-fake; Path=/');
+ if(req.url.endsWith('/stream')){res.writeHead(200,{'Content-Type':'text/event-stream'});res.write('data: first\\n\\n');setTimeout(()=>res.end('data: last\\n\\n'),350);return;}
+ res.setHeader('Content-Type','application/json');const chunks=[];req.on('data',chunk=>chunks.push(chunk));req.on('end',()=>res.end(JSON.stringify({path:req.url,method:req.method,headers:req.headers,body:Buffer.concat(chunks).toString()})));
+});
+studio.listen(8097,'0.0.0.0');
 const registry=http.createServer((req,res)=>{res.setHeader('Set-Cookie','hive_registry_forged=obviously-fake; Path=/');res.setHeader('Content-Type','application/json');res.end(JSON.stringify({path:req.url,method:req.method,authorization:req.headers.authorization,cookie:req.headers.cookie,origin:req.headers.origin}));});
 registry.listen(8095,'0.0.0.0');
 const gateway=https.createServer({key:fs.readFileSync('/config/console.key'),cert:fs.readFileSync('/config/console.crt')},(req,res)=>{
@@ -97,6 +103,8 @@ gateway.listen(4310,'0.0.0.0');
     'backend',
     '--network-alias',
     'emberfold',
+    '--network-alias',
+    'ardentstudio',
     '--network-alias',
     'hive-registry',
     '--network-alias',
@@ -207,7 +215,7 @@ gateway.listen(4310,'0.0.0.0');
     hostname: 'localhost',
     port: await startIngress(
       ingress,
-      [...env, '-e', 'MAGNUS_GATEWAY_ENDPOINT=https://magnus-gateway:4310', '-e', 'MAGNUS_GATEWAY_TLS_NAME=localhost'],
+      [...env, '-e', 'MAGNUS_GATEWAY_ENDPOINT=https://magnus-gateway:4310', '-e', 'MAGNUS_GATEWAY_TLS_NAME=localhost', '-e', 'ARDENTSTUDIO_ENDPOINT=http://ardentstudio:8097'],
       join(temporary, 'state'),
       [4000],
     ),
@@ -307,6 +315,8 @@ gateway.listen(4310,'0.0.0.0');
     'x-node-token': 'obviously-fake-node-token',
     'X-Log-Token': 'obviously-fake-log-token',
     'X-Forwarded-For': '192.0.2.1',
+    'X-Acting-Subject': 'obviously-fake-subject',
+    'Last-Event-ID': '42',
   };
   for (const [input, expected, method, payload] of [
     ['/api/magnus/health/ready', '/api/v1/health'],
@@ -315,6 +325,12 @@ gateway.listen(4310,'0.0.0.0');
     ['/api/magnus/nodes/node-1/gpu', '/api/v1/nodes/node-1/gpu'],
     ['/api/magnus/files/read?path=%2Fetc%2Fhosts', '/api/v1/files/read?path=%2Fetc%2Fhosts'],
     ['/api/magnus/ardent/installations/node-1/profiles/main/sessions/one', '/api/v1/ardent/installations/node-1/profiles/main/sessions/one'],
+    ['/api/magnus/ardent/agents/operations/op-1', '/api/v1/ardent/agents/operations/op-1'],
+    ['/api/magnus/ardent/agents/operations/op-1/stream', '/api/v1/ardent/agents/operations/op-1/stream'],
+    ['/api/magnus/ardent/installations/node-1/profiles/main/tasks/task-1/artifacts', '/api/v1/ardent/installations/node-1/profiles/main/tasks/task-1/artifacts'],
+    ['/api/magnus/ardent/agents', '/api/v1/ardent/agents', 'POST', '{"synthetic":true}'],
+    ['/api/magnus/ardent/agents/operations/op-1/resume', '/api/v1/ardent/agents/operations/op-1/resume', 'POST', '{"synthetic":true}'],
+    ['/api/magnus/ardent/installations/node-1/profiles/main/hivemem', '/api/v1/ardent/installations/node-1/profiles/main/hivemem', 'POST', '{"synthetic":true}'],
     ['/api/magnus/commands', '/api/v1/commands', 'POST', '{"synthetic":true}'],
     ['/api/magnus/notifications/preferences', '/api/v1/notifications/preferences', 'PUT', '{"synthetic":true}'],
     ['/api/magnus/nodes/node-1', '/api/v1/nodes/node-1', 'PATCH', '{"synthetic":true}'],
@@ -331,7 +347,8 @@ gateway.listen(4310,'0.0.0.0');
     assert.equal(body.headers['x-trace-id'], 'obviously-fake-trace');
     assert.equal(body.headers.accept, 'application/json');
     assert.equal(body.headers['content-type'], 'application/json');
-    for (const name of ['x-api-secret', 'x-node-token', 'x-log-token', 'cookie', 'origin'])
+    assert.equal(body.headers['last-event-id'], '42', input + ' dropped Last-Event-ID');
+    for (const name of ['x-api-secret', 'x-node-token', 'x-log-token', 'x-acting-subject', 'cookie', 'origin'])
       assert.equal(body.headers[name], undefined, input + ' forwarded ' + name);
     assert.notEqual(body.headers['x-forwarded-for'], '192.0.2.1', 'Ingress trusted a browser forwarding header');
     assert.deepEqual((result.cookies || []).filter(Boolean), [], input + ' let Magnus set a cookie');
@@ -339,6 +356,11 @@ gateway.listen(4310,'0.0.0.0');
   assert.equal((await request('/api/magnus/console/session', { Authorization: 'Basic b2JfdmlvdXNseQ==' })).status, 401, 'Non-bearer Authorization reached Magnus');
   for (const [input, method] of [
     ['/api/magnus/heartbeat', 'POST'],
+    ['/api/magnus/ardent/agents'],
+    ['/api/magnus/ardent/agents/operations'],
+    ['/api/magnus/ardent/agents/operations/op-1', 'POST'],
+    ['/api/magnus/ardent/agents/operations/op-1/resume'],
+    ['/api/magnus/ardent/installations/node-1/profiles/main/hivemem/extra', 'POST'],
     ['/api/magnus/heartbeat/stream/stats'],
     ['/api/magnus/discovery/scan', 'POST'],
     ['/api/magnus/terminal/ticket', 'POST'],
@@ -462,6 +484,24 @@ gateway.listen(4310,'0.0.0.0');
   const besideTerminal = JSON.parse((await request('/api/magnus/console/session', terminalHeaders)).body);
   assert.equal(besideTerminal.headers['x-api-secret'], undefined);
   assert.equal(besideTerminal.gateway, undefined, 'A Magnus route reached the gateway');
+  // Ardent Project Studio keeps its own prefix, gets the bearer token and no cookie either way,
+  // and streams its project events unbuffered.
+  for (const method of ['GET', 'POST']) {
+    const studio = await request('/api/ardentstudio/v1/projects?limit=1', { ...headers, 'X-Idempotency-Key': 'obviously-fake-key', 'Last-Event-ID': '7' }, method, method === 'POST' ? '{"synthetic":true}' : undefined);
+    assert.equal(studio.status, 200, 'Studio ' + method);
+    const body = JSON.parse(studio.body);
+    assert.equal(body.path, '/api/ardentstudio/v1/projects?limit=1', 'Studio lost its prefix');
+    assert.equal(body.method, method);
+    assert.equal(body.headers.authorization, headers.Authorization);
+    assert.equal(body.headers['x-idempotency-key'], 'obviously-fake-key');
+    assert.equal(body.headers['last-event-id'], '7');
+    assert.equal(body.headers.cookie, undefined, 'A product session cookie reached Studio');
+    assert.deepEqual((studio.cookies || []).filter(Boolean), [], 'Studio set a cookie');
+  }
+  const studioStream = await request('/api/ardentstudio/v1/projects/project-1/stream', { Authorization: headers.Authorization, Accept: 'text/event-stream' });
+  assert.equal(studioStream.status, 200);
+  assert.match(studioStream.body, /first[\s\S]*last/);
+  assert(studioStream.streamMilliseconds > 150, 'Studio event stream was buffered until completion');
   // Off by default: without a selected gateway the terminal routes do not exist at all.
   const withoutGatewayName = network + '-edge-no-gateway';
   containers.push(withoutGatewayName);
@@ -473,6 +513,10 @@ gateway.listen(4310,'0.0.0.0');
     assert.equal(result.body, refused);
   }
   assert.equal(JSON.parse((await request('/api/magnus/console/session', { Authorization: headers.Authorization }, 'GET', undefined, withoutGateway)).body).path, '/api/v1/console/session');
+  // Without Studio its prefix is an unknown API, as before.
+  const withoutStudio = await request('/api/ardentstudio/v1/projects', { Authorization: headers.Authorization }, 'GET', undefined, withoutGateway);
+  assert.equal(withoutStudio.status, 404, 'Studio route exists without Studio');
+  assert.equal(withoutStudio.body, refused);
   const magnusStream = await request('/api/magnus/events/stream', { ...magnusHeaders, Accept: 'text/event-stream' });
   assert.equal(magnusStream.status, 200);
   assert.match(magnusStream.body, /first[\s\S]*last/);
@@ -676,7 +720,7 @@ gateway.listen(4310,'0.0.0.0');
   assert.equal(consoleSession.headers['x-node-token'], undefined, 'The console port forwarded x-node-token');
   passed = true;
   console.log(
-    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming, WebSocket transport, the Magnus route allowlist with machine credentials stripped, the exact fleet gateway browser routes with Origin and Sec-Fetch-Site intact, and the Magnus host agent port with its own allowlist and no client-asserted identity.',
+    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming, WebSocket transport, the Magnus route allowlist with machine credentials and acting subjects stripped, the optional Ardent Project Studio route with its prefix kept, no cookies and unbuffered streams, the exact fleet gateway browser routes with Origin and Sec-Fetch-Site intact, and the Magnus host agent port with its own allowlist and no client-asserted identity.',
   );
 } catch (error) {
   for (const container of containers) {

@@ -19,6 +19,10 @@ export const DATASTORE_VERSIONS = Object.freeze({ redis: '8.2.10', qdrant: '1.18
 // Product images each profile needs. chat-migrator is ChatterMost's initialization image.
 export const CORE_PRODUCTS = Object.freeze(['hive-registry', 'oathweave', 'emberpath', 'hivemem', 'hiveskills', 'hivexui', 'ingress']);
 export const FULL_PRODUCTS = Object.freeze(['magnus', 'cindertrace', 'chattermost', 'chat-migrator', 'emberfold', 'magnus-gateway']);
+// Offered only when the release inputs name an image, and never selected by a profile, so an
+// installation without them, and the upgrade of one, is unchanged. Ardent Project Studio is
+// published as ghcr.io/cheftaco/ardent-studio.
+export const OPTIONAL_PRODUCTS = Object.freeze(['ardentstudio']);
 // HiveXUI's nginx image runs as its own unprivileged account.
 export const STATIC_UI_USER = '101:101';
 
@@ -116,7 +120,7 @@ export function coreRelease({ version, images, user, registryVersion }) {
 
 // Adds Magnus, Cindertrace, ChatterMost (each with private PostgreSQL, and Redis for the
 // first two), the Emberfold service and the optional Magnus fleet gateway, which is
-// offered but never part of a profile.
+// offered but never part of a profile, and the optional products the images name.
 export function addFullComponents(manifest, { images, user }) {
   for (const [product, database, role, postgres, major] of [
     ['magnus', 'magnus', 'magnus', images['magnus-postgres'] ?? DATASTORE_IMAGES.postgres17, '17'],
@@ -171,6 +175,16 @@ export function addFullComponents(manifest, { images, user }) {
     requiresLocal: ['magnus'],
     service: { user, depends_on: { magnus: { condition: 'service_healthy' } }, healthcheck: health(['magnus-fleet-gateway', 'healthcheck']) },
   };
-  manifest.profiles.full = Object.keys(manifest.components).filter((name) => name !== 'magnus-gateway').sort();
+  // Ardent Project Studio: SQLite and content-addressed files in /data, plain HTTP on the
+  // console host's private network. It reaches Magnus, HiveMem and Oathweave over HTTPS.
+  if (images.ardentstudio) {
+    manifest.components.ardentstudio = {
+      image: images.ardentstudio,
+      kind: 'application',
+      storageFormat: 'ardentstudio-v1',
+      service: { user, healthcheck: health(['node', '/app/healthcheck.mjs']) },
+    };
+  }
+  manifest.profiles.full = Object.keys(manifest.components).filter((name) => name !== 'magnus-gateway' && !OPTIONAL_PRODUCTS.includes(name)).sort();
   return manifest;
 }

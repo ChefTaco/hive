@@ -34,6 +34,7 @@ jq -e '
   .version=="9.9.9" and (.controllerSHA256|test("^[a-f0-9]{64}$")) and
   (.profiles.core|index("hive-registry"))!=null and (.profiles.full|index("hive-registry"))!=null and
   (.profiles.full|index("magnus-gateway"))==null and .components["magnus-gateway"]!=null and
+  .components.ardentstudio==null and
   (.profiles.full|length)==18 and (.profiles.core|length)==9 and
   .components.chattermost.initialization.image==("ghcr.io/example/chattermost-migrator@"+("sha256:"+("0"*63)+"7")) and
   .components["magnus-postgres"].version=="17.11" and .components["cindertrace-postgres"].version=="18.6" and
@@ -66,4 +67,21 @@ for change in '.magnusAgent.version="1.0.1"' '.magnusAgent.name="magnus-agent"' 
   jq "$change" "$temporary/agent-inputs.json" > "$temporary/bad-inputs.json"
   if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo "An invalid agent pin passed: $change" >&2; exit 1; fi
 done
+# Ardent Project Studio is offered when the inputs name its image, and no profile selects it.
+jq '.products.ardentstudio={image:"ghcr.io/example/ardent-studio:0.1.0",version:"0.1.0",platforms:["linux/amd64","linux/arm64"]}' "$temporary/inputs.json" > "$temporary/studio-inputs.json"
+jq --arg digest "$(digest 7)" '.ardentstudio=("ghcr.io/example/ardent-studio@"+$digest)' "$temporary/pinned.json" > "$temporary/studio-pinned.json"
+node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/studio-inputs.json" --pinned "$temporary/studio-pinned.json" --output "$temporary/studio.json" >/dev/null
+jq -e '
+  .components.ardentstudio as $studio |
+  $studio.kind=="application" and $studio.storageFormat=="ardentstudio-v1" and $studio.version=="0.1.0" and
+  $studio.image==("ghcr.io/example/ardent-studio@sha256:"+("0"*63)+"7") and $studio.service.user=="1000:1000" and
+  $studio.service.healthcheck.test==["CMD","node","/app/healthcheck.mjs"] and ($studio|has("requiresLocal")|not) and
+  $studio.catalog.consoleSection=="studio" and $studio.catalog.connection.consolePath=="/studio" and
+  $studio.catalog.connection.browserPrefix=="/api/ardentstudio" and $studio.catalog.dependencies==["magnus","oathweave","hivemem"] and
+  all(.profiles[]; index("ardentstudio")==null) and (.profiles.full|length)==18
+' "$temporary/studio.json" >/dev/null || { echo 'The Ardent Project Studio contract is not the reviewed one' >&2; exit 1; }
+diff <(jq 'del(.components.ardentstudio)' "$temporary/studio.json") <(jq . "$temporary/original.json") >/dev/null || { echo 'Offering Ardent Project Studio changed another component' >&2; exit 1; }
+jq '.products["unreviewed-product"]=.products.ardentstudio' "$temporary/studio-inputs.json" > "$temporary/bad-inputs.json"
+jq '.["unreviewed-product"]=.ardentstudio' "$temporary/studio-pinned.json" > "$temporary/bad-pinned.json"
+if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/bad-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An unknown product image passed' >&2; exit 1; fi
 echo 'build-suite-manifest: ok'

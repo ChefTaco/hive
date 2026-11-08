@@ -15,6 +15,11 @@ die() { printf 'Hive initialization: %s\n' "$*" >&2; exit 1; }
 for tool in openssl jq docker flock sha256sum cmp base64 stat find; do command -v "$tool" >/dev/null || die "Required tool missing on this host: $tool. Install the prerequisites with: sudo ./scripts/install-prerequisites.sh"; done
 docker info >/dev/null || die "Docker is not reachable by $(id -un) on this host: start it, or log in again after joining the docker group"
 has_component() { jq -e --arg name "$1" '.placements[$name]!=null' <<< "$input" >/dev/null; }
+# Selected anywhere in this installation, not only on this host.
+selected() { jq -e --arg name "$1" '.bootstrapServiceUsers[$name]!=null' <<< "$input" >/dev/null; }
+# Ardent Project Studio's Oathweave machine clients. Oathweave binds one audience to a client.
+studio_magnus_client=ardentstudio-magnus
+studio_hivemem_client=ardentstudio-hivemem
 distributed=$(jq -r '.bootstrap.productEndpoints!=null' <<< "$input")
 console_hostname=${origin#https://}; console_hostname=${console_hostname%%:*}
 certificate_references=()
@@ -212,6 +217,8 @@ if has_component magnus-gateway; then for name in magnus-gateway-api magnus-gate
 if has_component cindertrace; then for name in security-db security-redis security-admin-password security-session security-console security-audit security-receipt security-backup security-rate; do ensure_secret "$name"; done; fi
 if has_component chattermost; then for name in chat-db chat-cookie chat-token chat-admin-password chat-bot; do ensure_secret "$name"; done; fi
 if has_component emberfold; then ensure_secret context-api; fi
+# Studio runs with Oathweave, so its client secrets are generated once, on that host.
+if has_component ardentstudio; then for name in studio-id studio-magnus-client studio-hivemem-client; do ensure_secret "$name"; done; fi
 secret() { cat "$state/secrets/$1"; }
 ensure_key() {
   local path="$state/keys/$1.pem" pending="$state/keys/$1.pending"
@@ -270,6 +277,8 @@ for component in oathweave emberpath hivemem hiveskills magnus magnus-gateway ci
   publish_file "$component" "$directory/config/$component/tls.crt" < "$certificate_reference"
   publish_file "$component" "$directory/config/$component/authority.pem" < "$ca"
 done
+# Studio serves plain HTTP behind the ingress, but verifies Oathweave, Magnus and HiveMem.
+if has_component ardentstudio; then publish_file ardentstudio "$directory/config/ardentstudio/authority.pem" < "$ca"; fi
 if has_component ingress; then
   publish_file ingress "$directory/config/ingress/console.crt" < "$(jq -er .bootstrap.certificateFile <<< "$input")"
   publish_file ingress "$directory/config/ingress/console.key" < "$(jq -er .bootstrap.privateKeyFile <<< "$input")"
@@ -287,6 +296,8 @@ username=$(jq -er .bootstrap.adminUsername <<< "$input")
 email=$(jq -er .bootstrap.adminEmail <<< "$input")
 subject=$(secret identity-id); model_id=$(secret model-id 2>/dev/null || true); memory_id=$(secret memory-id 2>/dev/null || true)
 issuer="$origin/api/oathweave"
+# Oathweave signs client_credentials tokens with this one unless a client policy selects the browser issuer.
+native_issuer="oathweave-$installation"
 if has_component oathweave; then
 # Oathweave gives its initial administrator every permission listed here and a browser token
 # carries no more than this list, so magnus:terminal appears only on the explicit opt-in.
@@ -297,7 +308,8 @@ jq -n --arg id "$subject" --arg redirect "$origin/auth/callback" --argjson selec
  {id:"hivexui-hiveskills",audience:"hiveskills",permissions:["hiveskills:admin"],redirectUris:[$redirect],firstParty:true}]} |
  .clients += ((if $selection.cindertrace then [{id:"hivexui-cindertrace",audience:"cindertrace",permissions:["cindertrace:view","cindertrace:investigate","cindertrace:admin"],redirectUris:[$redirect],firstParty:true}] else [] end) +
  (if $selection.chattermost then [{id:"hivexui-chattermost",audience:"chattermost",permissions:["chattermost:session"],redirectUris:[$redirect],firstParty:true}] else [] end) +
- (if $selection.magnus then [{id:"hivexui-magnus",audience:"magnus",permissions:(["magnus:view","magnus:operate","magnus:admin"]+(if $terminal then ["magnus:terminal"] else [] end)),redirectUris:[$redirect],firstParty:true}] else [] end)) | .clients |= map(select(.audience as $name|$selection[$name]!=null))' | publish_file oathweave "$directory/config/oathweave/suite-bootstrap.json"
+ (if $selection.magnus then [{id:"hivexui-magnus",audience:"magnus",permissions:(["magnus:view","magnus:operate","magnus:admin"]+(if $terminal then ["magnus:terminal"] else [] end)),redirectUris:[$redirect],firstParty:true}] else [] end) +
+ (if $selection.ardentstudio then [{id:"hivexui-ardentstudio",audience:"ardentstudio",permissions:["ardentstudio:projects:read","ardentstudio:projects:write","ardentstudio:templates:read","ardentstudio:templates:write","ardentstudio:review:write","ardentstudio:agents:admin"],redirectUris:[$redirect],firstParty:true}] else [] end)) | .clients |= map(select(.audience as $name|$selection[$name]!=null))' | publish_file oathweave "$directory/config/oathweave/suite-bootstrap.json"
 policies=$(jq -c '.clients|map({key:.id,value:{audience,permissions}})|from_entries' "$directory/config/oathweave/suite-bootstrap.json")
 fi
 if has_component hivemem; then
@@ -320,11 +332,20 @@ if has_component oathweave; then
 {
   common_environment; line HOST 0.0.0.0; line PORT 4200; line DATABASE_URL file:/data/iam/iam.db
   line REDIS_URL "redis://:$(secret redis-password)@oathweave-redis:6379"
-  line JWT_ISSUER "oathweave-$installation"; line IAM_BROWSER_ISSUER "$issuer"; line IAM_BROWSER_CLIENT_POLICIES "$policies"
+  line JWT_ISSUER "$native_issuer"; line IAM_BROWSER_ISSUER "$issuer"; line IAM_BROWSER_CLIENT_POLICIES "$policies"
   line COOKIE_SECRET "$(secret oath-cookie)"; line IAM_AGENT_SECRET "$(secret oath-agent)"
   line SEED_ADMIN_USERNAME "$username"; line SEED_ADMIN_EMAIL "$email"; line SEED_ADMIN_PASSWORD "$(secret admin-password)"
   line SEED_HIVE_CLIENT_SECRET "$(secret native-hive-client)"; line SEED_HIVE_ROUTER_CLIENT_SECRET "$(secret native-router-client)"
   line OATHWEAVE_SUITE_BOOTSTRAP_FILE /config/suite-bootstrap.json
+  if has_component ardentstudio; then
+  # Studio's service identities. Its Magnus tokens use the browser issuer, the one Magnus verifies
+  # people on, so Magnus can relate the service to the person it acts for. HiveMem links services
+  # on the native issuer. Each token carries only the permissions Studio requests as its scope.
+  line IAM_MACHINE_CLIENT_POLICIES "$(jq -nc --arg magnus "$studio_magnus_client" --arg memory "$studio_hivemem_client" '{
+    ($magnus):{audience:"magnus",permissions:["magnus:ardent"],lifetimeSeconds:300,rotationOwner:"hive-suite",issuer:"browser"},
+    ($memory):{audience:"hivemem",permissions:["hivemem:workspaces:write","hivemem:memories:write"],lifetimeSeconds:300,rotationOwner:"hive-suite"}}')"
+  line IAM_MACHINE_CLIENT_SECRETS "$(jq -nc --arg magnus "$studio_magnus_client" --arg memory "$studio_hivemem_client" --arg magnusSecret "$(secret studio-magnus-client)" --arg memorySecret "$(secret studio-hivemem-client)" '{($magnus):$magnusSecret,($memory):$memorySecret}')"
+  fi
   if jq -e '.bootstrapServiceUsers.emberpath!=null and .bootstrapServiceUsers.hivemem!=null' <<< "$input" >/dev/null; then
   line IAM_ENROLLMENT_INSTALLATION_ID "$installation"
   line IAM_ENROLLMENT_PRODUCTS_JSON "$(jq -nc --arg models "$(product_endpoint emberpath https://emberpath:9443)/api" --arg memory "$(product_endpoint hivemem https://hivemem:18790)/v1" '{emberpath:{url:$models,caFile:"/config/authority.pem"},hivemem:{url:$memory,caFile:"/config/authority.pem"}}')"
@@ -351,6 +372,9 @@ if has_component hivemem; then
   line HIVEMEM_TS_TLS_CERT_FILE /config/tls.crt; line HIVEMEM_TS_TLS_KEY_FILE /config/tls.key
   line HIVEMEM_INITIAL_ACCOUNT_FILE /config/initial-account.json
   line HIVEMEM_OATHWEAVE_IDENTITIES_JSON "$(jq -nc --arg issuer "$issuer" --arg subject "$subject" --arg id "$memory_id" '[{issuer:$issuer,subject:$subject,localId:$id,credentialGeneration:0}]')"
+  if selected ardentstudio; then
+  line HIVEMEM_OATHWEAVE_SERVICES_JSON "$(jq -nc --arg issuer "$native_issuer" --arg client "$studio_hivemem_client" '[{issuer:$issuer,clientId:$client,localId:"ardentstudio",scopes:["workspaces:write","memories:write"]}]')"
+  fi
 } | publish_file hivemem "$directory/config/hivemem.env"
 fi
 if has_component hiveskills; then
@@ -387,6 +411,8 @@ if has_component ingress; then
     endpoint=$(product_endpoint "$component" "https://$component:$port"); hostname=${endpoint#https://}; hostname=${hostname%%:*}
     line "${label}_ENDPOINT" "$endpoint"; line "${label}_TLS_NAME" "$hostname"
   done
+  # Studio is plain HTTP on this host's private network; without it the route answers 404.
+  if selected ardentstudio; then line ARDENTSTUDIO_ENDPOINT http://ardentstudio:8097; fi
   if jq -e '.bootstrapServiceUsers.emberpath!=null' <<< "$input" >/dev/null; then
   endpoint=$(product_endpoint emberpath https://emberpath:4020 inferenceOrigin)
   hostname=${endpoint#https://}; hostname=${hostname%%:*}
@@ -400,6 +426,7 @@ jq -n --arg issuer "$issuer" --arg installation "$installation" --argjson select
  if $selection.cindertrace then .products.cindertrace="/api/cindertrace" | .identity.clients.cindertrace="hivexui-cindertrace" else . end |
  if $selection.chattermost then .products.chattermost="/api/chattermost" | .identity.clients.chattermost="hivexui-chattermost" else . end |
  if $selection.magnus then .products.magnus="/api/magnus" | .identity.clients.magnus="hivexui-magnus" else . end |
+ if $selection.ardentstudio then .products.ardentstudio="/api/ardentstudio" | .identity.clients.ardentstudio="hivexui-ardentstudio" else . end |
  .products |= with_entries(select(.key as $name|$selection[$name]!=null)) | .identity.clients |= with_entries(select(.key as $name|$selection[$name]!=null)) |
  if ($selection.emberpath and $selection.hivemem) then . else del(.enrollmentInstallationId) end' | publish_file hivexui "$directory/config/runtime.json" 644
 fi

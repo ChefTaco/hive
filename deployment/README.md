@@ -107,6 +107,8 @@ transport disables certificate verification. Unconfigured products fail closed.
 Compose names can be used only for services on this host and a shared bridge;
 remote placements need explicit verified HTTPS endpoints. Static HiveXUI is local
 to ingress. Do not expose datastore ports.
+Set `ARDENTSTUDIO_ENDPOINT=http://ardentstudio:8097` only when Ardent Project Studio is installed on
+this host; without it `/api/ardentstudio/*` answers 404.
 
 Browser prefixes are `/api/emberpath`, `/api/oathweave`, `/api/hivemem`,
 `/api/hiveskills`, `/api/cindertrace`, `/api/chattermost`, and `/api/magnus`.

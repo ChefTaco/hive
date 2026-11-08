@@ -226,5 +226,17 @@
     "required": false,
     "dependencies": [],
     "connection": { "browserPrefix": "/api/emberfold", "consolePath": null, "nativeApis": {}, "internalEndpoints": { "api": "http://emberfold:8096" } }
+  },
+  "ardentstudio": {
+    "displayName": "Ardent Project Studio",
+    "description": "Team projects for Ardent agents: team assignment, the conversation room and deliverable review.",
+    "repository": "https://github.com/ChefTaco/ArdentStudio",
+    "documentation": "https://github.com/ChefTaco/ArdentStudio/blob/HEAD/README.md",
+    "license": "https://github.com/ChefTaco/ArdentStudio/blob/HEAD/LICENSE",
+    "licenseSpdx": "Apache-2.0",
+    "consoleSection": "studio",
+    "required": false,
+    "dependencies": ["magnus", "oathweave", "hivemem"],
+    "connection": { "browserPrefix": "/api/ardentstudio", "consolePath": "/studio", "nativeApis": {}, "internalEndpoints": { "api": "http://ardentstudio:8097" } }
   }
 }

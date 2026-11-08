@@ -173,6 +173,61 @@ Hive does not enable checksums or alter their data automatically.
 All inference services, hosted APIs, model files, model storage, containers and
 hardware provisioning remain external. Full installation creates none of them.
 
+## Ardent Project Studio
+
+[Ardent Project Studio](https://github.com/ChefTaco/ArdentStudio) (component `ardentstudio`) gives
+Ardent agents shared team projects. HiveXUI shows its **Studio** section, a fullscreen page at
+`/studio`, only when it is installed. A release offers it once its image is published
+(`ghcr.io/cheftaco/ardent-studio`), and no profile selects it, so an installation without it, and
+the upgrade of one, is unchanged. Interactive setup suggests it with the full profile when Magnus
+and HiveMem are selected:
+
+```text
+Deploy Ardent Project Studio, team projects for Ardent agents (yes/no) [yes]:
+```
+
+An unattended configuration selects it as a component:
+
+```json
+"ardentstudio": {
+  "host": "control",
+  "envFile": "/opt/hive/config/ardentstudio.env",
+  "configDirectory": "/opt/hive/config/ardentstudio"
+}
+```
+
+It needs Magnus with at least one Ardent agent, and HiveMem, and runs on the console host with
+Oathweave: its client secrets are generated there and never leave it. It needs a release whose
+Oathweave supports browser-issued machine clients and whose Magnus links service identities
+(role `ARDENT_SERVICE`). Fresh setup:
+
+- registers the browser client `hivexui-ardentstudio` (audience `ardentstudio`, permissions
+  `ardentstudio:projects:read|write`, `ardentstudio:templates:read|write`,
+  `ardentstudio:review:write`, `ardentstudio:agents:admin`) and links the initial operator to a
+  generated Studio account;
+- declares two installation-owned Oathweave machine clients, because Oathweave binds one audience
+  to each client: `ardentstudio-magnus` (audience `magnus`, permission `magnus:ardent`, tokens on
+  the browser issuer) and `ardentstudio-hivemem` (audience `hivemem`, permissions
+  `hivemem:workspaces:write` and `hivemem:memories:write`, tokens on the native issuer), each with
+  a generated secret in `IAM_MACHINE_CLIENT_POLICIES` and `IAM_MACHINE_CLIENT_SECRETS`;
+- links `ardentstudio-magnus` in Magnus's `MAGNUS_OATHWEAVE_IDENTITIES_JSON` with role
+  `ARDENT_SERVICE`, and `ardentstudio-hivemem` in HiveMem's `HIVEMEM_OATHWEAVE_SERVICES_JSON` with
+  the scopes `workspaces:write` and `memories:write`;
+- writes `config/ardentstudio.env` and the internal certificate authority Studio uses to verify
+  Oathweave, Magnus and HiveMem.
+
+Studio calls Magnus and HiveMem directly on their HTTPS endpoints, as itself, never through the
+browser routes. For work a person asked for it names that person in `x-acting-subject`; the
+ingress removes that header from every browser request to Magnus. Studio listens on plain HTTP
+port 8097 on the console host's private network. The ingress maps `/api/ardentstudio/*` to it with
+the prefix kept, no cookies either way and unbuffered event streams; without Studio the path
+answers 404. Its state is the `ardentstudio-data` volume (`data/ardentstudio`), backed up with the
+rest of the installation ([BACKUPS.md](BACKUPS.md#ardent-project-studio)).
+
+Adding Studio to an existing installation is not automated yet: configure the same clients, links
+and environment by hand, then select the component. Studio's README and `docs/OATHWEAVE.md` list
+its variables.
+
 ## Magnus host agents
 
 A host joins the fleet by running the Magnus agent, which calls Magnus's agent API. On a fresh
