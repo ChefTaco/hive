@@ -9,7 +9,7 @@ import {
   type Release,
 } from './manifest.js';
 import { atomic, home, json, writeJson, withLock } from './files.js';
-import { installedPackage, activeDirectory, readProject, serviceEnv } from './project.js';
+import { installedPackage, activeDirectory } from './project.js';
 import { upgrade, releaseChanges, type Manager } from './engine.js';
 
 export interface UpdateStatus {

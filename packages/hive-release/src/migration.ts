@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { backupStores, type StoreSpec } from './backup.js';
@@ -235,7 +235,7 @@ export async function delegate(args: string[]): Promise<number> {
     throw new Error(
       'This server is not enrolled; run hive adopt --dry-run with its existing configuration',
     );
-  const project = json<{ launcher: string }>(file);
+  json(file); // Reject malformed project JSON before invoking the launcher.
   const { run } = await import('./files.js');
   process.stdout.write(
     await run(

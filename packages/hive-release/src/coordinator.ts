@@ -3,7 +3,7 @@ import { chmodSync, existsSync, readFileSync, unlinkSync, readdirSync } from 'no
 import { join } from 'node:path';
 import { z } from 'zod';
 import { activeDirectory, installedPackage, readProject } from './project.js';
-import { hash, json, privateDir, writeJson } from './files.js';
+import { json, privateDir, writeJson } from './files.js';
 import {
   planUpgrade,
   upgrade,

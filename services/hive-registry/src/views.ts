@@ -13,7 +13,7 @@ export function publicProductVisible(row: ProductRow): boolean {
   return row.public === 1;
 }
 
-export function publicProduct(row: ProductRow, installed: InstalledRow | undefined, store: RegistryStore) {
+function productDetails(row: ProductRow, installed: InstalledRow | undefined) {
   return {
     id: row.id,
     displayName: row.display_name,
@@ -22,6 +22,12 @@ export function publicProduct(row: ProductRow, installed: InstalledRow | undefin
     consoleSection: row.console_section,
     required: row.required === 1,
     installed: installed?.status === 'installed' || installed?.status === 'external',
+  };
+}
+
+export function publicProduct(row: ProductRow, installed: InstalledRow | undefined, store: RegistryStore) {
+  return {
+    ...productDetails(row, installed),
     dependencies: dependenciesOf(row).filter((name) => {
       const dependency = store.product(name);
       return dependency ? publicProductVisible(dependency) : false;
@@ -33,7 +39,7 @@ const versionView = (row: VersionRow) => ({ version: row.version, image: row.ima
 
 export function privateProduct(row: ProductRow, installed: InstalledRow | undefined, store: RegistryStore) {
   return {
-    ...publicProduct(row, installed, store),
+    ...productDetails(row, installed),
     dependencies: dependenciesOf(row),
     kind: row.kind,
     source: row.source,
@@ -46,13 +52,17 @@ export function privateProduct(row: ProductRow, installed: InstalledRow | undefi
   };
 }
 
-export function publicConnection(row: ProductRow, installed: InstalledRow | undefined) {
-  const connection = connectionOf(installed);
+function connectionDetails(row: ProductRow, connection: Connection) {
   return { id: row.id, consolePath: connection.consolePath, browserPrefix: connection.browserPrefix, nativeApis: connection.nativeApis, documentation: row.documentation_url };
 }
 
+export function publicConnection(row: ProductRow, installed: InstalledRow | undefined) {
+  return connectionDetails(row, connectionOf(installed));
+}
+
 export function privateConnection(row: ProductRow, installed: InstalledRow | undefined) {
-  return { ...publicConnection(row, installed), inventoryHost: installed?.inventory_host ?? null, internalEndpoints: connectionOf(installed).internalEndpoints };
+  const connection = connectionOf(installed);
+  return { ...connectionDetails(row, connection), inventoryHost: installed?.inventory_host ?? null, internalEndpoints: connection.internalEndpoints };
 }
 
 export function publicInstallation(installation: InstallationRow | undefined, configured: string, store: RegistryStore) {

@@ -1,7 +1,6 @@
 import { canonicalJson } from './manifest.js';
 import {
   existsSync,
-  mkdirSync,
   openSync,
   closeSync,
   readFileSync,
@@ -22,14 +21,12 @@ import { catalog, packageMetadata, registryUrl, targetRelease } from './catalog.
 import {
   assertUpgrade,
   autoEligible,
-  BINS,
   compareVersions,
   ENGINE_PROTOCOL,
   NATIVE_POLICY,
   PACKAGES,
   releaseSchema,
   satisfies,
-  SERVICES,
   type Release,
   type Service,
 } from './manifest.js';
@@ -47,7 +44,6 @@ import { backupStores, restoreStores, verifyBackup, type StoreSpec } from './bac
 import { migrationReview } from './migration.js';
 import { inspectStores, assertQuiesced } from './inspect.js';
 import {
-  atomic,
   hash,
   json,
   privateDir,

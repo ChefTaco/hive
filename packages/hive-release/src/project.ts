@@ -5,7 +5,6 @@ import {
   realpathSync,
   renameSync,
   symlinkSync,
-  mkdirSync,
   cpSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';

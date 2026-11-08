@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { run } from './files.js';
 import { compareVersions, parseVersion, releaseSchema, type Release } from './manifest.js';

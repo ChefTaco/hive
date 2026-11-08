@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { PACKAGES, SERVICES, type Service } from './manifest.js';
 import { activeDirectory, installedPackage, readProject, type Project } from './project.js';
