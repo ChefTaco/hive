@@ -13,7 +13,8 @@ hive_full_configuration() {
     fi
   done
   # The gateway and the server must hold the same links.
-  has_component magnus && magnus_identities=$(jq -nc --arg issuer "$issuer" --arg subject "$subject" --arg id "$(secret magnus-id)" '[{issuer:$issuer,subject:$subject,localUserId:$id,role:"ADMIN"}]')
+  # Ardent Project Studio's Magnus client is a service link: role ARDENT_SERVICE, subject = client ID.
+  has_component magnus && magnus_identities=$(jq -nc --arg issuer "$issuer" --arg subject "$subject" --arg id "$(secret magnus-id)" --arg studio "$studio_magnus_client" --argjson withStudio "$(selected ardentstudio && echo true || echo false)" '[{issuer:$issuer,subject:$subject,localUserId:$id,role:"ADMIN"}] + (if $withStudio then [{issuer:$issuer,subject:$studio,localUserId:"ardentstudio",role:"ARDENT_SERVICE"}] else [] end)')
   if has_component magnus; then
     {
       common_environment; resource_identity; line MAGNUS_HOME /data; line MAGNUS_AUTO_MIGRATE false; line MAGNUS_UPDATE_CHECK false; line MAGNUS_AGENT_UPGRADES false
@@ -106,5 +107,22 @@ hive_full_configuration() {
       common_environment; line EMBERFOLD_API_TOKEN "$(secret context-api)"
     } | publish_file emberfold "$directory/config/emberfold.env"
     printf '%s\n' '{"host":"0.0.0.0","port":8096,"providers":[],"concurrency":2,"timeout_ms":120000}' | publish_file emberfold "$directory/config/emberfold/service.json"
+  fi
+  if has_component ardentstudio; then
+    # Studio reaches Magnus and HiveMem directly on their verified HTTPS endpoints, as itself,
+    # never through the browser routes. Its operator link carries no permission ceiling.
+    {
+      line NODE_ENV production; line NODE_EXTRA_CA_CERTS /config/authority.pem
+      line ARDENT_STUDIO_HOST 0.0.0.0; line ARDENT_STUDIO_PORT 8097; line ARDENT_STUDIO_DATA /data
+      resource_identity
+      line ARDENT_STUDIO_OATHWEAVE_IDENTITIES_JSON "$(jq -nc --arg issuer "$issuer" --arg subject "$subject" --arg id "$(secret studio-id)" --arg name "$username" '[{issuer:$issuer,subject:$subject,localUserId:$id,displayName:$name}]')"
+      line ARDENT_STUDIO_OATHWEAVE_TOKEN_URL "$(product_endpoint oathweave https://oathweave:4200)/api/v1/oauth/token"
+      line ARDENT_STUDIO_MAGNUS_URL "$(product_endpoint magnus https://magnus:4000)"
+      line ARDENT_STUDIO_MAGNUS_CLIENT_ID "$studio_magnus_client"; line ARDENT_STUDIO_MAGNUS_CLIENT_SECRET "$(secret studio-magnus-client)"
+      line ARDENT_STUDIO_MAGNUS_SCOPE magnus:ardent
+      line ARDENT_STUDIO_HIVEMEM_URL "$(product_endpoint hivemem https://hivemem:18790)"
+      line ARDENT_STUDIO_HIVEMEM_CLIENT_ID "$studio_hivemem_client"; line ARDENT_STUDIO_HIVEMEM_CLIENT_SECRET "$(secret studio-hivemem-client)"
+      line ARDENT_STUDIO_HIVEMEM_SCOPE "'hivemem:workspaces:write hivemem:memories:write'"
+    } | publish_file ardentstudio "$directory/config/ardentstudio.env"
   fi
 }

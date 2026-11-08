@@ -6,6 +6,19 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- Ardent Project Studio (`ardentstudio`) as an optional product: its catalog entry (Studio section,
+  `/studio`, `/api/ardentstudio`), release contract (`ardentstudio-v1`, offered only when the
+  release inputs name its image and selected by no profile), fresh configuration with its
+  Oathweave browser client, two machine clients for Magnus and HiveMem with generated secrets and
+  their service links, the ingress route (prefix kept, no cookies, unbuffered streams, 404 when it
+  is not installed), the interactive offer with the full profile, and its data volume in backups.
+  An installation without it is unchanged.
+- Magnus browser routes for New Agent: its operation status and stream, `POST /ardent/agents`,
+  operation resume and a profile's HiveMem enrollment. The ingress forwards `Last-Event-ID` to
+  Magnus and removes `x-acting-subject` from browser requests.
+
 ### Next
 
 - Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no

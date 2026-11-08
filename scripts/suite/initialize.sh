@@ -39,7 +39,7 @@ hive_initialize() {
     .bootstrap!=null and .console!=null and
     (.components|keys) as $names |
     (["hive-registry","hivexui","ingress","oathweave","oathweave-redis"]-$names|length==0) and
-    ($names-["hive-registry","emberpath","hivemem","hivemem-qdrant","hiveskills","hivexui","ingress","oathweave","oathweave-redis","magnus","magnus-gateway","magnus-postgres","magnus-redis","cindertrace","cindertrace-postgres","cindertrace-redis","chattermost","chattermost-postgres","emberfold"]|length==0) and
+    ($names-["hive-registry","emberpath","hivemem","hivemem-qdrant","hiveskills","hivexui","ingress","oathweave","oathweave-redis","magnus","magnus-gateway","magnus-postgres","magnus-redis","cindertrace","cindertrace-postgres","cindertrace-redis","chattermost","chattermost-postgres","emberfold","ardentstudio"]|length==0) and
     (. as $c|all(["magnus","cindertrace","chattermost"][];. as $name| if $c.components[$name] then
       $release[0].components[$name].initialization!=null and
       $c.components[$name+"-postgres"].host==$c.components[$name].host and
@@ -47,6 +47,8 @@ hive_initialize() {
       (if $c.bootstrap.productEndpoints then $c.bootstrap.productEndpoints[$name]!=null else true end)
      else $c.components[$name+"-postgres"]==null and $c.components[$name+"-redis"]==null end)) and
     (if .components.emberfold then .components.emberfold.host==.console.host else true end) and
+    (if .components.ardentstudio then .components.ardentstudio.host==.console.host and .components.ardentstudio.host==.components.oathweave.host and
+      .components.magnus!=null and .components.hivemem!=null else true end) and
     (if .components["magnus-gateway"] then .components.magnus!=null and .components["magnus-gateway"].host==.components.magnus.host else true end) and
     .components.oathweave.host==.components["oathweave-redis"].host and
     (if .components.hivemem then .components["hivemem-qdrant"]!=null and .components.hivemem.host==.components["hivemem-qdrant"].host else .components["hivemem-qdrant"]==null end) and
@@ -56,7 +58,7 @@ hive_initialize() {
       .value.configDirectory==($c.hosts[.value.host].directory+"/config/"+.key) and
       (if (.key|test("-(qdrant|redis|postgres)$")) then true else .value.envFile==($c.hosts[.value.host].directory+"/config/"+.key+".env") end)
     end))
-  ' "$HIVE_CONFIG" >/dev/null || hive_die 'Fresh suite initialization requires the Hive Registry, Oathweave, its private Redis, HiveXUI and ingress, locally placed selected-product datastores, explicit HTTPS endpoints across hosts and standard protected config paths. Existing or separately configured products must use their owning setup workflow; this command never adopts or overwrites their state.'
+  ' "$HIVE_CONFIG" >/dev/null || hive_die 'Fresh suite initialization requires the Hive Registry, Oathweave, its private Redis, HiveXUI and ingress, locally placed selected-product datastores, explicit HTTPS endpoints across hosts and standard protected config paths. Ardent Project Studio needs Magnus and HiveMem, and runs on the console host with Oathweave. Existing or separately configured products must use their owning setup workflow; this command never adopts or overwrites their state.'
   HIVE_BOOTSTRAP_USERS=$(jq -c --slurpfile config "$HIVE_CONFIG" '.components|with_entries(select(.key as $name|$config[0].components[$name]!=null))|map_values(.service.user)' "$HIVE_MANIFEST")
   HIVE_BOOTSTRAP_IMAGES=$(jq -c --slurpfile config "$HIVE_CONFIG" ' .components|with_entries(select(.key as $name|$config[0].components[$name]!=null))|map_values(.image)' "$HIVE_MANIFEST")
   HIVE_BOOTSTRAP_INGRESS=$(base64 -w0 "$HIVE_ROOT/deployment/Caddyfile")

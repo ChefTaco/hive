@@ -224,6 +224,14 @@ hive_configure() {
       elif [[ "$gateway_deploy" != no ]]; then hive_die 'Answer yes or no'; fi
       [[ "$gateway_grant" == yes || "$gateway_grant" == no ]] || hive_die 'Answer yes or no'
     fi
+    # Ardent Project Studio is offered when the release has it; no profile selects it, so an
+    # installation without it, and its upgrade, is unchanged. The full profile suggests it.
+    if jq -e '.components.ardentstudio!=null' "$HIVE_MANIFEST" >/dev/null && jq -ne --argjson selected "$selected_json" '$selected|index("magnus")!=null and index("hivemem")!=null' >/dev/null; then
+      if jq -ne --argjson selected "$selected_json" '$selected|index("ardentstudio")!=null' >/dev/null; then studio_deploy=yes
+      else hive_prompt studio_deploy 'Deploy Ardent Project Studio, team projects for Ardent agents (yes/no)' "$([[ "$profile" == full ]] && printf yes || printf no)"; fi
+      if [[ "$studio_deploy" == yes ]]; then selected_json=$(jq -nc --argjson selected "$selected_json" '$selected+["ardentstudio"]|unique')
+      elif [[ "$studio_deploy" != no ]]; then hive_die 'Answer yes or no'; fi
+    fi
     # Host agents reach Magnus on its own published port; a distributed Magnus has its endpoint.
     if [[ "$mode" == fresh ]] && jq -ne --argjson selected "$selected_json" '$selected|index("magnus")!=null' >/dev/null; then
       printf 'Magnus host agents need to reach its agent API. Hive can publish it on its own port at %s, where only the agent routes and credentials pass.\n' "$bind"

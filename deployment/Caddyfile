@@ -43,12 +43,17 @@
 	import stateless_backend {args[0]}
 	# Default deny: the API reads only these. x-api-secret grants system ADMIN and
 	# x-node-token an agent's access, so a browser must never be able to send them.
+	# x-acting-subject names the person a linked service acts for; only that service,
+	# on the private network, may send it, never a browser.
 	header_up -*
 	header_up -X-Api-Secret
 	header_up -X-Node-Token
+	header_up -X-Acting-Subject
 	header_up Authorization {http.request.header.Authorization}
 	header_up Content-Type {http.request.header.Content-Type}
 	header_up Accept {http.request.header.Accept}
+	# A reconnecting event stream resumes from the last event it received.
+	header_up Last-Event-ID {http.request.header.Last-Event-ID}
 	header_up X-Idempotency-Key {http.request.header.X-Idempotency-Key}
 	header_up X-Trace-Id {http.request.header.X-Trace-Id}
 	header_up X-Forwarded-For {client_ip}
@@ -316,6 +321,8 @@
 				|| {path} == "/api/v1/anomalies"
 				|| {path}.matches("^/api/v1/anomalies/event/[^/]+/correlation$")
 				|| {path} == "/api/v1/anomalies/summary"
+				|| {path}.matches("^/api/v1/ardent/agents/operations/[^/]+$")
+				|| {path}.matches("^/api/v1/ardent/agents/operations/[^/]+/stream$")
 				|| {path} == "/api/v1/ardent/installations"
 				|| {path}.matches("^/api/v1/ardent/installations/[^/]+$")
 				|| {path}.matches("^/api/v1/ardent/installations/[^/]+/profiles/[^/]+/.+$")
@@ -394,7 +401,10 @@
 				{path} == "/api/v1/agents/upgrade"
 				|| {path}.matches("^/api/v1/agents/upgrade/runs/[^/]+/retry$")
 				|| {path}.matches("^/api/v1/agents/upgrade/runs/[^/]+/stop$")
+				|| {path} == "/api/v1/ardent/agents"
+				|| {path}.matches("^/api/v1/ardent/agents/operations/[^/]+/resume$")
 				|| {path}.matches("^/api/v1/ardent/installations/[^/]+/profiles/[^/]+/action$")
+				|| {path}.matches("^/api/v1/ardent/installations/[^/]+/profiles/[^/]+/hivemem$")
 				|| {path} == "/api/v1/assistant/insights/pins"
 				|| {path}.matches("^/api/v1/codex/installations/[^/]+/device-auth$")
 				|| {path}.matches("^/api/v1/codex/installations/[^/]+/device-auth/[^/]+/cancel$")
@@ -500,6 +510,22 @@
 		}
 		handle {
 			respond "API unavailable" 404
+		}
+	}
+	# Ardent Project Studio serves its own /api/ardentstudio prefix over plain HTTP on this
+	# host's private network, present only when it is installed (ARDENTSTUDIO_ENDPOINT); without
+	# it the path answers 404 like any unknown API. It authenticates with bearer tokens and sets
+	# no cookie, so every cookie is removed both ways. Its project streams are SSE: unbuffered.
+	@ardentstudio {
+		path /api/ardentstudio/*
+		expression `"{$ARDENTSTUDIO_ENDPOINT:}" != ""`
+	}
+	handle @ardentstudio {
+		reverse_proxy {$ARDENTSTUDIO_ENDPOINT:http://unconfigured.invalid} {
+			import plain_backend
+			flush_interval -1
+			header_up -Cookie
+			header_down -Set-Cookie
 		}
 	}
 	# Emberfold has an optional co-located HTTP listener. HTTPS terminates here;

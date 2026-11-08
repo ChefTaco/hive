@@ -215,6 +215,22 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     subprocess.run([*arguments[:2], '--config', str(agent_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
     print('Passed: interactive Magnus host agent port, off by default and published only when given.')
 
+    # Ardent Project Studio is offered with Magnus and HiveMem; the full profile suggests it.
+    manifest['components']['ardentstudio'] = {'image': 'example.com/synthetic@sha256:' + '3' * 64, 'kind': 'application', 'storageFormat': 'ardentstudio-v1',
+                                              'service': {'user': f'{os.getuid()}:{os.getgid()}', 'healthcheck': {'test': ['CMD', 'true']}}}
+    release.write_text(json.dumps(with_catalog(manifest)))
+    openssl('pkeyutl', '-sign', '-inkey', base / 'publisher.key', '-rawin', '-in', release, '-out', str(release) + '.sig')
+    studio, target = with_gateway_answers('studio-default', [('Deploy the Magnus web terminal gateway', 'no'), ('Deploy Ardent Project Studio', '')])
+    assert studio['components']['ardentstudio'] == {'host': 'control', 'envFile': str(base / 'deployment/config/ardentstudio.env'), 'configDirectory': str(base / 'deployment/config/ardentstudio')}
+    assert len(studio['components']) == 19
+    subprocess.run([*arguments[:2], '--config', str(target), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
+    declined, _ = with_gateway_answers('studio-declined', [('Deploy the Magnus web terminal gateway', 'no'), ('Deploy Ardent Project Studio', 'no')])
+    assert 'ardentstudio' not in declined['components'] and len(declined['components']) == 18
+    del manifest['components']['ardentstudio']
+    release.write_text(json.dumps(with_catalog(manifest)))
+    openssl('pkeyutl', '-sign', '-inkey', base / 'publisher.key', '-rawin', '-in', release, '-out', str(release) + '.sig')
+    print('Passed: interactive Ardent Project Studio, suggested by the full profile and left out when declined.')
+
     custom_output = base / 'inventory' / 'custom.json'
     custom_questions = []
     for label, answer in questions[:13]:

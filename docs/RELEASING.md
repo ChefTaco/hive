@@ -24,6 +24,12 @@ when run from any other controller source, so install from a checkout of the rel
 1. **Release the products.** Each product repository publishes its own multi-architecture image
    from its own version tag. Record the exact tags in `releases/X.Y.Z.inputs.json`. The input file
    lists the platforms each image must provide.
+   Optional products (`OPTIONAL_PRODUCTS` in `scripts/suite/release-contracts.mjs`) are offered
+   only when the inputs name their image and no profile selects them. Ardent Project Studio is
+   one: after its first image is published, add
+   `"ardentstudio": {"image": "ghcr.io/cheftaco/ardent-studio:X.Y.Z", "version": "X.Y.Z", ...}`,
+   with a Magnus that links service identities and an Oathweave with browser-issued machine
+   clients.
 2. **Publish the suite images.** The Hive Registry, the ingress and the hardened datastores are built
    from this repository; `deployment/images.json` gives each one's version and base.
    Merge the release candidate to `main`, then run *Actions > Suite release > Run workflow* on

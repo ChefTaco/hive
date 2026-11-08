@@ -19,7 +19,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { addFullComponents, coreRelease, CORE_PRODUCTS, DATASTORE_IMAGES, DATASTORE_VERSIONS, FULL_PRODUCTS } from '../suite/release-contracts.mjs';
+import { addFullComponents, coreRelease, CORE_PRODUCTS, DATASTORE_IMAGES, DATASTORE_VERSIONS, FULL_PRODUCTS, OPTIONAL_PRODUCTS } from '../suite/release-contracts.mjs';
 import { applySuiteCatalog } from '../suite/suite-catalog.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -33,7 +33,7 @@ assert.equal(inputs.schema, 1, 'Unsupported inputs schema');
 assert.equal(inputs.version, version, 'Inputs describe a different suite version');
 assert.match(inputs.user, /^[1-9][0-9]*:[1-9][0-9]*$/, 'Inputs need a non-root service owner uid:gid');
 const products = inputs.products;
-assert.deepEqual(Object.keys(products).sort(), [...CORE_PRODUCTS, ...FULL_PRODUCTS].sort(), 'Inputs must name exactly the suite product images');
+assert.deepEqual(Object.keys(products).filter((name) => !OPTIONAL_PRODUCTS.includes(name)).sort(), [...CORE_PRODUCTS, ...FULL_PRODUCTS].sort(), 'Inputs must name exactly the suite product images, and optionally ' + OPTIONAL_PRODUCTS.join(', '));
 for (const [name, product] of Object.entries(products)) {
   assert.match(product.image, /^ghcr\.io\/[a-z0-9-]+\/[a-z0-9-]+:\d+\.\d+\.\d+$/, name + ': image must be an exact version tag');
   assert(product.version === undefined || /^\d+\.\d+\.\d+$/.test(product.version), name + ': invalid product version');

@@ -35,6 +35,18 @@ and to bring that up to date, not as long as copying the data.
 | PostgreSQL (Magnus, Cindertrace, ChatterMost) | `pg_basebackup` over the local socket, with its WAL streamed | `pg_verifybackup`, then recovery by the product image to a cleanly shut down cluster, then `pg_checksums` |
 | Files (attachments, skill archives, audit logs, keys, certificates) | Copied while serving, then brought up to date while paused: an unchanged file is kept, a file that only grew gains its new tail, anything else is copied again. File times come from a coarse clock, so a file changed within a second before its copy is compared by content instead | SHA-256 of every file, in the archive's `snapshot.json` |
 
+### Ardent Project Studio
+
+Ardent Project Studio keeps all of its state in its data volume, `data/ardentstudio` on its host
+(the `ardentstudio-data` volume, mounted at `/data`): `studio.sqlite` in WAL mode and the
+content-addressed files under `blobs/aa/bb/<sha256>` that its records name. The database refers to
+files by digest, so the two are one backup unit: the online backup captures both in the same
+pause, the database by the SQLite method and the files as files. A file is never changed once
+written, and Studio writes a file before the row that names it, so every file a captured row
+names is in the archive. `blobs/tmp/` holds uploads in progress; Studio clears it when it starts,
+so a restored partial upload is removed. After restoring an archive older than Studio's HiveMem
+knowledge, reindex the project's reference files in Studio to bring HiveMem back in line.
+
 The staging lives beside the backups, owner-only. Every staging directory mounted into a product
 container belongs to that product's service user and is private to it; the host side runs as root
 on a production host, so it never relies on its own ownership.

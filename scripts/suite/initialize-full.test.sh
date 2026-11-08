@@ -13,7 +13,7 @@ jq --arg root "$temporary" '.profile="full" | .origin="https://localhost:65426" 
  .components += (["magnus","magnus-postgres","magnus-redis","cindertrace","cindertrace-postgres","cindertrace-redis","chattermost","chattermost-postgres","emberfold"]|map({key:.,value:({host:"control",configDirectory:("/config/"+.)}+(if test("-(redis|postgres)$") then {} else {envFile:("/config/"+.+".env")} end))})|from_entries) |
  .components|=with_entries(.key as $name|.value.configDirectory=(if $name=="hivexui" then null else $root+"/install/config/"+$name end)|.value|=with_entries(select(.value!=null))|if .value.envFile then .value.envFile=($root+"/install/config/"+$name+".env") else . end) |
  .console.httpsPort=65426 | .console.runtimeFile=($root+"/install/config/runtime.json") | .bootstrap.certificateFile=($root+"/server.crt") | .bootstrap.privateKeyFile=($root+"/server.key")' "$ROOT/examples/installation.json" > "$temporary/config.json"
-jq -n --slurpfile c "$temporary/config.json" --arg user "$(id -u):$(id -g)" '{schema:1,version:"0.1.0",profiles:{core:($c[0].components|keys),full:($c[0].components|keys)},components:($c[0].components|map_values({image:("example.com/synthetic@sha256:"+("0"*64)),service:{user:$user,healthcheck:{test:["CMD","true"]}}}))} | .components.hivexui.kind="static-ui" | .components.hivexui.service.user="101:101" | .components.ingress.kind="ingress" | reduce ["magnus","cindertrace","chattermost"][] as $name (.;.components[$name].initialization={image:("example.com/migrator@sha256:"+("1"*64)),command:["apply"],verificationCommand:["verify-current"]}) | .components["magnus-gateway"]={image:("example.com/gateway@sha256:"+("2"*64)),kind:"application",requiresLocal:["magnus"],service:{user:$user,healthcheck:{test:["CMD","true"]}}}' > "$temporary/release.json"
+jq -n --slurpfile c "$temporary/config.json" --arg user "$(id -u):$(id -g)" '{schema:1,version:"0.1.0",profiles:{core:($c[0].components|keys),full:($c[0].components|keys)},components:($c[0].components|map_values({image:("example.com/synthetic@sha256:"+("0"*64)),service:{user:$user,healthcheck:{test:["CMD","true"]}}}))} | .components.hivexui.kind="static-ui" | .components.hivexui.service.user="101:101" | .components.ingress.kind="ingress" | reduce ["magnus","cindertrace","chattermost"][] as $name (.;.components[$name].initialization={image:("example.com/migrator@sha256:"+("1"*64)),command:["apply"],verificationCommand:["verify-current"]}) | .components["magnus-gateway"]={image:("example.com/gateway@sha256:"+("2"*64)),kind:"application",requiresLocal:["magnus"],service:{user:$user,healthcheck:{test:["CMD","true"]}}} | .components.ardentstudio={image:("example.com/studio@sha256:"+("3"*64)),kind:"application",storageFormat:"ardentstudio-v1",service:{user:$user,healthcheck:{test:["CMD","true"]}}}' > "$temporary/release.json"
 source "$ROOT/scripts/suite/test-catalog.sh"; hive_test_catalog "$temporary/release.json"
 openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/release.json" -out "$temporary/release.json.sig"
 mkdir "$temporary/bin"
@@ -72,10 +72,70 @@ for component in magnus cindertrace chattermost; do [[ -f "$temporary/install/co
 for path in "$temporary/install/config/runtime.json" "$temporary/install/config/ingress.env"; do
  while IFS= read -r secret; do if rg -F -q -- "$(cat "$secret")" "$path"; then fail 'Infrastructure credential reached browser/ingress configuration'; fi; done < <(find "$temporary/install/config/.initializer/secrets" -type f ! -name '*-id')
 done
+# Ardent Project Studio is offered by this release but not selected: nothing about it is configured.
+if rg -q 'IAM_MACHINE_CLIENT|ardentstudio' "$temporary/install/config/oathweave.env" "$temporary/install/config/oathweave/suite-bootstrap.json" "$temporary/install/config/runtime.json" "$temporary/install/config/magnus.env"; then fail 'An unselected Studio got identity, console or Magnus configuration'; fi
+if rg -q 'HIVEMEM_OATHWEAVE_SERVICES_JSON' "$temporary/install/config/hivemem.env"; then fail 'HiveMem linked a service nobody selected'; fi
+if rg -q 'ARDENTSTUDIO' "$temporary/install/config/ingress.env"; then fail 'Ingress was given a Studio nobody selected'; fi
+[[ ! -e "$temporary/install/config/ardentstudio.env" && ! -e "$temporary/install/config/ardentstudio" && ! -e "$temporary/install/config/.initializer/secrets/studio-magnus-client" ]] || fail 'An unselected Studio got configuration'
 find "$temporary/install/config" -type f -exec sha256sum {} + | sort > "$temporary/before"
 run_init > "$temporary/repeated.log"
 find "$temporary/install/config" -type f -exec sha256sum {} + | sort > "$temporary/after"
 cmp -s "$temporary/before" "$temporary/after" || fail 'Repeated full setup changed existing credentials, IDs or password hash'
+# Ardent Project Studio, when selected: a browser client, two machine clients with generated
+# secrets, their Magnus and HiveMem links, and its own environment and ingress route.
+studio_config() {
+  jq --arg old "$temporary/install" --arg new "$temporary/$1" '
+    walk(if type=="string" then (split($old)|join($new)) else . end) | .installation=("synthetic-"+($new|split("/")|last)) |
+    .components.ardentstudio={host:"control",envFile:($new+"/config/ardentstudio.env"),configDirectory:($new+"/config/ardentstudio")}
+  ' "$temporary/config.json" > "$temporary/$1.json"
+}
+studio_config studio
+"$ROOT/hive.sh" init --config "$temporary/studio.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/studio.log"
+studio="$temporary/studio/config"
+value() { sed -n "s/^$2=//p" "$1" | tail -1; }
+magnus_secret=$(cat "$studio/.initializer/secrets/studio-magnus-client"); memory_secret=$(cat "$studio/.initializer/secrets/studio-hivemem-client")
+[[ "$magnus_secret" =~ ^[a-f0-9]{64}$ && "$memory_secret" =~ ^[a-f0-9]{64}$ && "$magnus_secret" != "$memory_secret" ]] || fail 'Studio client secrets are not distinct generated values'
+permissions='["ardentstudio:projects:read","ardentstudio:projects:write","ardentstudio:templates:read","ardentstudio:templates:write","ardentstudio:review:write","ardentstudio:agents:admin"]'
+jq -e --argjson permissions "$permissions" '(.clients|length)==8 and (.clients[]|select(.id=="hivexui-ardentstudio")|.audience=="ardentstudio" and .permissions==$permissions and .firstParty==true)' "$studio/oathweave/suite-bootstrap.json" >/dev/null || fail 'Studio browser client is not the reviewed resource grant'
+value "$studio/oathweave.env" IAM_BROWSER_CLIENT_POLICIES | jq -e --argjson permissions "$permissions" '."hivexui-ardentstudio"=={audience:"ardentstudio",permissions:$permissions}' >/dev/null || fail 'The Studio browser ceiling differs from its bootstrap client'
+value "$studio/oathweave.env" IAM_MACHINE_CLIENT_POLICIES | jq -e '.=={
+  "ardentstudio-magnus":{audience:"magnus",permissions:["magnus:ardent"],lifetimeSeconds:300,rotationOwner:"hive-suite",issuer:"browser"},
+  "ardentstudio-hivemem":{audience:"hivemem",permissions:["hivemem:workspaces:write","hivemem:memories:write"],lifetimeSeconds:300,rotationOwner:"hive-suite"}}' >/dev/null || fail 'Studio machine client policies are not the reviewed grants'
+value "$studio/oathweave.env" IAM_MACHINE_CLIENT_SECRETS | jq -e --arg magnus "$magnus_secret" --arg memory "$memory_secret" '.=={"ardentstudio-magnus":$magnus,"ardentstudio-hivemem":$memory}' >/dev/null || fail 'Oathweave lacks the Studio client secrets'
+[[ $(value "$studio/oathweave.env" JWT_ISSUER) == oathweave-synthetic-studio ]] || fail 'Unexpected native issuer'
+value "$studio/magnus.env" MAGNUS_OATHWEAVE_IDENTITIES_JSON | jq -e --arg subject "$(cat "$studio/.initializer/secrets/identity-id")" '.[0].subject==$subject and .[0].role=="ADMIN" and .[1]=={issuer:"https://localhost:65426/api/oathweave",subject:"ardentstudio-magnus",localUserId:"ardentstudio",role:"ARDENT_SERVICE"} and length==2' >/dev/null || fail 'Magnus lacks the Studio service link on the browser issuer'
+value "$studio/hivemem.env" HIVEMEM_OATHWEAVE_SERVICES_JSON | jq -e '.==[{issuer:"oathweave-synthetic-studio",clientId:"ardentstudio-hivemem",localId:"ardentstudio",scopes:["workspaces:write","memories:write"]}]' >/dev/null || fail 'HiveMem lacks the Studio service link on the native issuer'
+for setting in NODE_EXTRA_CA_CERTS=/config/authority.pem ARDENT_STUDIO_HOST=0.0.0.0 ARDENT_STUDIO_PORT=8097 ARDENT_STUDIO_DATA=/data \
+  OATHWEAVE_ISSUER=https://localhost:65426/api/oathweave OATHWEAVE_JWKS_URL=https://oathweave:4200/api/v1/oauth/jwks OATHWEAVE_USERINFO_URL=https://oathweave:4200/api/v1/oauth/userinfo \
+  ARDENT_STUDIO_OATHWEAVE_TOKEN_URL=https://oathweave:4200/api/v1/oauth/token ARDENT_STUDIO_MAGNUS_URL=https://magnus:4000 ARDENT_STUDIO_MAGNUS_CLIENT_ID=ardentstudio-magnus \
+  ARDENT_STUDIO_MAGNUS_CLIENT_SECRET="$magnus_secret" ARDENT_STUDIO_MAGNUS_SCOPE=magnus:ardent ARDENT_STUDIO_HIVEMEM_URL=https://hivemem:18790 ARDENT_STUDIO_HIVEMEM_CLIENT_ID=ardentstudio-hivemem \
+  ARDENT_STUDIO_HIVEMEM_CLIENT_SECRET="$memory_secret" "ARDENT_STUDIO_HIVEMEM_SCOPE='hivemem:workspaces:write hivemem:memories:write'"; do
+  rg -q -F -x -- "$setting" "$studio/ardentstudio.env" || fail "Studio environment lacks ${setting%%=*}"
+done
+value "$studio/ardentstudio.env" ARDENT_STUDIO_OATHWEAVE_IDENTITIES_JSON | jq -e --arg subject "$(cat "$studio/.initializer/secrets/identity-id")" --arg id "$(cat "$studio/.initializer/secrets/studio-id")" '.==[{issuer:"https://localhost:65426/api/oathweave",subject:$subject,localUserId:$id,displayName:"admin"}]' >/dev/null || fail 'The operator is not an explicit Studio link'
+[[ $(stat -c %a "$studio/ardentstudio.env") == 600 ]] || fail 'Studio environment is not owner-only'
+openssl verify -CAfile "$studio/ardentstudio/authority.pem" -verify_hostname magnus "$studio/magnus/tls.crt" >/dev/null || fail 'Studio cannot verify Magnus'
+openssl verify -CAfile "$studio/ardentstudio/authority.pem" -verify_hostname hivemem "$studio/hivemem/tls.crt" >/dev/null || fail 'Studio cannot verify HiveMem'
+[[ ! -e "$studio/ardentstudio/tls.key" ]] || fail 'Studio got a TLS key it does not serve'
+[[ $(value "$studio/ingress.env" ARDENTSTUDIO_ENDPOINT) == http://ardentstudio:8097 ]] || fail 'Ingress lacks the Studio route'
+jq -e '.products.ardentstudio=="/api/ardentstudio" and .identity.clients.ardentstudio=="hivexui-ardentstudio" and (.products|length)==8' "$studio/runtime.json" >/dev/null || fail 'The console does not know Studio'
+source "$ROOT/scripts/suite/public-runtime.sh"; hive_check_public_runtime "$studio/runtime.json" || fail 'Studio broke the public browser allowlist'
+for path in "$studio/runtime.json" "$studio/ingress.env" "$studio/magnus.env" "$studio/hivemem.env"; do
+  for secret in "$magnus_secret" "$memory_secret"; do if rg -F -q -- "$secret" "$path"; then fail 'A Studio client secret reached browser, ingress, Magnus or HiveMem configuration'; fi; done
+done
+rendered=$(source "$ROOT/scripts/suite/controller.sh"; HIVE_ROOT=$ROOT HIVE_CONFIG=$temporary/studio.json HIVE_MANIFEST=$temporary/release.json HIVE_SIGNATURE=$temporary/release.json.sig HIVE_TRUST_KEY=$temporary/publisher.pub HIVE_VERSION=0.1.0; hive_validate; hive_manifest >/dev/null; hive_render control)
+jq -e --arg data "$temporary/studio/data/ardentstudio" --arg env "$studio/ardentstudio.env" '.services.ardentstudio as $s | $s.env_file==[$env] and ($s.volumes|any(.source==$data and .target=="/data")) and ($s.volumes|any(.target=="/config" and .read_only==true)) and $s.ports==null and $s.read_only==true and $s.cap_drop==["ALL"]' <<< "$rendered" >/dev/null || fail 'Studio is not rendered as a private, read-only service with its data volume'
+find "$studio" -type f -exec sha256sum {} + | sort > "$temporary/studio.before"
+"$ROOT/hive.sh" init --config "$temporary/studio.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/studio-repeat.log"
+find "$studio" -type f -exec sha256sum {} + | sort > "$temporary/studio.after"
+cmp -s "$temporary/studio.before" "$temporary/studio.after" || fail 'A repeated setup changed Studio secrets or configuration'
+# Studio needs Magnus and HiveMem, and runs with Oathweave on the console host.
+jq '.profile="custom" | del(.components.hivemem, .components["hivemem-qdrant"])' "$temporary/studio.json" > "$temporary/studio-refused.json"
+reject "$ROOT/hive.sh" init --config "$temporary/studio-refused.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes
+grep -q 'Ardent Project Studio needs Magnus and HiveMem' "$temporary/rejection.log" || fail 'Studio without HiveMem lacks a clear refusal'
+jq '.profile="custom" | del(.components.magnus, .components["magnus-postgres"], .components["magnus-redis"])' "$temporary/studio.json" > "$temporary/studio-refused.json"
+reject "$ROOT/hive.sh" init --config "$temporary/studio-refused.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes
+grep -q 'Ardent Project Studio needs Magnus and HiveMem' "$temporary/rejection.log" || fail 'Studio without Magnus lacks a clear refusal'
 # Opt-in: selecting the gateway deploys it and wires Magnus, and only the separate flag grants.
 ssh-keygen -q -t ed25519 -N '' -C fleet-gateway-fixture -f "$temporary/fleet-key"
 gateway_config() {
@@ -192,4 +252,4 @@ cp "$temporary/release.json" "$temporary/release.valid.json"
 jq 'del(.components.chattermost.initialization)' "$temporary/release.valid.json" > "$temporary/release.json"
 openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/release.json" -out "$temporary/release.json.sig"
 reject run_init
-printf 'Passed: full fresh configuration, independent native credentials and datastores, seven browser products with HiveXUI as the Magnus console, the fleet gateway and its terminal grant off by default and each a separate explicit opt-in, protected product-owned hash preparation, disabled automatic dispatch/migrations, stable repeat, required migration artifact refusal and the opt-in Magnus host agent listener.\n'
+printf 'Passed: full fresh configuration, independent native credentials and datastores, seven browser products with HiveXUI as the Magnus console, the fleet gateway and its terminal grant off by default and each a separate explicit opt-in, protected product-owned hash preparation, disabled automatic dispatch/migrations, stable repeat, required migration artifact refusal, the opt-in Magnus host agent listener and opt-in Ardent Project Studio with its service identities.\n'
