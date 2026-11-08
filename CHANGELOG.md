@@ -6,6 +6,11 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Fixed
+
+- Fresh initialization reads machine-client secrets and the initial security-console password
+  directly from protected files, keeping them out of subprocess arguments and shell traces.
+
 ### Added
 
 - Ardent Project Studio (`ardentstudio`) as an optional product: its catalog entry (Studio section,

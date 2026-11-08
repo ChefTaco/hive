@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 temporary=$(mktemp -d)
 trap 'rm -rf -- "$temporary"' EXIT
@@ -34,9 +35,32 @@ umask 077
 if [[ ! -f "$output/browser-admin.json" ]]; then jq -n '{schema:1,username:"admin",passwordHash:"$argon2id$synthetic-non-authenticating-test-hash",sourceSha256:("0"*64)}' > "$output/browser-admin.json"; fi
 DOCKER
 chmod +x "$temporary/bin/docker"
+# Intercept external commands during initialization, with no credential in the observer's argv.
+# Keep the synthetic observations owner-only. Wrapping bash also checks explicitly traced hosts.
+export HIVE_TEST_REAL_PATH="$PATH"
+for tool in jq openssl cat sed sha256sum docker bash; do
+  [[ "$tool" != docker ]] || mv "$temporary/bin/docker" "$temporary/bin/docker-fixture"
+  cat > "$temporary/bin/$tool" <<'OBSERVER'
+#!/usr/bin/python3
+import json, os, pathlib, shutil, sys
+name = pathlib.Path(sys.argv[0]).name
+if os.environ.get('HIVE_TEST_ARGV_LOG'):
+    with open(os.environ['HIVE_TEST_ARGV_LOG'], 'a') as log:
+        log.write(json.dumps([name, *sys.argv[1:]]) + '\n')
+real = str(pathlib.Path(sys.argv[0]).with_name('docker-fixture')) if name == 'docker' else shutil.which(name, path=os.environ['HIVE_TEST_REAL_PATH'])
+args = sys.argv[1:]
+if name == 'bash' and os.environ.get('HIVE_TEST_ARGV_LOG') and args[:1] == ['-c'] and 'Fresh configuration only.' in args[1]:
+    args.insert(0, '-xv')
+if name == 'jq' and os.environ.get('HIVE_TEST_FAIL_SECRET_JQ') and '--rawfile' in args:
+    sys.stderr.write('Synthetic protected-file read failure\n')
+    sys.exit(1)
+os.execv(real, [real, *args])
+OBSERVER
+  chmod +x "$temporary/bin/$tool"
+done
 export PATH="$temporary/bin:$PATH"
 run_init() { "$ROOT/hive.sh" init --config "$temporary/config.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes; }
-run_init > "$temporary/initialization.log"
+HIVE_TEST_ARGV_LOG="$temporary/initializer-argv.jsonl" run_init > "$temporary/initialization.log" 2>&1
 jq -e '.clients|length==7' "$temporary/install/config/oathweave/suite-bootstrap.json" >/dev/null
 # The terminal is off in a fresh install. Oathweave gives its initial administrator every
 # permission a client lists, so listing magnus:terminal would grant it to the operator.
@@ -125,8 +149,45 @@ studio_config() {
   ' "$temporary/config.json" > "$temporary/$1.json"
 }
 studio_config studio
-"$ROOT/hive.sh" init --config "$temporary/studio.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/studio.log"
+HIVE_TEST_ARGV_LOG="$temporary/studio-argv.jsonl" "$ROOT/hive.sh" init --config "$temporary/studio.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/studio.log" 2>&1
 studio="$temporary/studio/config"
+# Exercise the failure path too; it must retain the protected files for an identical retry.
+studio_config secret-failure
+if HIVE_TEST_FAIL_SECRET_JQ=1 HIVE_TEST_ARGV_LOG="$temporary/failure-argv.jsonl" "$ROOT/hive.sh" init --config "$temporary/secret-failure.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/secret-failure.log" 2>&1; then
+  fail 'The synthetic secret-file read failure was ignored'
+fi
+python3 - "$temporary" <<'PRIVACY'
+import json, pathlib, stat, sys
+root = pathlib.Path(sys.argv[1])
+for name, logs in [('install', ['initializer-argv.jsonl', 'initialization.log']), ('studio', ['studio-argv.jsonl', 'studio.log']), ('secret-failure', ['failure-argv.jsonl', 'secret-failure.log'])]:
+    config = root / name / 'config'
+    # Account IDs are not credentials; all generated passwords/keys must be absent from argv/output.
+    secrets = {p.name: p.read_text().strip() for p in (config / '.initializer/secrets').iterdir() if not p.name.endswith('-id')}
+    captured = ''.join((root / log).read_text() for log in logs)
+    for key, value in secrets.items():
+        assert value and value not in captured, 'Generated credential exposed in subprocess arguments or output'
+        assert stat.S_IMODE((config / '.initializer/secrets' / key).stat().st_mode) == 0o600, 'Credential file mode changed'
+    if name != 'secret-failure':
+        values = dict(line.split('=', 1) for line in (config / 'oathweave.env').read_text().splitlines())
+        clients = json.loads(values['IAM_MACHINE_CLIENT_SECRETS'])
+        assert clients['magnus-hivemem'] == secrets['magnus-hivemem-client'], 'Magnus client configuration changed'
+        if name == 'studio':
+            assert clients['ardentstudio-magnus'] == secrets['studio-magnus-client'], 'Studio client configuration changed'
+            assert clients['ardentstudio-hivemem'] == secrets['studio-hivemem-client'], 'Studio memory configuration changed'
+        account = json.loads((config / 'cindertrace/initial-browser-account.json').read_text())
+        assert account['password'] == secrets['security-admin-password'], 'Security account configuration changed'
+        for file in ['oathweave.env', 'cindertrace/initial-browser-account.json']:
+            assert stat.S_IMODE((config / file).stat().st_mode) == 0o600, 'Published configuration is exposed'
+PRIVACY
+# Subsequent configuration assertions do not need the process observer.
+python3 - "$temporary/bin" <<'UNWRAP'
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+for name in ['jq', 'openssl', 'cat', 'sed', 'sha256sum', 'bash', 'docker']:
+    (root / name).unlink()
+(root / 'docker-fixture').rename(root / 'docker')
+UNWRAP
+hash -r
 magnus_secret=$(cat "$studio/.initializer/secrets/studio-magnus-client"); memory_secret=$(cat "$studio/.initializer/secrets/studio-hivemem-client")
 [[ "$magnus_secret" =~ ^[a-f0-9]{64}$ && "$memory_secret" =~ ^[a-f0-9]{64}$ && "$magnus_secret" != "$memory_secret" ]] || fail 'Studio client secrets are not distinct generated values'
 permissions='["ardentstudio:projects:read","ardentstudio:projects:write","ardentstudio:templates:read","ardentstudio:templates:write","ardentstudio:review:write","ardentstudio:agents:admin"]'

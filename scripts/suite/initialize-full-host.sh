@@ -69,7 +69,7 @@ hive_full_configuration() {
     publish_file magnus-gateway "$directory/config/magnus-gateway/ssh-key" < "$(jq -er .bootstrap.magnusGateway.sshPrivateKeyFile <<< "$input")"
   fi
   if has_component cindertrace; then
-    jq -nc --arg username "$username" --arg password "$(secret security-admin-password)" '{username:$username,password:$password}' | publish_file cindertrace "$directory/config/cindertrace/initial-browser-account.json"
+    jq -nc --arg username "$username" --rawfile password "$state/secrets/security-admin-password" '{username:$username,password:($password|rtrimstr("\n"))}' | publish_file cindertrace "$directory/config/cindertrace/initial-browser-account.json"
     image=$(jq -er .bootstrapImages.cindertrace <<< "$input")
     [[ "$image" =~ @sha256:[a-f0-9]{64}$ ]] || die 'Fresh browser credential hashing requires an exact reviewed Cindertrace image digest'
     user=$(jq -er .bootstrapServiceUsers.cindertrace <<< "$input"); uid=${user%:*}; gid=${user#*:}

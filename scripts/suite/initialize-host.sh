@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Fresh configuration only. Invoked over the pinned controller transport.
+# Even an explicitly traced invocation must stop tracing before reading credentials.
+set +x +v
 set -Eeuo pipefail
 umask 077
 read -r input
@@ -351,12 +353,12 @@ if has_component oathweave; then
   machine_policies=$(jq -c --arg magnus "$studio_magnus_client" --arg memory "$studio_hivemem_client" '. + {
     ($magnus):{audience:"magnus",permissions:["magnus:ardent"],lifetimeSeconds:300,rotationOwner:"hive-suite",issuer:"browser"},
     ($memory):{audience:"hivemem",permissions:["hivemem:workspaces:write","hivemem:memories:write"],lifetimeSeconds:300,rotationOwner:"hive-suite"}}' <<< "$machine_policies")
-  machine_secrets=$(jq -c --arg magnus "$studio_magnus_client" --arg memory "$studio_hivemem_client" --arg magnusSecret "$(secret studio-magnus-client)" --arg memorySecret "$(secret studio-hivemem-client)" '. + {($magnus):$magnusSecret,($memory):$memorySecret}' <<< "$machine_secrets")
+  machine_secrets=$(jq -c --arg magnus "$studio_magnus_client" --arg memory "$studio_hivemem_client" --rawfile magnusSecret "$state/secrets/studio-magnus-client" --rawfile memorySecret "$state/secrets/studio-hivemem-client" '. + {($magnus):($magnusSecret|rtrimstr("\n")),($memory):($memorySecret|rtrimstr("\n"))}' <<< "$machine_secrets")
   fi
   if [[ "$magnus_memory" == true ]]; then
   # Magnus enrolls each Ardent agent in HiveMem: it holds every scope it grants an agent.
   machine_policies=$(jq -c --arg client "$magnus_hivemem_client" --argjson scopes "$magnus_hivemem_permissions" '. + {($client):{audience:"hivemem",permissions:($scopes|map("hivemem:"+.)),lifetimeSeconds:300,rotationOwner:"hive-suite"}}' <<< "$machine_policies")
-  machine_secrets=$(jq -c --arg client "$magnus_hivemem_client" --arg secret "$(secret magnus-hivemem-client)" '. + {($client):$secret}' <<< "$machine_secrets")
+  machine_secrets=$(jq -c --arg client "$magnus_hivemem_client" --rawfile secret "$state/secrets/magnus-hivemem-client" '. + {($client):($secret|rtrimstr("\n"))}' <<< "$machine_secrets")
   fi
   if [[ "$machine_policies" != '{}' ]]; then line IAM_MACHINE_CLIENT_POLICIES "$machine_policies"; line IAM_MACHINE_CLIENT_SECRETS "$machine_secrets"; fi
   if jq -e '.bootstrapServiceUsers.emberpath!=null and .bootstrapServiceUsers.hivemem!=null' <<< "$input" >/dev/null; then
