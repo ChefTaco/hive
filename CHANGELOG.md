@@ -8,6 +8,12 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- The ingress build removes vulnerable go-jose v3 by upgrading Smallstep crypto to 0.92.0,
+  pinning the upstream certificates compatibility commit and using go-jose v4.1.9. No local
+  certificate authority or TLS configuration is changed.
+- Upgrade the ingress's x/crypto pin past removal of the obsolete OpenPGP package (GO-2026-5932).
+- Restored-peer rehearsals run a static native client with request data in protected JSON,
+  avoiding JavaScript construction from session headers and retained attachment metadata.
 - Fresh initialization reads machine-client secrets and the initial security-console password
   directly from protected files, keeping them out of subprocess arguments and shell traces.
 

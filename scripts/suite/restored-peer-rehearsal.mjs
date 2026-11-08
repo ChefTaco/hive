@@ -132,11 +132,11 @@ export async function restoredPeerRehearsal({ output, addresses, config, docker,
     // Run the native client inside the isolated peer bridge, retaining original
     // origin checks and verified TLS. Secrets live in a protected clone file.
     const nativeProof=join(paths[consoleHost].destination,'config/chattermost/peer-read-proof.mjs');
-    put(nativeProof,`import assert from 'node:assert/strict';import {createRequire} from 'node:module';import fs from 'node:fs';import https from 'node:https';import {createHash} from 'node:crypto';const WebSocket=createRequire('/app/package.json')('ws'),ca=fs.readFileSync('/config/authority.pem'),headers=${JSON.stringify({...chatHeaders,Host:new URL(config.origin).host})};
-      const bytes=await new Promise((done,reject)=>{https.get(${JSON.stringify('https://ingress:8443/api/v4/files/'+encodeURIComponent(proof.fileId))},{ca,servername:'localhost',headers},response=>{assert.equal(response.statusCode,200);const parts=[];response.on('data',p=>parts.push(p));response.on('end',()=>done(Buffer.concat(parts)));}).on('error',reject);});assert.equal(createHash('sha256').update(bytes).digest('hex'),${JSON.stringify(proof.fileSha256)});
-      const ws=new WebSocket('wss://ingress:8443/api/v4/websocket',{ca,servername:'localhost',headers});await new Promise((done,reject)=>{const timer=setTimeout(()=>{ws.terminate();reject(Error('Restored socket timeout'));},8000);ws.on('error',reject);ws.on('message',raw=>{const message=JSON.parse(raw);if(message.event==='hello')ws.send(JSON.stringify({seq:1,action:'ping',data:{}}));if(message.seq_reply===1){assert.equal(message.status,'OK');clearTimeout(timer);ws.close();done();}});});console.log('PASS restored native attachment and authenticated WSS ping');`);
+    const nativeInputs=join(paths[consoleHost].destination,'config/chattermost/peer-read-proof.json');
+    put(nativeProof,readFileSync(new URL('./restored-peer-native-proof.mjs',import.meta.url),'utf8'));
+    put(nativeInputs,{headers:{...chatHeaders,Host:new URL(config.origin).host},fileId:proof.fileId,fileSha256:proof.fileSha256});
     // A new file in the product's own configuration belongs to its owner, as the copy does.
-    if(sudoHost) execFileSync('chown',['--reference',join(paths[consoleHost].destination,'config/chattermost'),nativeProof]);
+    if(sudoHost) execFileSync('chown',['--reference',join(paths[consoleHost].destination,'config/chattermost'),nativeProof,nativeInputs]);
     put(join(evidence,'native-read-proof.log'),docker('compose','-f',chatCompose,'exec','-T','chattermost','node','/config/peer-read-proof.mjs'));
 
     assert.equal((await request('/api/v4/posts',{channel_id:'invalid',message:'must not write'},chatHeaders)).status,503);

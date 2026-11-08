@@ -55,7 +55,7 @@ never rebuilt; a change takes a new version.
 | Image | Built from | Changes from upstream |
 |---|---|---|
 | `hive-registry` | `services/hive-registry/Dockerfile` on `node:24.22.1-bookworm-slim` | npm, npx, corepack, yarn and apt removed |
-| `hive-ingress` | `deployment/ingress.Dockerfile` | Caddy 2.11.7 compiled from its module with Go 1.26.10, `golang.org/x/net` v0.62.0 and go-jose v4.1.6 (`deployment/caddy/go.mod` and `go.sum`), on the official Caddy 2.11.7 Alpine image with curl removed and Alpine packages upgraded |
+| `hive-ingress` | `deployment/ingress.Dockerfile` | Caddy 2.11.7 compiled from its module with Go 1.26.10, `golang.org/x/net` v0.62.0 and go-jose v4.1.9 (`deployment/caddy/go.mod` and `go.sum`), on the official Caddy 2.11.7 Alpine image with curl removed and Alpine packages upgraded |
 | `hive-postgres` 17.11-2, 18.6-2 | `deployment/datastores/postgres.Dockerfile` | gosu and apt removed. The suite runs PostgreSQL as its non-root service owner, so the entrypoint never reaches its root-only gosu step; initdb and data checksums are unchanged |
 | `hive-redis` 8.2.10-1 | `deployment/datastores/redis.Dockerfile` | pending Debian security updates applied, apt removed |
 | `hive-qdrant` 1.18.3-2 | `deployment/datastores/qdrant.Dockerfile` | pending Debian security updates applied, apt and the unused web dashboard (`/qdrant/static`) removed; the Qdrant binary and its storage format are upstream's |
@@ -78,9 +78,19 @@ exceptions are kept per image in `deployment/trivy/`, each scoped to one advisor
   Qdrant's bundled SBOM `/qdrant/qdrant.spdx.json`, which lists the whole Cargo workspace. Neither
   crate is linked into the binary: none of the 218 crate source paths embedded in the 1.18.3 binary
   is pyo3 or quinn-proto. The SBOM is kept unmodified.
-- `hive-ingress`: CVE-2026-116587 in go-jose v3, which has no fixed release. It reaches Caddy only
-  through the PKI app (`caddypki`), which the suite never enables (`admin off`, no ACME, static
-  certificates).
+
+The ingress source no longer needs a go-jose v3 exception. Smallstep crypto 0.92.0 uses go-jose
+v4.1.9; its certificates consumer needs the compatibility changes merged in upstream
+[Smallstep certificates #2848](https://github.com/smallstep/certificates/pull/2848). Until those
+changes are tagged, `go.mod` pins the merged commit as
+`v0.30.3-0.20261105213751-6d5a251fbe01` with checksums in `go.sum`. Replace it with a compatible
+tagged release after build and ingress protocol verification. The PKI dependency remains part
+of Caddy's standard modules; the suite still uses static certificates and does not enable it.
+The `golang.org/x/crypto` pin also includes upstream commit `2f1f834330b2`, removing the obsolete
+OpenPGP package identified by [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932); replace this
+pseudo-version with a compatible tagged fix once available.
+Previously published images retain their original dependencies and exceptions until rebuilt
+and released; editing these source pins does not patch an installation.
 
 Findings with no fix available upstream are listed in each release's notes.
 
