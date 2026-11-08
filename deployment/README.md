@@ -27,7 +27,7 @@ git clone https://github.com/ChefTaco/hive.git && cd hive
 ./hive.sh --release latest
 ```
 
-Replace `latest` with an exact version, such as `2.0.6`, to select it explicitly. The launcher
+Replace `latest` with an exact version, such as `2.1.0`, to select it explicitly. The launcher
 resolves `latest` only for `install`/`init`, `plan` and `upgrade`, and reports the exact version
 before starting setup. It retains matching tagged controllers under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`, verifies their clean Git checkout and signed

@@ -29,7 +29,7 @@ cd hive
 ```
 
 Run the preparation commands from this checkout. `--release latest` resolves the published
-release once and runs its matching tagged controller; an exact `--release 2.0.6` selects that
+release once and runs its matching tagged controller; an exact `--release 2.1.0` selects that
 version instead. The launcher prints the version and retained checkout path, under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`. The signed release still pins the exact
 controller source. After setup, switch to the retained release checkout printed by the launcher
@@ -127,7 +127,7 @@ questions. Press Enter to accept the default shown in brackets.
 | Deploy the Magnus web terminal gateway | `no`. For `yes`, first create the restricted account and key in [preparing nodes](FULL.md#preparing-nodes-and-the-gateway-key) |
 | Port for Magnus host agents | blank for none. Give a port, such as `4000`, to let hosts join the Magnus fleet; see [Magnus host agents](FULL.md#magnus-host-agents) |
 | Existing external inference HTTPS endpoint | blank to skip; see [external inference](INFERENCE.md) |
-| Opt-in native agent runtime | blank. Release 2.0.6 pins no native agent artifacts, so none can be installed here; a Magnus host agent is installed as in [Magnus host agents](FULL.md#magnus-host-agents) |
+| Opt-in native agent runtime | blank. Release 2.1.0 pins no native agent artifacts, so none can be installed here; a Magnus host agent is installed as in [Magnus host agents](FULL.md#magnus-host-agents) |
 | Write protected installation configuration to | the default, `~/.config/hive/hive/installation.json` |
 
 `hive.sh` then prints the plan: every product, image digest and host path. Answer `y` to apply
@@ -136,10 +136,10 @@ it. The first install pulls the images and takes a few minutes; later commands t
 If it stops after writing the configuration file, fix the cause and run `./hive.sh --release
 X.Y.Z` again, replacing `X.Y.Z` with the exact version it reported: after the installation name
 it offers to continue with the saved file instead of asking everything again. Use that exact version for retries and for planning then applying,
-so a new release cannot change the plan between commands. Unattended, for example with 2.0.6:
+so a new release cannot change the plan between commands. Unattended, for example with 2.1.0:
 
 ```bash
-./hive.sh install --config ~/.config/hive/hive/installation.json --release 2.0.6
+./hive.sh install --config ~/.config/hive/hive/installation.json --release 2.1.0
 ```
 
 After setup, change to the retained release checkout path printed by the launcher before
