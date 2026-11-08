@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "2.1.0",
+  "version": "2.1.1",
   "profiles": {
     "core": [
       "emberpath",
@@ -341,7 +341,7 @@
       }
     },
     "ingress": {
-      "image": "ghcr.io/cheftaco/hive-ingress@sha256:fc8a251d620fb3bd55922cd3d8729e93f2d3557e6046ba42612ec1f76b988283",
+      "image": "ghcr.io/cheftaco/hive-ingress@sha256:9e5d76033808da23934275956665fdeca547c93bb73a0f6064c25a579a554823",
       "kind": "ingress",
       "requiresLocal": [
         "hivexui"
@@ -375,7 +375,7 @@
           }
         }
       },
-      "version": "2.0.3",
+      "version": "2.0.4",
       "catalog": {
         "displayName": "Hive Ingress",
         "description": "HTTPS entry point with explicit browser and native path mappings.",

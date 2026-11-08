@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "2.1.0",
+  "version": "2.1.1",
   "user": "1000:1000",
   "products": {
     "hive-registry": {
