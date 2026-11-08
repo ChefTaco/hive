@@ -79,6 +79,9 @@ hive_initialize() {
   done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
   hive_registry_provision
   hive_memory_credential_provision
+  if jq -e '.components.magnus!=null and .components.hivemem!=null and .components.magnus.host!=.components.oathweave.host' "$HIVE_CONFIG" >/dev/null; then
+    printf 'Note: Magnus and Oathweave run on different hosts, so Magnus has no HiveMem service identity and Ardent New Agent answers HIVEMEM_ENROLLMENT_UNAVAILABLE. Configure it by hand as described in deployment/FULL.md.\n' >&2
+  fi
   if [[ "${HIVE_OPERATION:-}" == install ]]; then printf 'Protected selected-product configuration prepared; installing the release.\n'
   else printf 'Protected selected-product configuration prepared. Review the plan, then run install with this same configuration. Initial sign-in instructions are stored on the identity host in config/initial-credentials.env.\n'; fi
 }
