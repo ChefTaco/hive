@@ -6,6 +6,17 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Next
+
+- Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
+  host Node.js. The setup question "Opt-in native agent runtime" offers runtimes the release
+  has no artifacts for.
+- A bring-your-own certificate for `magnus-agent install` on a host without Tailscale.
+- Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
+- An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
+
+## [2.2.0] - 2026-11-08
+
 ### Added
 
 - An external Magnus: an installation configuration can name a Magnus control API that runs
@@ -37,14 +48,16 @@ All notable changes to this project are documented in this file. The format is b
   data starts at its release's format, as on a fresh install. Data without a recorded format is
   still refused without an explicit migration.
 
-### Next
+### Release
 
-- Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
-  host Node.js. The setup question "Opt-in native agent runtime" offers runtimes the release
-  has no artifacts for.
-- A bring-your-own certificate for `magnus-agent install` on a host without Tailscale.
-- Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
-- An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
+- Pin the Hive Registry 1.1.0 (`hive-registry` 2.0.3, which records an external product), and
+  Magnus server, fleet gateway and host-agent package 2.2.1 (Ardent 2.3.0). Every other image is
+  unchanged from 2.1.1, including Ardent Project Studio 0.1.0. Both architectures pass the image gate
+  with no fixable HIGH or CRITICAL findings; unfixed distribution findings remain.
+- No datastore format change for existing products. Existing installations use the reviewed upgrade
+  plan, pre-change backup and restored-copy rehearsal; adding an external Magnus and Ardent Project
+  Studio to an existing installation is the manual configuration change in `deployment/FULL.md`,
+  followed by `hive.sh upgrade` and `hive.sh console-clients add`.
 
 ## [2.1.1] - 2026-11-08
 
