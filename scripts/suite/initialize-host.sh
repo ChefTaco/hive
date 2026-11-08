@@ -217,7 +217,7 @@ if has_component oathweave; then for name in admin-password oath-cookie oath-age
 if has_component emberpath; then ensure_secret router-key; fi
 if has_component hivemem; then for name in memory-key memory-renewal qdrant-key; do ensure_secret "$name"; done; fi
 if has_component hiveskills; then ensure_secret skills-session; fi
-if has_component magnus; then for name in magnus-db magnus-redis magnus-api magnus-jwt magnus-manager magnus-audit magnus-result magnus-log magnus-rotation magnus-metrics magnus-webhook; do ensure_secret "$name"; done; fi
+if has_component magnus; then for name in magnus-db magnus-redis magnus-api magnus-jwt magnus-manager magnus-audit magnus-result magnus-log magnus-rotation magnus-metrics magnus-webhook magnus-reconcile; do ensure_secret "$name"; done; fi
 if has_component magnus-gateway; then for name in magnus-gateway-api magnus-gateway-drain; do ensure_secret "$name"; done; fi
 if has_component cindertrace; then for name in security-db security-redis security-admin-password security-session security-console security-audit security-receipt security-backup security-rate; do ensure_secret "$name"; done; fi
 if has_component chattermost; then for name in chat-db chat-cookie chat-token chat-admin-password chat-bot; do ensure_secret "$name"; done; fi

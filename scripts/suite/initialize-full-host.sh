@@ -23,6 +23,9 @@ hive_full_configuration() {
       line API_SECRET "$(secret magnus-api)"; line JWT_SECRET "$(secret magnus-jwt)"; line NODE_MANAGER_SECRET "$(secret magnus-manager)"
       line AUDIT_HMAC_SECRET "$(secret magnus-audit)"; line RESULT_SIGNING_SECRET "$(secret magnus-result)"; line LOG_INGEST_SIGNING_SECRET "$(secret magnus-log)"
       line CREDENTIAL_ROTATION_KEY "$(secret magnus-rotation)"; line METRICS_TOKEN "$(secret magnus-metrics)"; line WEBHOOK_ENCRYPTION_KEY "$(secret magnus-webhook)"
+      # The node agents hold the same key (hive.sh magnus-agent install copies it), so an ADMIN can
+      # settle an Ardent action whose outcome is unknown.
+      line COMMAND_RECONCILIATION_SECRET "$(secret magnus-reconcile)"
       line TLS_CERT_PATH /config/tls.crt; line TLS_KEY_PATH /config/tls.key; line CONTROL_API_BIND_HOST 0.0.0.0; line CONTROL_API_PORT 4000
       line CONTROL_API_URL "$(product_endpoint magnus https://magnus:4000)"; line CORS_ORIGIN "$origin"; line DASHBOARD_PUBLIC_ORIGIN "$origin"
       line SECURITY_FUSION_MODE off; line ENABLE_AGENT_DISCOVERY false
@@ -37,6 +40,9 @@ hive_full_configuration() {
         line MAGNUS_ARDENT_HIVEMEM_CLIENT_ID "$magnus_hivemem_client"; line MAGNUS_ARDENT_HIVEMEM_CLIENT_SECRET "$(secret magnus-hivemem-client)"
         line MAGNUS_ARDENT_HIVEMEM_WORKSPACE_ID ardent-agents
       fi
+      # Ardent skill installs fetch HiveSkills catalog releases over HTTPS from the registry's internal
+      # address; its certificate is issued by the suite authority Magnus trusts (NODE_EXTRA_CA_CERTS).
+      if selected hiveskills; then line MAGNUS_ARDENT_HIVESKILLS_URL "$(product_endpoint hiveskills https://hiveskills:4030)"; fi
       # DASHBOARD_PUBLIC_ORIGIN above is only for links in notifications: the console does not
       # answer drain challenges, the gateway does. With no gateway, say so explicitly, or every
       # node's resource drain waits for a participant that does not exist. CA trust for the

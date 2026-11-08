@@ -54,6 +54,9 @@ openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/f
 "$ROOT/hive.sh" init --config "$temporary/fleet.json" --manifest "$temporary/fleet-release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/fleet.log" 2>&1 || { cat "$temporary/fleet.log" >&2; fail 'Distributed setup with Magnus failed'; }
 grep -q 'Magnus and Oathweave run on different hosts' "$temporary/fleet.log" || fail 'The operator is not told Magnus lacks a HiveMem service identity'
 [[ -f "$temporary/fleet-console/config/magnus.env" ]] || fail 'Magnus was not configured'
+# HiveSkills runs on the identity host: Magnus reaches it at its reviewed cross-host endpoint.
+rg -q -F -x "MAGNUS_ARDENT_HIVESKILLS_URL=$(jq -r .bootstrap.productEndpoints.hiveskills.origin "$temporary/fleet.json")" "$temporary/fleet-console/config/magnus.env" || fail 'Magnus lacks the cross-host HiveSkills registry'
+rg -q '^COMMAND_RECONCILIATION_SECRET=[a-f0-9]{64}$' "$temporary/fleet-console/config/magnus.env" || fail 'Distributed Magnus lacks the command reconciliation key'
 if rg -q 'MAGNUS_ARDENT_HIVEMEM|magnus-hivemem' "$temporary/fleet-console/config/magnus.env" "$temporary/fleet-console/config/hivemem.env" "$temporary/fleet-identity/config/oathweave.env"; then fail 'A Magnus HiveMem identity was configured across hosts'; fi
 [[ ! -e "$temporary/fleet-console/config/.initializer/secrets/magnus-hivemem-client" && ! -e "$temporary/fleet-identity/config/.initializer/secrets/magnus-hivemem-client" ]] || fail 'A Magnus HiveMem client secret was generated that nothing uses'
 cp "$temporary/config.json" "$temporary/valid.json"
