@@ -90,6 +90,21 @@ for setting in MAGNUS_ARDENT_HIVEMEM_URL=https://hivemem:18790 MAGNUS_ARDENT_HIV
   rg -q -F -x -- "$setting" "$install/magnus.env" || fail "Magnus environment lacks ${setting%%=*}"
 done
 if rg -q 'MAGNUS_ARDENT_HIVEMEM_ENROLLMENT_TOKEN' "$install/magnus.env"; then fail 'Magnus got a static HiveMem token beside its service identity'; fi
+# Ardent skill installs read the HiveSkills catalog at its internal HTTPS address, which the suite
+# authority Magnus trusts has certified; the registry needs no credential from Magnus.
+rg -q -F -x 'MAGNUS_ARDENT_HIVESKILLS_URL=https://hiveskills:4030' "$install/magnus.env" || fail 'Magnus lacks the HiveSkills registry for Ardent skill installs'
+rg -q -F -x 'NODE_EXTRA_CA_CERTS=/config/authority.pem' "$install/magnus.env" || fail 'Magnus does not trust the suite authority'
+openssl verify -CAfile "$install/magnus/authority.pem" -verify_hostname hiveskills "$install/hiveskills/tls.crt" >/dev/null || fail 'Magnus cannot verify the HiveSkills certificate'
+# Ardent command reconciliation: an independent generated key on the server, which the node agents copy.
+reconcile_secret=$(cat "$install/.initializer/secrets/magnus-reconcile")
+[[ "$reconcile_secret" =~ ^[a-f0-9]{64}$ ]] || fail 'The command reconciliation key is not a generated value'
+rg -q -F -x -- "COMMAND_RECONCILIATION_SECRET=$reconcile_secret" "$install/magnus.env" || fail 'Magnus lacks the command reconciliation key'
+for name in magnus-api magnus-jwt magnus-manager magnus-audit magnus-result magnus-log magnus-rotation magnus-metrics magnus-webhook; do
+  [[ $(cat "$install/.initializer/secrets/$name") != "$reconcile_secret" ]] || fail "The command reconciliation key repeats $name"
+done
+for path in "$install/runtime.json" "$install/ingress.env" "$install/hivemem.env" "$install/oathweave.env" "$install/hiveskills.env"; do
+  if rg -F -q -- "$reconcile_secret" "$path"; then fail 'The command reconciliation key reached another product'; fi
+done
 for path in "$install/runtime.json" "$install/ingress.env" "$install/hivemem.env" "$install/oathweave/suite-bootstrap.json"; do
   if rg -F -q -- "$magnus_memory_secret" "$path"; then fail 'The Magnus HiveMem client secret reached browser, ingress or HiveMem configuration'; fi
 done
@@ -125,6 +140,7 @@ value "$studio/oathweave.env" IAM_MACHINE_CLIENT_POLICIES | jq -e --argjson scop
   "magnus-hivemem":{audience:"hivemem",permissions:($scopes|map("hivemem:"+.)),lifetimeSeconds:300,rotationOwner:"hive-suite"}}' >/dev/null || fail 'Studio and Magnus machine client policies are not the reviewed grants'
 value "$studio/oathweave.env" IAM_MACHINE_CLIENT_SECRETS | jq -e --arg magnus "$magnus_secret" --arg memory "$memory_secret" --arg fleet "$studio_fleet_secret" '.=={"ardentstudio-magnus":$magnus,"ardentstudio-hivemem":$memory,"magnus-hivemem":$fleet}' >/dev/null || fail 'Oathweave lacks the Studio and Magnus client secrets'
 rg -q -F -x -- "MAGNUS_ARDENT_HIVEMEM_CLIENT_SECRET=$studio_fleet_secret" "$studio/magnus.env" || fail 'Magnus lacks its HiveMem client secret beside Studio'
+rg -q -F -x 'MAGNUS_ARDENT_HIVESKILLS_URL=https://hiveskills:4030' "$studio/magnus.env" || fail 'Magnus lacks the HiveSkills registry beside Studio'
 [[ $(value "$studio/oathweave.env" JWT_ISSUER) == oathweave-synthetic-studio ]] || fail 'Unexpected native issuer'
 value "$studio/magnus.env" MAGNUS_OATHWEAVE_IDENTITIES_JSON | jq -e --arg subject "$(cat "$studio/.initializer/secrets/identity-id")" '.[0].subject==$subject and .[0].role=="ADMIN" and .[1]=={issuer:"https://localhost:65426/api/oathweave",subject:"ardentstudio-magnus",localUserId:"ardentstudio",role:"ARDENT_SERVICE"} and length==2' >/dev/null || fail 'Magnus lacks the Studio service link on the browser issuer'
 value "$studio/hivemem.env" HIVEMEM_OATHWEAVE_SERVICES_JSON | jq -e --argjson scopes "$memory_scopes" '.==[{issuer:"oathweave-synthetic-studio",clientId:"ardentstudio-hivemem",localId:"ardentstudio",scopes:["workspaces:write","memories:write"]},{issuer:"oathweave-synthetic-studio",clientId:"magnus-hivemem",localId:"magnus-ardent",scopes:$scopes}]' >/dev/null || fail 'HiveMem lacks the Studio and Magnus service links on the native issuer'
@@ -268,6 +284,11 @@ for listeners in '[{"port":4000,"component":"cindertrace"}]' '[{"port":65426,"co
   reject "$ROOT/hive.sh" plan --config "$temporary/refused.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive
   grep -q 'console.nativeListeners on a fresh installation' "$temporary/rejection.log" || fail "An invalid agent listener was not refused: $listeners"
 done
+# Without HiveSkills, Magnus has no registry for Ardent skill installs.
+jq --arg old "$temporary/install" --arg new "$temporary/noskills" 'walk(if type=="string" then (split($old)|join($new)) else . end) | .installation="synthetic-noskills" | .profile="custom" | del(.components.hiveskills)' "$temporary/config.json" > "$temporary/noskills.json"
+"$ROOT/hive.sh" init --config "$temporary/noskills.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/noskills.log" 2>&1 || { cat "$temporary/noskills.log" >&2; fail 'Setup without HiveSkills failed'; }
+[[ -f "$temporary/noskills/config/magnus.env" ]] || fail 'Magnus was not configured without HiveSkills'
+if rg -q 'MAGNUS_ARDENT_HIVESKILLS_URL' "$temporary/noskills/config/magnus.env"; then fail 'Magnus was given a HiveSkills registry nobody selected'; fi
 # Configurations that still carry the removed external console link get a clear refusal.
 jq '.bootstrap.magnusConsoleOrigin="https://fleet.example.com"' "$temporary/config.json" > "$temporary/config.valid.json.pending"
 cp "$temporary/config.json" "$temporary/config.valid.json"; mv "$temporary/config.valid.json.pending" "$temporary/config.json"
@@ -278,4 +299,4 @@ cp "$temporary/release.json" "$temporary/release.valid.json"
 jq 'del(.components.chattermost.initialization)' "$temporary/release.valid.json" > "$temporary/release.json"
 openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/release.json" -out "$temporary/release.json.sig"
 reject run_init
-printf 'Passed: full fresh configuration, independent native credentials and datastores, seven browser products with HiveXUI as the Magnus console, the fleet gateway and its terminal grant off by default and each a separate explicit opt-in, protected product-owned hash preparation, disabled automatic dispatch/migrations, stable repeat, required migration artifact refusal, the opt-in Magnus host agent listener and opt-in Ardent Project Studio with its service identities.\n'
+printf 'Passed: full fresh configuration, independent native credentials and datastores, seven browser products with HiveXUI as the Magnus console, the fleet gateway and its terminal grant off by default and each a separate explicit opt-in, protected product-owned hash preparation, disabled automatic dispatch/migrations, stable repeat, required migration artifact refusal, the opt-in Magnus host agent listener, opt-in Ardent Project Studio with its service identities, the HiveSkills registry for Ardent skill installs and the command reconciliation key.\n'

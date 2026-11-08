@@ -253,6 +253,30 @@ secret of 64 hex characters. An existing installation is configured the same way
 secret and link into the existing values, add the Magnus entries, and restart Oathweave, HiveMem
 and Magnus.
 
+## Magnus and HiveSkills
+
+Magnus's Ardent skill install puts HiveSkills catalog releases onto Ardent profiles. When HiveSkills
+is selected, fresh setup writes `MAGNUS_ARDENT_HIVESKILLS_URL` into `config/magnus.env`: the
+registry's internal HTTPS address (`https://hiveskills:4030`, or its endpoint in a distributed
+installation). Magnus accepts only an HTTPS URL; it trusts the registry's certificate through the
+suite authority in `NODE_EXTRA_CA_CERTS`, and sends no credential, because catalog reads are public
+within the suite network. Magnus checks every archive against the catalog's SHA-256. Without
+HiveSkills the entry is left out and skill install answers `HIVESKILLS_UNCONFIGURED`. On an
+existing installation, add the entry by hand and restart Magnus.
+
+## Magnus command reconciliation
+
+An Ardent action whose outcome Magnus could not confirm holds its command until an ADMIN settles it
+from the Ardent installations page. Settling an outcome the node agent itself records as unknown
+needs `COMMAND_RECONCILIATION_SECRET`: one independent key of at least 32 characters, the same on
+the Magnus server and every node agent. Fresh setup generates it into `config/magnus.env`, and
+`hive.sh magnus-agent install` copies it into each agent's environment beside the node credentials
+(see below). On an existing installation, add a new random value (for example
+`openssl rand -hex 32`) to `config/magnus.env`, restart Magnus, and run
+`hive.sh magnus-agent install` again for each host, or add the same line to each agent's
+`/opt/magnus-agent/.env` and restart `magnus-agent`. Without it, that one decision answers
+`RECONCILIATION_UNAVAILABLE`; everything else works.
+
 ## Magnus host agents
 
 A host joins the fleet by running the Magnus agent, which calls Magnus's agent API. On a fresh
@@ -304,7 +328,8 @@ any fleet host, with `--ssh-config FILE` and `--sudo-password-file FILE` as that
    before replacing a package. Older unlocked tarballs are refused; this controller requires a
    new locked Magnus agent artifact in a newly signed suite release;
 3. writes `/opt/magnus-agent/.env`, root-only, with `CONTROL_API_URL` from the console name and
-   the agent port. The node credentials come from the Magnus host's own configuration; for
+   the agent port. The node credentials (`NODE_MANAGER_SECRET`, `RESULT_SIGNING_SECRET` and,
+   when Magnus has one, `COMMAND_RECONCILIATION_SECRET`) come from the Magnus host's own configuration; for
    another host they stream through the controller on standard input only. They are never
    printed and never a command-line value;
 4. runs the agent's `check`, then its own `install-service`, which sets up the versioned layout

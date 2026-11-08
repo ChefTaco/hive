@@ -133,7 +133,7 @@ install_locked_package() {
 }
 
 write_environment() {
-  local environment="$root/.env" temporary secret_source control fqdn certificate key renewal
+  local environment="$root/.env" temporary secret_source control fqdn certificate key renewal reconciliation=''
   control=$(jq -er .controlApiUrl <<< "$request"); fqdn=$(jq -er .hostFqdn <<< "$request")
   certificate=$(jq -er .certificate.certificate <<< "$request"); key=$(jq -er .certificate.key <<< "$request")
   renewal=$(jq -r '.certificate.renewal // ""' <<< "$request")
@@ -148,11 +148,16 @@ write_environment() {
     if [[ -n "$secret_source" ]]; then
       [[ -f "$secret_source" && ! -L "$secret_source" ]] || die 'The Magnus configuration is missing on this host'
       printf 'NODE_MANAGER_SECRET=%s\nRESULT_SIGNING_SECRET=%s\n' "$(get "$secret_source" NODE_MANAGER_SECRET)" "$(get "$secret_source" RESULT_SIGNING_SECRET)"
+      reconciliation=$(get "$secret_source" COMMAND_RECONCILIATION_SECRET)
     else
       printf 'NODE_MANAGER_SECRET=%s\nRESULT_SIGNING_SECRET=%s\n' "$(jq -r '.secret.NODE_MANAGER_SECRET // ""' <<< "$input")" "$(jq -r '.secret.RESULT_SIGNING_SECRET // ""' <<< "$input")"
+      reconciliation=$(jq -r '.secret.COMMAND_RECONCILIATION_SECRET // ""' <<< "$input")
     fi
+    # The server's reconciliation key, when it has one: the same value on the server and every agent.
+    [[ -z "$reconciliation" ]] || printf 'COMMAND_RECONCILIATION_SECRET=%s\n' "$reconciliation"
   } > "$temporary"
   grep -qE '^NODE_MANAGER_SECRET=.{32,}$' "$temporary" && grep -qE '^RESULT_SIGNING_SECRET=.{32,}$' "$temporary" || { rm -f -- "$temporary"; die 'The Magnus node credentials are missing'; }
+  [[ -z "$reconciliation" || ${#reconciliation} -ge 32 ]] || { rm -f -- "$temporary"; die 'COMMAND_RECONCILIATION_SECRET on the Magnus host is shorter than 32 characters'; }
   chmod 600 "$temporary"
   if [[ -f "$environment" ]] && cmp -s "$temporary" "$environment"; then rm -f -- "$temporary"; return 1; fi
   mv -T -- "$temporary" "$environment"
@@ -232,7 +237,7 @@ magnus_secrets() {
   # Parsed inside jq from the file itself, so no value is ever an argument.
   jq -Rs --arg sq "'" 'split("\n") as $lines | def value($key): ($lines|map(select(startswith($key+"="))|.[($key|length)+1:]|
       if length>1 and ((startswith("\"") and endswith("\"")) or (startswith($sq) and endswith($sq))) then .[1:-1] else . end)|last // "");
-    {NODE_MANAGER_SECRET:value("NODE_MANAGER_SECRET"),RESULT_SIGNING_SECRET:value("RESULT_SIGNING_SECRET")}' "$file"
+    {NODE_MANAGER_SECRET:value("NODE_MANAGER_SECRET"),RESULT_SIGNING_SECRET:value("RESULT_SIGNING_SECRET"),COMMAND_RECONCILIATION_SECRET:value("COMMAND_RECONCILIATION_SECRET")}' "$file"
 }
 
 # Magnus's own record of the node, read through its API inside its container with the

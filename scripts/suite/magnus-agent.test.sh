@@ -7,6 +7,7 @@ trap 'rm -rf -- "$temporary"' EXIT
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 node_secret="obviously-fake-node-manager-secret-$(printf 'n%.0s' {1..20})"
 result_secret="obviously-fake-result-signing-secret-$(printf 'r%.0s' {1..20})"
+reconcile_secret="obviously-fake-command-reconciliation-secret-$(printf 'c%.0s' {1..20})"
 bin="$temporary/bin"; mkdir -p "$bin" "$temporary/log"
 log="$temporary/log/calls"
 # Every stub records its arguments, so the test can prove no secret was ever an argument.
@@ -43,7 +44,7 @@ export MAGNUS_AGENT_UNIT="$temporary/magnus-agent.service" MAGNUS_AGENT_HOST_KEY
 ssh-keygen -q -t ed25519 -N '' -f "$temporary/ssh_host_ed25519_key" -C fixture
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 30 -subj /CN=hive.example.com -addext subjectAltName=DNS:hive.example.com \
   -keyout "$temporary/console.key" -out "$temporary/console.crt" 2>/dev/null; chmod 600 "$temporary/console.key"
-printf 'NODE_ENV=production\nNODE_MANAGER_SECRET=%s\nRESULT_SIGNING_SECRET=%s\n' "$node_secret" "$result_secret" > "$temporary/magnus.env"; chmod 600 "$temporary/magnus.env"
+printf 'NODE_ENV=production\nNODE_MANAGER_SECRET=%s\nRESULT_SIGNING_SECRET=%s\nCOMMAND_RECONCILIATION_SECRET=%s\n' "$node_secret" "$result_secret" "$reconcile_secret" > "$temporary/magnus.env"; chmod 600 "$temporary/magnus.env"
 # Real archives exercise extraction and lock validation; only the npm transport is stubbed.
 mkdir -p "$temporary/fixtures"
 for version in 2.1.1 2.1.2; do
@@ -63,7 +64,7 @@ request() { # VERSION [INTEGRITY]
     '{root:$root,package:{name:"@hivemagnus/magnus-agent",version:$version,integrity:$integrity},controlApiUrl:"https://hive.example.com:4000",hostFqdn:"hive.example.com",
       certificate:{certificate:$cert,key:$key,renewal:"console"},magnusEnvironment:$env}'
 }
-no_secret() { if /usr/bin/grep -nF -e "$node_secret" -e "$result_secret" "$@" | cut -c1-300 >&2; then fail "A secret appeared in $*"; fi; }
+no_secret() { if /usr/bin/grep -nF -e "$node_secret" -e "$result_secret" -e "$reconcile_secret" "$@" | cut -c1-300 >&2; then fail "A secret appeared in $*"; fi; }
 
 # Node.js: the engines range ^24.22.1 || ^26.13.0.
 for case in 'none false' 'v22.12.0 false' 'v24.21.9 false' 'v24.22.1 true' 'v24.30.0 true' 'v25.0.0 false' 'v26.13.0 true' 'v26.12.9 false'; do
@@ -113,6 +114,7 @@ host magnus-agent-install "$(request 2.1.1)" || { cat "$temporary/err" >&2; fail
 jq -e '.version=="2.1.1" and .service=="active" and .changed==true' "$temporary/out" >/dev/null || fail 'install did not report the running version'
 [[ $(stat -c %a "$agent/.env") == 600 ]] || fail 'The agent environment is not owner-only'
 /usr/bin/grep -qx "NODE_MANAGER_SECRET=$node_secret" "$agent/.env" && /usr/bin/grep -qx "RESULT_SIGNING_SECRET=$result_secret" "$agent/.env" || fail 'The credentials did not reach the agent environment'
+/usr/bin/grep -qx "COMMAND_RECONCILIATION_SECRET=$reconcile_secret" "$agent/.env" || fail 'The command reconciliation key did not reach the agent environment'
 grep -qx 'CONTROL_API_URL=https://hive.example.com:4000' "$agent/.env" && grep -qx "TLS_CERT_PATH=$temporary/console.crt" "$agent/.env" || fail 'The agent environment is wrong'
 ! grep -q MAGNUS_AGENT_TLS_RENEWAL "$agent/.env" || fail 'The console certificate was given to the agent to renew'
 [[ -L "$agent/current" && -f "$MAGNUS_AGENT_UNIT" ]] || fail 'install-service did not set up the service'
@@ -140,6 +142,19 @@ grep -q 'credentials are missing' "$temporary/err" || fail 'Missing credentials 
 /usr/bin/jq -nc --arg action magnus-agent-install --argjson request "$(request 2.1.2 | jq -c 'del(.magnusEnvironment)')" --arg node "${node_secret}x" --arg result "${result_secret}x" \
   '{action:$action,magnusAgent:$request,secret:{NODE_MANAGER_SECRET:$node,RESULT_SIGNING_SECRET:$result}}' | bash "$ROOT/scripts/suite/magnus-agent-host.sh" > "$temporary/out" 2>&1 || fail 'A remote-style install failed'
 /usr/bin/grep -qx "NODE_MANAGER_SECRET=${node_secret}x" "$agent/.env" || fail 'Credentials from the request were not written'
+# A Magnus host without a reconciliation key (an older installation) gives the agent none.
+! /usr/bin/grep -q '^COMMAND_RECONCILIATION_SECRET=' "$agent/.env" || fail 'An absent reconciliation key was written'
+/usr/bin/jq -nc --arg action magnus-agent-install --argjson request "$(request 2.1.2 | jq -c 'del(.magnusEnvironment)')" --arg node "$node_secret" --arg result "$result_secret" --arg reconcile "$reconcile_secret" \
+  '{action:$action,magnusAgent:$request,secret:{NODE_MANAGER_SECRET:$node,RESULT_SIGNING_SECRET:$result,COMMAND_RECONCILIATION_SECRET:$reconcile}}' | bash "$ROOT/scripts/suite/magnus-agent-host.sh" > "$temporary/out" 2>&1 || fail 'A remote-style install with a reconciliation key failed'
+/usr/bin/grep -qx "COMMAND_RECONCILIATION_SECRET=$reconcile_secret" "$agent/.env" || fail 'The reconciliation key from the request was not written'
+if /usr/bin/jq -nc --arg action magnus-agent-install --argjson request "$(request 2.1.2 | jq -c 'del(.magnusEnvironment)')" --arg node "$node_secret" --arg result "$result_secret" \
+  '{action:$action,magnusAgent:$request,secret:{NODE_MANAGER_SECRET:$node,RESULT_SIGNING_SECRET:$result,COMMAND_RECONCILIATION_SECRET:"too-short"}}' | bash "$ROOT/scripts/suite/magnus-agent-host.sh" > "$temporary/out" 2>&1; then fail 'A short reconciliation key was accepted'; fi
+grep -q 'shorter than 32 characters' "$temporary/out" || fail 'The short reconciliation key refusal is unclear'
+/usr/bin/grep -qx "COMMAND_RECONCILIATION_SECRET=$reconcile_secret" "$agent/.env" || fail 'A refused key replaced the agent environment'
+# The Magnus host hands over all three node credentials for an agent on another host.
+host magnus-agent-secrets "$(jq -nc --arg env "$temporary/magnus.env" '{magnusEnvironment:$env}')" || fail 'Reading the node credentials failed'
+/usr/bin/jq -e --arg node "$node_secret" --arg result "$result_secret" --arg reconcile "$reconcile_secret" '.=={NODE_MANAGER_SECRET:$node,RESULT_SIGNING_SECRET:$result,COMMAND_RECONCILIATION_SECRET:$reconcile}' "$temporary/out" >/dev/null || fail 'The node credentials are incomplete'
+: > "$temporary/out"
 no_secret "$temporary/out"
 
 host magnus-agent-host-key '{}' && [[ $(jq -r .fingerprint "$temporary/out") == SHA256:* ]] || fail 'The host key fingerprint was not read'

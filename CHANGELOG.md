@@ -22,6 +22,13 @@ All notable changes to this project are documented in this file. The format is b
   `MAGNUS_ARDENT_HIVEMEM_*` settings, so Ardent New Agent enrolls every agent in HiveMem and
   creates their `ardent-agents` workspace. When Magnus runs on another host, setup says so and
   configures none of it.
+- Magnus's HiveSkills registry for Ardent skill installs: with HiveSkills selected, fresh setup
+  writes `MAGNUS_ARDENT_HIVESKILLS_URL` (the registry's internal HTTPS address, trusted through the
+  suite authority) into Magnus's environment.
+- Magnus command reconciliation: fresh setup generates an independent
+  `COMMAND_RECONCILIATION_SECRET` for Magnus, and `hive.sh magnus-agent install` copies it into
+  each node agent's environment, refusing a key shorter than 32 characters. Existing installations
+  add it by hand (`deployment/FULL.md`).
 - Magnus browser routes for New Agent: its operation status and stream, `POST /ardent/agents`,
   operation resume and a profile's HiveMem enrollment. The ingress forwards `Last-Event-ID` to
   Magnus and removes `x-acting-subject` from browser requests.
