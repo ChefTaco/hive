@@ -42,6 +42,20 @@ find "$temporary/identity/config" "$temporary/console/config" -type f -exec sha2
 run_init > "$temporary/repeat.log"
 find "$temporary/identity/config" "$temporary/console/config" -type f -exec sha256sum {} + | sort > "$temporary/after"
 cmp -s "$temporary/before" "$temporary/after" || fail 'Repeated distributed setup changed identities or credentials'
+# Magnus on the console host and Oathweave on the identity host: Magnus's HiveMem client secret
+# would have to cross hosts, so neither side configures it, and the operator is told.
+jq --arg root "$temporary" 'walk(if type=="string" then (gsub($root+"/identity";$root+"/fleet-identity")|gsub($root+"/console";$root+"/fleet-console")) else . end) |
+  .components += (["magnus","magnus-postgres","magnus-redis"]|map({key:.,value:({host:"console",configDirectory:($root+"/fleet-console/config/"+.)}+(if test("-(redis|postgres)$") then {} else {envFile:($root+"/fleet-console/config/"+.+".env")} end))})|from_entries) |
+  .bootstrap.productEndpoints.magnus={origin:"https://127.0.0.1:65427",bindAddress:"127.0.0.1",certificateFile:($root+"/server.crt"),privateKeyFile:($root+"/server.key")}' "$temporary/config.json" > "$temporary/fleet.json"
+jq --arg user "$(id -u):$(id -g)" '.profiles.full+=["magnus","magnus-postgres","magnus-redis"] | reduce ("magnus","magnus-postgres","magnus-redis") as $name (.;.components[$name]={image:("example.com/synthetic@sha256:"+("0"*64)),service:{user:$user,healthcheck:{test:["CMD","true"]}}}) |
+  .components.magnus.initialization={image:("example.com/migrator@sha256:"+("1"*64)),command:["apply"],verificationCommand:["verify-current"]}' "$temporary/release.json" > "$temporary/fleet-release.json"
+hive_test_catalog "$temporary/fleet-release.json"
+openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/fleet-release.json" -out "$temporary/fleet-release.json.sig"
+"$ROOT/hive.sh" init --config "$temporary/fleet.json" --manifest "$temporary/fleet-release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/fleet.log" 2>&1 || { cat "$temporary/fleet.log" >&2; fail 'Distributed setup with Magnus failed'; }
+grep -q 'Magnus and Oathweave run on different hosts' "$temporary/fleet.log" || fail 'The operator is not told Magnus lacks a HiveMem service identity'
+[[ -f "$temporary/fleet-console/config/magnus.env" ]] || fail 'Magnus was not configured'
+if rg -q 'MAGNUS_ARDENT_HIVEMEM|magnus-hivemem' "$temporary/fleet-console/config/magnus.env" "$temporary/fleet-console/config/hivemem.env" "$temporary/fleet-identity/config/oathweave.env"; then fail 'A Magnus HiveMem identity was configured across hosts'; fi
+[[ ! -e "$temporary/fleet-console/config/.initializer/secrets/magnus-hivemem-client" && ! -e "$temporary/fleet-identity/config/.initializer/secrets/magnus-hivemem-client" ]] || fail 'A Magnus HiveMem client secret was generated that nothing uses'
 cp "$temporary/config.json" "$temporary/valid.json"
 for patch in 'del(.bootstrap.trustBundleFile)' '.bootstrap.productEndpoints.oathweave.origin="http://identity.example.com"' '.bootstrap.productEndpoints.emberpath.inferenceOrigin=.bootstrap.productEndpoints.emberpath.origin' '.bootstrap.productEndpoints.hivemem.origin=.bootstrap.productEndpoints.hiveskills.origin' '.components["oathweave-redis"].host="console"'; do
   jq "$patch" "$temporary/valid.json" > "$temporary/config.json"; reject run_init

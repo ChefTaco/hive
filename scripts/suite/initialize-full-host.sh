@@ -28,6 +28,15 @@ hive_full_configuration() {
       line SECURITY_FUSION_MODE off; line ENABLE_AGENT_DISCOVERY false
       line MAGNUS_CONSOLE_BASE_PATH /fleet; line MAGNUS_HERMES_ENABLED true
       line MAGNUS_OATHWEAVE_IDENTITIES_JSON "$magnus_identities"
+      # Ardent New Agent enrolls each agent in HiveMem as Magnus's own Oathweave service identity and
+      # creates the agents' workspace. Agents on fleet nodes reach HiveMem through the console.
+      if [[ "$magnus_memory" == true ]]; then
+        line MAGNUS_ARDENT_HIVEMEM_URL "$(product_endpoint hivemem https://hivemem:18790)"
+        line MAGNUS_ARDENT_HIVEMEM_AGENT_URL "$origin/memory/"
+        line MAGNUS_ARDENT_HIVEMEM_TOKEN_URL "$(product_endpoint oathweave https://oathweave:4200)/api/v1/oauth/token"
+        line MAGNUS_ARDENT_HIVEMEM_CLIENT_ID "$magnus_hivemem_client"; line MAGNUS_ARDENT_HIVEMEM_CLIENT_SECRET "$(secret magnus-hivemem-client)"
+        line MAGNUS_ARDENT_HIVEMEM_WORKSPACE_ID ardent-agents
+      fi
       # DASHBOARD_PUBLIC_ORIGIN above is only for links in notifications: the console does not
       # answer drain challenges, the gateway does. With no gateway, say so explicitly, or every
       # node's resource drain waits for a participant that does not exist. CA trust for the

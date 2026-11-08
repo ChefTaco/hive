@@ -15,6 +15,13 @@ All notable changes to this project are documented in this file. The format is b
   their service links, the ingress route (prefix kept, no cookies, unbuffered streams, 404 when it
   is not installed), the interactive offer with the full profile, and its data volume in backups.
   An installation without it is unchanged.
+- Magnus's HiveMem service identity: fresh setup with Magnus, HiveMem and Oathweave on one host
+  declares the Oathweave machine client `magnus-hivemem` (audience `hivemem`, `admin:agents`,
+  `workspaces:write` and the memory and session scopes Magnus grants Ardent agents) with a
+  generated secret, links it in HiveMem as `magnus-ardent`, and gives Magnus the
+  `MAGNUS_ARDENT_HIVEMEM_*` settings, so Ardent New Agent enrolls every agent in HiveMem and
+  creates their `ardent-agents` workspace. When Magnus runs on another host, setup says so and
+  configures none of it.
 - Magnus browser routes for New Agent: its operation status and stream, `POST /ardent/agents`,
   operation resume and a profile's HiveMem enrollment. The ingress forwards `Last-Event-ID` to
   Magnus and removes `x-acting-subject` from browser requests.

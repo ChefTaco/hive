@@ -228,6 +228,31 @@ Adding Studio to an existing installation is not automated yet: configure the sa
 and environment by hand, then select the component. Studio's README and `docs/OATHWEAVE.md` list
 its variables.
 
+## Magnus and HiveMem
+
+Magnus's Ardent New Agent and Enable HiveMem give every Ardent agent its own HiveMem identity.
+Magnus asks HiveMem for each agent's credential as its own Oathweave service identity, so no
+long-lived HiveMem admin token exists. When Magnus, HiveMem and Oathweave are selected and Magnus
+runs on the Oathweave host, fresh setup:
+
+- declares the machine client `magnus-hivemem` (audience `hivemem`, tokens on the native issuer)
+  with the permissions `hivemem:admin:agents`, `hivemem:workspaces:write` and the scopes Magnus
+  grants agents (`hivemem:memories:read|write`, `hivemem:sessions:read|write`), and a generated
+  secret in `IAM_MACHINE_CLIENT_POLICIES` and `IAM_MACHINE_CLIENT_SECRETS`;
+- links it in HiveMem's `HIVEMEM_OATHWEAVE_SERVICES_JSON` as the principal `magnus-ardent` (an
+  ID of its own, apart from any agent) with the same scopes;
+- writes `MAGNUS_ARDENT_HIVEMEM_URL`, `MAGNUS_ARDENT_HIVEMEM_TOKEN_URL`,
+  `MAGNUS_ARDENT_HIVEMEM_CLIENT_ID`, `MAGNUS_ARDENT_HIVEMEM_CLIENT_SECRET`,
+  `MAGNUS_ARDENT_HIVEMEM_WORKSPACE_ID=ardent-agents` and `MAGNUS_ARDENT_HIVEMEM_AGENT_URL` (the
+  console's `/memory/` route, which agents on fleet nodes reach) into `config/magnus.env`.
+
+Magnus creates the `ardent-agents` workspace on first use and owns it. The secret stays in the
+Oathweave and Magnus environments. When Magnus runs on another host, setup says so and leaves this
+out; configure it by hand with the entries above (Magnus's `docs/ARDENT.md` shows them) and a
+secret of 64 hex characters. An existing installation is configured the same way: merge the policy,
+secret and link into the existing values, add the Magnus entries, and restart Oathweave, HiveMem
+and Magnus.
+
 ## Magnus host agents
 
 A host joins the fleet by running the Magnus agent, which calls Magnus's agent API. On a fresh

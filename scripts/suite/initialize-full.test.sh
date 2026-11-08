@@ -72,9 +72,29 @@ for component in magnus cindertrace chattermost; do [[ -f "$temporary/install/co
 for path in "$temporary/install/config/runtime.json" "$temporary/install/config/ingress.env"; do
  while IFS= read -r secret; do if rg -F -q -- "$(cat "$secret")" "$path"; then fail 'Infrastructure credential reached browser/ingress configuration'; fi; done < <(find "$temporary/install/config/.initializer/secrets" -type f ! -name '*-id')
 done
+# Magnus enrolls Ardent agents in HiveMem as its own Oathweave service identity: one machine
+# client with the scopes it grants agents plus admin:agents and workspaces:write, the matching
+# HiveMem service link on the native issuer, and the client in Magnus's environment only.
+install="$temporary/install/config"
+value() { sed -n "s/^$2=//p" "$1" | tail -1; }
+magnus_memory_secret=$(cat "$install/.initializer/secrets/magnus-hivemem-client")
+[[ "$magnus_memory_secret" =~ ^[a-f0-9]{64}$ ]] || fail 'The Magnus HiveMem client secret is not a generated value'
+memory_scopes='["admin:agents","workspaces:write","memories:read","memories:write","sessions:read","sessions:write"]'
+value "$install/oathweave.env" IAM_MACHINE_CLIENT_POLICIES | jq -e --argjson scopes "$memory_scopes" '.=={"magnus-hivemem":{audience:"hivemem",permissions:($scopes|map("hivemem:"+.)),lifetimeSeconds:300,rotationOwner:"hive-suite"}}' >/dev/null || fail 'The Magnus HiveMem machine client is not the reviewed grant'
+value "$install/oathweave.env" IAM_MACHINE_CLIENT_SECRETS | jq -e --arg secret "$magnus_memory_secret" '.=={"magnus-hivemem":$secret}' >/dev/null || fail 'Oathweave lacks the Magnus HiveMem client secret'
+native_issuer=$(value "$install/oathweave.env" JWT_ISSUER)
+value "$install/hivemem.env" HIVEMEM_OATHWEAVE_SERVICES_JSON | jq -e --arg issuer "$native_issuer" --argjson scopes "$memory_scopes" '.==[{issuer:$issuer,clientId:"magnus-hivemem",localId:"magnus-ardent",scopes:$scopes}]' >/dev/null || fail 'HiveMem lacks the Magnus service link on the native issuer'
+for setting in MAGNUS_ARDENT_HIVEMEM_URL=https://hivemem:18790 MAGNUS_ARDENT_HIVEMEM_AGENT_URL=https://localhost:65426/memory/ \
+  MAGNUS_ARDENT_HIVEMEM_TOKEN_URL=https://oathweave:4200/api/v1/oauth/token MAGNUS_ARDENT_HIVEMEM_CLIENT_ID=magnus-hivemem \
+  MAGNUS_ARDENT_HIVEMEM_CLIENT_SECRET="$magnus_memory_secret" MAGNUS_ARDENT_HIVEMEM_WORKSPACE_ID=ardent-agents; do
+  rg -q -F -x -- "$setting" "$install/magnus.env" || fail "Magnus environment lacks ${setting%%=*}"
+done
+if rg -q 'MAGNUS_ARDENT_HIVEMEM_ENROLLMENT_TOKEN' "$install/magnus.env"; then fail 'Magnus got a static HiveMem token beside its service identity'; fi
+for path in "$install/runtime.json" "$install/ingress.env" "$install/hivemem.env" "$install/oathweave/suite-bootstrap.json"; do
+  if rg -F -q -- "$magnus_memory_secret" "$path"; then fail 'The Magnus HiveMem client secret reached browser, ingress or HiveMem configuration'; fi
+done
 # Ardent Project Studio is offered by this release but not selected: nothing about it is configured.
-if rg -q 'IAM_MACHINE_CLIENT|ardentstudio' "$temporary/install/config/oathweave.env" "$temporary/install/config/oathweave/suite-bootstrap.json" "$temporary/install/config/runtime.json" "$temporary/install/config/magnus.env"; then fail 'An unselected Studio got identity, console or Magnus configuration'; fi
-if rg -q 'HIVEMEM_OATHWEAVE_SERVICES_JSON' "$temporary/install/config/hivemem.env"; then fail 'HiveMem linked a service nobody selected'; fi
+if rg -q 'ardentstudio' "$install/oathweave.env" "$install/oathweave/suite-bootstrap.json" "$install/runtime.json" "$install/magnus.env" "$install/hivemem.env"; then fail 'An unselected Studio got identity, console, Magnus or HiveMem configuration'; fi
 if rg -q 'ARDENTSTUDIO' "$temporary/install/config/ingress.env"; then fail 'Ingress was given a Studio nobody selected'; fi
 [[ ! -e "$temporary/install/config/ardentstudio.env" && ! -e "$temporary/install/config/ardentstudio" && ! -e "$temporary/install/config/.initializer/secrets/studio-magnus-client" ]] || fail 'An unselected Studio got configuration'
 find "$temporary/install/config" -type f -exec sha256sum {} + | sort > "$temporary/before"
@@ -92,19 +112,22 @@ studio_config() {
 studio_config studio
 "$ROOT/hive.sh" init --config "$temporary/studio.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/studio.log"
 studio="$temporary/studio/config"
-value() { sed -n "s/^$2=//p" "$1" | tail -1; }
 magnus_secret=$(cat "$studio/.initializer/secrets/studio-magnus-client"); memory_secret=$(cat "$studio/.initializer/secrets/studio-hivemem-client")
 [[ "$magnus_secret" =~ ^[a-f0-9]{64}$ && "$memory_secret" =~ ^[a-f0-9]{64}$ && "$magnus_secret" != "$memory_secret" ]] || fail 'Studio client secrets are not distinct generated values'
 permissions='["ardentstudio:projects:read","ardentstudio:projects:write","ardentstudio:templates:read","ardentstudio:templates:write","ardentstudio:review:write","ardentstudio:agents:admin"]'
 jq -e --argjson permissions "$permissions" '(.clients|length)==8 and (.clients[]|select(.id=="hivexui-ardentstudio")|.audience=="ardentstudio" and .permissions==$permissions and .firstParty==true)' "$studio/oathweave/suite-bootstrap.json" >/dev/null || fail 'Studio browser client is not the reviewed resource grant'
 value "$studio/oathweave.env" IAM_BROWSER_CLIENT_POLICIES | jq -e --argjson permissions "$permissions" '."hivexui-ardentstudio"=={audience:"ardentstudio",permissions:$permissions}' >/dev/null || fail 'The Studio browser ceiling differs from its bootstrap client'
-value "$studio/oathweave.env" IAM_MACHINE_CLIENT_POLICIES | jq -e '.=={
+studio_fleet_secret=$(cat "$studio/.initializer/secrets/magnus-hivemem-client")
+[[ "$studio_fleet_secret" != "$magnus_secret" && "$studio_fleet_secret" != "$memory_secret" ]] || fail 'Magnus and Studio share a client secret'
+value "$studio/oathweave.env" IAM_MACHINE_CLIENT_POLICIES | jq -e --argjson scopes "$memory_scopes" '.=={
   "ardentstudio-magnus":{audience:"magnus",permissions:["magnus:ardent"],lifetimeSeconds:300,rotationOwner:"hive-suite",issuer:"browser"},
-  "ardentstudio-hivemem":{audience:"hivemem",permissions:["hivemem:workspaces:write","hivemem:memories:write"],lifetimeSeconds:300,rotationOwner:"hive-suite"}}' >/dev/null || fail 'Studio machine client policies are not the reviewed grants'
-value "$studio/oathweave.env" IAM_MACHINE_CLIENT_SECRETS | jq -e --arg magnus "$magnus_secret" --arg memory "$memory_secret" '.=={"ardentstudio-magnus":$magnus,"ardentstudio-hivemem":$memory}' >/dev/null || fail 'Oathweave lacks the Studio client secrets'
+  "ardentstudio-hivemem":{audience:"hivemem",permissions:["hivemem:workspaces:write","hivemem:memories:write"],lifetimeSeconds:300,rotationOwner:"hive-suite"},
+  "magnus-hivemem":{audience:"hivemem",permissions:($scopes|map("hivemem:"+.)),lifetimeSeconds:300,rotationOwner:"hive-suite"}}' >/dev/null || fail 'Studio and Magnus machine client policies are not the reviewed grants'
+value "$studio/oathweave.env" IAM_MACHINE_CLIENT_SECRETS | jq -e --arg magnus "$magnus_secret" --arg memory "$memory_secret" --arg fleet "$studio_fleet_secret" '.=={"ardentstudio-magnus":$magnus,"ardentstudio-hivemem":$memory,"magnus-hivemem":$fleet}' >/dev/null || fail 'Oathweave lacks the Studio and Magnus client secrets'
+rg -q -F -x -- "MAGNUS_ARDENT_HIVEMEM_CLIENT_SECRET=$studio_fleet_secret" "$studio/magnus.env" || fail 'Magnus lacks its HiveMem client secret beside Studio'
 [[ $(value "$studio/oathweave.env" JWT_ISSUER) == oathweave-synthetic-studio ]] || fail 'Unexpected native issuer'
 value "$studio/magnus.env" MAGNUS_OATHWEAVE_IDENTITIES_JSON | jq -e --arg subject "$(cat "$studio/.initializer/secrets/identity-id")" '.[0].subject==$subject and .[0].role=="ADMIN" and .[1]=={issuer:"https://localhost:65426/api/oathweave",subject:"ardentstudio-magnus",localUserId:"ardentstudio",role:"ARDENT_SERVICE"} and length==2' >/dev/null || fail 'Magnus lacks the Studio service link on the browser issuer'
-value "$studio/hivemem.env" HIVEMEM_OATHWEAVE_SERVICES_JSON | jq -e '.==[{issuer:"oathweave-synthetic-studio",clientId:"ardentstudio-hivemem",localId:"ardentstudio",scopes:["workspaces:write","memories:write"]}]' >/dev/null || fail 'HiveMem lacks the Studio service link on the native issuer'
+value "$studio/hivemem.env" HIVEMEM_OATHWEAVE_SERVICES_JSON | jq -e --argjson scopes "$memory_scopes" '.==[{issuer:"oathweave-synthetic-studio",clientId:"ardentstudio-hivemem",localId:"ardentstudio",scopes:["workspaces:write","memories:write"]},{issuer:"oathweave-synthetic-studio",clientId:"magnus-hivemem",localId:"magnus-ardent",scopes:$scopes}]' >/dev/null || fail 'HiveMem lacks the Studio and Magnus service links on the native issuer'
 for setting in NODE_EXTRA_CA_CERTS=/config/authority.pem ARDENT_STUDIO_HOST=0.0.0.0 ARDENT_STUDIO_PORT=8097 ARDENT_STUDIO_DATA=/data \
   OATHWEAVE_ISSUER=https://localhost:65426/api/oathweave OATHWEAVE_JWKS_URL=https://oathweave:4200/api/v1/oauth/jwks OATHWEAVE_USERINFO_URL=https://oathweave:4200/api/v1/oauth/userinfo \
   ARDENT_STUDIO_OATHWEAVE_TOKEN_URL=https://oathweave:4200/api/v1/oauth/token ARDENT_STUDIO_MAGNUS_URL=https://magnus:4000 ARDENT_STUDIO_MAGNUS_CLIENT_ID=ardentstudio-magnus \
@@ -122,6 +145,9 @@ jq -e '.products.ardentstudio=="/api/ardentstudio" and .identity.clients.ardents
 source "$ROOT/scripts/suite/public-runtime.sh"; hive_check_public_runtime "$studio/runtime.json" || fail 'Studio broke the public browser allowlist'
 for path in "$studio/runtime.json" "$studio/ingress.env" "$studio/magnus.env" "$studio/hivemem.env"; do
   for secret in "$magnus_secret" "$memory_secret"; do if rg -F -q -- "$secret" "$path"; then fail 'A Studio client secret reached browser, ingress, Magnus or HiveMem configuration'; fi; done
+done
+for path in "$studio/runtime.json" "$studio/ingress.env" "$studio/hivemem.env" "$studio/ardentstudio.env"; do
+  if rg -F -q -- "$studio_fleet_secret" "$path"; then fail 'The Magnus HiveMem client secret reached browser, ingress, HiveMem or Studio configuration'; fi
 done
 rendered=$(source "$ROOT/scripts/suite/controller.sh"; HIVE_ROOT=$ROOT HIVE_CONFIG=$temporary/studio.json HIVE_MANIFEST=$temporary/release.json HIVE_SIGNATURE=$temporary/release.json.sig HIVE_TRUST_KEY=$temporary/publisher.pub HIVE_VERSION=0.1.0; hive_validate; hive_manifest >/dev/null; hive_render control)
 jq -e --arg data "$temporary/studio/data/ardentstudio" --arg env "$studio/ardentstudio.env" '.services.ardentstudio as $s | $s.env_file==[$env] and ($s.volumes|any(.source==$data and .target=="/data")) and ($s.volumes|any(.target=="/config" and .read_only==true)) and $s.ports==null and $s.read_only==true and $s.cap_drop==["ALL"]' <<< "$rendered" >/dev/null || fail 'Studio is not rendered as a private, read-only service with its data volume'

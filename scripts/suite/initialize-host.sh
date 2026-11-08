@@ -20,6 +20,11 @@ selected() { jq -e --arg name "$1" '.bootstrapServiceUsers[$name]!=null' <<< "$i
 # Ardent Project Studio's Oathweave machine clients. Oathweave binds one audience to a client.
 studio_magnus_client=ardentstudio-magnus
 studio_hivemem_client=ardentstudio-hivemem
+# Magnus's own HiveMem service identity: it enrolls Ardent agents and creates their workspace.
+# Its secret is generated where Oathweave and Magnus run together; without that, it is not configured.
+magnus_hivemem_client=magnus-hivemem
+magnus_memory=$(jq -r '.magnusMemoryIdentity==true' <<< "$input")
+magnus_hivemem_permissions='["admin:agents","workspaces:write","memories:read","memories:write","sessions:read","sessions:write"]'
 distributed=$(jq -r '.bootstrap.productEndpoints!=null' <<< "$input")
 console_hostname=${origin#https://}; console_hostname=${console_hostname%%:*}
 certificate_references=()
@@ -219,6 +224,7 @@ if has_component chattermost; then for name in chat-db chat-cookie chat-token ch
 if has_component emberfold; then ensure_secret context-api; fi
 # Studio runs with Oathweave, so its client secrets are generated once, on that host.
 if has_component ardentstudio; then for name in studio-id studio-magnus-client studio-hivemem-client; do ensure_secret "$name"; done; fi
+if [[ "$magnus_memory" == true ]] && has_component magnus; then ensure_secret magnus-hivemem-client; fi
 secret() { cat "$state/secrets/$1"; }
 ensure_key() {
   local path="$state/keys/$1.pem" pending="$state/keys/$1.pending"
@@ -337,15 +343,22 @@ if has_component oathweave; then
   line SEED_ADMIN_USERNAME "$username"; line SEED_ADMIN_EMAIL "$email"; line SEED_ADMIN_PASSWORD "$(secret admin-password)"
   line SEED_HIVE_CLIENT_SECRET "$(secret native-hive-client)"; line SEED_HIVE_ROUTER_CLIENT_SECRET "$(secret native-router-client)"
   line OATHWEAVE_SUITE_BOOTSTRAP_FILE /config/suite-bootstrap.json
+  machine_policies='{}'; machine_secrets='{}'
   if has_component ardentstudio; then
   # Studio's service identities. Its Magnus tokens use the browser issuer, the one Magnus verifies
   # people on, so Magnus can relate the service to the person it acts for. HiveMem links services
   # on the native issuer. Each token carries only the permissions Studio requests as its scope.
-  line IAM_MACHINE_CLIENT_POLICIES "$(jq -nc --arg magnus "$studio_magnus_client" --arg memory "$studio_hivemem_client" '{
+  machine_policies=$(jq -c --arg magnus "$studio_magnus_client" --arg memory "$studio_hivemem_client" '. + {
     ($magnus):{audience:"magnus",permissions:["magnus:ardent"],lifetimeSeconds:300,rotationOwner:"hive-suite",issuer:"browser"},
-    ($memory):{audience:"hivemem",permissions:["hivemem:workspaces:write","hivemem:memories:write"],lifetimeSeconds:300,rotationOwner:"hive-suite"}}')"
-  line IAM_MACHINE_CLIENT_SECRETS "$(jq -nc --arg magnus "$studio_magnus_client" --arg memory "$studio_hivemem_client" --arg magnusSecret "$(secret studio-magnus-client)" --arg memorySecret "$(secret studio-hivemem-client)" '{($magnus):$magnusSecret,($memory):$memorySecret}')"
+    ($memory):{audience:"hivemem",permissions:["hivemem:workspaces:write","hivemem:memories:write"],lifetimeSeconds:300,rotationOwner:"hive-suite"}}' <<< "$machine_policies")
+  machine_secrets=$(jq -c --arg magnus "$studio_magnus_client" --arg memory "$studio_hivemem_client" --arg magnusSecret "$(secret studio-magnus-client)" --arg memorySecret "$(secret studio-hivemem-client)" '. + {($magnus):$magnusSecret,($memory):$memorySecret}' <<< "$machine_secrets")
   fi
+  if [[ "$magnus_memory" == true ]]; then
+  # Magnus enrolls each Ardent agent in HiveMem: it holds every scope it grants an agent.
+  machine_policies=$(jq -c --arg client "$magnus_hivemem_client" --argjson scopes "$magnus_hivemem_permissions" '. + {($client):{audience:"hivemem",permissions:($scopes|map("hivemem:"+.)),lifetimeSeconds:300,rotationOwner:"hive-suite"}}' <<< "$machine_policies")
+  machine_secrets=$(jq -c --arg client "$magnus_hivemem_client" --arg secret "$(secret magnus-hivemem-client)" '. + {($client):$secret}' <<< "$machine_secrets")
+  fi
+  if [[ "$machine_policies" != '{}' ]]; then line IAM_MACHINE_CLIENT_POLICIES "$machine_policies"; line IAM_MACHINE_CLIENT_SECRETS "$machine_secrets"; fi
   if jq -e '.bootstrapServiceUsers.emberpath!=null and .bootstrapServiceUsers.hivemem!=null' <<< "$input" >/dev/null; then
   line IAM_ENROLLMENT_INSTALLATION_ID "$installation"
   line IAM_ENROLLMENT_PRODUCTS_JSON "$(jq -nc --arg models "$(product_endpoint emberpath https://emberpath:9443)/api" --arg memory "$(product_endpoint hivemem https://hivemem:18790)/v1" '{emberpath:{url:$models,caFile:"/config/authority.pem"},hivemem:{url:$memory,caFile:"/config/authority.pem"}}')"
@@ -372,9 +385,15 @@ if has_component hivemem; then
   line HIVEMEM_TS_TLS_CERT_FILE /config/tls.crt; line HIVEMEM_TS_TLS_KEY_FILE /config/tls.key
   line HIVEMEM_INITIAL_ACCOUNT_FILE /config/initial-account.json
   line HIVEMEM_OATHWEAVE_IDENTITIES_JSON "$(jq -nc --arg issuer "$issuer" --arg subject "$subject" --arg id "$memory_id" '[{issuer:$issuer,subject:$subject,localId:$id,credentialGeneration:0}]')"
+  # Service links on the native issuer, each with the scope ceiling its client's policy grants.
+  services='[]'
   if selected ardentstudio; then
-  line HIVEMEM_OATHWEAVE_SERVICES_JSON "$(jq -nc --arg issuer "$native_issuer" --arg client "$studio_hivemem_client" '[{issuer:$issuer,clientId:$client,localId:"ardentstudio",scopes:["workspaces:write","memories:write"]}]')"
+  services=$(jq -c --arg issuer "$native_issuer" --arg client "$studio_hivemem_client" '. + [{issuer:$issuer,clientId:$client,localId:"ardentstudio",scopes:["workspaces:write","memories:write"]}]' <<< "$services")
   fi
+  if [[ "$magnus_memory" == true ]]; then
+  services=$(jq -c --arg issuer "$native_issuer" --arg client "$magnus_hivemem_client" --argjson scopes "$magnus_hivemem_permissions" '. + [{issuer:$issuer,clientId:$client,localId:"magnus-ardent",scopes:$scopes}]' <<< "$services")
+  fi
+  if [[ "$services" != '[]' ]]; then line HIVEMEM_OATHWEAVE_SERVICES_JSON "$services"; fi
 } | publish_file hivemem "$directory/config/hivemem.env"
 fi
 if has_component hiveskills; then
