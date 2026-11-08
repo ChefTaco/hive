@@ -364,11 +364,16 @@ action_configure() {
   common=$(jq -nc '{NODE_ENV:"production",HIVE_HOME:"/data",HIVE_AUTO_MIGRATE:"false",HIVE_AUTO_UPGRADE:"false",HIVE_UPDATE_CHECK:"false",NODE_EXTRA_CA_CERTS:"/config/authority.pem"}')
   [[ "$rehearsal" != true ]] || common=$(jq -c '.+{HIVE_REHEARSAL:"true"}' <<< "$common")
   internal_certificates
-  policies=$(jq -nc --arg redirect "$origin/auth/callback" --argjson skills "$(has_component hiveskills && printf true || printf false)" '
+  # An external Magnus (deployment/FULL.md#external-magnus) gets the console's Magnus client too.
+  local external_magnus external_host
+  external_magnus=$(jq -r '.external.magnus.url // empty' <<< "$input")
+  external_host=${external_magnus#https://}; external_host=${external_host%%:*}
+  policies=$(jq -nc --arg redirect "$origin/auth/callback" --argjson skills "$(has_component hiveskills && printf true || printf false)" --arg magnus "$external_magnus" '
     [{id:"hivexui-oathweave",audience:"oathweave",permissions:["iam:users:read","iam:users:write","iam:users:delete","iam:roles:read","iam:roles:write","iam:sa:read","iam:sa:write","iam:sa:delete","iam:clients:read","iam:clients:write","iam:sessions:revoke","iam:audit:read","iam:system:login","iam:policy:write"]},
      {id:"hivexui-emberpath",audience:"emberpath",permissions:["router:providers:read","router:providers:write","router:routing:read","router:routing:write","router:testing:read","router:testing:write","router:keys:read","router:keys:write","router:settings:read","router:settings:write","router:admin:read","router:admin:write"]},
      {id:"hivexui-hivemem",audience:"hivemem",permissions:["hivemem:admin:all"]}]+
-    (if $skills then [{id:"hivexui-hiveskills",audience:"hiveskills",permissions:["hiveskills:admin"]}] else [] end)|map(.+{redirectUris:[$redirect],firstParty:true})')
+    (if $skills then [{id:"hivexui-hiveskills",audience:"hiveskills",permissions:["hiveskills:admin"]}] else [] end)+
+    (if $magnus!="" then [{id:"hivexui-magnus",audience:"magnus",permissions:["magnus:view","magnus:operate","magnus:admin"]}] else [] end)|map(.+{redirectUris:[$redirect],firstParty:true})')
   jq . <<< "$policies" | atomic "$state/browser-clients.json"
   local link_env
   link_env() { jq -c --arg product "$1" --arg issuer "$issuer" --argjson generation "${2:-null}" '[.applied[]|select(.product==$product)|{issuer:$issuer,subject,localId}+(if $generation!=null then {credentialGeneration:$generation} else {} end)]' <<< "$review"; }
@@ -420,13 +425,16 @@ action_configure() {
   publish_copy hivemem-qdrant "$directory/config/hivemem-qdrant/qdrant.yaml" "$state/qdrant.yaml"; rm -f -- "$state/qdrant.yaml"
   ingress_fragments "$listeners"
   # The console listens for every name the native Router accepted on this port.
-  write_env ingress "$directory/config/ingress.env" "$(jq -nc --argjson skills "$(has_component hiveskills && printf true || printf false)" '{HIVE_CONSOLE_HOST:":8443",XDG_CONFIG_HOME:"/data/config",XDG_DATA_HOME:"/data",
+  write_env ingress "$directory/config/ingress.env" "$(jq -nc --argjson skills "$(has_component hiveskills && printf true || printf false)" --arg magnus "$external_magnus" --arg magnusHost "$external_host" '{HIVE_CONSOLE_HOST:":8443",XDG_CONFIG_HOME:"/data/config",XDG_DATA_HOME:"/data",
     OATHWEAVE_ENDPOINT:"https://oathweave:4200",OATHWEAVE_TLS_NAME:"oathweave",EMBERPATH_ENDPOINT:"https://emberpath:9443",EMBERPATH_TLS_NAME:"emberpath",
     EMBERPATH_API_ENDPOINT:"https://emberpath:4020",EMBERPATH_API_TLS_NAME:"emberpath",HIVEMEM_ENDPOINT:"https://hivemem:18790",HIVEMEM_TLS_NAME:"hivemem"}+
-    (if $skills then {HIVESKILLS_ENDPOINT:"https://hiveskills:4030",HIVESKILLS_TLS_NAME:"hiveskills"} else {} end)')"
-  jq -n --arg issuer "$issuer" --arg installation "$installation" --argjson skills "$(has_component hiveskills && printf true || printf false)" '
+    (if $skills then {HIVESKILLS_ENDPOINT:"https://hiveskills:4030",HIVESKILLS_TLS_NAME:"hiveskills"} else {} end)+
+    # An external Magnus is verified against the ingress image system trust store, on its own name.
+    (if $magnus!="" then {MAGNUS_ENDPOINT:$magnus,MAGNUS_TLS_NAME:$magnusHost,MAGNUS_TRUST_FILE:"/etc/ssl/certs/ca-certificates.crt"} else {} end)')"
+  jq -n --arg issuer "$issuer" --arg installation "$installation" --argjson skills "$(has_component hiveskills && printf true || printf false)" --arg magnus "$external_magnus" '
     {schema:1,mode:"suite",enrollmentInstallationId:$installation,products:{oathweave:"/api/oathweave",emberpath:"/api/emberpath",hivemem:"/api/hivemem"},identity:{issuer:$issuer,apiPrefix:"/api/oathweave",clients:{oathweave:"hivexui-oathweave",emberpath:"hivexui-emberpath",hivemem:"hivexui-hivemem"}}}|
-    if $skills then .products.hiveskills="/api/hiveskills"|.identity.clients.hiveskills="hivexui-hiveskills" else . end' > "$directory/config/runtime.json"
+    if $skills then .products.hiveskills="/api/hiveskills"|.identity.clients.hiveskills="hivexui-hiveskills" else . end |
+    if $magnus!="" then .products.magnus="/api/magnus"|.identity.clients.magnus="hivexui-magnus" else . end' > "$directory/config/runtime.json"
   chmod 644 "$directory/config/runtime.json"
   # The owner's password script. It holds no secret and talks to the native identity port.
   local verify_address admin_username ca_file

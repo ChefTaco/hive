@@ -19,9 +19,23 @@ All notable changes to this project are documented in this file. The format is b
   set, userinfo and identity links to add on that Magnus. Interactive setup asks for it when Magnus is
   not selected; `plan` and `doctor` show it, and host preflight checks the console host's routes to
   it. The Hive Registry records it as installed and `external`, so the console shows its section
-  (Hive Registry 1.1.0, image `hive-registry:2.0.3`). `deployment/FULL.md` lists the manual steps
-  for an existing installation. An installation without an external Magnus generates the same files
-  and Compose definition as before; its ingress configuration adapts to the same routes.
+  (Hive Registry 1.1.0, image `hive-registry:2.0.3`). It works on installations moved with
+  `migrate-native` too, whose migration then adds the Magnus client and route; a
+  `console.nativeListeners` entry for `magnus` is refused beside it. `deployment/FULL.md` lists the
+  manual steps for an existing installation. An installation without an external Magnus generates
+  the same files and Compose definition as before; its ingress configuration adapts to the same
+  routes.
+- `hive.sh console-clients add`: creates the HiveXUI browser clients of Magnus (the component or
+  external) and Ardent Project Studio in an existing Oathweave store, and adds their permissions to
+  `SUITE_ADMIN`, in one transaction inside the Oathweave container that refuses any other change.
+
+### Fixed
+
+- An upgrade that adds a component the installation's recorded storage formats predate, such as
+  Ardent Project Studio on an installation set up before Studio existed, no longer stops with
+  `Storage transition needs --allow-migrations`: a component that is not deployed yet and has no
+  data starts at its release's format, as on a fresh install. Data without a recorded format is
+  still refused without an explicit migration.
 
 ### Next
 

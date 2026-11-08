@@ -59,6 +59,18 @@ compose() { docker compose -f "$directory/compose.json" "$@"; }
 # A release that adds the mandatory Hive Registry to an existing installation starts it
 # empty. That is a new store, not a migration of existing data.
 registry_is_new() { [[ "$1" == hive-registry && "$2" == unversioned ]]; }
+# A component this change adds to an existing deployment: no storage format recorded, not in the
+# active Compose definition, and no data. A store that does not exist yet has nothing to migrate,
+# so it starts at the release's format, as on a fresh install. Data without a recorded format is
+# a real transition, and that is never skipped. $3 is the installation tree (a rehearsal's copy).
+component_is_new() {
+  local component=$1 current=$2 tree=${3:-$directory} data
+  [[ "$current" == unversioned && -f "$tree/compose.json" ]] || return 1
+  ! jq -e --arg name "$component" '.services[$name]!=null' "$tree/compose.json" >/dev/null || return 1
+  data="$tree/data/$component"
+  [[ ! -e "$data" && ! -L "$data" ]] || [[ -d "$data" && ! -L "$data" && -z $(find "$data" -mindepth 1 -print -quit) ]]
+}
+recorded_format() { jq -r --arg name "$2" '.[$name] // "unversioned"' "$1/data-formats.json" 2>/dev/null || printf 'unversioned\n'; }
 [[ "$directory" =~ ^/[A-Za-z0-9_./-]+$ && "$directory" != *'/../'* && "$directory" != */.. && ${#directory} -gt 4 ]] || die 'Invalid installation path'
 [[ "$installation" =~ ^[a-z][a-z0-9-]{0,47}$ && "$host" =~ ^[a-z][a-z0-9-]{0,47}$ && "$plan" =~ ^[a-f0-9]{64}$ ]] || die 'Invalid installation identity'
 [[ ! -L "$directory" ]] || die 'Installation root cannot be a symlink'
@@ -164,6 +176,7 @@ case "$action" in
       # Adoption verifies the exact running images, so their data is this release's format.
       if [[ "$operation" == adopt && ! -f "$directory/receipt.json" ]]; then continue; fi
       if registry_is_new "$component" "$current"; then continue; fi
+      if component_is_new "$component" "$current"; then continue; fi
       if [[ "$current" != "$target" ]]; then
         if [[ "$operation" == rollback ]]; then
           jq -e --arg name "$component" --arg current "$current" '.components[$name].readableFormats | index($current)!=null' "$directory/manifest.$plan.json" >/dev/null || die 'Binary rollback cannot read the current storage format; use rehearsed restore'
@@ -244,7 +257,7 @@ case "$action" in
     while IFS= read -r component; do
       format=$(jq -r --arg component "$component" '.components[$component].storageFormat // "unversioned"' "$manifest")
       current=$(jq -r --arg component "$component" '.[$component] // "unversioned"' "$directory/data-formats.json" 2>/dev/null || printf 'unversioned\n')
-      if [[ "$current" != "$format" ]] && ! registry_is_new "$component" "$current"; then
+      if [[ "$current" != "$format" ]] && ! registry_is_new "$component" "$current" && ! component_is_new "$component" "$current"; then
         jq -e --arg name "$component" --arg from "$current" '.components[$name].migration | .from==$from and (.command|type=="array" and length>0 and all(.[];type=="string"))' "$manifest" >/dev/null || die 'An explicit migration is required'
         [[ $(jq -r .allowMigrations <<< "$input") == true ]] || die 'Migration execution requires --allow-migrations'
         record migration-started
@@ -308,6 +321,12 @@ case "$action" in
     if jq -e --slurpfile formats "$directory/data-formats.json" '.services["hive-registry"]!=null and $formats[0]["hive-registry"]==null' "$candidate" >/dev/null; then
       jq --slurpfile release "$directory/manifest.$plan.json" '.+{"hive-registry":$release[0].components["hive-registry"].storageFormat}' "$directory/data-formats.json" | atomic_json "$directory/data-formats.json"
     fi
+    # A component this change adds starts at the release's format, before its store exists.
+    while IFS= read -r component; do
+      if component_is_new "$component" "$(recorded_format "$directory" "$component")"; then
+        jq --arg name "$component" --slurpfile release "$directory/manifest.$plan.json" '.+{($name):($release[0].components[$name].storageFormat // "unversioned")}' "$directory/data-formats.json" | atomic_json "$directory/data-formats.json"
+      fi
+    done < <(jq -r '.services|keys[]' "$candidate")
     prepare_data_directories "$candidate"
     record activating
     docker compose -f "$candidate" up -d --wait --wait-timeout 180
@@ -375,7 +394,11 @@ case "$action" in
     docker compose -f "$rehearsal/isolated.json" config --quiet
     [[ $(tree_digest "$rehearsal/data") == "$(jq -er .dataSHA256 "$backup/receipt.json")" ]] || die 'Restored data differs from the backup receipt'
     # Restore ownership only inside this disposable tree, before the non-root services run.
-    while read -r service uid gid; do chown -R -- "$uid:$gid" "$rehearsal/data/$service"; done < <(jq -r '.services|to_entries[]|select(any(.value.volumes[]?; .target=="/data"))|[.key,(.value.user|split(":")[])]|@tsv' "$rehearsal/isolated.json")
+    # A component this change adds has no store in the archive yet: it gets an empty one here.
+    while read -r service uid gid; do
+      if [[ ! -e "$rehearsal/data/$service" ]] && component_is_new "$service" "$(recorded_format "$rehearsal" "$service")" "$rehearsal"; then install -d -m 700 -o "$uid" -g "$gid" "$rehearsal/data/$service"
+      else chown -R -- "$uid:$gid" "$rehearsal/data/$service"; fi
+    done < <(jq -r '.services|to_entries[]|select(any(.value.volumes[]?; .target=="/data"))|[.key,(.value.user|split(":")[])]|@tsv' "$rehearsal/isolated.json")
     result=passed
     if ! check_data "$rehearsal" "$rehearsal/isolated.json"; then result=failed; fi
     if [[ "$result" == passed && -f "$directory/manifest.$plan.json" ]]; then
@@ -383,6 +406,7 @@ case "$action" in
         from=$(jq -r --arg name "$component" '.[$name] // "unversioned"' "$rehearsal/data-formats.json" 2>/dev/null || printf 'unversioned\n')
         target=$(jq -r --arg name "$component" '.components[$name].storageFormat // "unversioned"' "$directory/manifest.$plan.json")
         if registry_is_new "$component" "$from"; then continue; fi
+        if component_is_new "$component" "$from" "$rehearsal"; then continue; fi
         if [[ "$from" != "$target" && $(jq -r .operation <<< "$input") != rollback ]]; then
           mapfile -t arguments < <(jq -r --arg name "$component" '.components[$name].migration.command[]' "$directory/manifest.$plan.json")
           if ((${#arguments[@]}==0)) || ! docker compose -f "$rehearsal/isolated.json" run --no-deps --rm -T "$component" "${arguments[@]}"; then result=failed; break; fi
