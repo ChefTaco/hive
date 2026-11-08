@@ -29,8 +29,8 @@ openssl and Docker Compose on the controller; no Node.js runtime.
 The `core` profile installs Oathweave, Emberpath, HiveMem, HiveSkills, HiveXUI, the ingress and the
 Registry with their private Redis and Qdrant stores. The `full` profile adds Magnus, Cindertrace,
 ChatterMost (each with its own private PostgreSQL) and Emberfold. The Magnus web terminal gateway is
-offered by every release but never selected by a profile. Ardent Project Studio is offered once its
-image is published and is never selected by a profile either; interactive setup suggests it with the
+offered by every release but never selected by a profile. Ardent Project Studio is offered from release
+2.1.0 and is never selected by a profile either; interactive setup suggests it with the
 full profile. Inference stays external.
 
 ## Install the suite
@@ -52,21 +52,21 @@ certificate renewal, firewalls and managing the host from another machine.
 
 `--release latest` resolves GitHub’s latest published, non-prerelease suite release once, prints
 the exact version, and runs its tagged controller. To choose a version, use `./hive.sh --release
-2.0.6` instead. The launcher retains release checkouts under
+2.1.0` instead. The launcher retains release checkouts under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`; keep them for later commands and certificate
 renewal timers. It leaves the original checkout and current working directory unchanged. After
 setup, change to the printed release checkout for the lifecycle commands below; return to the
 original launcher checkout when selecting a new release with `--release latest`.
 
-For example, release 2.0.6 verifies `releases/2.0.6.json` against `releases/2.0.6.json.sig` with the publisher key
+For example, release 2.1.0 verifies `releases/2.1.0.json` against `releases/2.1.0.json.sig` with the publisher key
 in `trust/publisher.pub` before it reads anything else, and refuses a manifest pinned to a different
 controller. The setup writes a protected installation file that the same commands accept
 unattended. Use the exact version setup reported for repeatable planning and applying
-(the following is an example for 2.0.6):
+(the following is an example for 2.1.0):
 
 ```bash
-./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 2.0.6
-./hive.sh install --config ~/.config/hive/ID/installation.json --release 2.0.6 --non-interactive --yes
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 2.1.0
+./hive.sh install --config ~/.config/hive/ID/installation.json --release 2.1.0 --non-interactive --yes
 ./hive.sh status  --config ~/.config/hive/ID/installation.json
 ./hive.sh doctor  --config ~/.config/hive/ID/installation.json
 ```

@@ -6,10 +6,18 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
-### Fixed
+### Next
 
-- Fresh initialization reads machine-client secrets and the initial security-console password
-  directly from protected files, keeping them out of subprocess arguments and shell traces.
+- Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
+  host Node.js. The setup question "Opt-in native agent runtime" offers runtimes the release
+  has no artifacts for.
+- A bring-your-own certificate for `magnus-agent install` on a host without Tailscale.
+- Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
+- An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
+
+## [2.1.0] - 2026-11-08
+
+The publisher key is unchanged: DER SHA-256 `c0d0665a70969f37c8f1cffbdcf8e54df13626f8dbd4b5759a7c44843d86d1b2`.
 
 ### Added
 
@@ -38,14 +46,22 @@ All notable changes to this project are documented in this file. The format is b
   operation resume and a profile's HiveMem enrollment. The ingress forwards `Last-Event-ID` to
   Magnus and removes `x-acting-subject` from browser requests.
 
-### Next
+### Fixed
 
-- Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
-  host Node.js. The setup question "Opt-in native agent runtime" offers runtimes the release
-  has no artifacts for.
-- A bring-your-own certificate for `magnus-agent install` on a host without Tailscale.
-- Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
-- An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
+- Fresh initialization reads machine-client secrets and the initial security-console password
+  directly from protected files, keeping them out of subprocess arguments and shell traces.
+
+### Release
+
+- Pin Oathweave 2.1.0, HiveMem 1.4.0, HiveXUI 0.2.0 (the fullscreen Studio and the Magnus New Agent
+  wizard), Magnus server, fleet gateway and host-agent package 2.2.0 (Ardent 2.2.1), and offer
+  Ardent Project Studio 0.1.0 (`ghcr.io/cheftaco/ardent-studio`). Every other image is unchanged
+  from 2.0.6. Both architectures pass the image gate with no fixable HIGH or CRITICAL findings;
+  unfixed distribution findings remain.
+- No datastore format change for existing products. Existing installations use the reviewed upgrade
+  plan, pre-change backup and restored-copy rehearsal; adding Ardent Project Studio, Magnus's
+  HiveMem identity and the command reconciliation key to an existing installation is a manual
+  configuration change (`deployment/FULL.md`).
 
 ## [2.0.6] - 2026-11-07
 
