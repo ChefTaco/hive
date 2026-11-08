@@ -56,6 +56,39 @@ reject "$ROOT/hive.sh" doctor --config "$temporary/config.json"
 grep -q 'not valid for hive.example.com' "$temporary/result" || fail 'Wrong-name refusal does not name the origin'
 cp "$temporary/certificate.good" "$temporary/install/config/ingress/console.crt"; cp "$temporary/key.good" "$temporary/install/config/ingress/console.key"
 "$ROOT/hive.sh" doctor --config "$temporary/config.json" > "$temporary/result" || fail 'Restored certificate was refused'
+# An external Magnus: the console host's files must route to it with system trust, and the
+# console and Studio must use it. Whether it answers is reported, never a refusal.
+cat > "$temporary/bin/curl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${HIVE_TEST_CURL_LOG:?}"
+[[ -z "${HIVE_TEST_CURL_FAIL:-}" ]]
+SH
+chmod 700 "$temporary/bin/curl"
+export HIVE_TEST_CURL_LOG="$temporary/curl.log"
+mkdir -p "$temporary/install/config/ardentstudio"
+printf 'ARDENT_STUDIO_MAGNUS_URL=https://magnus:4000\n' > "$temporary/install/config/ardentstudio.env"; chmod 600 "$temporary/install/config/ardentstudio.env"
+jq --arg directory "$temporary/install" '.external={magnus:{url:"https://magnus.example.com:4000"}} | .components.ardentstudio={host:"control",envFile:($directory+"/config/ardentstudio.env"),configDirectory:($directory+"/config/ardentstudio")}' "$temporary/config.json" > "$temporary/external.json"
+reject "$ROOT/hive.sh" doctor --config "$temporary/external.json"
+grep -q 'does not route Magnus to the external Magnus at https://magnus.example.com:4000' "$temporary/result" || fail 'An ingress without the external Magnus route lacks a clear refusal'
+printf 'MAGNUS_ENDPOINT=https://magnus.example.com:4000\nMAGNUS_TLS_NAME=magnus.example.com\nMAGNUS_TRUST_FILE=/config/backend-ca.pem\n' >> "$temporary/install/config/ingress.env"
+reject "$ROOT/hive.sh" doctor --config "$temporary/external.json"
+grep -q 'MAGNUS_TRUST_FILE=/etc/ssl/certs/ca-certificates.crt' "$temporary/result" || fail 'An external Magnus verified with the suite authority was accepted'
+printf "MAGNUS_TRUST_FILE='/etc/ssl/certs/ca-certificates.crt'\n" >> "$temporary/install/config/ingress.env"
+reject "$ROOT/hive.sh" doctor --config "$temporary/external.json"
+grep -q 'console runtime does not list Magnus' "$temporary/result" || fail 'A console without Magnus beside an external Magnus lacks a clear refusal'
+jq '.products.magnus="/api/magnus" | .identity.clients.magnus="hivexui-magnus"' "$temporary/runtime.good" > "$temporary/install/config/runtime.json"
+reject "$ROOT/hive.sh" doctor --config "$temporary/external.json"
+grep -q 'Studio does not use the external Magnus' "$temporary/result" || fail 'Studio on the internal Magnus address was accepted'
+printf 'ARDENT_STUDIO_MAGNUS_URL=https://magnus.example.com:4000\n' > "$temporary/install/config/ardentstudio.env"
+"$ROOT/hive.sh" doctor --config "$temporary/external.json" > "$temporary/result" 2>&1 || { cat "$temporary/result" >&2; fail 'A complete external Magnus configuration was refused'; }
+grep -qF 'External Magnus: https://magnus.example.com:4000, managed outside this installation' "$temporary/result" || fail 'Doctor does not name the external Magnus'
+grep -qF -- '--proto =https --max-time 5 -o /dev/null -- https://magnus.example.com:4000/api/v1/health' "$temporary/curl.log" || fail 'Doctor did not check the external Magnus with system trust'
+if grep -q WARNING "$temporary/result"; then fail 'A reachable external Magnus was reported'; fi
+HIVE_TEST_CURL_FAIL=1 "$ROOT/hive.sh" doctor --config "$temporary/external.json" > "$temporary/result" 2>&1 || fail 'An unreachable external Magnus was refused'
+grep -q 'WARNING: the external Magnus at https://magnus.example.com:4000 did not answer' "$temporary/result" || fail 'An unreachable external Magnus was not reported'
+cp "$temporary/runtime.good" "$temporary/install/config/runtime.json"
+"$ROOT/hive.sh" doctor --config "$temporary/config.json" > "$temporary/result" 2>&1 || fail 'The installation without an external Magnus changed'
+if grep -q 'External Magnus' "$temporary/result"; then fail 'Doctor named an external Magnus that is not configured'; fi
 # A missing host tool is named, with the command that installs it.
 mkdir "$temporary/no-timeout"
 IFS=: read -ra directories <<< "$PATH"
@@ -67,4 +100,4 @@ for directory in "${directories[@]}"; do
 done
 PATH=$temporary/no-timeout reject "$ROOT/hive.sh" doctor --config "$temporary/config.json"
 grep -q 'Required tool missing on this host: timeout.*install-prerequisites.sh' "$temporary/result" || fail 'A missing host tool was not named'
-printf 'Passed: read-only host preflight, secret-file permissions, certificate/key matching, public-runtime rejection, capacity and symlink refusal, wrong-name certificates and named missing tools.\n'
+printf 'Passed: read-only host preflight, secret-file permissions, certificate/key matching, public-runtime rejection, capacity and symlink refusal, wrong-name certificates, the external Magnus routes and named missing tools.\n'

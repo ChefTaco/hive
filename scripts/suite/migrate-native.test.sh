@@ -223,6 +223,32 @@ jq -e '[.services[]|select(has("ports"))]|length==1' "$temporary/compose.json" >
 jq -e '.networks.default.ipam.config[0].subnet=="10.200.0.0/24"' "$temporary/compose.json" >/dev/null || fail 'Known proxy subnet'
 jq -e '.services.hiveskills.volumes|any(.target=="/opt/hive-skills/shared/data")' "$temporary/compose.json" >/dev/null || fail 'Skills path alias'
 
+# ---- An external Magnus on a migrated installation: the same files gain its console client,
+# its route with system trust and its console entry; the listeners and reviewed links do not change. ----
+for file in ingress.env runtime.json; do cp -- "$directory/config/$file" "$temporary/without-external.$file"; done
+cp -- "$directory/config/.migration/browser-clients.json" "$temporary/without-external.clients.json" 2>/dev/null || cp -- "$(find "$directory" -name browser-clients.json | head -1)" "$temporary/without-external.clients.json"
+cp -- "$config/native-listeners.caddy" "$temporary/without-external.listeners"
+input native-configure | jq -c '.external={magnus:{url:"https://magnus.example.com:4000"}}' | PATH="$temporary/bin:$PATH" bash "$ROOT/scripts/suite/migrate-native-host.sh" 2> "$temporary/configure-external.log" || { cat "$temporary/configure-external.log" >&2; fail 'configure with an external Magnus'; }
+[[ $(env_of ingress MAGNUS_ENDPOINT) == https://magnus.example.com:4000 && $(env_of ingress MAGNUS_TLS_NAME) == magnus.example.com && $(env_of ingress MAGNUS_TRUST_FILE) == /etc/ssl/certs/ca-certificates.crt ]] || fail 'A migrated ingress does not route to the external Magnus with system trust'
+diff <(grep -v '^MAGNUS_' "$directory/config/ingress.env") "$temporary/without-external.ingress.env" >/dev/null || fail 'The external Magnus changed other ingress entries'
+jq -e --slurpfile before "$temporary/without-external.runtime.json" '.products.magnus=="/api/magnus" and .identity.clients.magnus=="hivexui-magnus" and (del(.products.magnus,.identity.clients.magnus)==$before[0])' "$directory/config/runtime.json" >/dev/null || fail 'A migrated console does not show the external Magnus, or changed otherwise'
+env_of oathweave IAM_BROWSER_CLIENT_POLICIES | jq -e '."hivexui-magnus"=={audience:"magnus",permissions:["magnus:view","magnus:operate","magnus:admin"]}' >/dev/null || fail 'A migrated Oathweave lacks the Magnus browser policy'
+clients_file=$(find "$directory" -name browser-clients.json | head -1)
+jq -e --slurpfile before "$temporary/without-external.clients.json" '(map(select(.id!="hivexui-magnus"))==$before[0]) and any(.id=="hivexui-magnus" and .firstParty==true)' "$clients_file" >/dev/null || fail 'The migration does not create the Magnus browser client and grant'
+cmp -s "$config/native-listeners.caddy" "$temporary/without-external.listeners" || fail 'The external Magnus changed the native listeners'
+# Its plan passes; a Magnus agent listener beside an external Magnus does not.
+jq '.external={magnus:{url:"https://magnus.example.com:4000"}}' "$temporary/config.json" > "$temporary/variant.json"; chmod 600 "$temporary/variant.json"
+jq '.components.magnus=.components.emberpath' "$temporary/release.json" > "$temporary/magnus-release.json"; hive_test_catalog "$temporary/magnus-release.json"
+openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/magnus-release.json" -out "$temporary/magnus-release.json.sig"
+PATH="$temporary/bin:$PATH" "$ROOT/hive.sh" plan --config "$temporary/variant.json" --manifest "$temporary/magnus-release.json" --trust-key "$temporary/publisher.pub" --non-interactive > "$temporary/external.plan" 2>&1 || { cat "$temporary/external.plan" >&2; fail 'A migrated installation with an external Magnus was refused'; }
+jq -e '.external.magnus.url=="https://magnus.example.com:4000"' "$temporary/external.plan" >/dev/null || fail 'The migrated plan does not show the external Magnus'
+jq '.external={magnus:{url:"https://magnus.example.com:4000"}} | .console.nativeListeners+=[{port:4000,component:"magnus"}]' "$temporary/config.json" > "$temporary/variant.json"; chmod 600 "$temporary/variant.json"
+if PATH="$temporary/bin:$PATH" "$ROOT/hive.sh" plan --config "$temporary/variant.json" --non-interactive > "$temporary/result" 2>&1; then fail 'A Magnus listener beside an external Magnus was accepted'; fi
+grep -q 'console.nativeListeners entry for magnus' "$temporary/result" || { cat "$temporary/result" >&2; fail 'A Magnus listener beside an external Magnus lacks a clear refusal'; }
+# Back to the migration without it, for the checks below.
+host_action native-configure 2> "$temporary/configure.log" || { cat "$temporary/configure.log" >&2; fail 'configure again without the external Magnus'; }
+cmp -s "$directory/config/ingress.env" "$temporary/without-external.ingress.env" && cmp -s "$directory/config/runtime.json" "$temporary/without-external.runtime.json" || fail 'Configuring without the external Magnus did not restore the same files'
+
 # Native secrets and suite credentials never reach a command line on the host.
 ! grep -nE -- "--arg (redis|qdrant|password|key)\b|apiKey:|--arg token" "$ROOT/scripts/suite/migrate-native-host.sh" || fail 'A credential is passed as a process argument'
 

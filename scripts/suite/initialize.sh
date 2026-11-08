@@ -48,7 +48,7 @@ hive_initialize() {
      else $c.components[$name+"-postgres"]==null and $c.components[$name+"-redis"]==null end)) and
     (if .components.emberfold then .components.emberfold.host==.console.host else true end) and
     (if .components.ardentstudio then .components.ardentstudio.host==.console.host and .components.ardentstudio.host==.components.oathweave.host and
-      .components.magnus!=null and .components.hivemem!=null else true end) and
+      (.components.magnus!=null or .external.magnus!=null) and .components.hivemem!=null else true end) and
     (if .components["magnus-gateway"] then .components.magnus!=null and .components["magnus-gateway"].host==.components.magnus.host else true end) and
     .components.oathweave.host==.components["oathweave-redis"].host and
     (if .components.hivemem then .components["hivemem-qdrant"]!=null and .components.hivemem.host==.components["hivemem-qdrant"].host else .components["hivemem-qdrant"]==null end) and
@@ -58,7 +58,7 @@ hive_initialize() {
       .value.configDirectory==($c.hosts[.value.host].directory+"/config/"+.key) and
       (if (.key|test("-(qdrant|redis|postgres)$")) then true else .value.envFile==($c.hosts[.value.host].directory+"/config/"+.key+".env") end)
     end))
-  ' "$HIVE_CONFIG" >/dev/null || hive_die 'Fresh suite initialization requires the Hive Registry, Oathweave, its private Redis, HiveXUI and ingress, locally placed selected-product datastores, explicit HTTPS endpoints across hosts and standard protected config paths. Ardent Project Studio needs Magnus and HiveMem, and runs on the console host with Oathweave. Existing or separately configured products must use their owning setup workflow; this command never adopts or overwrites their state.'
+  ' "$HIVE_CONFIG" >/dev/null || hive_die 'Fresh suite initialization requires the Hive Registry, Oathweave, its private Redis, HiveXUI and ingress, locally placed selected-product datastores, explicit HTTPS endpoints across hosts and standard protected config paths. Ardent Project Studio needs Magnus and HiveMem (Magnus as the magnus component or an external Magnus), and runs on the console host with Oathweave. Existing or separately configured products must use their owning setup workflow; this command never adopts or overwrites their state.'
   HIVE_BOOTSTRAP_USERS=$(jq -c --slurpfile config "$HIVE_CONFIG" '.components|with_entries(select(.key as $name|$config[0].components[$name]!=null))|map_values(.service.user)' "$HIVE_MANIFEST")
   HIVE_BOOTSTRAP_IMAGES=$(jq -c --slurpfile config "$HIVE_CONFIG" ' .components|with_entries(select(.key as $name|$config[0].components[$name]!=null))|map_values(.image)' "$HIVE_MANIFEST")
   HIVE_BOOTSTRAP_INGRESS=$(base64 -w0 "$HIVE_ROOT/deployment/Caddyfile")
@@ -81,6 +81,14 @@ hive_initialize() {
   hive_memory_credential_provision
   if jq -e '.components.magnus!=null and .components.hivemem!=null and .components.magnus.host!=.components.oathweave.host' "$HIVE_CONFIG" >/dev/null; then
     printf 'Note: Magnus and Oathweave run on different hosts, so Magnus has no HiveMem service identity and Ardent New Agent answers HIVEMEM_ENROLLMENT_UNAVAILABLE. Configure it by hand as described in deployment/FULL.md.\n' >&2
+  fi
+  # Hive cannot configure a Magnus it does not run: the entries it needs wait in a protected file
+  # on the identity host. The file holds links and URLs, and nothing is printed from it.
+  if jq -e '.external.magnus!=null' "$HIVE_CONFIG" >/dev/null; then
+    local target
+    target=$(jq -r --arg host "$identity_host" '.hosts[$host].target' "$HIVE_CONFIG")
+    printf 'External Magnus: add the entries in %s/config/.initializer/external-magnus.env%s to the environment of the Magnus at %s, then restart it. Until then the console cannot sign in to Magnus and Studio cannot reach it. See deployment/FULL.md#external-magnus\n' \
+      "$(jq -r --arg host "$identity_host" '.hosts[$host].directory' "$HIVE_CONFIG")" "$([[ "$target" == local ]] || printf ' on %s' "$target")" "$(jq -r .external.magnus.url "$HIVE_CONFIG")"
   fi
   if [[ "${HIVE_OPERATION:-}" == install ]]; then printf 'Protected selected-product configuration prepared; installing the release.\n'
   else printf 'Protected selected-product configuration prepared. Review the plan, then run install with this same configuration. Initial sign-in instructions are stored on the identity host in config/initial-credentials.env.\n'; fi
@@ -113,6 +121,9 @@ hive_install_summary() {
   fi
   if jq -e '.components.magnus!=null and ([.console.nativeListeners // [] | .[] | select(.component=="magnus")]|length>0)' "$HIVE_CONFIG" >/dev/null; then
     printf '  Magnus agent on this host: ./hive.sh magnus-agent install --config %s\n' "$config"
+  fi
+  if jq -e '.external.magnus!=null and .bootstrap!=null and .components.oathweave!=null' "$HIVE_CONFIG" >/dev/null; then
+    printf '  External Magnus: add %s/config/.initializer/external-magnus.env%s to the Magnus at %s\n' "$directory" "$([[ "$target" == local ]] || printf ' on %s' "$target")" "$(jq -r .external.magnus.url "$HIVE_CONFIG")"
   fi
   if jq -e '.components.cindertrace!=null' "$HIVE_CONFIG" >/dev/null; then
     printf '  Security events: ./hive.sh cindertrace-collector add ID --sources tailscale --config %s\n' "$config"

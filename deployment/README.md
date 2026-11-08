@@ -119,6 +119,10 @@ remote placements need explicit verified HTTPS endpoints. Static HiveXUI is loca
 to ingress. Do not expose datastore ports.
 Set `ARDENTSTUDIO_ENDPOINT=http://ardentstudio:8097` only when Ardent Project Studio is installed on
 this host; without it `/api/ardentstudio/*` answers 404.
+For an [external Magnus](FULL.md#external-magnus), set `MAGNUS_ENDPOINT` and `MAGNUS_TLS_NAME` to
+its URL and host name and `MAGNUS_TRUST_FILE=/etc/ssl/certs/ca-certificates.crt`: the Magnus routes
+then verify it against the image's system trust store instead of `backend-ca.pem`. Leave
+`MAGNUS_TRUST_FILE` unset for a Magnus inside the installation.
 
 Browser prefixes are `/api/emberpath`, `/api/oathweave`, `/api/hivemem`,
 `/api/hiveskills`, `/api/cindertrace`, `/api/chattermost`, and `/api/magnus`.
@@ -275,7 +279,9 @@ routes under `/api/registry/` and strips cookies, so writes never leave the priv
 
 The registry starts before the products it records and marks them `activating`. After
 activation, the installer records `installed` only for products observed running their
-exact signed image. If that record fails, services keep running, the command fails and
+exact signed image. A product the configuration names as external, such as an
+[external Magnus](FULL.md#external-magnus), is recorded as `external` with its URL and no host;
+`status` lists it under `externallyManaged`. If that record fails, services keep running, the command fails and
 the transaction stays open, so the install cannot look finished with a wrong catalog.
 Repeat the command to finish: writes are idempotent and add no duplicates. If the registry
 cannot start, the operation holds. `status` reports `registry.state` and each drift by name

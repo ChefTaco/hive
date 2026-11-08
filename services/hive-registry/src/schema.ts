@@ -54,7 +54,7 @@ export const catalogEntry = z.strictObject({
 });
 export type CatalogEntry = z.infer<typeof catalogEntry>;
 
-export const installedEntry = z.strictObject({
+const deployedEntry = z.strictObject({
   id: productId,
   inventoryHost: productId,
   version,
@@ -63,7 +63,16 @@ export const installedEntry = z.strictObject({
   status: z.enum(['activating', 'installed']),
   connection,
 });
+// A release product that this installation uses but does not run: the installation configuration
+// names it as external (an external Magnus). It has no host, version or image here.
+const externalEntry = z.strictObject({
+  id: productId,
+  status: z.literal('external'),
+  connection,
+});
+export const installedEntry = z.union([deployedEntry, externalEntry]);
 export type InstalledEntry = z.infer<typeof installedEntry>;
+export type DeployedEntry = z.infer<typeof deployedEntry>;
 
 export const syncRequest = z.strictObject({
   schema: z.literal(1),
@@ -80,6 +89,9 @@ export const syncRequest = z.strictObject({
   const names = value.installed.map((entry) => entry.id);
   if (new Set(names).size !== names.length) context.addIssue({ code: 'custom', message: 'Duplicate installed product' });
   for (const name of names) if (!offered.has(name)) context.addIssue({ code: 'custom', message: 'Installed product is not in the catalog' });
+  const kinds = new Map(value.catalog.map((entry) => [entry.id, entry.kind]));
+  for (const entry of value.installed)
+    if (entry.status === 'external' && kinds.get(entry.id) !== 'application') context.addIssue({ code: 'custom', message: 'Only an application can be external' });
 });
 export type SyncRequest = z.infer<typeof syncRequest>;
 

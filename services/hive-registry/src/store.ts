@@ -199,6 +199,7 @@ export class RegistryStore {
   }
 
   private upsertInstalled(entry: InstalledEntry, release: string, timestamp: string, record: (subject: string, change: unknown) => void): void {
+    if (entry.status === 'external') return this.upsertExternalUse(entry, release, timestamp, record);
     const current = this.installedProduct(entry.id);
     const sameDeployment = current?.inventory_host === entry.inventoryHost && current.version === entry.version && current.image_digest === entry.imageDigest;
     // An interrupted retry of an already installed product must not look like new work.
@@ -216,6 +217,24 @@ export class RegistryStore {
       ON CONFLICT (product_id) DO UPDATE SET inventory_host = excluded.inventory_host, version = excluded.version, image = excluded.image, image_digest = excluded.image_digest, status = excluded.status,
         installed_at = excluded.installed_at, updated_at = excluded.updated_at, release_version = excluded.release_version, connection_json = excluded.connection_json`)
       .run(entry.id, entry.inventoryHost, entry.version, entry.image, entry.imageDigest, status, installedAt, timestamp, release, connection);
+  }
+
+  /** A release product the installation uses but runs elsewhere: installed, with no host or image. */
+  private upsertExternalUse(entry: Extract<InstalledEntry, { status: 'external' }>, release: string, timestamp: string, record: (subject: string, change: unknown) => void): void {
+    const current = this.installedProduct(entry.id);
+    const connection = JSON.stringify(entry.connection);
+    const same = current?.status === 'external' && current.inventory_host === null && current.image_digest === null;
+    if (same && current.connection_json === connection && current.release_version === release) return;
+    record(`installed:${entry.id}`, {
+      before: current ? { inventoryHost: current.inventory_host, version: current.version, imageDigest: current.image_digest, status: current.status } : null,
+      after: { inventoryHost: null, version: null, imageDigest: null, status: 'external' },
+      release,
+    });
+    this.db.prepare(`INSERT INTO installed_products (product_id, inventory_host, version, image, image_digest, status, installed_at, updated_at, release_version, connection_json)
+      VALUES (?, NULL, NULL, NULL, NULL, 'external', ?, ?, ?, ?)
+      ON CONFLICT (product_id) DO UPDATE SET inventory_host = NULL, version = NULL, image = NULL, image_digest = NULL, status = 'external',
+        installed_at = excluded.installed_at, updated_at = excluded.updated_at, release_version = excluded.release_version, connection_json = excluded.connection_json`)
+      .run(entry.id, same ? current.installed_at : timestamp, timestamp, release, connection);
   }
 
   private transaction(actor: string, operation: string, work: (record: (subject: string, change: unknown) => void, timestamp: string) => void): WriteResult {

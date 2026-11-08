@@ -239,6 +239,67 @@ grep -q 'Ardent Project Studio needs Magnus and HiveMem' "$temporary/rejection.l
 jq '.profile="custom" | del(.components.magnus, .components["magnus-postgres"], .components["magnus-redis"])' "$temporary/studio.json" > "$temporary/studio-refused.json"
 reject "$ROOT/hive.sh" init --config "$temporary/studio-refused.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes
 grep -q 'Ardent Project Studio needs Magnus and HiveMem' "$temporary/rejection.log" || fail 'Studio without Magnus lacks a clear refusal'
+# An external Magnus in place of the magnus component: the console and Studio use it, the ingress
+# verifies it on its own name against the system trust store, and the entries that Magnus needs
+# are written for the operator. Nothing configures a Magnus HiveMem identity for it.
+external_url=https://magnus.example.com:4000
+jq --arg old "$temporary/install" --arg new "$temporary/external" --arg url "$external_url" '
+  walk(if type=="string" then (split($old)|join($new)) else . end) | .installation="synthetic-external" | .profile="custom" |
+  del(.components.magnus, .components["magnus-postgres"], .components["magnus-redis"]) |
+  .components.ardentstudio={host:"control",envFile:($new+"/config/ardentstudio.env"),configDirectory:($new+"/config/ardentstudio")} |
+  .external={magnus:{url:$url}}' "$temporary/config.json" > "$temporary/external.json"
+external_init() { "$ROOT/hive.sh" init --config "$temporary/external.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes; }
+external_init > "$temporary/external.log" 2>&1 || { cat "$temporary/external.log" >&2; fail 'Setup with an external Magnus failed'; }
+external="$temporary/external/config"
+grep -qF "External Magnus: add the entries in $external/.initializer/external-magnus.env to the environment of the Magnus at $external_url" "$temporary/external.log" || fail 'The operator is not told where the external Magnus entries are'
+while IFS= read -r secret; do if rg -F -q -- "$(cat "$secret")" "$temporary/external.log" "$external/.initializer/external-magnus.env"; then fail 'A generated credential was printed or written for the external Magnus'; fi; done < <(find "$external/.initializer/secrets" -type f ! -name '*-id')
+# The console signs in to it with the same reviewed browser client as for the component.
+jq -e '(.clients|length)==8 and (.clients[]|select(.id=="hivexui-magnus")|.audience=="magnus" and .permissions==["magnus:view","magnus:operate","magnus:admin"] and .firstParty==true)' "$external/oathweave/suite-bootstrap.json" >/dev/null || fail 'The external Magnus has no reviewed browser client'
+value "$external/oathweave.env" IAM_BROWSER_CLIENT_POLICIES | jq -e '."hivexui-magnus"=={audience:"magnus",permissions:["magnus:view","magnus:operate","magnus:admin"]}' >/dev/null || fail 'The Magnus browser ceiling differs from its bootstrap client'
+jq -e '.products.magnus=="/api/magnus" and .identity.clients.magnus=="hivexui-magnus" and .products.ardentstudio=="/api/ardentstudio" and (.products|length)==8' "$external/runtime.json" >/dev/null || fail 'The console does not show the external Magnus'
+hive_check_public_runtime "$external/runtime.json" || fail 'The external Magnus broke the public browser allowlist'
+# The ingress reaches it on its own name with system trust, and nothing else about Magnus.
+[[ $(value "$external/ingress.env" MAGNUS_ENDPOINT) == "$external_url" && $(value "$external/ingress.env" MAGNUS_TLS_NAME) == magnus.example.com &&
+   $(value "$external/ingress.env" MAGNUS_TRUST_FILE) == /etc/ssl/certs/ca-certificates.crt ]] || fail 'The ingress does not verify the external Magnus against the system trust store'
+[[ $(rg -c '^MAGNUS_TRUST_FILE=' "$temporary/install/config/ingress.env" "$studio/ingress.env" | wc -l) == 0 ]] || fail 'An internal Magnus lost the suite authority'
+if rg -q 'MAGNUS_GATEWAY' "$external/ingress.env"; then fail 'The ingress was given a gateway for an external Magnus'; fi
+[[ ! -e "$external/ingress/native-listeners-magnus-agents.caddy" ]] || fail 'An agent port was published for an external Magnus'
+# Studio uses it, with its own Magnus client on the browser issuer, and its HiveMem link only.
+rg -q -F -x "ARDENT_STUDIO_MAGNUS_URL=$external_url" "$external/ardentstudio.env" || fail 'Studio does not use the external Magnus'
+rg -q -F -x 'ARDENT_STUDIO_MAGNUS_CLIENT_ID=ardentstudio-magnus' "$external/ardentstudio.env" && rg -q -F -x 'NODE_EXTRA_CA_CERTS=/config/authority.pem' "$external/ardentstudio.env" || fail 'Studio lacks its Magnus client or trust'
+value "$external/oathweave.env" IAM_MACHINE_CLIENT_POLICIES | jq -e '.=={
+  "ardentstudio-magnus":{audience:"magnus",permissions:["magnus:ardent"],lifetimeSeconds:300,rotationOwner:"hive-suite",issuer:"browser"},
+  "ardentstudio-hivemem":{audience:"hivemem",permissions:["hivemem:workspaces:write","hivemem:memories:write"],lifetimeSeconds:300,rotationOwner:"hive-suite"}}' >/dev/null || fail 'The machine clients beside an external Magnus are not the reviewed Studio grants'
+value "$external/hivemem.env" HIVEMEM_OATHWEAVE_SERVICES_JSON | jq -e '.==[{issuer:"oathweave-synthetic-external",clientId:"ardentstudio-hivemem",localId:"ardentstudio",scopes:["workspaces:write","memories:write"]}]' >/dev/null || fail 'HiveMem got another service link beside Studio'
+if rg -q 'magnus-hivemem|MAGNUS_ARDENT' "$external"; then fail 'A Magnus HiveMem identity was configured for an external Magnus'; fi
+[[ ! -e "$external/magnus.env" && ! -e "$external/magnus" && ! -e "$external/magnus-postgres" && ! -e "$external/.initializer/secrets/magnus-api" && ! -e "$external/.initializer/secrets/magnus-hivemem-client" ]] || fail 'An external Magnus got local Magnus configuration'
+# The entries the external Magnus needs, for the operator: the browser issuer, its key set and
+# userinfo through the console origin, and the operator ADMIN and Studio service links.
+external_file="$external/.initializer/external-magnus.env"
+[[ -f "$external_file" && $(stat -c %a "$external_file") == 600 ]] || fail 'The external Magnus entries are not owner-only'
+[[ $(jq -r --arg path "$external_file" '.files[$path]' "$external/.initializer/receipt.json") == $(sha256sum "$external_file" | cut -d ' ' -f1) ]] || fail 'The initializer does not record the external Magnus entries'
+rg -q -F -x 'OATHWEAVE_ISSUER=https://localhost:65426/api/oathweave' "$external_file" &&
+  rg -q -F -x 'OATHWEAVE_JWKS_URL=https://localhost:65426/api/oathweave/oauth/jwks' "$external_file" &&
+  rg -q -F -x 'OATHWEAVE_USERINFO_URL=https://localhost:65426/api/oathweave/oauth/userinfo' "$external_file" || fail 'The external Magnus entries do not name the browser issuer through the console'
+[[ $(rg -v '^#' "$external_file" | cut -d= -f1 | tr '\n' ' ') == 'OATHWEAVE_ISSUER OATHWEAVE_JWKS_URL OATHWEAVE_USERINFO_URL MAGNUS_OATHWEAVE_IDENTITIES_JSON ' ]] || fail 'The external Magnus entries are not exactly the four it needs'
+value "$external_file" MAGNUS_OATHWEAVE_IDENTITIES_JSON | sed "s/^'//; s/'\$//" | jq -e --arg subject "$(cat "$external/.initializer/secrets/identity-id")" --arg id "$(cat "$external/.initializer/secrets/magnus-id")" '.==[
+  {issuer:"https://localhost:65426/api/oathweave",subject:$subject,localUserId:$id,role:"ADMIN"},
+  {issuer:"https://localhost:65426/api/oathweave",subject:"ardentstudio-magnus",localUserId:"ardentstudio",role:"ARDENT_SERVICE"}]' >/dev/null || fail 'The external Magnus links are not the operator ADMIN and the Studio service'
+[[ $(cat "$external/.initializer/secrets/magnus-id") =~ ^[a-f0-9]{64}$ ]] || fail 'The operator has no Magnus account ID for the external Magnus'
+# The deployment runs no Magnus; the plan and the registry record name the external one.
+rendered=$(source "$ROOT/scripts/suite/controller.sh"; HIVE_ROOT=$ROOT HIVE_CONFIG=$temporary/external.json HIVE_MANIFEST=$temporary/release.json HIVE_SIGNATURE=$temporary/release.json.sig HIVE_TRUST_KEY=$temporary/publisher.pub HIVE_VERSION=0.1.0; hive_validate; hive_manifest >/dev/null; hive_render control)
+jq -e '(.services|has("magnus") or has("magnus-postgres") or has("magnus-redis") or has("magnus-gateway")|not) and .services.ardentstudio!=null and (.services.ingress.ports|length)==1' <<< "$rendered" >/dev/null || fail 'The deployment runs a Magnus beside the external one'
+"$ROOT/hive.sh" plan --config "$temporary/external.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive | jq -e --arg url "$external_url" '.external=={magnus:{url:$url}} and (.components|has("magnus")|not)' >/dev/null || fail 'The plan does not show the external Magnus'
+record=$(source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/registry.sh"; HIVE_ROOT=$ROOT HIVE_CONFIG=$temporary/external.json HIVE_MANIFEST=$temporary/release.json HIVE_SIGNATURE=$temporary/release.json.sig HIVE_TRUST_KEY=$temporary/publisher.pub HIVE_VERSION=0.1.0; hive_validate; hive_manifest >/dev/null; hive_registry_body complete installed)
+jq -e --arg url "$external_url" '(.installed|map(select(.id=="magnus")))==[{id:"magnus",status:"external",connection:{consolePath:"/fleet",browserPrefix:"/api/magnus",nativeApis:{},internalEndpoints:{api:$url}}}] and (.catalog|any(.id=="magnus"))' <<< "$record" >/dev/null || fail 'The registry does not record the external Magnus'
+find "$external" -type f -exec sha256sum {} + | sort > "$temporary/external.before"
+external_init > "$temporary/external-repeat.log" 2>&1
+find "$external" -type f -exec sha256sum {} + | sort > "$temporary/external.after"
+cmp -s "$temporary/external.before" "$temporary/external.after" || fail 'A repeated setup changed the external Magnus configuration'
+# Studio still needs HiveMem beside an external Magnus.
+jq 'del(.components.hivemem, .components["hivemem-qdrant"])' "$temporary/external.json" > "$temporary/studio-refused.json"
+reject "$ROOT/hive.sh" init --config "$temporary/studio-refused.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes
+grep -q 'Ardent Project Studio needs Magnus and HiveMem' "$temporary/rejection.log" || fail 'Studio beside an external Magnus without HiveMem lacks a clear refusal'
 # Opt-in: selecting the gateway deploys it and wires Magnus, and only the separate flag grants.
 ssh-keygen -q -t ed25519 -N '' -C fleet-gateway-fixture -f "$temporary/fleet-key"
 gateway_config() {
@@ -360,4 +421,4 @@ cp "$temporary/release.json" "$temporary/release.valid.json"
 jq 'del(.components.chattermost.initialization)' "$temporary/release.valid.json" > "$temporary/release.json"
 openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/release.json" -out "$temporary/release.json.sig"
 reject run_init
-printf 'Passed: full fresh configuration, independent native credentials and datastores, seven browser products with HiveXUI as the Magnus console, the fleet gateway and its terminal grant off by default and each a separate explicit opt-in, protected product-owned hash preparation, disabled automatic dispatch/migrations, stable repeat, required migration artifact refusal, the opt-in Magnus host agent listener, opt-in Ardent Project Studio with its service identities, the HiveSkills registry for Ardent skill installs and the command reconciliation key.\n'
+printf 'Passed: full fresh configuration, independent native credentials and datastores, seven browser products with HiveXUI as the Magnus console, the fleet gateway and its terminal grant off by default and each a separate explicit opt-in, protected product-owned hash preparation, disabled automatic dispatch/migrations, stable repeat, required migration artifact refusal, the opt-in Magnus host agent listener, opt-in Ardent Project Studio with its service identities, an external Magnus in place of the component with its operator entries, the HiveSkills registry for Ardent skill installs and the command reconciliation key.\n'

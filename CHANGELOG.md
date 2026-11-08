@@ -6,6 +6,37 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- An external Magnus: an installation configuration can name a Magnus control API that runs
+  outside the installation, `"external": {"magnus": {"url": "https://magnus.example.com:4000"}}`
+  (HTTPS, a DNS host name and an optional port), in place of the `magnus` component. Ardent Project
+  Studio can then run on the console host without the component. Fresh setup registers the
+  `hivexui-magnus` browser client, lists Magnus in the console's `runtime.json`, routes the ingress
+  Magnus routes to the external URL (`MAGNUS_TRUST_FILE` verifies it against the ingress image's
+  system trust store and on its own name; every other product keeps the suite authority), points
+  Studio at it, and writes `config/.initializer/external-magnus.env` with the Oathweave issuer, key
+  set, userinfo and identity links to add on that Magnus. Interactive setup asks for it when Magnus is
+  not selected; `plan` and `doctor` show it, and host preflight checks the console host's routes to
+  it. The Hive Registry records it as installed and `external`, so the console shows its section
+  (Hive Registry 1.1.0, image `hive-registry:2.0.3`). It works on installations moved with
+  `migrate-native` too, whose migration then adds the Magnus client and route; a
+  `console.nativeListeners` entry for `magnus` is refused beside it. `deployment/FULL.md` lists the
+  manual steps for an existing installation. An installation without an external Magnus generates
+  the same files and Compose definition as before; its ingress configuration adapts to the same
+  routes.
+- `hive.sh console-clients add`: creates the HiveXUI browser clients of Magnus (the component or
+  external) and Ardent Project Studio in an existing Oathweave store, and adds their permissions to
+  `SUITE_ADMIN`, in one transaction inside the Oathweave container that refuses any other change.
+
+### Fixed
+
+- An upgrade that adds a component the installation's recorded storage formats predate, such as
+  Ardent Project Studio on an installation set up before Studio existed, no longer stops with
+  `Storage transition needs --allow-migrations`: a component that is not deployed yet and has no
+  data starts at its release's format, as on a fresh install. Data without a recorded format is
+  still refused without an explicit migration.
+
 ### Next
 
 - Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no

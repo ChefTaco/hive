@@ -125,7 +125,13 @@ hive_registry_body() {
        id:$name,inventoryHost:$placement.host,version:product_version($name),image:$component.image,imageDigest:($component.image|identity),status:$status,
        connection:{consolePath:$connection.consolePath,browserPrefix:$connection.browserPrefix,
          nativeApis:($connection.nativeApis|map_values($c.origin+.)),
-         internalEndpoints:($connection.internalEndpoints|with_entries(if .key=="model" and $endpoint.inferenceOrigin then .value=$endpoint.inferenceOrigin elif $endpoint.origin and (.key=="api" or .key=="admin") then .value=$endpoint.origin else . end))}}))}'
+         internalEndpoints:($connection.internalEndpoints|with_entries(if .key=="model" and $endpoint.inferenceOrigin then .value=$endpoint.inferenceOrigin elif $endpoint.origin and (.key=="api" or .key=="admin") then .value=$endpoint.origin else . end))}}) +
+       # A release product this installation uses but does not run, such as an external Magnus:
+       # recorded as external, with its own URL and no host or image.
+       (($c.external // {})|to_entries|map(.key as $name|$r.components[$name].catalog.connection as $connection|{
+         id:$name,status:"external",
+         connection:{consolePath:$connection.consolePath,browserPrefix:$connection.browserPrefix,
+           nativeApis:($connection.nativeApis|map_values($c.origin+.)),internalEndpoints:{api:.value.url}}})))}'
 }
 
 hive_registry_write() {
@@ -160,7 +166,7 @@ hive_registry_complete() {
   body=$(hive_registry_body complete installed)
   mismatch=$(jq -n --argjson observed "$observed" --argjson body "$body" '
     ($observed|map(.host as $host|.services[]|{key:(.service+"@"+$host),value:.})|from_entries) as $actual |
-    [$body.installed[]|. as $entry|$actual[$entry.id+"@"+$entry.inventoryHost] as $service|
+    [$body.installed[]|select(.status!="external")|. as $entry|$actual[$entry.id+"@"+$entry.inventoryHost] as $service|
       select(($service|not) or $service.state!="running" or ($service.health|IN("","healthy")|not) or $service.imageMatches!=true or $service.image!=$entry.image)|$entry.id]') || return 1
   if [[ "$mismatch" != '[]' ]]; then
     printf 'Hive Registry: these products do not match the signed release on their hosts: %s\n' "$(jq -r 'join(", ")' <<< "$mismatch")" >&2
@@ -188,12 +194,14 @@ hive_registry_report() {
     jq -e . <<< "$summary" >/dev/null 2>&1 || summary=null
     jq -e . <<< "$list" >/dev/null 2>&1 || list=null
   fi
-  jq -n --argjson observed "$observed" --argjson summary "$summary" --argjson list "$list" '
+  jq -n --argjson observed "$observed" --argjson summary "$summary" --argjson list "$list" --argjson external "$(jq -c '.external // {}|keys' "$HIVE_CONFIG")" '
     def drift($code;$detail): {code:$code,detail:$detail};
     ($observed|map(select(.active))) as $active |
     ($observed|map(.host as $host|.services[]|.+{host:$host})) as $actual |
     (($list.products? // [])|map(select(.installation!=null))) as $recorded |
-    ($recorded|map(select(.source=="release"))) as $managed |
+    # Release products the configuration names as external run elsewhere: no deployment to compare.
+    ($recorded|map(select(.source=="release" and .installation.status!="external"))) as $managed |
+    ($recorded|map(select(.source=="release" and .installation.status=="external")|.id)) as $used |
     ($list.products? // []) as $catalog |
     if ($active|length)==0 then {state:(if any($observed[];.unreachable) then "unavailable" else "not-active" end),drift:[]}
     elif $summary==null or $list==null or ($summary|type!="object") or ($list|type!="object") then {state:"unavailable",drift:[drift("registry-unavailable";"The registry did not answer on its host")]}
@@ -208,9 +216,11 @@ hive_registry_report() {
           (if ($service.health|IN("","healthy")|not) then [drift("unhealthy";$service.service+" on "+$service.host+" is "+$service.health)] else [] end) +
           (if $service.state!="missing" and $service.imageMatches!=true then [drift("image-mismatch";$service.service+" on "+$service.host+" does not run its deployed image")] else [] end) +
           (if ($service.image|split("@")[1])!=$entry.installation.imageDigest then [drift("digest-mismatch";$service.service+" is recorded with a different image digest")] else [] end))|add // []) +
+       [$external[]|select(. as $name|$used|index($name)|not)|drift("external-not-recorded";.+" is configured as external but not recorded as external")] +
+       [$used[]|select(. as $name|$external|index($name)|not)|drift("external-not-configured";.+" is recorded as external but the configuration does not name it")] +
        [$active[]|select(.catalog!=null)|.catalog[]|. as $signed|($catalog|map(select(.id==$signed.id))|first) as $entry|
           select(($entry|not) or ($entry.offered!=true) or (($entry.versions|any(.image==$signed.image and .storageFormat==$signed.storageFormat))|not))|drift("catalog-mismatch";$signed.id+" differs from the signed release catalog")]) as $drift |
-      {state:(if ($drift|length)==0 then "in-sync" else "drift" end),release:$summary.release.version,products:($recorded|length),externallyManaged:($recorded|map(select(.source=="external")|.id)),drift:($drift|unique)}
+      {state:(if ($drift|length)==0 then "in-sync" else "drift" end),release:$summary.release.version,products:($recorded|length),externallyManaged:($recorded|map(select(.source=="external" or .installation.status=="external")|.id)),drift:($drift|unique)}
     end'
 }
 

@@ -59,6 +59,22 @@ rg -q -F -x "MAGNUS_ARDENT_HIVESKILLS_URL=$(jq -r .bootstrap.productEndpoints.hi
 rg -q '^COMMAND_RECONCILIATION_SECRET=[a-f0-9]{64}$' "$temporary/fleet-console/config/magnus.env" || fail 'Distributed Magnus lacks the command reconciliation key'
 if rg -q 'MAGNUS_ARDENT_HIVEMEM|magnus-hivemem' "$temporary/fleet-console/config/magnus.env" "$temporary/fleet-console/config/hivemem.env" "$temporary/fleet-identity/config/oathweave.env"; then fail 'A Magnus HiveMem identity was configured across hosts'; fi
 [[ ! -e "$temporary/fleet-console/config/.initializer/secrets/magnus-hivemem-client" && ! -e "$temporary/fleet-identity/config/.initializer/secrets/magnus-hivemem-client" ]] || fail 'A Magnus HiveMem client secret was generated that nothing uses'
+# An external Magnus with Oathweave on another host than the console: the identity host writes the
+# Magnus entries, with the key set reached through the console origin; the console host routes to it.
+jq --arg root "$temporary" 'walk(if type=="string" then (gsub($root+"/identity";$root+"/external-identity")|gsub($root+"/console";$root+"/external-console")) else . end) |
+  .external={magnus:{url:"https://magnus.example.com"}}' "$temporary/config.json" > "$temporary/external.json"
+"$ROOT/hive.sh" init --config "$temporary/external.json" --manifest "$temporary/fleet-release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/external.log" 2>&1 || { cat "$temporary/external.log" >&2; fail 'Distributed setup with an external Magnus failed'; }
+grep -qF "$temporary/external-identity/config/.initializer/external-magnus.env" "$temporary/external.log" || fail 'The operator is not told where the external Magnus entries are'
+entries="$temporary/external-identity/config/.initializer/external-magnus.env"
+[[ -f "$entries" && ! -e "$temporary/external-console/config/.initializer/external-magnus.env" ]] || fail 'The external Magnus entries are not on the identity host only'
+rg -q -F -x 'OATHWEAVE_JWKS_URL=https://localhost:65420/api/oathweave/oauth/jwks' "$entries" || fail 'The external Magnus key set is not reached through the console origin'
+sed -n "s/^MAGNUS_OATHWEAVE_IDENTITIES_JSON='\(.*\)'\$/\1/p" "$entries" | jq -e --arg subject "$(cat "$temporary/external-identity/config/.initializer/secrets/identity-id")" --arg id "$(cat "$temporary/external-identity/config/.initializer/secrets/magnus-id")" '.==[{issuer:"https://localhost:65420/api/oathweave",subject:$subject,localUserId:$id,role:"ADMIN"}]' >/dev/null || fail 'The external Magnus lacks the operator ADMIN link alone'
+cmp -s "$temporary/external-identity/config/.initializer/secrets/magnus-id" "$temporary/external-console/config/.initializer/secrets/magnus-id" || fail 'The Magnus account ID differs between hosts'
+jq -e '.clients|any(.id=="hivexui-magnus")' "$temporary/external-identity/config/oathweave/suite-bootstrap.json" >/dev/null || fail 'Oathweave lacks the Magnus browser client'
+jq -e '.products.magnus=="/api/magnus" and .identity.clients.magnus=="hivexui-magnus"' "$temporary/external-console/config/runtime.json" >/dev/null || fail 'The console does not show the external Magnus'
+rg -q -F -x 'MAGNUS_ENDPOINT=https://magnus.example.com' "$temporary/external-console/config/ingress.env" && rg -q -F -x 'MAGNUS_TLS_NAME=magnus.example.com' "$temporary/external-console/config/ingress.env" &&
+  rg -q -F -x 'MAGNUS_TRUST_FILE=/etc/ssl/certs/ca-certificates.crt' "$temporary/external-console/config/ingress.env" || fail 'The console ingress does not route to the external Magnus with system trust'
+if rg -q 'magnus-hivemem|MAGNUS_ARDENT' "$temporary/external-identity/config" "$temporary/external-console/config"; then fail 'A Magnus HiveMem identity was configured for an external Magnus'; fi
 cp "$temporary/config.json" "$temporary/valid.json"
 for patch in 'del(.bootstrap.trustBundleFile)' '.bootstrap.productEndpoints.oathweave.origin="http://identity.example.com"' '.bootstrap.productEndpoints.emberpath.inferenceOrigin=.bootstrap.productEndpoints.emberpath.origin' '.bootstrap.productEndpoints.hivemem.origin=.bootstrap.productEndpoints.hiveskills.origin' '.components["oathweave-redis"].host="console"'; do
   jq "$patch" "$temporary/valid.json" > "$temporary/config.json"; reject run_init
@@ -66,4 +82,4 @@ done
 cp "$temporary/valid.json" "$temporary/config.json"
 printf 'changed' >> "$temporary/server.crt"
 reject run_init
-printf 'Passed: fresh distributed configuration, exact account coordination, product-owned secrets, explicit HTTPS origins, repeat stability and invalid topology/trust refusal.\n'
+printf 'Passed: fresh distributed configuration, exact account coordination, product-owned secrets, explicit HTTPS origins, an external Magnus with its entries on the identity host, repeat stability and invalid topology/trust refusal.\n'

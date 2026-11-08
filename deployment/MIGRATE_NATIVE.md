@@ -248,6 +248,16 @@ identity at all. When Emberpath and Oathweave run on different hosts, the step i
 the secret would have to cross hosts; Emberpath then needs `HIVE_ROUTER_MEMORY_PROXY_TOKEN` as before.
 To contain the client, deactivate it in Oathweave or disable the `hive-router` agent in HiveMem.
 
+### External Magnus
+
+A migrated installation can use an [external Magnus](FULL.md#external-magnus), a Magnus that runs
+on another host with a publicly trusted certificate. With `external.magnus` in the configuration
+before `prepare`, the migration adds the console's Magnus client and route. An installation that is
+already migrated gains it, and optionally Ardent Project Studio, by the steps in
+[FULL.md](FULL.md#adding-an-external-magnus-and-studio-to-an-existing-installation), then
+`hive.sh upgrade` and `hive.sh console-clients add`. Its native listeners and reviewed links are
+unchanged; a `console.nativeListeners` entry for `magnus` is refused beside an external Magnus.
+
 ## First sign-in
 
 Roles and passwords carry over, so an administrator whose password had expired stays expired. The
