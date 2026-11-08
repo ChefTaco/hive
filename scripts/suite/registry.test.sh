@@ -224,6 +224,25 @@ reset_fixture
 jq '.products+=[{id:"external-api",source:"external",offered:false,installed:true,versions:[],installation:{inventoryHost:null,version:null,imageDigest:null,status:"external"}}]' "$HIVE_FIXTURE/products.json" > "$HIVE_FIXTURE/next"; mv "$HIVE_FIXTURE/next" "$HIVE_FIXTURE/products.json"
 report=$(status); jq -e '.state=="in-sync" and .externallyManaged==["external-api"]' <<< "$report" >/dev/null || { printf '%s\n' "$report" >&2; fail 'An external product caused drift'; }
 reset_fixture
+# An external Magnus is a release product recorded as external: nothing is deployed to compare,
+# and the record must match the configuration both ways.
+jq '.external={magnus:{url:"https://magnus.example.com:4000"}}' "$temporary/config.json" > "$temporary/external.json"
+external_status() { "$ROOT/hive.sh" status --config "$temporary/external.json" | jq -c .registry; }
+used_externally() { jq '.products+=[{id:"magnus",source:"release",offered:true,installed:true,versions:[],installation:{inventoryHost:null,version:null,imageDigest:null,status:"external"}}]' "$HIVE_FIXTURE/products.json" > "$HIVE_FIXTURE/next"; mv "$HIVE_FIXTURE/next" "$HIVE_FIXTURE/products.json"; }
+used_externally
+report=$(external_status); jq -e '.state=="in-sync" and .externallyManaged==["magnus"]' <<< "$report" >/dev/null || { printf '%s\n' "$report" >&2; fail 'An external Magnus caused drift'; }
+report=$(status); jq -e '.state=="drift" and any(.drift[];.code=="external-not-configured")' <<< "$report" >/dev/null || { printf '%s\n' "$report" >&2; fail 'An external record the configuration does not name was not reported'; }
+reset_fixture
+report=$(external_status); jq -e '.state=="drift" and any(.drift[];.code=="external-not-recorded")' <<< "$report" >/dev/null || { printf '%s\n' "$report" >&2; fail 'A configured external Magnus missing from the record was not reported'; }
+reset_fixture
+# Completion compares only what runs here: the external entry has no host to observe.
+(
+  hive_registry_write() { printf '%s\n' "$3" > "$temporary/external-sync.json"; }
+  HIVE_CONFIG=$temporary/external.json HIVE_MANIFEST_DIGEST=$(sha256sum "$temporary/release.json"|cut -d ' ' -f1) HIVE_PLAN_DIGEST=$(printf 'p%.0s' {1..64})
+  hive_registry_body() { jq '.installed+=[{id:"magnus",status:"external",connection:{consolePath:"/fleet",browserPrefix:"/api/magnus",nativeApis:{},internalEndpoints:{api:"https://magnus.example.com:4000"}}}]' "$temporary/body.json"; }
+  hive_registry_complete || fail 'Completion refused an external entry it cannot observe'
+) || exit 1
+jq -e '.installed|any(.id=="magnus" and .status=="external")' "$temporary/external-sync.json" >/dev/null || fail 'Completion did not record the external entry'
 hive_registry_doctor > "$temporary/doctor.log"; grep -q 'in sync' "$temporary/doctor.log" || fail 'Doctor did not report sync'
 printf '{"phase":"ready"}' > "$directory/transaction.json"
 if (hive_registry_doctor) > "$temporary/doctor.log" 2>&1; then fail 'Doctor passed with drift'; fi

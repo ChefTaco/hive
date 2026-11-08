@@ -39,8 +39,24 @@
 	header_down -Set-Cookie
 }
 
+# Magnus's browser routes. A Magnus in this installation is verified against the suite authority,
+# as every other product is. An external Magnus, on another host and managed separately, has a
+# publicly trusted certificate: setup sets MAGNUS_TRUST_FILE to this image's system trust store,
+# and its host name (MAGNUS_TLS_NAME) is verified all the same. See deployment/FULL.md.
+(magnus_verified_backend) {
+	flush_interval -1
+	transport http {
+		tls
+		tls_server_name {args[0]}
+		tls_trust_pool file {$MAGNUS_TRUST_FILE:/config/backend-ca.pem}
+		keepalive 2s
+	}
+	header_up -Cookie
+	header_down -Set-Cookie
+}
+
 (magnus_backend) {
-	import stateless_backend {args[0]}
+	import magnus_verified_backend {args[0]}
 	# Default deny: the API reads only these. x-api-secret grants system ADMIN and
 	# x-node-token an agent's access, so a browser must never be able to send them.
 	# x-acting-subject names the person a linked service acts for; only that service,

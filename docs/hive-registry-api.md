@@ -81,6 +81,13 @@ Private network only, with the write credential. `hive.sh` calls them over SSH t
 | `PUT /v1/products/{id}` | Adds or updates an externally managed product |
 | `DELETE /v1/products/{id}` | Removes an externally managed product |
 
+A sync's `installed` entries are the products this installation runs, each with its inventory
+host, version, image and `activating` or `installed`, and the release products it uses but does
+not run, such as an [external Magnus](../deployment/FULL.md#external-magnus):
+`{"id":"magnus","status":"external","connection":{...}}`, with no host, version or image. Only an
+application can be external. It is `installed` at once and stays a release product; a sync that
+no longer names it removes it on completion, like any release product.
+
 Writes are idempotent: an unchanged write changes no rows and adds no history, and the
 response reports `{"schema":1,"changes":0,"revision":N}`. Release-owned products cannot be
 edited by hand (`409`), and a sync for another installation is refused (`409`).

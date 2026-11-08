@@ -257,6 +257,33 @@ describe('Hive Registry API', () => {
       missing.installed.push(installed('absent', 'installed'));
       assert.equal((await sync(missing)).status, 422);
     });
+    it('records a release product the installation uses but runs elsewhere', async () => {
+      const external = { id: 'not-selected', status: 'external', connection: { consolePath: '/fleet', browserPrefix: '/api/magnus', nativeApis: {}, internalEndpoints: { api: 'https://magnus.example.com:4000' } } };
+      for (const phase of ['begin', 'complete'] as const) {
+        const body = syncBody(phase, phase === 'begin' ? 'activating' : 'installed') as any;
+        body.installed.push(external);
+        assert.equal((await sync(body)).status, 200, phase);
+      }
+      const product = (await call('GET', '/v1/products/not-selected', { token: readToken })).body;
+      assert.equal(product.installed, true);
+      assert.equal(product.source, 'release');
+      assert.deepEqual({ ...product.installation, installedAt: null, updatedAt: null }, { inventoryHost: null, version: null, image: null, imageDigest: null, status: 'external', installedAt: null, updatedAt: null, release: '1.0.0' });
+      assert.equal((await call('GET', '/v1/products/not-selected/connection', { token: readToken })).body.internalEndpoints.api, 'https://magnus.example.com:4000');
+      assert((await call('GET', '/v1/installation')).body.products.includes('not-selected'), 'The console does not see the external product');
+      const retry = syncBody('complete', 'installed') as any;
+      retry.installed.push(external);
+      assert.equal((await sync(retry)).body.changes, 0);
+      // Without it in the configuration, completion removes it like any release product.
+      assert.equal((await sync(syncBody('complete', 'installed'))).status, 200);
+      assert.equal((await call('GET', '/v1/products/not-selected', { token: readToken })).body.installation, null);
+      const datastore = syncBody('complete', 'installed') as any;
+      datastore.installed = datastore.installed.filter((item: any) => item.id !== 'fixture-store');
+      datastore.installed.push({ ...external, id: 'fixture-store' });
+      assert.equal((await sync(datastore)).status, 422, 'A datastore was recorded as external');
+      const hosted = syncBody('complete', 'installed') as any;
+      hosted.installed.push({ ...external, inventoryHost: 'private-host' });
+      assert.equal((await sync(hosted)).status, 422, 'An external entry carried a host');
+    });
     it('keeps history append-only at the database level', async () => {
       const data = await start();
       await sync();

@@ -170,7 +170,7 @@ gateway.listen(4310,'0.0.0.0');
   writeFileSync(join(temporary, 'native-listeners-magnus-agents.caddy'), ':4000 {\n\ttls /config/console.crt /config/console.key\n\timport magnus_agent_listener\n}\n', { mode: 0o600 });
   // The gateway is optional: this ingress has it, and a second one below does not.
   let agentPort;
-  async function startIngress(name, environment, state, extraPorts = []) {
+  async function startIngress(name, environment, state, extraPorts = [], mounts = []) {
     mkdirSync(state, { recursive: true, mode: 0o700 });
     docker(
       'run',
@@ -181,6 +181,7 @@ gateway.listen(4310,'0.0.0.0');
       network,
       ...restrictions,
       ...environment,
+      ...mounts.flatMap((mount) => ['-v', mount]),
       '-v',
       `${temporary}:/config:ro`,
       '-v',
@@ -269,6 +270,9 @@ gateway.listen(4310,'0.0.0.0');
     ['/api/emberpath/health/ready', '/health/ready', []],
     ['/api/cindertrace/health/ready', '/ready', []],
     ['/api/oathweave/users', '/api/v1/users', ['__Host-oathweave_sso', 'iam_refresh']],
+    // An external Magnus reads Oathweave's key set and userinfo through the console origin.
+    ['/api/oathweave/oauth/jwks', '/api/v1/oauth/jwks', ['__Host-oathweave_sso', 'iam_refresh']],
+    ['/api/oathweave/oauth/userinfo', '/api/v1/oauth/userinfo', ['__Host-oathweave_sso', 'iam_refresh']],
     ['/api/hivemem/memories', '/v1/memories', ['hivemem_dash']],
     ['/api/cindertrace/security-fusion/cases', '/api/v1/security-fusion/cases', ['cindertrace_session']],
     ['/api/chattermost/api/v4/users/me', '/api/v4/users/me', chatCookies],
@@ -521,6 +525,85 @@ gateway.listen(4310,'0.0.0.0');
   assert.equal(magnusStream.status, 200);
   assert.match(magnusStream.body, /first[\s\S]*last/);
   assert(magnusStream.streamMilliseconds > 150, 'Magnus event stream was buffered until completion');
+  // An external Magnus: another host whose certificate a public authority issued. Here a test
+  // authority stands in for one, added to a copy of the ingress image's own system trust store.
+  // The ingress verifies the external Magnus against that store and on its own name, never
+  // against the suite authority, and every other product keeps the suite authority only.
+  const external = join(temporary, 'external');
+  mkdirSync(external, { mode: 0o700 });
+  const openssl = (...args) => execFileSync('openssl', args, { stdio: 'ignore' });
+  openssl('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', join(external, 'public-ca.key'), '-out', join(external, 'public-ca.crt'), '-subj', '/CN=Synthetic public root',
+    '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign', '-days', '1');
+  writeFileSync(join(external, 'leaf.ext'), 'subjectAltName=DNS:magnus.example.com\nbasicConstraints=critical,CA:FALSE\nextendedKeyUsage=serverAuth\nkeyUsage=critical,digitalSignature,keyEncipherment\n', { mode: 0o600 });
+  openssl('req', '-new', '-newkey', 'rsa:2048', '-nodes', '-keyout', join(external, 'console.key'), '-out', join(external, 'leaf.csr'), '-subj', '/CN=magnus.example.com');
+  openssl('x509', '-req', '-in', join(external, 'leaf.csr'), '-CA', join(external, 'public-ca.crt'), '-CAkey', join(external, 'public-ca.key'), '-set_serial', '0x' + randomBytes(16).toString('hex'),
+    '-days', '1', '-extfile', join(external, 'leaf.ext'), '-out', join(external, 'console.crt'));
+  writeFileSync(join(external, 'backend.cjs'), readFileSync(join(temporary, 'backend.cjs')), { mode: 0o600 });
+  const systemTrust = join(temporary, 'system-trust.pem');
+  writeFileSync(systemTrust, docker('run', '--rm', '--entrypoint', 'cat', caddyImage, '/etc/ssl/certs/ca-certificates.crt') + '\n' + readFileSync(join(external, 'public-ca.crt')), { mode: 0o600 });
+  const externalServer = network + '-external-magnus';
+  containers.push(externalServer);
+  docker('run', '-d', '--name', externalServer, '--network', network, '--network-alias', 'magnus.example.com', ...restrictions, '-v', `${external}:/config:ro`, nodeImage, 'node', '/config/backend.cjs');
+  // As initialize-host.sh writes ingress.env for an external Magnus.
+  const externalEnvironment = (endpoint, name) => [
+    ...env.filter((_, index, all) => !/^MAGNUS_(ENDPOINT|TLS_NAME)=/.test(all[index]) && !/^MAGNUS_(ENDPOINT|TLS_NAME)=/.test(all[index + 1] ?? '')),
+    '-e', 'MAGNUS_ENDPOINT=' + endpoint, '-e', 'MAGNUS_TLS_NAME=' + name, '-e', 'MAGNUS_TRUST_FILE=/etc/ssl/certs/ca-certificates.crt',
+  ];
+  const trustMount = [`${systemTrust}:/etc/ssl/certs/ca-certificates.crt:ro`];
+  async function externalIngress(suffix, endpoint, name, extra = []) {
+    const container = network + '-edge-' + suffix;
+    containers.push(container);
+    const target = { ...options, port: await startIngress(container, [...externalEnvironment(endpoint, name), ...extra], join(temporary, 'state-' + suffix), [], trustMount) };
+    await waitReady(target);
+    return target;
+  }
+  // Oathweave is pointed at the external host too: the public authority must not verify it.
+  const viaExternal = await externalIngress('external', 'https://magnus.example.com:9443', 'magnus.example.com', ['-e', 'OATHWEAVE_ENDPOINT=https://magnus.example.com:9443', '-e', 'OATHWEAVE_TLS_NAME=magnus.example.com']);
+  for (const [input, expected, method, payload] of [
+    ['/api/magnus/health/ready', '/api/v1/health'],
+    ['/api/magnus/console/session', '/api/v1/console/session'],
+    ['/api/magnus/nodes/node-1', '/api/v1/nodes/node-1', 'PATCH', '{"synthetic":true}'],
+    ['/api/magnus/ardent/agents', '/api/v1/ardent/agents', 'POST', '{"synthetic":true}'],
+    ['/api/magnus/ardent/installations/node-1/profiles/main/tasks/task-1/artifacts', '/api/v1/ardent/installations/node-1/profiles/main/tasks/task-1/artifacts'],
+    ['/api/magnus/docs/openapi.json', '/api/docs/openapi.json'],
+  ]) {
+    const result = await request(input, magnusHeaders, method, payload, viaExternal);
+    assert.equal(result.status, 200, input + ' did not reach the external Magnus: ' + result.body.slice(0, 200));
+    const body = JSON.parse(result.body);
+    assert.equal(body.path, expected);
+    assert.equal(body.method, method ?? 'GET');
+    assert.equal(body.body, payload ?? '', input + ' changed the request body on the way to the external Magnus');
+    assert.equal(body.headers.authorization, headers.Authorization, input + ' dropped the bearer token');
+    // Its own name, as a proxy in front of it would route by, never the console's.
+    assert.equal(body.headers.host, 'magnus.example.com:9443', input + ' reached the external Magnus under another host name');
+    for (const name of ['x-api-secret', 'x-node-token', 'x-log-token', 'x-acting-subject', 'cookie', 'origin'])
+      assert.equal(body.headers[name], undefined, input + ' forwarded ' + name + ' to the external Magnus');
+    assert.notEqual(body.headers['x-forwarded-for'], '192.0.2.1', 'Ingress trusted a browser forwarding header for the external Magnus');
+    assert.deepEqual((result.cookies || []).filter(Boolean), [], input + ' let the external Magnus set a cookie');
+  }
+  const externalStream = await request('/api/magnus/events/stream', { ...magnusHeaders, Accept: 'text/event-stream' }, 'GET', undefined, viaExternal);
+  assert.equal(externalStream.status, 200);
+  assert(externalStream.streamMilliseconds > 150, 'The external Magnus event stream was buffered until completion');
+  for (const [path, method] of [['/api/magnus/heartbeat', 'POST'], ['/api/magnus/nodes/scan-users', 'GET'], ['/api/magnus/terminal/open', 'POST'], ['/api/magnus//nodes', 'GET']]) {
+    const result = await request(path, magnusHeaders, method, method === 'POST' ? '{}' : undefined, viaExternal);
+    assert.equal(result.status, 404, path + ' passed the allowlist to the external Magnus');
+    assert.equal(result.body, refused);
+  }
+  assert.equal((await request('/api/magnus/console/session', { Authorization: 'Basic b2JfdmlvdXNseQ==' }, 'GET', undefined, viaExternal)).status, 401, 'Non-bearer Authorization reached the external Magnus');
+  assert.equal((await request('/api/oathweave/users', headers, 'GET', undefined, viaExternal)).status, 503, 'A product inside the installation was verified with the public trust store');
+  assert.equal(JSON.parse((await request('/api/hivemem/memories', headers, 'GET', undefined, viaExternal)).body).path, '/v1/memories', 'The suite authority stopped verifying the other products');
+  // The suite authority does not verify an external Magnus, and neither does a certificate for another name.
+  const suiteSigned = await externalIngress('external-suite-ca', 'https://backend:9443', 'localhost');
+  assert.equal((await request('/api/magnus/console/session', { Authorization: headers.Authorization }, 'GET', undefined, suiteSigned)).status, 503, 'The suite authority verified an external Magnus');
+  const wrongName = await externalIngress('external-wrong-name', 'https://magnus.example.com:9443', 'fleet.example.com');
+  assert.equal((await request('/api/magnus/console/session', { Authorization: headers.Authorization }, 'GET', undefined, wrongName)).status, 503, 'An external Magnus certificate for another name was accepted');
+  // Without MAGNUS_TRUST_FILE, as in every installation without an external Magnus, the public
+  // authority does not verify Magnus either.
+  const internalOnly = network + '-edge-internal-trust';
+  containers.push(internalOnly);
+  const internalTarget = { ...options, port: await startIngress(internalOnly, externalEnvironment('https://magnus.example.com:9443', 'magnus.example.com').filter((value, index, all) => value !== 'MAGNUS_TRUST_FILE=/etc/ssl/certs/ca-certificates.crt' && all[index + 1] !== 'MAGNUS_TRUST_FILE=/etc/ssl/certs/ca-certificates.crt'), join(temporary, 'state-internal-trust'), [], trustMount) };
+  await waitReady(internalTarget);
+  assert.equal((await request('/api/magnus/console/session', { Authorization: headers.Authorization }, 'GET', undefined, internalTarget)).status, 503, 'Magnus left the suite authority without MAGNUS_TRUST_FILE');
   // Optional: the whole of Magnus's own route inventory, when a checkout supplies it.
   if (process.env.HIVE_MAGNUS_ROUTE_INVENTORY) {
     const counts = { browser: 0, refused: 0 };
@@ -720,7 +803,7 @@ gateway.listen(4310,'0.0.0.0');
   assert.equal(consoleSession.headers['x-node-token'], undefined, 'The console port forwarded x-node-token');
   passed = true;
   console.log(
-    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming, WebSocket transport, the Magnus route allowlist with machine credentials and acting subjects stripped, the optional Ardent Project Studio route with its prefix kept, no cookies and unbuffered streams, the exact fleet gateway browser routes with Origin and Sec-Fetch-Site intact, and the Magnus host agent port with its own allowlist and no client-asserted identity.',
+    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming, WebSocket transport, the Magnus route allowlist with machine credentials and acting subjects stripped, the optional Ardent Project Studio route with its prefix kept, no cookies and unbuffered streams, the exact fleet gateway browser routes with Origin and Sec-Fetch-Site intact, an external Magnus verified against the system trust store on its own name while every other product keeps the suite authority, and the Magnus host agent port with its own allowlist and no client-asserted identity.',
   );
 } catch (error) {
   for (const container of containers) {

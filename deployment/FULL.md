@@ -197,7 +197,9 @@ An unattended configuration selects it as a component:
 ```
 
 It needs Magnus with at least one Ardent agent, and HiveMem, and runs on the console host with
-Oathweave: its client secrets are generated there and never leave it. It needs a release whose
+Oathweave: its client secrets are generated there and never leave it. Magnus is the `magnus`
+component or an [external Magnus](#external-magnus), and interactive setup offers Studio with
+either. It needs a release whose
 Oathweave supports browser-issued machine clients and whose Magnus links service identities
 (role `ARDENT_SERVICE`). Fresh setup:
 
@@ -225,8 +227,238 @@ answers 404. Its state is the `ardentstudio-data` volume (`data/ardentstudio`), 
 rest of the installation ([BACKUPS.md](BACKUPS.md#ardent-project-studio)).
 
 Adding Studio to an existing installation is not automated yet: configure the same clients, links
-and environment by hand, then select the component. Studio's README and `docs/OATHWEAVE.md` list
-its variables.
+and environment by hand, then select the component.
+[Adding an external Magnus and Studio to an existing installation](#adding-an-external-magnus-and-studio-to-an-existing-installation)
+lists every entry; with Magnus as a component, add Studio's link to `MAGNUS_OATHWEAVE_IDENTITIES_JSON`
+in `config/magnus.env` (and `config/magnus-gateway.env` with the gateway) instead of on an external
+Magnus, and use `ARDENT_STUDIO_MAGNUS_URL=https://magnus:4000`. Studio's
+README and `docs/OATHWEAVE.md` list its variables.
+
+## External Magnus
+
+An external Magnus is a Magnus control API that runs outside this installation: on another host,
+managed and upgraded separately, with a publicly trusted certificate (for example from Let's
+Encrypt, or a Tailscale certificate). The console's Magnus pages (fleet, Ardent, New Agent) use it
+through the ingress `/api/magnus/*` routes with each person's Oathweave token, and Ardent Project
+Studio can run on the console host without the `magnus` component. The installation configuration
+names it at the top level:
+
+```json
+"external": {
+  "magnus": { "url": "https://magnus.example.com:4000" }
+}
+```
+
+The URL is HTTPS with a fully qualified DNS host name (not an IP address) and an optional port, and
+nothing else: no path, query or credentials. It takes the place of the `magnus` component, so
+`magnus`, `magnus-postgres`, `magnus-redis` and `magnus-gateway` are not selected, and the full
+profile, which selects Magnus, is not used (choose core or custom). It needs the console, a release
+that offers Magnus, an installation not moved with `migrate-native`, and a URL other than the console
+origin. `hive.sh plan` shows it as `external`, and `hive.sh doctor` names it. Interactive setup asks
+for it when Magnus is not selected:
+
+```text
+External Magnus HTTPS URL, managed outside this installation (blank for none):
+```
+
+Fresh setup with an external Magnus:
+
+- registers the browser client `hivexui-magnus` (audience `magnus`, permissions `magnus:view`,
+  `magnus:operate`, `magnus:admin`) exactly as for the component, and lists `magnus` in the console's
+  `runtime.json` (`products.magnus` is `/api/magnus`, `identity.clients.magnus` is `hivexui-magnus`);
+- routes the ingress Magnus routes to it: `config/ingress.env` gets
+  `MAGNUS_ENDPOINT=https://magnus.example.com:4000`, `MAGNUS_TLS_NAME=magnus.example.com` and
+  `MAGNUS_TRUST_FILE=/etc/ssl/certs/ca-certificates.crt`. The ingress verifies the external Magnus
+  against its image's system trust store and on that host name, which it also sends as the TLS
+  server name and the `Host` header; it never skips verification, and
+  every product inside the installation is still verified against the suite authority only. The
+  browser routes keep the same allowlist, and still remove `x-acting-subject`, machine credentials
+  and cookies both ways;
+- with Studio, writes `ARDENT_STUDIO_MAGNUS_URL=https://magnus.example.com:4000` into
+  `config/ardentstudio.env` (Studio trusts public authorities as well as the suite authority in
+  `NODE_EXTRA_CA_CERTS`) and declares the machine client `ardentstudio-magnus` on the browser issuer,
+  as for the component;
+- records Magnus in the Hive Registry as installed and `external`, with the URL and no host, version
+  or image, so the console shows its section; `status` lists it under `externallyManaged`;
+- writes `config/.initializer/external-magnus.env` on the Oathweave host (owner-only, recorded in the
+  initialization receipt) and prints where it is. Hive cannot change another host's Magnus, so this
+  file holds the entries to add there. None of them is a secret:
+
+  ```text
+  OATHWEAVE_ISSUER=https://console.example.com/api/oathweave
+  OATHWEAVE_JWKS_URL=https://console.example.com/api/oathweave/oauth/jwks
+  OATHWEAVE_USERINFO_URL=https://console.example.com/api/oathweave/oauth/userinfo
+  MAGNUS_OATHWEAVE_IDENTITIES_JSON='[{"issuer":"https://console.example.com/api/oathweave","subject":"OPERATOR_SUBJECT","localUserId":"MAGNUS_ID","role":"ADMIN"},{"issuer":"https://console.example.com/api/oathweave","subject":"ardentstudio-magnus","localUserId":"ardentstudio","role":"ARDENT_SERVICE"}]'
+  ```
+
+  The issuer is Oathweave's browser issuer. The external Magnus reads the key set and userinfo
+  through the console origin, which maps `/api/oathweave/*` to Oathweave's `/api/v1/*`, so it must
+  reach the console and trust its certificate (add the console's authority to that Magnus's
+  `NODE_EXTRA_CA_CERTS` if it is not publicly trusted). `OPERATOR_SUBJECT` is the initial
+  operator's Oathweave ID (`config/.initializer/secrets/identity-id`) and `MAGNUS_ID` a generated
+  Magnus account ID (`config/.initializer/secrets/magnus-id`). The second link, Studio's service
+  identity, is there only with Studio. A Magnus trusts one Oathweave issuer and refuses
+  `OATHWEAVE_ISSUER` together with `IAM_CORE_URL`; merge the links with any that Magnus already has.
+  The JSON is single-quoted, which Docker Compose, systemd and dotenv files remove. Then restart
+  that Magnus.
+
+Not configured for an external Magnus: the Magnus host agent port (`console.nativeListeners`; agents
+connect to the external Magnus directly), the web terminal gateway (`magnus-gateway`, which runs
+beside its Magnus; the terminal routes answer 404), and Magnus's HiveMem service identity
+`magnus-hivemem`, as for a Magnus on another host ([Magnus and HiveMem](#magnus-and-hivemem)):
+configure the latter on that Magnus by hand, or Ardent New Agent answers
+`HIVEMEM_ENROLLMENT_UNAVAILABLE`. Host preflight (`install`, `upgrade` and `doctor`) refuses a
+console host whose `ingress.env`, `runtime.json` or Studio environment does not use the external
+Magnus, and warns when the external Magnus does not answer `/api/v1/health` from the console host
+with a certificate its system trust store accepts.
+
+### Adding an external Magnus and Studio to an existing installation
+
+`hive.sh upgrade` does not regenerate product environments or `runtime.json` on an existing
+installation. With the new configuration it writes:
+
+- the Compose definition, which then runs Studio (`env_file` `config/ardentstudio.env`,
+  `config/ardentstudio` at `/config`, data in `data/ardentstudio`, created owned by Studio's user)
+  and no Magnus;
+- the ingress `config/ingress/Caddyfile`, replaced by this release's whenever it differs (the
+  previous one is kept as `Caddyfile.previous`); `MAGNUS_TRUST_FILE` needs this release's Caddyfile;
+- the Hive Registry record, with Magnus as `external`.
+
+Everything else is edited by hand, on the console host, which must also run Oathweave (Studio's
+requirement), before the upgrade. The steps below use `/opt/hive` as the installation directory,
+`https://console.example.com` as the console origin and `https://magnus.example.com:4000` as the
+external Magnus; they match what fresh setup generates, entry for entry. Keep every file owner-only
+(mode 0600, its current owner) except `runtime.json` (0644), and back up first
+(`hive.sh backup`).
+
+1. **Generate four values** of 64 hex characters, owner-only, as fresh setup names them:
+
+   ```bash
+   cd /opt/hive/config/.initializer/secrets
+   for name in magnus-id studio-id studio-magnus-client studio-hivemem-client; do
+     (umask 077; [ -e "$name" ] || openssl rand -hex 32 > "$name")
+   done
+   ```
+
+   `magnus-id` is the operator's Magnus account ID, `studio-id` the operator's Studio account ID,
+   and the other two are the Studio clients' secrets. The operator's Oathweave ID is `identity-id`
+   in the same directory, and the username is `SEED_ADMIN_USERNAME` in `config/oathweave.env`.
+
+2. **Oathweave** (`config/oathweave.env`). Merge these keys into the JSON objects already there,
+   keeping every existing key (such as `emberpath-hivemem`):
+
+   - `IAM_BROWSER_CLIENT_POLICIES`:
+     `"hivexui-magnus":{"audience":"magnus","permissions":["magnus:view","magnus:operate","magnus:admin"]}`
+     and `"hivexui-ardentstudio":{"audience":"ardentstudio","permissions":["ardentstudio:projects:read","ardentstudio:projects:write","ardentstudio:templates:read","ardentstudio:templates:write","ardentstudio:review:write","ardentstudio:agents:admin"]}`;
+   - `IAM_MACHINE_CLIENT_POLICIES`:
+     `"ardentstudio-magnus":{"audience":"magnus","permissions":["magnus:ardent"],"lifetimeSeconds":300,"rotationOwner":"hive-suite","issuer":"browser"}`
+     and `"ardentstudio-hivemem":{"audience":"hivemem","permissions":["hivemem:workspaces:write","hivemem:memories:write"],"lifetimeSeconds":300,"rotationOwner":"hive-suite"}`;
+   - `IAM_MACHINE_CLIENT_SECRETS`: `"ardentstudio-magnus":"STUDIO_MAGNUS_CLIENT"` and
+     `"ardentstudio-hivemem":"STUDIO_HIVEMEM_CLIENT"`, the contents of `studio-magnus-client` and
+     `studio-hivemem-client`.
+
+   Leave `config/oathweave/suite-bootstrap.json` alone: Oathweave reads it only when it seeds an
+   empty store.
+
+3. **HiveMem** (`config/hivemem.env`). Append to the `HIVEMEM_OATHWEAVE_SERVICES_JSON` array (create
+   it as `[...]` if absent)
+   `{"issuer":"NATIVE_ISSUER","clientId":"ardentstudio-hivemem","localId":"ardentstudio","scopes":["workspaces:write","memories:write"]}`,
+   where `NATIVE_ISSUER` is `JWT_ISSUER` from `config/oathweave.env`.
+
+4. **Studio** (`config/ardentstudio.env`, new, owned by Studio's service user `1000:1000`):
+
+   ```text
+   NODE_ENV=production
+   NODE_EXTRA_CA_CERTS=/config/authority.pem
+   ARDENT_STUDIO_HOST=0.0.0.0
+   ARDENT_STUDIO_PORT=8097
+   ARDENT_STUDIO_DATA=/data
+   OATHWEAVE_ISSUER=https://console.example.com/api/oathweave
+   OATHWEAVE_JWKS_URL=https://oathweave:4200/api/v1/oauth/jwks
+   OATHWEAVE_USERINFO_URL=https://oathweave:4200/api/v1/oauth/userinfo
+   ARDENT_STUDIO_OATHWEAVE_IDENTITIES_JSON=[{"issuer":"https://console.example.com/api/oathweave","subject":"OPERATOR_SUBJECT","localUserId":"STUDIO_ID","displayName":"USERNAME"}]
+   ARDENT_STUDIO_OATHWEAVE_TOKEN_URL=https://oathweave:4200/api/v1/oauth/token
+   ARDENT_STUDIO_MAGNUS_URL=https://magnus.example.com:4000
+   ARDENT_STUDIO_MAGNUS_CLIENT_ID=ardentstudio-magnus
+   ARDENT_STUDIO_MAGNUS_CLIENT_SECRET=STUDIO_MAGNUS_CLIENT
+   ARDENT_STUDIO_MAGNUS_SCOPE=magnus:ardent
+   ARDENT_STUDIO_HIVEMEM_URL=https://hivemem:18790
+   ARDENT_STUDIO_HIVEMEM_CLIENT_ID=ardentstudio-hivemem
+   ARDENT_STUDIO_HIVEMEM_CLIENT_SECRET=STUDIO_HIVEMEM_CLIENT
+   ARDENT_STUDIO_HIVEMEM_SCOPE='hivemem:workspaces:write hivemem:memories:write'
+   ```
+
+   `OPERATOR_SUBJECT` is `identity-id`, `STUDIO_ID` is `studio-id` and `USERNAME` the operator's
+   username.
+
+5. **Studio's trust** (`config/ardentstudio/authority.pem`): a copy of the suite authority,
+   `config/.initializer/certificates/authority.pem`, in a directory of mode 0700, both owned by
+   `1000:1000`.
+
+6. **Ingress** (`config/ingress.env`). Replace any `MAGNUS_ENDPOINT` and `MAGNUS_TLS_NAME`, and add:
+
+   ```text
+   MAGNUS_ENDPOINT=https://magnus.example.com:4000
+   MAGNUS_TLS_NAME=magnus.example.com
+   MAGNUS_TRUST_FILE=/etc/ssl/certs/ca-certificates.crt
+   ARDENTSTUDIO_ENDPOINT=http://ardentstudio:8097
+   ```
+
+7. **Console** (`config/runtime.json`). Add `"magnus":"/api/magnus"` and
+   `"ardentstudio":"/api/ardentstudio"` to `products`, and `"magnus":"hivexui-magnus"` and
+   `"ardentstudio":"hivexui-ardentstudio"` to `identity.clients`. HiveXUI mounts this one file, so
+   rewrite it in place rather than replacing it:
+   `jq '.products+={magnus:"/api/magnus",ardentstudio:"/api/ardentstudio"} | .identity.clients+={magnus:"hivexui-magnus",ardentstudio:"hivexui-ardentstudio"}' runtime.json > runtime.json.new && cat runtime.json.new > runtime.json && rm runtime.json.new`.
+
+8. **The external Magnus.** Add the four entries shown above to its environment, with
+   `MAGNUS_ID` the contents of `magnus-id`, and restart it.
+
+9. **Record the edits** so `hive.sh tls-refresh` still accepts the generated files it checks:
+
+   ```bash
+   cd /opt/hive/config
+   for file in oathweave.env hivemem.env ingress.env runtime.json; do
+     jq --arg path "$PWD/$file" --arg sha "$(sha256sum "$file" | cut -d ' ' -f1)" \
+       'if .files[$path] then .files[$path]=$sha else . end' .initializer/receipt.json > .initializer/receipt.json.new
+     chmod 600 .initializer/receipt.json.new && mv .initializer/receipt.json.new .initializer/receipt.json
+   done
+   ```
+
+10. **The installation configuration.** Add the `external` object and the `ardentstudio` component
+    (the JSON in [Ardent Project Studio](#ardent-project-studio), with this host and its paths), then
+    review the plan and upgrade:
+
+    ```bash
+    ./hive.sh plan --config installation.json --release VERSION
+    ./hive.sh upgrade --config installation.json --release VERSION
+    ```
+
+    Preflight refuses the upgrade until steps 4, 6 and 7 are in place. Compose recreates Oathweave,
+    HiveMem and the ingress, whose environments changed, and starts Studio.
+
+11. **Oathweave's browser clients and grants.** Oathweave now allows the two browser policies, but
+    an existing store has no such clients and the operator holds none of their permissions. As an
+    Oathweave administrator (the initial operator holds `SUPER_ADMIN`), create both public clients
+    with Oathweave's clients API (`POST /api/oathweave/clients` through the console), which gives a
+    client named after a browser policy that policy's ID:
+
+    ```json
+    {"name":"hivexui-magnus","clientType":"public","firstParty":true,"grantTypes":["authorization_code"],"redirectUris":["https://console.example.com/auth/callback"]}
+    ```
+
+    and the same with `"name":"hivexui-ardentstudio"`. Then add the nine permissions of the two
+    policies to the operator's `SUITE_ADMIN` role (`PATCH /api/oathweave/roles/ROLE_ID` with the
+    role's full permission list). Sign out and in again so the console gets tokens for Magnus and
+    Studio.
+
+An installation first set up with a release that did not offer Studio has no Studio storage format
+recorded in `data-formats.json`, and the upgrade then stops with `Storage transition needs
+--allow-migrations`; adding Studio to it is not supported yet. The external Magnus alone has no
+such limit: generate only `magnus-id` (step 1), add only the `hivexui-magnus` policy (step 2), skip
+steps 3 to 5, leave out `ARDENTSTUDIO_ENDPOINT` (step 6), Studio's runtime entries (step 7) and
+Studio's link (step 8), add only the `external` object (step 10), and create only `hivexui-magnus`
+with the three Magnus permissions (step 11). This section covers an installation without the
+`magnus` component; moving a Magnus that the installation runs to another host is not covered.
 
 ## Magnus and HiveMem
 

@@ -97,6 +97,30 @@ if jq -e '.console!=null' <<< "$input" >/dev/null; then
       [[ -f "$directory/compose.json" && -n $(docker compose -f "$directory/compose.json" ps -q ingress) ]] || { printf 'Native listener port %s is still occupied by another process\n' "$port" >&2; exit 1; }
     fi
   done < <(jq -r '.console.nativeListeners[]?.port' <<< "$input")
+  # An external Magnus (deployment/FULL.md#external-magnus): the console host's files must route
+  # to it with system trust. On an existing installation the operator adds these entries.
+  external_magnus=$(jq -r '.external.magnus.url // empty' <<< "$input")
+  if [[ -n "$external_magnus" ]]; then
+    # Compose and systemd semantics: the last assignment wins; one pair of quotes is removed.
+    env_value() {
+      jq -Rrs --arg key "$2" --arg sq "'" 'split("\n")|map(select(startswith($key+"="))|.[($key|length)+1:]|
+        if length>1 and ((startswith("\"") and endswith("\"")) or (startswith($sq) and endswith($sq))) then .[1:-1] else . end)|last // empty' "$1"
+    }
+    external_host=${external_magnus#https://}; external_host=${external_host%%:*}
+    ingress_environment=$(jq -r .placements.ingress.envFile <<< "$input")
+    [[ $(env_value "$ingress_environment" MAGNUS_ENDPOINT) == "$external_magnus" && $(env_value "$ingress_environment" MAGNUS_TLS_NAME) == "$external_host" &&
+       $(env_value "$ingress_environment" MAGNUS_TRUST_FILE) == /etc/ssl/certs/ca-certificates.crt ]] ||
+      { printf 'The ingress environment does not route Magnus to the external Magnus at %s: it needs MAGNUS_ENDPOINT=%s, MAGNUS_TLS_NAME=%s and MAGNUS_TRUST_FILE=/etc/ssl/certs/ca-certificates.crt. See deployment/FULL.md#external-magnus\n' "$external_magnus" "$external_magnus" "$external_host" >&2; exit 1; }
+    jq -e '.products.magnus=="/api/magnus" and (.identity.clients.magnus|type=="string")' "$runtime" >/dev/null ||
+      { printf 'The console runtime does not list Magnus: add products.magnus and identity.clients.magnus to %s. See deployment/FULL.md#external-magnus\n' "$runtime" >&2; exit 1; }
+    if jq -e '.placements.ardentstudio!=null' <<< "$input" >/dev/null; then
+      [[ $(env_value "$(jq -r .placements.ardentstudio.envFile <<< "$input")" ARDENT_STUDIO_MAGNUS_URL) == "$external_magnus" ]] ||
+        { printf 'Ardent Project Studio does not use the external Magnus: set ARDENT_STUDIO_MAGNUS_URL=%s in its environment\n' "$external_magnus" >&2; exit 1; }
+    fi
+    # Hive does not run it, so an unreachable external Magnus is reported, not refused.
+    curl -fsS --proto =https --max-time 5 -o /dev/null -- "$external_magnus/api/v1/health" 2>/dev/null ||
+      printf 'WARNING: the external Magnus at %s did not answer from this host with a certificate its system trust store accepts\n' "$external_magnus" >&2
+  fi
 fi
 if jq -e '.placements["hive-registry"]!=null' <<< "$input" >/dev/null; then
   config=$(jq -r '.placements["hive-registry"].configDirectory' <<< "$input")

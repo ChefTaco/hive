@@ -238,7 +238,9 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
         custom_questions.append((label, answer))
         if label == 'Product profile':
             custom_questions.append(('Selected component names', 'hiveskills'))
-    custom_questions += [('Existing external inference HTTPS endpoint', ''),
+    # Without the magnus component, setup offers a Magnus that runs outside the installation.
+    custom_questions += [('External Magnus HTTPS URL', ''),
+                         ('Existing external inference HTTPS endpoint', ''),
                          ('Opt-in native agent runtime', ''),
                          ('Write protected installation configuration to', str(custom_output))]
     review.write_text(json.dumps({'command': arguments, 'questions': custom_questions,
@@ -251,6 +253,34 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     assert custom_output.stat().st_mode & 0o077 == 0
     subprocess.run([*arguments[:2], '--config', str(custom_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
     print('Passed: interactive custom selection adds the identity/console foundation, omits unselected products and matches unattended planning.')
+
+    # An external Magnus takes the place of the magnus component, and Studio is offered with it.
+    manifest['components']['ardentstudio'] = {'image': 'example.com/synthetic@sha256:' + '3' * 64, 'kind': 'application', 'storageFormat': 'ardentstudio-v1',
+                                              'service': {'user': f'{os.getuid()}:{os.getgid()}', 'healthcheck': {'test': ['CMD', 'true']}}}
+    release.write_text(json.dumps(with_catalog(manifest)))
+    openssl('pkeyutl', '-sign', '-inkey', base / 'publisher.key', '-rawin', '-in', release, '-out', str(release) + '.sig')
+    external_output = base / 'inventory' / 'external-magnus.json'
+    external_questions = []
+    for label, answer in custom_questions:
+        if label == 'Selected component names': answer = 'hivemem'
+        if label == 'External Magnus HTTPS URL': answer = 'https://magnus.example.com:4000'
+        if label == 'Write protected installation configuration to': answer = str(external_output)
+        external_questions.append((label, answer))
+        if label == 'External Magnus HTTPS URL':
+            external_questions.append(('Deploy Ardent Project Studio', 'yes'))
+    review.write_text(json.dumps({'command': arguments, 'questions': external_questions,
+                                 'transcriptFile': str(base / 'external-magnus-transcript.log'), 'timeoutSeconds': 30}))
+    subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
+    external_config = json.loads(external_output.read_text())
+    assert external_config['external'] == {'magnus': {'url': 'https://magnus.example.com:4000'}}
+    assert 'magnus' not in external_config['components'] and 'ardentstudio' in external_config['components']
+    assert 'nativeListeners' not in external_config['console'], 'An agent port was offered for a Magnus this installation does not run'
+    plan = json.loads(subprocess.run([*arguments[:2], '--config', str(external_output), *arguments[2:]], check=True, stdout=subprocess.PIPE).stdout)
+    assert plan['external'] == {'magnus': {'url': 'https://magnus.example.com:4000'}} and 'magnus' not in plan['components']
+    del manifest['components']['ardentstudio']
+    release.write_text(json.dumps(with_catalog(manifest)))
+    openssl('pkeyutl', '-sign', '-inkey', base / 'publisher.key', '-rawin', '-in', release, '-out', str(release) + '.sig')
+    print('Passed: interactive external Magnus in place of the magnus component, with Ardent Project Studio offered beside it.')
 
     # New-user guidance: an unwritable directory is asked for again before anything else, an SSH
     # target asks for its SSH configuration, and a repeated setup continues with its saved file.

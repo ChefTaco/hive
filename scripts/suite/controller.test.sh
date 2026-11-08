@@ -131,4 +131,38 @@ jq '.release="9.9.1"' "$temporary/installation.json" > "$temporary/current.json"
 [[ $(HIVE_ROOT=$checkout HIVE_MANIFEST= HIVE_CONFIG=$temporary/current.json hive_default_release 2>&1) == 9.9.1 ]] || fail 'A matching release was reported or replaced'
 [[ $(HIVE_ROOT=$temporary/none HIVE_MANIFEST= HIVE_CONFIG=$temporary/upgraded.json hive_default_release 2>/dev/null) == 9.9.0 ]] || fail 'A release was chosen without a checkout release'
 [[ $(HIVE_ROOT=$checkout HIVE_CONFIG=$temporary/upgraded.json HIVE_MANIFEST=$checkout/releases/9.9.1.json hive_default_release 2>/dev/null) == 9.9.1 ]] || fail 'The given manifest did not name its version'
+# An external Magnus: an HTTPS URL with a fully qualified DNS name and an optional port, nothing
+# else, in place of the magnus component and beside the console. The plan shows it.
+external_config() { jq --argjson external "$1" '.external=$external' "$temporary/installation.json" > "$temporary/external.json"; }
+for url in https://magnus.example.com https://magnus.example.com:4000 https://Magnus.Example.com:443 https://fleet-1.magnus.example.com:65535; do
+  external_config "$(jq -nc --arg url "$url" '{magnus:{url:$url}}')"
+  "$ROOT/hive.sh" plan --config "$temporary/external.json" > "$temporary/external.plan" 2> "$temporary/result" || { cat "$temporary/result" >&2; fail "A valid external Magnus was refused: $url"; }
+  jq -e --arg url "$url" '.external=={magnus:{url:$url}} and (.components|has("magnus")|not)' "$temporary/external.plan" >/dev/null || fail "The plan does not show the external Magnus $url"
+done
+"$ROOT/hive.sh" plan --config "$temporary/installation.json" | jq -e 'has("external")|not' >/dev/null || fail 'A plan without an external Magnus names one'
+for url in http://magnus.example.com https://magnus.example.com/ https://magnus.example.com/api https://user:fake@magnus.example.com 'https://magnus.example.com?q=1' 'https://magnus.example.com#x' \
+  https://magnus.example.com:0 https://magnus.example.com:65536 https://magnus.example.com:04000 https://magnus.example.com: https://203.0.113.10 https://203.0.113.10:4000 'https://[2001:db8::1]:4000' \
+  https://magnus https://localhost:4000 https://-magnus.example.com https://magnus-.example.com https://magnus..example.com https://magnus.example.com. https://magnus_1.example.com ' https://magnus.example.com' ''; do
+  external_config "$(jq -nc --arg url "$url" '{magnus:{url:$url}}')"
+  reject "$ROOT/hive.sh" plan --config "$temporary/external.json"
+  grep -q 'external.magnus is {"url":"https://HOST\[:PORT\]"}' "$temporary/result" || fail "An invalid external Magnus URL lacks a clear refusal: '$url'"
+done
+for external in '{}' '[]' '{"magnus":"https://magnus.example.com"}' '{"magnus":{}}' '{"magnus":{"url":"https://magnus.example.com","caFile":"/opt/ca.pem"}}' \
+  '{"magnus":{"url":"https://magnus.example.com"},"emberpath":{"url":"https://models.example.com"}}' '{"cindertrace":{"url":"https://security.example.com"}}'; do
+  external_config "$external"
+  reject "$ROOT/hive.sh" plan --config "$temporary/external.json"
+  grep -q 'external.magnus is' "$temporary/result" || fail "An invalid external configuration lacks a clear refusal: $external"
+done
+for patch in '.components.magnus={host:"control",envFile:"/opt/hive/config/magnus.env",configDirectory:"/opt/hive/config/magnus"}' \
+  '.components["magnus-gateway"]={host:"control",envFile:"/opt/hive/config/magnus-gateway.env",configDirectory:"/opt/hive/config/magnus-gateway"} | .bootstrap.magnusGateway={sshUsername:"deploy",sshPrivateKeyFile:"/opt/credentials/fleet-key"}' \
+  '.components["magnus-postgres"]={host:"control",configDirectory:"/opt/hive/config/magnus-postgres"}' \
+  'del(.console) | del(.components.hivexui, .components.ingress)' '.external.magnus.url=.origin' '.external.magnus.url=(.origin+":443")' '.external.magnus.url=(.origin|ascii_upcase|sub("^HTTPS";"https"))'; do
+  jq --arg patch "$patch" '.external={magnus:{url:"https://magnus.example.com:4000"}}' "$temporary/installation.json" | jq "$patch" > "$temporary/external.json"
+  reject "$ROOT/hive.sh" plan --config "$temporary/external.json"
+  grep -q 'An external Magnus takes the place of the magnus component' "$temporary/result" || { cat "$temporary/result" >&2; fail "An external Magnus beside $patch lacks a clear refusal"; }
+done
+# The release must offer Magnus: the registry records the external Magnus against its catalog.
+external_config '{"magnus":{"url":"https://magnus.example.com:4000"}}'
+(HIVE_CONFIG=$temporary/external.json; hive_validate; hive_manifest) > "$temporary/result" 2>&1 && fail 'An external Magnus was accepted by a release without Magnus'
+grep -q 'needs a release that offers Magnus' "$temporary/result" || fail 'A release without Magnus lacks a clear refusal'
 printf 'Passed: planning, unattended guards, input injection, signature tampering, pinned rendering, privileged-mount rejection and digest-bound relaxed authentication limits and checkout release lookup.\n'

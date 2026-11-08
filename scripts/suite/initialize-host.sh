@@ -28,6 +28,11 @@ magnus_hivemem_client=magnus-hivemem
 magnus_memory=$(jq -r '.magnusMemoryIdentity==true' <<< "$input")
 magnus_hivemem_permissions='["admin:agents","workspaces:write","memories:read","memories:write","sessions:read","sessions:write"]'
 distributed=$(jq -r '.bootstrap.productEndpoints!=null' <<< "$input")
+# A Magnus outside this installation (deployment/FULL.md#external-magnus): the console and Studio
+# use it as their Magnus, and Hive writes the entries it needs for the operator to add there.
+external_magnus=$(jq -r '.external.magnus.url // empty' <<< "$input")
+# The products the console and Oathweave serve: the selected components, and an external Magnus.
+console_selection=$(jq -c '.bootstrapServiceUsers + (if .external.magnus then {magnus:"external"} else {} end)' <<< "$input")
 console_hostname=${origin#https://}; console_hostname=${console_hostname%%:*}
 certificate_references=()
 check_certificate() {
@@ -198,7 +203,7 @@ jq -e '.bootstrapServiceUsers.emberpath!=null' <<< "$input" >/dev/null && identi
 jq -e '.bootstrapServiceUsers.hivemem!=null' <<< "$input" >/dev/null && identity_names+=(memory-id)
 jq -e '.bootstrapServiceUsers.cindertrace!=null' <<< "$input" >/dev/null && identity_names+=(security-id)
 jq -e '.bootstrapServiceUsers.chattermost!=null' <<< "$input" >/dev/null && identity_names+=(chat-id)
-jq -e '.bootstrapServiceUsers.magnus!=null' <<< "$input" >/dev/null && identity_names+=(magnus-id)
+jq -e '.bootstrapServiceUsers.magnus!=null or .external.magnus!=null' <<< "$input" >/dev/null && identity_names+=(magnus-id)
 for name in "${identity_names[@]}"; do
   length=64; [[ "$name" != memory-id ]] || length=32; [[ "$name" != chat-id ]] || length=26
   shared_name=${name%-id}
@@ -309,7 +314,7 @@ native_issuer="oathweave-$installation"
 if has_component oathweave; then
 # Oathweave gives its initial administrator every permission listed here and a browser token
 # carries no more than this list, so magnus:terminal appears only on the explicit opt-in.
-jq -n --arg id "$subject" --arg redirect "$origin/auth/callback" --argjson selection "$(jq -c .bootstrapServiceUsers <<< "$input")" --argjson terminal "$(jq -c '.bootstrapServiceUsers["magnus-gateway"]!=null and .bootstrap.magnusGateway.grantTerminalToInitialOperator==true' <<< "$input")" '{schema:1,adminId:$id,clients:[
+jq -n --arg id "$subject" --arg redirect "$origin/auth/callback" --argjson selection "$console_selection" --argjson terminal "$(jq -c '.bootstrapServiceUsers["magnus-gateway"]!=null and .bootstrap.magnusGateway.grantTerminalToInitialOperator==true' <<< "$input")" '{schema:1,adminId:$id,clients:[
  {id:"hivexui-oathweave",audience:"oathweave",permissions:["iam:users:read","iam:users:write","iam:users:delete","iam:roles:read","iam:roles:write","iam:sa:read","iam:sa:write","iam:sa:delete","iam:clients:read","iam:clients:write","iam:sessions:revoke","iam:audit:read","iam:system:login","iam:policy:write"],redirectUris:[$redirect],firstParty:true},
  {id:"hivexui-emberpath",audience:"emberpath",permissions:["router:providers:read","router:providers:write","router:routing:read","router:routing:write","router:testing:read","router:testing:write","router:keys:read","router:keys:write","router:settings:read","router:settings:write","router:admin:read","router:admin:write"],redirectUris:[$redirect],firstParty:true},
  {id:"hivexui-hivemem",audience:"hivemem",permissions:["hivemem:admin:all"],redirectUris:[$redirect],firstParty:true},
@@ -428,6 +433,13 @@ if has_component ingress; then
   done
   for mapping in cindertrace:CINDERTRACE:4101 chattermost:CHATTERMOST:8065 magnus:MAGNUS:4000 magnus-gateway:MAGNUS_GATEWAY:4310; do
     component=${mapping%%:*}; tail=${mapping#*:}; label=${tail%%:*}; port=${tail##*:}
+    # An external Magnus is verified on its own name against the ingress image's system trust
+    # store, never against the suite authority, which certifies only this installation's products.
+    if [[ "$component" == magnus && -n "$external_magnus" ]]; then
+      hostname=${external_magnus#https://}; hostname=${hostname%%:*}
+      line MAGNUS_ENDPOINT "$external_magnus"; line MAGNUS_TLS_NAME "$hostname"; line MAGNUS_TRUST_FILE /etc/ssl/certs/ca-certificates.crt
+      continue
+    fi
     jq -e --arg name "$component" '.bootstrapServiceUsers[$name]!=null' <<< "$input" >/dev/null || continue
     endpoint=$(product_endpoint "$component" "https://$component:$port"); hostname=${endpoint#https://}; hostname=${hostname%%:*}
     line "${label}_ENDPOINT" "$endpoint"; line "${label}_TLS_NAME" "$hostname"
@@ -443,7 +455,7 @@ if has_component ingress; then
 fi
 hive_full_configuration
 if has_component hivexui; then
-jq -n --arg issuer "$issuer" --arg installation "$installation" --argjson selection "$(jq -c .bootstrapServiceUsers <<< "$input")" '{schema:1,mode:"suite",enrollmentInstallationId:$installation,products:{oathweave:"/api/oathweave",emberpath:"/api/emberpath",hivemem:"/api/hivemem",hiveskills:"/api/hiveskills"},identity:{issuer:$issuer,apiPrefix:"/api/oathweave",clients:{oathweave:"hivexui-oathweave",emberpath:"hivexui-emberpath",hivemem:"hivexui-hivemem",hiveskills:"hivexui-hiveskills"}}} |
+jq -n --arg issuer "$issuer" --arg installation "$installation" --argjson selection "$console_selection" '{schema:1,mode:"suite",enrollmentInstallationId:$installation,products:{oathweave:"/api/oathweave",emberpath:"/api/emberpath",hivemem:"/api/hivemem",hiveskills:"/api/hiveskills"},identity:{issuer:$issuer,apiPrefix:"/api/oathweave",clients:{oathweave:"hivexui-oathweave",emberpath:"hivexui-emberpath",hivemem:"hivexui-hivemem",hiveskills:"hivexui-hiveskills"}}} |
  if $selection.cindertrace then .products.cindertrace="/api/cindertrace" | .identity.clients.cindertrace="hivexui-cindertrace" else . end |
  if $selection.chattermost then .products.chattermost="/api/chattermost" | .identity.clients.chattermost="hivexui-chattermost" else . end |
  if $selection.magnus then .products.magnus="/api/magnus" | .identity.clients.magnus="hivexui-magnus" else . end |
