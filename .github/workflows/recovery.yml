@@ -1,0 +1,72 @@
+name: Suite recovery
+
+on:
+  workflow_call:
+    inputs:
+      full:
+        type: boolean
+        default: true
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Use the full installation-sized corpus
+        type: boolean
+        default: true
+      baseline:
+        description: Benchmark the frozen v2.4.0 driver with the full corpus
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  recovery:
+    name: Backup, ownership, rehearsals, failures and two restores through sudo
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.22.1
+      - name: Install recovery verification tools
+        run: sudo apt-get update -qq && sudo apt-get install -y jq openssl sqlite3 util-linux
+      - name: Runner comparison metadata
+        run: node --input-type=module -e 'import {arch,availableParallelism} from "node:os"; console.log(JSON.stringify({image:process.env.ImageOS,version:process.env.ImageVersion,arch:arch(),cpus:availableParallelism()}))'
+      - name: Backup/recovery regression contracts
+        run: |
+          node --test scripts/ci-recovery-scope.test.mjs scripts/suite/recovery-timing.test.mjs scripts/suite/recovery-client.test.mjs scripts/suite/snapshot-data.test.mjs
+          bash scripts/suite/snapshot-host.test.sh
+          bash scripts/suite/rehearsal-resources.test.sh
+          bash scripts/suite/local-sudo.test.sh
+      - name: ${{ inputs.full != false && 'Installation-size' || 'Focused-corpus' }} backup, rehearsals, failure recovery and two restores through sudo
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.baseline) }}
+        env:
+          FULL_RECOVERY: ${{ inputs.full != false }}
+          HIVE_RECOVERY_REPORT: ${{ runner.temp }}/recovery-report.json
+        run: |
+          scale=1
+          if [[ "$FULL_RECOVERY" == false ]]; then scale=0.02; fi
+          bash scripts/suite/online-backup-sudo.sh "$RUNNER_TEMP/recovery" -- --seed-scale "$scale"
+      - name: Checkout frozen baseline for explicit comparison
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.baseline }}
+        uses: actions/checkout@v7
+        with:
+          ref: d08097b5664ebc2362ab763b44f0454f5c4941c5
+          path: .recovery-baseline
+      - name: Baseline full-size backup, rehearsals, failures and two restores through sudo
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.baseline }}
+        run: bash .recovery-baseline/scripts/suite/online-backup-sudo.sh "$RUNNER_TEMP/recovery-baseline" -- --seed-scale 1
+      - name: Recovery phase timings
+        if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.baseline) }}
+        env:
+          RECOVERY_REPORT: ${{ runner.temp }}/recovery-report.json
+        run: node scripts/recovery-summary.mjs "$RECOVERY_REPORT" >> "$GITHUB_STEP_SUMMARY"
+      - name: Sanitized recovery timing evidence
+        if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.baseline) }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: suite-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/recovery-report.json
+          if-no-files-found: warn

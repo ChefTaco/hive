@@ -25,7 +25,7 @@
     "build": "npm run build:router && npm run build:iam && npm run build:memory-ts && npm run build:skills && npm run build:registry && npm run build:launcher",
     "build:router": "npm --prefix services/hive-router run build",
     "build:iam": "npm --prefix services/hive-iam run build",
-    "test": "npm run test:router && npm run test:iam && npm run test:audit && npm run test:install-scripts && npm run check:release-docs && npm run check:openapi && npm run test:memory-ts && npm run test:skills && npm run test:registry && npm run test:release-manager && npm run test:launcher && npm run test:upgrades && npm run release:manifest:check && npm run test:suite",
+    "test": "npm run test:ci && npm run test:router && npm run test:iam && npm run test:audit && npm run test:install-scripts && npm run check:release-docs && npm run check:openapi && npm run test:memory-ts && npm run test:skills && npm run test:registry && npm run test:release-manager && npm run test:launcher && npm run test:upgrades && npm run release:manifest:check && npm run test:suite",
     "test:router": "npm --prefix services/hive-router test",
     "test:iam": "npm --prefix services/hive-iam test",
     "test:audit": "node --experimental-strip-types --test scripts/audit-deployments.test.ts scripts/service-manifest.test.ts scripts/hive-doctor.test.ts scripts/hive-backup.test.ts scripts/dev-hive.test.ts scripts/hive-deploy.test.ts scripts/hivemem-token.test.ts scripts/architecture-boundaries.test.ts scripts/release-config-hardening.test.ts scripts/model-e2e.test.ts scripts/fresh-npm-e2e.test.mjs scripts/published-release.test.mjs scripts/candidate-registry.test.mjs scripts/deploy-npm.test.ts && python3 scripts/npm-deploy-host.test.py",
@@ -104,6 +104,7 @@
     "test:suite:custom": "node scripts/suite/distributed-core-roundtrip.mjs --components hive-registry,oathweave,oathweave-redis,hivexui,ingress,hiveskills",
     "release:suite": "node scripts/release/build-suite-manifest.mjs",
     "release:suite:check": "bash scripts/release/check-suite-release.sh",
-    "test:terminal-host": "bash scripts/prepare-terminal.test.sh"
+    "test:terminal-host": "bash scripts/prepare-terminal.test.sh",
+    "test:ci": "node --test scripts/ci-recovery-scope.test.mjs scripts/suite/recovery-timing.test.mjs scripts/suite/recovery-client.test.mjs"
   }
 }

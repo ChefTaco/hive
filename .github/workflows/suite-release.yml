@@ -132,8 +132,15 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: echo "$IMAGE:$VERSION@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
 
+  recovery:
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/recovery.yml
+    with:
+      full: true
+
   release:
     name: Verify and publish the signed release
+    needs: recovery
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:

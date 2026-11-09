@@ -23,6 +23,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fixtureCatalog, hiveRegistryComponent } from './suite-catalog.mjs';
+import { observeRecoveryClient } from './recovery-client.mjs';
+import { recoveryTiming } from './recovery-timing.mjs';
 import { startRegistryImage } from './registry-image-fixture.mjs';
 import { serviceGid, serviceUid, serviceUser, startSudoTarget, sudoHost } from './sudo-target.mjs';
 
@@ -33,6 +35,9 @@ const keep = process.argv.includes('--keep');
 const seedScale = Number(argument('--seed-scale') ?? 1);
 const pauseBudget = Number(argument('--pause-budget') ?? 5);
 assert(seedScale >= 0 && pauseBudget > 0, 'Usage: --seed-scale N --pause-budget SECONDS');
+const timing = recoveryTiming();
+timing.begin('fixture-setup');
+const outputReport = argument('--report') && resolve(argument('--report'));
 const temp = mkdtempSync(join(tmpdir(), 'hive-online-backup-'));
 const owned = join(temp, 'installation');
 const id = 'online-' + randomBytes(4).toString('hex');
@@ -45,8 +50,7 @@ const sha = (value) => createHash('sha256').update(value).digest('hex');
 const say = (text) => console.log(new Date().toISOString().slice(11, 19) + ' ' + text);
 assert(sudoHost || process.getuid() !== 0, 'Run acceptance as an unprivileged operator with Docker access');
 // The host entry: local as the operator, or production-like through SSH and sudo.
-const target = sudoHost ? await startSudoTarget(join(temp, 'sudo-target')) : null;
-const hostEntry = target ? { target: target.target, sshConfig: target.sshConfig, sudoPasswordFile: target.sudoPasswordFile } : { target: 'local' };
+let target;
 
 const release = JSON.parse(readFileSync(join(root, 'releases/2.0.1.json'), 'utf8'));
 const images = { node: 'node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205', redis: release.components['oathweave-redis'].image, qdrant: release.components['hivemem-qdrant'].image, postgres: release.components['magnus-postgres'].image };
@@ -120,6 +124,8 @@ for (;;) {
 }
 `;
 const ledger = `set -euo pipefail
+# PID 1 must handle TERM: a fixture must not consume the controller's 45-second kill timeout.
+trap 'exit 0' TERM INT
 export PGPASSWORD=$(cat /config/password)
 q() { psql -h ledger-postgres -U ledger -d ledger -qAtX -v ON_ERROR_STOP=1 -c "$1"; }
 until q 'SELECT 1' >/dev/null 2>&1; do sleep 0.5; done
@@ -134,8 +140,11 @@ done
 
 const projects = new Set();
 let registryImage, passed = false;
-const report = { schema: 1, startedAt: new Date().toISOString() };
+const report = { schema: 2, startedAt: new Date().toISOString(), seedScale, phases: timing.phases, commands: [] };
+const phase = (name, description) => { timing.begin(name); say(description); };
 try {
+  target = sudoHost ? await startSudoTarget(join(temp, 'sudo-target')) : null;
+  const hostEntry = target ? { target: target.target, sshConfig: target.sshConfig, sudoPasswordFile: target.sudoPasswordFile } : { target: 'local' };
   registryImage = await startRegistryImage(id);
   for (const name of ['probe', 'probe-redis', 'probe-qdrant', 'ledger', 'ledger-postgres', 'hive-registry']) mkdirSync(join(owned, 'config', name), { recursive: true, mode: 0o700 });
   put(join(owned, 'config', 'probe', 'service.mjs'), probe);
@@ -177,34 +186,44 @@ try {
   // Each isolated rehearsal is removed once checked: Docker has a limited pool of networks.
   const rehearse = (archive) => {
     const result = cli('rehearse', ['--archive', archive]);
-    const isolated = join(owned, 'rehearsals', archive, 'isolated.json');
     assert.equal(JSON.parse(readFileSync(join(owned, 'rehearsals', archive, 'result.json'), 'utf8')).result, 'passed');
-    try { execute('docker', ['compose', '-f', isolated, 'down', '--timeout', '10']); } catch {}
+    assert.equal(JSON.parse(readFileSync(join(owned, 'rehearsals', archive, 'resources-released.json'), 'utf8')).resourcesReleased, true, 'Controller released rehearsal resources');
     return result;
   };
   const cli = (command, extra = [], ok = true, controller = root, configFile = configPath) => {
     const started = Date.now();
     const result = spawnSync(join(controller, 'hive.sh'), [command, '--config', configFile, '--release', '0.1.0', '--manifest', manifestFile, '--signature', manifestFile + '.sig', '--trust-key', join(temp, 'publisher.pub'), '--non-interactive', '--yes', ...extra], { env: environment, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     put(join(temp, command + '-' + (extra.find((value) => !value.startsWith('-')) ?? 'run') + '.log'), result.stdout + '\n--- stderr\n' + result.stderr);
+    const seconds = (Date.now() - started) / 1000;
+    report.commands.push({ command, archive: extra[1] ?? null, seconds, result: result.status === 0 ? 'passed' : 'refused' });
     assert.equal(result.status === 0, ok, command + ': ' + result.stderr.slice(-2500));
-    return { ...result, seconds: (Date.now() - started) / 1000 };
+    return { ...result, seconds };
   };
   const compose = join(owned, 'compose.json');
   projects.add(compose);
-  const containers = () => Object.fromEntries(docker('compose', '-f', compose, 'ps', '-q').split('\n').filter(Boolean).map((container) => JSON.parse(docker('inspect', container, '--format', '{"name":{{json .Config.Labels}},"started":{{json .State.StartedAt}},"running":{{.State.Running}}}'))).map((item) => [item.name['com.docker.compose.service'], { started: item.started, running: item.running }]));
+  const containers = () => {
+    const ids = docker('compose', '-f', compose, 'ps', '-q').split('\n').filter(Boolean);
+    return Object.fromEntries((ids.length ? JSON.parse(docker('inspect', ...ids)) : []).map((item) => [item.Config.Labels['com.docker.compose.service'], { started: item.State.StartedAt, running: item.State.Running }]));
+  };
 
-  say('install: probe with SQLite, files, Redis and Qdrant; ledger with PostgreSQL');
+  phase('install-and-seed', 'install: probe with SQLite, files, Redis and Qdrant; ledger with PostgreSQL');
   cli('install');
-  await new Promise((done) => setTimeout(done, 4000));
+  const ready = new DatabaseSync(join(owned, 'data', 'probe', 'wal.db'), { readOnly: true });
+  try { assert(ready.prepare('SELECT count(*) AS n FROM ticks').get().n > 0, 'Healthy fixture has a writing probe'); }
+  finally { ready.close(); }
   const project = JSON.parse(readFileSync(compose, 'utf8')).name;
+  const expectedBlob = sha(readFileSync(join(owned, 'data', 'probe', 'blob.bin')));
 
   // A client on the suite network asks the probe for its state every 50 ms through each backup.
   const poll = () => {
     const name = id + '-client-' + randomBytes(2).toString('hex');
     const child = spawn('docker', ['run', '--rm', '--name', name, '--network', project + '_default', '--user', user, images.node, 'node', '--input-type=module', '-e', `for(;;){const t=Date.now();let ok=false;try{const r=await fetch('http://probe:8080/',{signal:AbortSignal.timeout(30000)});ok=r.ok;await r.text();}catch{}console.log(JSON.stringify({at:t,ms:Date.now()-t,ok}));await new Promise(d=>setTimeout(d,50));}`], { stdio: ['ignore', 'pipe', 'ignore'] });
-    let text = '';
-    child.stdout.on('data', (chunk) => { text += chunk; });
-    return { stop: async () => { spawnSync('docker', ['rm', '-f', name], { stdio: 'ignore' }); await new Promise((done) => child.once('exit', done)); return text.trim().split('\n').filter((line) => line.startsWith('{')).map((line) => JSON.parse(line)); } };
+    const client = observeRecoveryClient(child);
+    return { observed: client.observed, stop: async () => {
+      const exited = new Promise((done) => child.exitCode !== null ? done() : child.once('exit', done));
+      spawnSync('docker', ['rm', '-f', name], { stdio: 'ignore' }); await exited;
+      return client.samples;
+    } };
   };
   const walGaps = (from, to) => {
     const database = new DatabaseSync(join(owned, 'data', 'probe', 'wal.db'), { readOnly: true, timeout: 5000 });
@@ -220,17 +239,17 @@ try {
   };
   const backup = async (archive, extra = []) => {
     const before = containers(), client = poll();
-    await new Promise((done) => setTimeout(done, 1500));
+    await client.observed();
     const from = Date.now();
     const result = cli('backup', ['--archive', archive, ...extra]);
     const to = Date.now();
-    await new Promise((done) => setTimeout(done, 1500));
+    await client.observed(to);
     const requests = (await client.stop()).filter((item) => item.at >= from && item.at <= to);
     const after = containers();
     return { result, before, after, requests, ticks: walGaps(from, to), seconds: result.seconds, receipt: JSON.parse(readFileSync(join(owned, 'backups', archive, 'receipt.json'), 'utf8')), bytes: statSync(join(owned, 'backups', archive, 'state.tar.gz')).size };
   };
 
-  say('online backup while every writer writes');
+  phase('online-backup', 'online backup while every writer writes');
   const online = await backup('online-a');
   assert.equal(online.receipt.mode, 'online');
   // The installation is root's, as on production hosts, so a root host side leaves it root's.
@@ -264,20 +283,21 @@ try {
     result.state = JSON.parse(readFileSync(join(data, 'probe', 'state.json'), 'utf8')).n;
     result.sidecars = execute('tar', ['-tzf', join(owned, 'backups', archive, 'state.tar.gz')]).split('\n').filter((name) => /\.db-(wal|shm|journal)$/.test(name));
     result.blob = sha(readFileSync(join(data, 'probe', 'blob.bin')));
+    assert.equal(result.blob, expectedBlob, 'Immutable blob bytes survive backup');
     const ledgerLines = readFileSync(join(data, 'ledger', 'ledger.log'), 'utf8').trim().split('\n').filter(Boolean).map(Number);
     result.ledgerLog = ledgerLines.at(-1) ?? 0;
     const run = (name, args) => docker('run', '-d', '--name', name, '--network', 'none', '--user', user, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--tmpfs', '/tmp:mode=1777', ...args);
     const name = id + '-inspect-' + archive;
     try {
       run(name + '-redis', ['--mount', `type=bind,source=${join(data, 'probe-redis')},target=/data`, '--mount', `type=bind,source=${join(owned, 'config', 'probe-redis')},target=/config,readonly`, images.redis, 'redis-server', '/config/redis.conf']);
+      run(name + '-qdrant', ['--workdir', '/data', '--mount', `type=bind,source=${join(data, 'probe-qdrant')},target=/data`, '--mount', `type=bind,source=${join(owned, 'config', 'probe-qdrant')},target=/config,readonly`, '--entrypoint', '/qdrant/qdrant', images.qdrant, '--config-path', '/config/qdrant.yaml']);
+      run(name + '-postgres', ['--tmpfs', `/var/run/postgresql:uid=${serviceUid},gid=${serviceGid},mode=700`, '-e', 'PGDATA=/data/pgdata', '--mount', `type=bind,source=${join(data, 'ledger-postgres')},target=/data`, images.postgres]);
       let redis;
       for (let attempt = 0; attempt < 60 && !redis; attempt++) { try { redis = docker('exec', '-e', 'REDISCLI_AUTH=' + secrets.redis, name + '-redis', 'sh', '-c', 'redis-cli --no-auth-warning get tick; redis-cli --no-auth-warning --scan --pattern "expiring:*" | wc -l; redis-cli --no-auth-warning pttl "$(redis-cli --no-auth-warning --scan --pattern "expiring:*" | head -1)"').split('\n'); if (!/^[0-9]+$/.test(redis[0])) redis = undefined; } catch { execute('sleep', ['0.5']); } }
       result.redis = { tick: Number(redis[0]), expiringKeys: Number(redis[1]), ttlMs: Number(redis[2]) };
-      run(name + '-qdrant', ['--workdir', '/data', '--mount', `type=bind,source=${join(data, 'probe-qdrant')},target=/data`, '--mount', `type=bind,source=${join(owned, 'config', 'probe-qdrant')},target=/config,readonly`, '--entrypoint', '/qdrant/qdrant', images.qdrant, '--config-path', '/config/qdrant.yaml']);
       let points;
       for (let attempt = 0; attempt < 60 && !points; attempt++) { try { points = JSON.parse(docker('run', '--rm', '--network', 'container:' + name + '-qdrant', images.node, 'node', '--input-type=module', '-e', `const h={'api-key':${JSON.stringify(secrets.qdrant)},'Content-Type':'application/json'};const c=await (await fetch('http://127.0.0.1:6333/collections/ticks/points/count',{method:'POST',headers:h,body:'{"exact":true}'})).json();let max=0,offset=null;do{const p=await (await fetch('http://127.0.0.1:6333/collections/ticks/points/scroll',{method:'POST',headers:h,body:JSON.stringify({limit:1000,offset,with_payload:true})})).json();for(const x of p.result.points)max=Math.max(max,x.payload.n);offset=p.result.next_page_offset;}while(offset!==null&&offset!==undefined);console.log(JSON.stringify({count:c.result.count,n:max}))`)); } catch { execute('sleep', ['0.5']); } }
       result.qdrant = points;
-      run(name + '-postgres', ['--tmpfs', `/var/run/postgresql:uid=${serviceUid},gid=${serviceGid},mode=700`, '-e', 'PGDATA=/data/pgdata', '--mount', `type=bind,source=${join(data, 'ledger-postgres')},target=/data`, images.postgres]);
       let rows;
       for (let attempt = 0; attempt < 120 && !rows; attempt++) { try { rows = docker('exec', name + '-postgres', 'psql', '-h', '/var/run/postgresql', '-U', 'ledger', '-d', 'ledger', '-At', '-c', 'SELECT count(*), coalesce(max(n),0) FROM ticks').split('|').map(Number); } catch { execute('sleep', ['0.5']); } }
       result.postgres = { rows: rows[0], n: rows[1] };
@@ -287,6 +307,7 @@ try {
   // A stopped backup stops the writers mid-tick, so rows are contiguous only until the first
   // restart; the order of the stores holds throughout.
   const consistent = (state, online = true, contiguous = online) => {
+    assert.equal(state.wal.integrity, 'ok'); assert.equal(state.journal.integrity, 'ok');
     const order = [state.wal.n, state.journal.n, state.log.n, state.state, state.redis.tick, state.qdrant.n];
     for (let index = 1; index < order.length; index++) assert(order[index] <= order[index - 1], 'Write order holds between stores: ' + order.join(' '));
     assert(order.at(-1) >= order[0] - 1, 'All stores hold the same instant, within the one tick in flight: ' + order.join(' '));
@@ -299,24 +320,26 @@ try {
     assert(state.redis.ttlMs > 0 && state.redis.ttlMs <= 600000, 'Redis expiry stays absolute');
     return order;
   };
-  say('archive: every store holds one instant');
+  phase('inspect-online', 'archive: every store holds one instant');
   report.online.restoredStores = inspect('online-a');
   report.online.storeOrder = consistent(report.online.restoredStores);
 
-  say('rehearse the online archive');
+  phase('rehearse-online', 'rehearse the online archive');
   report.online.rehearsalSeconds = rehearse('online-a').seconds;
 
-  say('stopped backup, the --stopped fallback');
+  phase('stopped-backup', 'stopped backup, the --stopped fallback');
   const stopped = await backup('stopped-a', ['--stopped']);
   assert.equal(stopped.receipt.mode, undefined, 'The stopped archive is the original format');
   report.stopped = { seconds: stopped.seconds, archiveBytes: stopped.bytes, clientFailures: stopped.requests.filter((item) => !item.ok).length, longestWriterGapMs: stopped.ticks.longestGapMs, restarted: Object.keys(stopped.after).filter((name) => stopped.after[name].started !== stopped.before[name].started).sort() };
   assert(report.stopped.restarted.length > 0, 'The stopped backup restarts services');
+  phase('inspect-stopped', 'inspect the stopped archive');
   report.stopped.restoredStores = inspect('stopped-a');
   consistent(report.stopped.restoredStores, false);
+  phase('rehearse-stopped', 'rehearse the stopped archive');
   rehearse('stopped-a');
 
   if (oldController) {
-    say('an archive written by the earlier controller');
+    phase('earlier-controller', 'an archive written by the earlier controller');
     const old = cli('backup', ['--archive', 'earlier-a'], true, oldController);
     report.earlierController = { seconds: old.seconds, receiptMode: JSON.parse(readFileSync(join(owned, 'backups', 'earlier-a', 'receipt.json'), 'utf8')).mode ?? 'stopped (original format)' };
     consistent(inspect('earlier-a'), false);
@@ -333,12 +356,12 @@ try {
   const archives = () => Object.fromEntries(readdirSync(join(owned, 'backups')).filter((name) => !name.startsWith('.')).map((name) => [name, sha(readFileSync(join(owned, 'backups', name, 'state.tar.gz')))]));
   const failure = async (archive, setup, pattern, configFile = configPath) => {
     const kept = archives(), before = containers(), client = poll();
-    await new Promise((done) => setTimeout(done, 1000));
+    await client.observed();
     setup?.();
     const from = Date.now();
     const result = cli('backup', ['--archive', archive], false, root, configFile);
     const to = Date.now();
-    await new Promise((done) => setTimeout(done, 1000));
+    await client.observed(to);
     const requests = (await client.stop()).filter((item) => item.at >= from && item.at <= to);
     assert.match(result.stderr, pattern);
     assert(!existsSync(join(owned, 'backups', archive)), 'No archive is kept');
@@ -346,28 +369,28 @@ try {
     assert.deepEqual(archives(), kept, 'No other archive changed or was removed');
     assert.deepEqual(containers(), before, 'Every service kept running');
     for (const container of docker('compose', '-f', compose, 'ps', '-q').split('\n')) assert.equal(docker('inspect', container, '--format', '{{.State.Paused}}'), 'false');
-    assert(requests.every((item) => item.ok), 'Every client request was answered');
+    assert(requests.length > 0 && requests.every((item) => item.ok), 'Client requests were observed and answered');
     assert.equal(JSON.parse(readFileSync(join(owned, 'transaction.json'), 'utf8')).phase, 'complete', 'The transaction is closed');
     return { refused: pattern.source, clientFailures: requests.filter((item) => !item.ok).length, otherArchivesUnchanged: true, servicesKeptRunning: true };
   };
-  say('failure: not enough free space');
+  phase('failure-space', 'failure: not enough free space');
   const small = join(temp, 'small-disk.json');
   // The host preflight passes, with a reserve just under the free space; the snapshot and its
   // archive would not fit beside it.
   const freeMiB = Number(execute('df', ['-Pm', owned]).trim().split('\n')[1].split(/\s+/)[3]);
   put(small, { ...config, hosts: { control: { ...config.hosts.control, minimumFreeMiB: freeMiB - 50 } } });
   report.failures = { space: await failure('fail-space', null, /needs [0-9]+ MiB free/, small) };
-  say('failure: a store snapshot fails while its writer is paused');
+  phase('failure-during-pause', 'failure: a store snapshot fails while its writer is paused');
   report.failures.duringPause = await failure('fail-pause', () => { const blocker = join(owned, 'data', 'ledger-postgres', '.hive-snapshot-fail-pause'); mkdirSync(blocker); put(join(blocker, 'occupied'), 'x'); }, /PostgreSQL base backup failed/);
   assert(!existsSync(join(owned, 'data', 'ledger-postgres', '.hive-snapshot-fail-pause')), 'The store temporary is removed');
-  say('failure: a service is not running');
+  phase('failure-not-serving', 'failure: a service is not running');
   docker('compose', '-f', compose, 'stop', 'ledger');
   const stoppedResult = cli('backup', ['--archive', 'fail-serving'], false);
   assert.match(stoppedResult.stderr, /every suite service running and healthy/);
   docker('compose', '-f', compose, 'up', '-d', '--wait', 'ledger');
   report.failures.notServing = { refused: true };
 
-  say('a later online backup succeeds');
+  phase('retry-online', 'a later online backup succeeds');
   const second = await backup('online-b');
   assert(second.requests.every((item) => item.ok));
   consistent(inspect('online-b'), true, false);
@@ -388,27 +411,43 @@ try {
     try { restoredRows = Number(database.prepare('SELECT count(*) AS c FROM ticks WHERE n <= ?').get(report.online.restoredStores.wal.n).c); } finally { database.close(); }
     return { seconds: result.seconds, restoredRowsUpToArchive: restoredRows, servicesRunning: Object.values(containers()).every((item) => item.running) };
   };
-  say('restore the online archive');
+  phase('restore-online', 'restore the online archive');
   report.restoreOnline = restore('online-a');
   assert.equal(report.restoreOnline.restoredRowsUpToArchive, report.online.restoredStores.wal.n);
   assert(report.restoreOnline.servicesRunning);
-  await new Promise((done) => setTimeout(done, 3000));
-  say('restore the stopped archive');
+  const resumed = new DatabaseSync(join(owned, 'data', 'probe', 'wal.db'), { readOnly: true });
+  try {
+    const before = resumed.prepare('SELECT max(n) AS n FROM ticks').get().n;
+    const until = Date.now() + 10000;
+    while (resumed.prepare('SELECT max(n) AS n FROM ticks').get().n <= before) {
+      assert(Date.now() < until, 'Restored writer did not resume');
+      await new Promise((done) => setTimeout(done, 50));
+    }
+  } finally { resumed.close(); }
+  phase('restore-stopped', 'restore the stopped archive');
   const secondPlan = join(temp, 'installation-second-restore.json');
   put(secondPlan, { ...config, hosts: { control: { ...config.hosts.control, minimumFreeMiB: 2048 } } });
   report.restoreStopped = restore(oldController ? 'earlier-a' : 'stopped-a', secondPlan);
   assert(report.restoreStopped.servicesRunning);
   passed = true;
   report.result = 'passed';
-  console.log(JSON.stringify(report, null, 2));
   console.log('PASS: online backup with live writers: no service stopped, pauses measured, one-instant stores in write order, verified, rehearsed and restored; stopped and earlier-controller archives rehearse and restore; failures keep serving and keep no archive.');
 } finally {
+  timing.end(passed ? 'passed' : 'failed');
+  timing.begin('cleanup');
   report.finishedAt = new Date().toISOString();
-  writeFileSync(join(temp, 'report.json'), JSON.stringify(report, null, 2));
   if (!keep) for (const file of projects) try { execute('docker', ['compose', '-f', file, 'down', '--timeout', '10']); } catch {}
   for (const line of spawnSync('docker', ['ps', '-aq', '--filter', 'name=' + id], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean)) spawnSync('docker', ['rm', '-f', line], { stdio: 'ignore' });
   registryImage?.stop();
   target?.stop();
+  timing.end();
+  report.totalSeconds = timing.elapsed();
+  report.result = passed ? 'passed' : 'failed';
+  report.finishedAt = new Date().toISOString();
+  const evidence = JSON.stringify(report, null, 2) + '\n';
+  put(join(temp, 'report.json'), evidence);
+  if (outputReport) put(outputReport, evidence);
+  console.log(evidence);
   if (passed && !keep) rmSync(temp, { recursive: true, force: true });
   else console.error('Private online-backup evidence retained at ' + temp);
 }

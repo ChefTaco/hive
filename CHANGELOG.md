@@ -6,6 +6,15 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Changed
+
+- Measure backup/recovery acceptance by phase and run it independently of Node verification.
+  Presentation-only pull requests use a smaller real corpus; installer, shared, unknown, main
+  and release changes retain the full corpus, with conservative fallback on classification failure.
+  Both sizes retain ownership, failure recovery, rehearsals and both restore paths.
+- Synthetic recovery writers stop gracefully; client readiness replaces fixed sleeps, and
+  ownership checks share one disposable sudo host with the recovery driver.
+
 ### Next
 
 - Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no

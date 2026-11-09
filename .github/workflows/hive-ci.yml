@@ -13,6 +13,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  recovery-scope:
+    runs-on: ubuntu-24.04
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.22.1
+      - id: scope
+        run: node scripts/ci-recovery-scope.mjs
+
+  recovery:
+    needs: recovery-scope
+    # A failed/missing classifier must run the full suite and still leave CI failed.
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/recovery.yml
+    with:
+      full: ${{ needs.recovery-scope.outputs.full != 'false' }}
+
   verify:
     runs-on: ubuntu-24.04
     strategy:
@@ -121,11 +143,6 @@ jobs:
           export HIVE_INGRESS_TEST_IMAGE=$(jq -r .components.ingress.image "releases/$latest")
           export HIVEXUI_TEST_IMAGE=$(jq -r .components.hivexui.image "releases/$latest")
           npm run test:suite:ingress
-
-      - name: Online backup with the host side as root through sudo
-        if: matrix.node == '24.22.1'
-        timeout-minutes: 25
-        run: npm run test:suite:online-backup:sudo
 
       - name: Real Qdrant process recovery and bounded corpus drill
         timeout-minutes: 8
