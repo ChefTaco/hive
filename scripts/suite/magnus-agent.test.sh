@@ -36,7 +36,8 @@ stub npm 'case "$1" in
   *) exit 97;;
 esac'
 
-stub node 'if [[ "$1" == --version ]]; then [[ -f "'"$temporary"'/node-version" ]] || exit 127; cat "'"$temporary"'/node-version"; exit; fi
+stub node 'if [[ "$1" == --input-type=module ]]; then cat >/dev/null; [[ ! -f "'"$temporary"'/fail-terminal-preflight" ]]; exit; fi
+if [[ "$1" == --version ]]; then [[ -f "'"$temporary"'/node-version" ]] || exit 127; cat "'"$temporary"'/node-version"; exit; fi
 case "$2" in
   check) [[ -f "$4" ]];;
   install-service) dir=$4 unit=$6; v=$(jq -r .version "$dir/node_modules/@hivemagnus/magnus-agent/package.json")
@@ -138,6 +139,16 @@ cmp -s "$staged" "$temporary/fixtures/ardent-1.0.0.tgz" || fail 'The staged runt
 jq -e '.name=="@hivemagnus/ardent" and .version=="1.0.0"' "$(dirname "$staged")/ardent-package.json" >/dev/null || fail 'Native package metadata is missing'
 printf 'ARDENT_HOME=%s\n' "$temporary/native-home/.ardent-custom" >> "$agent/.env"
 host magnus-agent-install "$(request 2.1.1)" || fail 'repair with native settings failed'
+
+# A failed native terminal authority check neither pauses profiles nor prints credentials.
+: > "$log"; touch "$temporary/fail-terminal-preflight"
+terminal_request=$(request 2.1.1 | jq --arg script "$(base64 -w0 "$ROOT/scripts/suite/terminal-authority.mjs")" '.terminalRouteScript=$script')
+if host magnus-agent-terminal-preflight "$terminal_request"; then fail 'Unavailable terminal authority was accepted'; fi
+grep -q 'terminal authority preflight failed' "$temporary/err" || fail 'Terminal route refusal is unclear'
+[[ ! -e "$agent/enrollment-maintenance.json" ]] || fail 'The preflight changed profile maintenance state'
+! /usr/bin/grep -q '^systemctl .*stop' "$log" || fail 'The failed preflight stopped a profile'
+no_secret "$log" "$temporary/out" "$temporary/err"
+rm "$temporary/fail-terminal-preflight"
 
 # Repeating changes nothing; a new version upgrades in place; a lost service is repaired.
 : > "$log"

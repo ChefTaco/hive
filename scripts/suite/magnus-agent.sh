@@ -91,6 +91,13 @@ hive_magnus_agent_enrollment_runtime() {
     bash "$HIVE_ROOT/hive.sh" magnus-agent install --config "$HIVE_CONFIG" "${release_arguments[@]}" --install-node --yes
 }
 
+hive_magnus_agent_terminal_routes() {
+  local request=$1
+  if jq -e '.gatewaySelected==true' <<< "$request" >/dev/null; then
+    hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-terminal-preflight "$request" true || hive_die 'Managed terminal routes are unavailable; repair the native ingress before enrollment'
+  fi
+}
+
 # Full-node enrollment deliberately includes the scheduler and retains its external OS boundary.
 hive_magnus_agent_enroll() (
   local request=$1 review status runtime_ready=false terminal_user wanted
@@ -107,7 +114,9 @@ hive_magnus_agent_enroll() (
   if [[ $(jq -r .state <<< "$status") == enrolled ]]; then
     hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$(jq -c '.mode="release"' <<< "$request")" true
     hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-node-maintenance "$(jq -c '.mode="resume"' <<< "$request")" true
+    hive_magnus_agent_terminal_routes "$request"
     printf '%s\n' "$status"; return; fi
+  hive_magnus_agent_terminal_routes "$request"
   trap 'hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$(jq -c '\''.mode="release"'\'' <<< "$request")" true || printf "Admission remains held for independent review.\n" >&2; hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-node-maintenance "$(jq -c '\''.mode="resume"'\'' <<< "$request")" true || printf "Owned profiles need resume: rerun magnus-agent enroll to recover its maintenance receipt.\n" >&2' EXIT
   hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-node-maintenance "$(jq -c '.mode="pause"' <<< "$request")" true
   # Source discovery may socket-activate an otherwise idle user D-Bus helper. Prepare
@@ -140,8 +149,8 @@ hive_magnus_agent() {
       local script=ardent-enrollment.mjs
       [[ "$subcommand" != enroll ]] || script=node-enrollment.mjs
       request=$(jq -nc --arg root "${HIVE_MAGNUS_AGENT_ROOT:-/opt/magnus-agent}" --arg compose "$magnus_directory/compose.json" --arg config "$magnus_directory/config" --arg fqdn "$fqdn" \
-        --arg script "$(base64 -w0 "$HIVE_ROOT/scripts/suite/$script")" --argjson gateway "$(jq '.components["magnus-gateway"]!=null' "$HIVE_CONFIG")" \
-        '{root:$root,compose:$compose,configurationDirectory:$config,hostFqdn:$fqdn,reviewScript:$script,gatewaySelected:$gateway,mode:"inspect"}')
+        --arg script "$(base64 -w0 "$HIVE_ROOT/scripts/suite/$script")" --arg terminalRouteScript "$(base64 -w0 "$HIVE_ROOT/scripts/suite/terminal-authority.mjs")" --argjson gateway "$(jq '.components["magnus-gateway"]!=null' "$HIVE_CONFIG")" \
+        '{root:$root,compose:$compose,configurationDirectory:$config,hostFqdn:$fqdn,reviewScript:$script,terminalRouteScript:$terminalRouteScript,gatewaySelected:$gateway,mode:"inspect"}')
       if [[ "$subcommand" == enroll ]]; then hive_magnus_agent_enroll "$request"; else hive_magnus_agent_prepare_ardent "$request"; fi; return;;
     status)
       record=$(hive_magnus_agent_node_record "$fqdn" 2>/dev/null || printf 'null\n')

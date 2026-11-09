@@ -30,6 +30,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- The native agent listener forwards the exact managed-terminal claim and receipt routes.
+  Full enrollment checks these routes with non-mutating validation requests before pausing profiles.
 - Full enrollment prepares scheduler discovery before its final approval snapshot, so newly
   activated user helpers cannot invalidate the first review. Post-approval drift still holds enrollment.
 - Native dependency failures report a bounded npm error code while keeping raw diagnostics private

@@ -7,10 +7,15 @@ temporary=$(mktemp -d); trap 'rm -rf -- "$temporary"' EXIT
 HIVE_CONFIG="$temporary/installation.json"
 printf '{"bootstrap":{},"hosts":{"control":{"target":"local"}}}\n' > "$HIVE_CONFIG"
 HIVE_AGENT_HOST=control HIVE_MAGNUS_HOST=control HIVE_AGENT_ON_CONSOLE=true
-state=draining fail_inspect=false fail_apply=false fixture_runtime_ready=true
+state=draining fail_inspect=false fail_apply=false fail_terminal_preflight=false fixture_runtime_ready=true
 hive_magnus_agent_release() { printf '{"version":"9.9.9"}\n'; }
 hive_magnus_agent_enrollment_runtime() { printf 'agent-install\n' >> "$temporary/calls"; }
 hive_magnus_agent_action() {
+  if [[ "$2" == magnus-agent-terminal-preflight ]]; then
+    printf 'terminal-preflight\n' >> "$temporary/calls"
+    [[ "$fail_terminal_preflight" != true ]] || return 1
+    return 0
+  fi
   local mode; mode=$(jq -r .mode <<< "$3"); printf '%s\n' "$mode" >> "$temporary/calls"
   case "$mode" in
     status) jq -nc --arg state "$state" --argjson ready "$fixture_runtime_ready" '{state:$state,agentRuntime:{version:(if $ready then "9.9.9" else "1.0.0" end),supervisor:$ready,terminalUser:""}}';;
@@ -50,4 +55,14 @@ hive_magnus_agent_enroll '{"mode":"inspect"}' > "$temporary/result"
 : > "$temporary/calls"; state=enrolled
 hive_magnus_agent_enroll '{"mode":"inspect"}' > "$temporary/result"
 [[ $(cat "$temporary/calls") == $'status\nagent-install\nrelease\nresume' ]]
+# A selected gateway's machine routes must validate before profiles pause.
+: > "$temporary/calls"; state=draining; fixture_runtime_ready=true
+hive_magnus_agent_enroll '{"mode":"inspect","gatewaySelected":true}' > "$temporary/result"
+[[ $(cat "$temporary/calls") == $'status\nterminal-preflight\npause\ninspect\ninspect\napply\nrelease\nresume' ]]
+: > "$temporary/calls"; fail_terminal_preflight=true
+if hive_magnus_agent_enroll '{"mode":"inspect","gatewaySelected":true}' > "$temporary/result" 2>&1; then exit 1; fi
+[[ $(cat "$temporary/calls") == $'status\nterminal-preflight' ]]
+: > "$temporary/calls"; state=enrolled
+if hive_magnus_agent_enroll '{"mode":"inspect","gatewaySelected":true}' > "$temporary/result" 2>&1; then exit 1; fi
+[[ $(cat "$temporary/calls") == $'status\nrelease\nresume\nterminal-preflight' ]]
 printf 'Passed: discovery preparation, exact final-snapshot approval, pause/review/apply/resume, failed-review recovery and enrolled maintenance recovery.\n'

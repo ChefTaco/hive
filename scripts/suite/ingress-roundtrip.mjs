@@ -728,6 +728,8 @@ gateway.listen(4310,'0.0.0.0');
     ['POST', '/api/v1/resource-leases/legacy-admission'],
     ['POST', '/api/v1/resource-leases/enrollment/node-status'],
     ['POST', '/api/v1/resource-leases/enrollment/scheduler-status'],
+    ['POST', '/api/v1/resource-leases/enrollment/terminal-claim'],
+    ['POST', '/api/v1/resource-leases/enrollment/terminal-receipt'],
     ['POST', '/api/v1/resource-leases/enrollment/work/work-1/node-receipt'],
     ['POST', '/api/v1/cron/managed-occurrences/admit'],
     ['POST', '/api/v1/cron/managed-occurrences/settle'],
@@ -761,6 +763,10 @@ gateway.listen(4310,'0.0.0.0');
     assert.notEqual(body.headers['x-forwarded-proto'], 'http', 'The agent port trusted a client X-Forwarded-Proto');
     assert.deepEqual((result.cookies || []).filter(Boolean), [], path + ' let Magnus set a cookie on the agent port');
   }
+  for (const action of ['terminal-claim', 'terminal-receipt']) {
+    const result = await request('/api/magnus/resource-leases/enrollment/' + action, forged, 'POST', '{}');
+    assert.equal(result.status, 404, 'The browser listener exposed a machine terminal route');
+  }
   // Operator, admin, browser and system routes, a wrong method on an agent route and any path that
   // could read differently upstream never reach Magnus on the agent port.
   for (const [method, path] of [
@@ -782,6 +788,10 @@ gateway.listen(4310,'0.0.0.0');
     ['GET', '/api/v1/hermes-registry/status'],
     ['POST', '/api/v1/cron/sync'],
     ['GET', '/api/v1/heartbeat'],
+    ['GET', '/api/v1/resource-leases/enrollment/terminal-claim'],
+    ['GET', '/api/v1/resource-leases/enrollment/terminal-receipt'],
+    ['POST', '/api/v1/resource-leases/enrollment/terminal-claim/extra'],
+    ['POST', '/api/v1/resource-leases/enrollment/terminal-receipt/extra'],
     ['DELETE', '/api/v1/heartbeat'],
     ['GET', '/api/docs/openapi.json'],
     ['GET', '/metrics'],

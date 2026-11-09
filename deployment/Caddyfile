@@ -104,6 +104,8 @@
 			|| {path} == "/api/v1/resource-leases/legacy-admission"
 			|| {path} == "/api/v1/resource-leases/enrollment/node-status"
 			|| {path} == "/api/v1/resource-leases/enrollment/scheduler-status"
+			|| {path} == "/api/v1/resource-leases/enrollment/terminal-claim"
+			|| {path} == "/api/v1/resource-leases/enrollment/terminal-receipt"
 			|| {path}.matches("^/api/v1/resource-leases/enrollment/work/[^/]+/node-receipt$")
 			|| {path} == "/api/v1/cron/managed-occurrences/admit"
 			|| {path} == "/api/v1/cron/managed-occurrences/settle"

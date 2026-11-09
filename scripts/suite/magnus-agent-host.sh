@@ -400,6 +400,12 @@ ardent_review() {
     -e "HIVE_ARDENT_REVIEW=$proof" magnus node --input-type=module
 }
 
+terminal_authority_preflight() {
+  need_root
+  jq -er '.terminalRouteScript' <<< "$request" | base64 -d |
+    HIVE_TERMINAL_PREFLIGHT_ROOT="$root" node --input-type=module || die 'Managed terminal authority preflight failed before pausing profiles'
+}
+
 node_maintenance() {
   need_root
   local owner uid home receipt="$root/enrollment-maintenance.json" mode profile service units temporary
@@ -458,5 +464,6 @@ case "$action" in
   magnus-agent-heartbeat) heartbeat;;
   magnus-agent-ardent-review) ardent_review;;
   magnus-agent-node-maintenance) node_maintenance;;
+  magnus-agent-terminal-preflight) terminal_authority_preflight;;
   *) die 'Unknown magnus-agent action';;
 esac

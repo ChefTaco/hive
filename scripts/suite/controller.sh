@@ -17,7 +17,7 @@ hive_runtime_files() {
     scripts/suite/magnus-gateway.sh scripts/suite/magnus-gateway-host.sh \
     scripts/suite/migrate-native.sh scripts/suite/migrate-native-host.sh scripts/suite/migrate-native-data.mjs scripts/suite/set-admin-password.sh \
     scripts/suite/cindertrace.sh scripts/suite/cindertrace-host.sh scripts/suite/ownership-host.sh \
-    scripts/suite/magnus-agent.sh scripts/suite/magnus-agent-host.sh scripts/suite/ardent-enrollment.mjs scripts/suite/node-enrollment.mjs \
+    scripts/suite/magnus-agent.sh scripts/suite/magnus-agent-host.sh scripts/suite/ardent-enrollment.mjs scripts/suite/node-enrollment.mjs scripts/suite/terminal-authority.mjs \
     scripts/suite/console-clients.sh scripts/suite/console-clients-host.sh
 }
 hive_controller_digest() {
