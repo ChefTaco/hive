@@ -32,7 +32,7 @@ stub npm 'case "$1" in
   pack) spec=${@: -1}; v=${spec##*@}; name=magnus-agent; [[ "$spec" != @hivemagnus/ardent@* ]] || name=ardent
     cp "'"$temporary"'/fixtures/$name-$v.tgz" "$name-$v.tgz"; echo "$name-$v.tgz";;
   ci) [[ "$*" == *--ignore-scripts* && "$*" == *--registry=https://registry.npmjs.org/* && "$*" == *--omit=dev* ]] || exit 99
-    [[ ! -f "'"$temporary"'/fail-ci" ]] || exit 98;;
+    [[ ! -f "'"$temporary"'/fail-ci" ]] || { printf "npm error code EINTEGRITY\nprivate diagnostic must stay private\n" >&2; exit 98; };;
   *) exit 97;;
 esac'
 
@@ -163,6 +163,8 @@ grep -q 'staged Ardent package changed' "$temporary/err" || fail 'Changed native
 cp "$temporary/fixtures/ardent-1.0.0.tgz" "$staged"
 touch "$temporary/fail-ci"
 if host magnus-agent-install "$(request 2.1.2)"; then fail 'Accepted a failed locked install'; fi
+grep -q 'npm EINTEGRITY' "$temporary/err" || fail 'The dependency error code was hidden'
+! grep -q 'private diagnostic' "$temporary/err" || fail 'Raw npm diagnostics were exposed'
 [[ $(readlink "$agent/current") == versions/2.1.1 ]] || fail 'A failed locked install switched the active agent'
 rm "$temporary/fail-ci"
 host magnus-agent-install "$(request 2.1.2)" || { cat "$temporary/err" >&2; fail 'upgrade failed'; }

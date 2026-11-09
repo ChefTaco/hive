@@ -101,7 +101,7 @@ fetch_package() {
 # The signed tarball must carry a complete standalone shrinkwrap, not only semver ranges.
 # Resolve only its locked registry URLs and integrities, and never execute dependency scripts.
 install_locked_package() {
-  local prefix=$1 tarball=$2 work=$3 member candidate target
+  local prefix=$1 tarball=$2 work=$3 member candidate target failure
   candidate="$work/package"
   while IFS= read -r member; do
     [[ "$member" == package/* && "$member" != *'/../'* && "$member" != */.. && "$member" != *'/./'* ]] || die 'Unsafe path in the agent archive'
@@ -121,8 +121,12 @@ install_locked_package() {
        (.value.link // false | not))))' "$candidate/npm-shrinkwrap.json" >/dev/null || die 'The agent shrinkwrap is incomplete or does not match the signed package'
   : > "$work/user.npmrc"; : > "$work/global.npmrc"
   npm ci --prefix "$candidate" --omit=dev --ignore-scripts --no-audit --no-fund --loglevel=error \
-    --registry=https://registry.npmjs.org/ --userconfig="$work/user.npmrc" --globalconfig="$work/global.npmrc" --cache="$work/npm-cache" > "$work/install.log" 2>&1 ||
-    die 'The locked agent dependencies could not be installed; the previous agent was retained'
+    --registry=https://registry.npmjs.org/ --userconfig="$work/user.npmrc" --globalconfig="$work/global.npmrc" --cache="$work/npm-cache" > "$work/install.log" 2>&1 || {
+    # npm diagnostics can contain credentials or private registry configuration. Expose only
+    # its bounded machine error code, so integrity and transport refusals are distinguishable.
+    failure=$(sed -nE 's/^npm (error|ERR!) code ([A-Z][A-Z0-9_]{0,63})$/\2/p' "$work/install.log" | head -n 1)
+    die "The locked agent dependencies could not be installed (npm ${failure:-failure}); the previous agent was retained"
+  }
   # Check the staged runtime before replacing any installed package or switching current.
   node "$candidate/dist/index.js" check --env-file "$root/.env" >/dev/null 2> "$work/check.log" || die 'The staged agent check failed; the previous agent was retained'
   target="$prefix/node_modules/$package"
