@@ -34,4 +34,24 @@ usermod -aG sudo hive-terminal
 if bash "$script" --owner deploy > /run/refusal.log 2>&1; then exit 1; fi
 grep -q 'additional groups' /run/refusal.log
 [[ "$before" == "$(sha256sum /etc/hive/fleet/gateway-key)" ]]
+# A shell that predates Docker membership gets it without changing its primary gid.
+getent group docker >/dev/null || groupadd docker
+usermod -aG docker deploy
+fixture=$(mktemp -d /tmp/hive-group-fixture-XXXXXX)
+chmod 755 "$fixture"
+cat > "$fixture/hive.sh" <<'EOF'
+set -Eeuo pipefail
+[[ $(id -g) == "$1" ]]
+id -nG | tr ' ' '\n' | grep -qx docker
+[[ "$2" == 'literal value with spaces; $not_a_command' ]]
+printf 'Primary group preserved; Docker membership refreshed.\n'
+EOF
+chmod 755 "$fixture/hive.sh"
+uid=$(id -u deploy); gid=$(id -g deploy)
+setpriv --reuid "$uid" --regid "$gid" --groups "$gid" bash -c '
+  source "$1/scripts/suite/guided-setup.sh"
+  HIVE_ROOT=$2
+  HIVE_SETUP_ARGUMENTS=("$3" "$4")
+  hive_setup_refresh_groups
+' fixture "$root" "$fixture" "$gid" 'literal value with spaces; $not_a_command'
 printf 'Passed: restricted terminal account, protected dedicated key, repeat stability, existing-key preservation, symlink and privilege refusals.\n'

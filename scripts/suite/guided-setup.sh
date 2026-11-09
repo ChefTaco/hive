@@ -12,6 +12,15 @@ hive_setup_sudo() {
   if [[ $(id -u) == 0 ]]; then "$@"; else sudo -- "$@"; fi
 }
 
+# Refresh Docker membership, then restore the operator's primary group. The signed
+# service owner remains uid:original-gid even when Docker was just added.
+hive_setup_refresh_groups() {
+  local invocation restored
+  printf -v invocation '%q ' bash "$HIVE_ROOT/hive.sh" "${HIVE_SETUP_ARGUMENTS[@]}"
+  printf -v restored '%q ' sg "$(id -gn)" -c "$invocation"
+  exec sg docker -c "$restored"
+}
+
 hive_setup_start() {
   HIVE_GUIDED_SETUP=false
   local command=install option
@@ -49,9 +58,7 @@ hive_setup_start() {
     if [[ "$HIVE_SETUP_LOCAL" == yes && $(id -u) != 0 ]] && ! docker info >/dev/null 2>&1; then
       if id -nG "$(id -un)" | tr ' ' '\n' | grep -qx docker; then
         printf 'Continuing setup in a shell with the new Docker group membership.\n'
-        local invocation
-        printf -v invocation '%q ' bash "$HIVE_ROOT/hive.sh" "${HIVE_SETUP_ARGUMENTS[@]}"
-        exec sg docker -c "$invocation"
+        hive_setup_refresh_groups
       fi
       hive_die 'Docker is not reachable after preparation; run scripts/install-prerequisites.sh --check'
     fi

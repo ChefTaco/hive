@@ -9,7 +9,8 @@ All notable changes to this project are documented in this file. The format is b
 ### Added
 
 - Guided local installation prepares Docker and controller tools with consent, activates new
-  Docker group membership without logging out, creates the installation directory, and offers
+  Docker group membership without logging out or changing the operator's primary group, creates
+  the installation directory, and offers
   a Tailscale console certificate when the host is already configured for it. The optional local
   web terminal can prepare its own restricted account and dedicated key. After installation,
   setup offers certificate renewal and the Magnus host agent. Saved configurations, unattended
@@ -32,8 +33,7 @@ All notable changes to this project are documented in this file. The format is b
 ### Next
 
 - Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
-  host Node.js. The setup question "Opt-in native agent runtime" offers runtimes the release
-  has no artifacts for.
+  host Node.js.
 - A bring-your-own certificate for `magnus-agent install` on a host without Tailscale.
 - Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
 - An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
