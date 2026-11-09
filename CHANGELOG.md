@@ -45,6 +45,7 @@ All notable changes to this project are documented in this file. The format is b
   and retaining the previous agent.
 - Local agent commands accept a protected sudo-password file for unattended enrollment and
   repair, using standard input only and retaining the interactive sudo prompt when no file is supplied.
+  Completed enrollment reads back the repaired runtime before reporting its version and readiness.
 - Upgrades verify signed product schema commands even when the storage format is unchanged.
   Pending writes require explicit approval bound to the plan, run first on isolated restored
   stores, and retain exact product-owned recovery evidence. Current schemas skip migration;

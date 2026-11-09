@@ -9,7 +9,7 @@ printf '{"bootstrap":{},"hosts":{"control":{"target":"local"}}}\n' > "$HIVE_CONF
 HIVE_AGENT_HOST=control HIVE_MAGNUS_HOST=control HIVE_AGENT_ON_CONSOLE=true
 state=draining fail_inspect=false fail_apply=false fail_terminal_preflight=false fixture_runtime_ready=true
 hive_magnus_agent_release() { printf '{"version":"9.9.9"}\n'; }
-hive_magnus_agent_enrollment_runtime() { printf 'agent-install\n' >> "$temporary/calls"; }
+hive_magnus_agent_enrollment_runtime() { printf 'agent-install\n' >> "$temporary/calls"; fixture_runtime_ready=true; }
 hive_magnus_agent_action() {
   if [[ "$2" == magnus-agent-terminal-preflight ]]; then
     printf 'terminal-preflight\n' >> "$temporary/calls"
@@ -18,7 +18,9 @@ hive_magnus_agent_action() {
   fi
   local mode; mode=$(jq -r .mode <<< "$3"); printf '%s\n' "$mode" >> "$temporary/calls"
   case "$mode" in
-    status) jq -nc --arg state "$state" --argjson ready "$fixture_runtime_ready" '{state:$state,agentRuntime:{version:(if $ready then "9.9.9" else "1.0.0" end),supervisor:$ready,terminalUser:""}}';;
+    status)
+      if [[ ${fail_status_readback:-false} == true && $(awk '$0=="status"{n++} END{print n+0}' "$temporary/calls") -gt 1 ]]; then return 1; fi
+      jq -nc --arg state "$state" --argjson ready "$fixture_runtime_ready" '{state:$state,agentRuntime:{version:(if $ready then "9.9.9" else "1.0.0" end),supervisor:$ready,terminalUser:""}}';;
     pause|resume|release) printf '{}\n';;
     inspect)
       local count; count=$(awk '$0=="inspect"{n++} END{print n+0}' "$temporary/calls")
@@ -48,13 +50,19 @@ if hive_magnus_agent_enroll '{"mode":"inspect"}' > "$temporary/result" 2>&1; the
 fail_apply=false
 : > "$temporary/calls"; state=enrolled
 hive_magnus_agent_enroll '{"mode":"inspect"}' > "$temporary/result"
-[[ $(cat "$temporary/calls") == $'status\nrelease\nresume' ]]
+[[ $(cat "$temporary/calls") == $'status\nrelease\nresume\nstatus' ]]
 : > "$temporary/calls"; state=draining; fail_inspect=false; fixture_runtime_ready=false
 hive_magnus_agent_enroll '{"mode":"inspect"}' > "$temporary/result"
 [[ $(cat "$temporary/calls") == $'status\nagent-install\npause\ninspect\ninspect\napply\nrelease\nresume' ]]
 : > "$temporary/calls"; state=enrolled
 hive_magnus_agent_enroll '{"mode":"inspect"}' > "$temporary/result"
-[[ $(cat "$temporary/calls") == $'status\nagent-install\nrelease\nresume' ]]
+[[ $(cat "$temporary/calls") == $'status\nagent-install\nrelease\nresume\nstatus' ]]
+jq -e '.agentRuntime.version=="9.9.9" and .agentRuntime.supervisor==true' "$temporary/result" >/dev/null
+# Do not return a stale success when the repaired runtime cannot be read back.
+: > "$temporary/calls"; fail_status_readback=true
+if hive_magnus_agent_enroll '{"mode":"inspect"}' > "$temporary/result" 2>&1; then exit 1; fi
+[[ $(cat "$temporary/calls") == $'status\nagent-install\nrelease\nresume\nstatus' ]]
+fail_status_readback=false
 # A selected gateway's machine routes must validate before profiles pause.
 : > "$temporary/calls"; state=draining; fixture_runtime_ready=true
 hive_magnus_agent_enroll '{"mode":"inspect","gatewaySelected":true}' > "$temporary/result"

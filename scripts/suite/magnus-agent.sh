@@ -115,6 +115,8 @@ hive_magnus_agent_enroll() (
     hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$(jq -c '.mode="release"' <<< "$request")" true
     hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-node-maintenance "$(jq -c '.mode="resume"' <<< "$request")" true
     hive_magnus_agent_terminal_routes "$request"
+    status=$(hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$(jq -c '.mode="status"' <<< "$request")" true) || hive_die 'Full-node status could not be read after runtime preparation'
+    jq -e --arg version "$wanted" --arg terminal "$terminal_user" '.state=="enrolled" and .agentRuntime.version==$version and .agentRuntime.supervisor==true and .agentRuntime.terminalUser==$terminal' <<< "$status" >/dev/null || hive_die 'Full-node runtime preparation needs review; the pinned runtime was not verified'
     printf '%s\n' "$status"; return; fi
   hive_magnus_agent_terminal_routes "$request"
   trap 'hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$(jq -c '\''.mode="release"'\'' <<< "$request")" true || printf "Admission remains held for independent review.\n" >&2; hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-node-maintenance "$(jq -c '\''.mode="resume"'\'' <<< "$request")" true || printf "Owned profiles need resume: rerun magnus-agent enroll to recover its maintenance receipt.\n" >&2' EXIT
