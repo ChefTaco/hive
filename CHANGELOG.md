@@ -6,6 +6,15 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Fixed
+
+- Upgrades verify signed product schema commands even when the storage format is unchanged.
+  Pending writes require explicit approval bound to the plan, run first on isolated restored
+  stores, and retain exact product-owned recovery evidence. Current schemas skip migration;
+  missing consent is detected before shutdown. Failed journal writes cannot start a migration.
+- Release candidates can promote to their stable release through the upgrade path; moving from
+  stable to its earlier candidate still requires an explicit rollback.
+
 ### Added
 
 - Guided full-node enrollment includes commands, managed cron and selected restricted web terminals.

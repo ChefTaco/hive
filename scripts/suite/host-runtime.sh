@@ -31,7 +31,13 @@ tree_lines() {
 }
 tree_digest() { tree_lines "$1" | sha256sum | cut -d ' ' -f1; }
 recovery_image='node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205'
-atomic_json() { jq . > "$1.tmp"; chmod 600 "$1.tmp"; sync -f "$1.tmp"; mv -T -- "$1.tmp" "$1"; sync -f "$(dirname -- "$1")"; }
+atomic_json() {
+  jq . > "$1.tmp" || return 1
+  chmod 600 "$1.tmp" || return 1
+  sync -f "$1.tmp" || return 1
+  mv -T -- "$1.tmp" "$1" || return 1
+  sync -f "$(dirname -- "$1")"
+}
 prepare_data_directories() {
   local candidate=$1 service uid gid path
     while read -r service uid gid; do
@@ -39,9 +45,9 @@ prepare_data_directories() {
       [[ ! -L "$path" ]] || die 'Data directory cannot be a symlink'
       if [[ -d "$path" ]]; then
         [[ $(stat -c %u "$path") == "$uid" && $(stat -c %g "$path") == "$gid" ]] || die 'Data ownership differs'
-      else install -d -m 700 -o "$uid" -g "$gid" "$path"; fi
+      else install -d -m 700 -o "$uid" -g "$gid" "$path" || die 'Data directory could not be prepared'; fi
       # The approved host-key store. The gateway refuses every connection without this private directory.
-      if [[ "$service" == magnus-gateway && ! -d "$path/known-hosts" ]]; then install -d -m 700 -o "$uid" -g "$gid" "$path/known-hosts"; fi
+      if [[ "$service" == magnus-gateway && ! -d "$path/known-hosts" ]]; then install -d -m 700 -o "$uid" -g "$gid" "$path/known-hosts" || die 'Gateway trust directory could not be prepared'; fi
     done < <(jq -r '.services|to_entries[]|select(any(.value.volumes[]?; .target=="/data"))|[.key,(.value.user|split(":")[])]|@tsv' "$candidate")
 }
 save_release_artifacts() {
@@ -69,6 +75,16 @@ component_is_new() {
   ! jq -e --arg name "$component" '.services[$name]!=null' "$tree/compose.json" >/dev/null || return 1
   data="$tree/data/$component"
   [[ ! -e "$data" && ! -L "$data" ]] || [[ -d "$data" && ! -L "$data" && -z $(find "$data" -mindepth 1 -print -quit) ]]
+}
+# GNU version sorting puts a stable version before its suffixed candidates.
+# Preserve the existing ordering otherwise, but allow a candidate to promote to stable.
+upgrade_version_allowed() {
+  local from=$1 to=$2
+  if [[ "${from%%-*}" == "${to%%-*}" && "$from" != "$to" ]]; then
+    [[ "$to" == *-* ]] || return 0
+    [[ "$from" == *-* ]] || return 1
+  fi
+  [[ $(printf '%s\n%s\n' "$from" "$to" | sort -V | tail -1) == "$to" ]]
 }
 recorded_format() { jq -r --arg name "$2" '.[$name] // "unversioned"' "$1/data-formats.json" 2>/dev/null || printf 'unversioned\n'; }
 [[ "$directory" =~ ^/[A-Za-z0-9_./-]+$ && "$directory" != *'/../'* && "$directory" != */.. && ${#directory} -gt 4 ]] || die 'Invalid installation path'
@@ -166,7 +182,7 @@ case "$action" in
       if [[ "$previous" == "$version" ]]; then
         [[ $(jq -r .digest "$directory/receipt.json") == "$(jq -r .digest <<< "$input")" ]] || die 'Published release bytes changed'
       elif [[ "$operation" == upgrade ]]; then
-        [[ $(printf '%s\n%s\n' "$previous" "$version" | sort -V | tail -1) == "$version" ]] || die 'Use rollback for an older version'
+        upgrade_version_allowed "$previous" "$version" || die 'Use rollback for an older version'
       fi
     fi
     while IFS= read -r component; do
@@ -186,6 +202,9 @@ case "$action" in
         fi
       fi
     done < <(jq -r '.services|keys[]' "$directory/candidate.$plan.json")
+    if [[ "$operation" == upgrade && $(jq -r .allowMigrations <<< "$input") != true ]]; then
+      hive_schema_upgrade_preflight "$directory/candidate.$plan.json" "$directory/manifest.$plan.json"
+    fi
     ;;
   stage)
     assert_transaction
@@ -267,6 +286,9 @@ case "$action" in
         record migrated
       fi
     done < <(jq -r '.services|keys[]' "$directory/candidate.$plan.json")
+    if [[ $(jq -r .operation <<< "$input") == upgrade ]]; then
+      hive_upgrade_schema_migrations "$directory/candidate.$plan.json" "$manifest" "$directory" "$(jq -r .allowMigrations <<< "$input")"
+    fi
     ;;
   initialize-data)
     assert_transaction
@@ -412,6 +434,9 @@ case "$action" in
           if ((${#arguments[@]}==0)) || ! docker compose -f "$rehearsal/isolated.json" run --no-deps --rm -T "$component" "${arguments[@]}"; then result=failed; break; fi
         fi
       done < <(jq -r '.services|keys[]' "$rehearsal/isolated.json")
+    fi
+    if [[ "$result" == passed && $(jq -r .operation <<< "$input") == upgrade ]]; then
+      if ! hive_upgrade_schema_migrations "$rehearsal/isolated.json" "$directory/manifest.$plan.json" "$rehearsal" "$(jq -r .allowMigrations <<< "$input")"; then result=failed; fi
     fi
     if [[ "$result" == passed ]] && ! docker compose -f "$rehearsal/isolated.json" up -d --wait --wait-timeout 180; then result=failed; fi
     docker compose -f "$rehearsal/isolated.json" stop --timeout 45

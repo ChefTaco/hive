@@ -87,7 +87,7 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|re
   --archive ID           Protected installation backup ID
   --stopped              backup only: stop every service while the archive is written, instead
                          of the default online backup that keeps the suite serving
-  --allow-migrations     Execute exact signed, explicitly planned migrations
+  --allow-migrations     Allow pending signed product schema and storage migrations after rehearsal
   --relax-auth-limits    Testing only (plan, install, upgrade): greatly relax sign-in and
                          password attempt limits in Oathweave, Cindertrace and ChatterMost.
                          Part of the plan digest; omitting it on a later upgrade restores
@@ -493,12 +493,17 @@ hive_manifest() {
     [[ $(jq -er .controllerSHA256 "$HIVE_MANIFEST") == "$HIVE_CONTROLLER_DIGEST" ]] || hive_die 'Signed release requires different controller source; use its original verified installer bundle'
   fi
   # Rendering depends on the relaxed limits choice, so it must select a distinct plan. Plans without it keep their digest.
-  HIVE_PLAN_DIGEST=$( { sha256sum "$HIVE_CONFIG" | cut -d ' ' -f1; printf '%s\n' "$HIVE_MANIFEST_DIGEST" "$HIVE_CONTROLLER_DIGEST"; if [[ "${HIVE_RELAX_AUTH_LIMITS:-false}" == true ]]; then printf 'relax-auth-limits\n'; fi; } | sha256sum | cut -d ' ' -f1)
+  HIVE_PLAN_DIGEST=$( { sha256sum "$HIVE_CONFIG" | cut -d ' ' -f1; printf '%s\n' "$HIVE_MANIFEST_DIGEST" "$HIVE_CONTROLLER_DIGEST"; if [[ "${HIVE_ALLOW_MIGRATIONS:-false}" == true ]]; then printf 'allow-migrations\n'; fi; if [[ "${HIVE_RELAX_AUTH_LIMITS:-false}" == true ]]; then printf 'relax-auth-limits\n'; fi; } | sha256sum | cut -d ' ' -f1)
 }
 
 hive_plan() {
-  local released=${HIVE_RELEASE_SUMMARY:-'{}'}
-  jq --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg plan "${HIVE_PLAN_DIGEST:-}" --argjson released "$released" --argjson relax "${HIVE_RELAX_AUTH_LIMITS:-false}" '{schema,installation,release:$version,configurationRevision:(.configurationRevision // "1"),planDigest:$plan,manifestDigest:$digest,controllerSourceSHA256:$controller,profile,origin,
+  local released=${HIVE_RELEASE_SUMMARY:-'{}'} schema
+  schema='[]'
+  if [[ -n "${HIVE_MANIFEST:-}" && -f "$HIVE_MANIFEST" ]]; then
+    schema=$(jq -c --slurpfile config "$HIVE_CONFIG" '[.components|to_entries[]|select(.value.initialization!=null and $config[0].components[.key]!=null)|{component:.key,specification:.value.initialization}]' "$HIVE_MANIFEST")
+  fi
+  jq --argjson schema "$schema" --argjson allow "${HIVE_ALLOW_MIGRATIONS:-false}" --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg plan "${HIVE_PLAN_DIGEST:-}" --argjson released "$released" --argjson relax "${HIVE_RELAX_AUTH_LIMITS:-false}" '{schema,installation,release:$version,configurationRevision:(.configurationRevision // "1"),planDigest:$plan,manifestDigest:$digest,controllerSourceSHA256:$controller,profile,origin,
+    upgradeSchemaMigrations:{writesAllowed:$allow,products:$schema},
     authLimits:{relaxed:$relax,products:(if $relax then [.components|keys[]|select(IN("oathweave","cindertrace","chattermost"))] else [] end)},
     magnusTerminal:{gatewaySelected:(.components["magnus-gateway"]!=null),grantedToInitialOperator:(.bootstrap.magnusGateway.grantTerminalToInitialOperator==true)},
     hosts:(.hosts|map_values({target,directory})),

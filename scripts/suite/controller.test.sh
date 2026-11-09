@@ -74,6 +74,10 @@ relaxed_digest=$(jq -er .planDigest "$temporary/relaxed.plan")
 [[ "$relaxed_digest" == "$(jq -er .planDigest "$temporary/relaxed-again.plan")" ]] || fail 'Relaxed plan digest is not stable'
 expected_default=$( { sha256sum "$temporary/suite.json" | cut -d ' ' -f1; printf '%s\n' "$(jq -er .manifestDigest "$temporary/default.plan")" "$(jq -er .controllerSourceSHA256 "$temporary/default.plan")"; } | sha256sum | cut -d ' ' -f1)
 [[ "$default_digest" == "$expected_default" ]] || fail 'Omitting the flag changed the existing plan digest'
+# Permission to mutate a pending schema is visible and bound to its exact plan.
+"$ROOT/hive.sh" plan "${suite_arguments[@]}" --allow-migrations > "$temporary/schema-approved.plan"
+jq -e '.upgradeSchemaMigrations.writesAllowed==true and .upgradeSchemaMigrations.products==[]' "$temporary/schema-approved.plan" >/dev/null || fail 'Schema approval was absent from the plan'
+[[ $(jq -er .planDigest "$temporary/schema-approved.plan") != "$default_digest" ]] || fail 'Schema migration consent did not change the plan digest'
 # Applying displays the same plan before asking for confirmation.
 if "$ROOT/hive.sh" upgrade "${suite_arguments[@]}" --relax-auth-limits --non-interactive > "$temporary/upgrade.plan" 2>/dev/null; then fail 'Upgrade applied without confirmation'; fi
 [[ $(jq -er .planDigest "$temporary/upgrade.plan") == "$relaxed_digest" ]] || fail 'Upgrade displayed a different relaxed plan'
