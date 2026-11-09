@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Next
+
+- Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
+  host Node.js.
+- A bring-your-own certificate for `magnus-agent install` on a host without Tailscale.
+- Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
+- An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
+
+## [2.3.0] - 2026-11-09
+
 ### Added
 
 - Guided local installation prepares Docker and controller tools with consent, activates new
@@ -30,13 +40,26 @@ All notable changes to this project are documented in this file. The format is b
 - The browser walkthrough returns from fullscreen Studio before visiting the next console page
   and preserves intermediate results during long reviews.
 
-### Next
+### Changed
 
-- Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
-  host Node.js.
-- A bring-your-own certificate for `magnus-agent install` on a host without Tailscale.
-- Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
-- An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
+- Pin Magnus 2.2.3 with verified TLS endpoint selection, IP-only certificate compatibility,
+  automatic recovery from an unusable DNS endpoint and the native owner's npm cache repair.
+- Pin HiveXUI 0.2.3 with the correct Studio readiness route, independent product access when
+  a valid suite user has no Emberpath identity, and supported API-key metadata examples.
+- Pin Emberpath 2.0.3 with per-key trace privacy accepted by its strict public metadata contract.
+- Pin HiveSkills 1.3.2, whose catalog explicitly reports no promoted release instead of breaking
+  client response validation.
+
+### Security
+
+- All 18 pinned images passed the release scan on amd64 and arm64 with no fixable HIGH or
+  CRITICAL findings. Unfixed upstream advisories remain:
+  CVE-2023-2953, CVE-2023-45853, CVE-2025-69720, CVE-2026-119373, CVE-2026-119374,
+  CVE-2026-119379, CVE-2026-16742, CVE-2026-24882, CVE-2026-41992, CVE-2026-53613,
+  CVE-2026-53615, CVE-2026-54369, CVE-2026-6653, CVE-2026-74860, CVE-2026-76642,
+  CVE-2026-76844, CVE-2026-78408, CVE-2026-78409, CVE-2026-78410, CVE-2026-85091,
+  CVE-2026-86138, CVE-2026-86139, CVE-2026-86140, CVE-2026-86142, CVE-2026-86143,
+  CVE-2026-86144, CVE-2026-9538
 
 ## [2.2.0] - 2026-11-08
 
