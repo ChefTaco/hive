@@ -60,16 +60,16 @@
       ]
     },
     "magnus": {
-      "image": "ghcr.io/cheftaco/magnus-server:2.3.1",
-      "version": "2.3.1",
+      "image": "ghcr.io/cheftaco/magnus-server:2.3.2",
+      "version": "2.3.2",
       "platforms": [
         "linux/amd64",
         "linux/arm64"
       ]
     },
     "magnus-gateway": {
-      "image": "ghcr.io/cheftaco/magnus-fleet-gateway:2.3.1",
-      "version": "2.3.1",
+      "image": "ghcr.io/cheftaco/magnus-fleet-gateway:2.3.2",
+      "version": "2.3.2",
       "platforms": [
         "linux/amd64",
         "linux/arm64"
@@ -118,7 +118,7 @@
   },
   "magnusAgent": {
     "name": "@hivemagnus/magnus-agent",
-    "version": "2.3.1",
-    "integrity": "sha512-+V1CS55M02/9z8m3mMcWecxFQKNO8mBk8qK21q/lvTtPuyqwjc7Ji4YmBYIXXXAXmcWEDH5kwxDs4yW8STsDvg=="
+    "version": "2.3.2",
+    "integrity": "sha512-bmRWb7YGpppJUF3ZPA+gOfB+1H+6WPz4yWv4QVFRhFarCDifyF17jMCLpIEYJwS7xvgEUUijGAocwgE++Kpefg=="
   }
 }

@@ -584,7 +584,7 @@
       }
     },
     "magnus": {
-      "image": "ghcr.io/cheftaco/magnus-server@sha256:ffe58134fb8e3424c38e8d62bdc53413eb236d8c0e54c27dccfed42f34f7f007",
+      "image": "ghcr.io/cheftaco/magnus-server@sha256:863c4266c15d3eef45e2b1c16ede83816fe23fb676dd59a2b92dbc88b73e1c8b",
       "kind": "application",
       "storageFormat": "magnus-v1",
       "requiresLocal": [
@@ -619,7 +619,7 @@
         }
       },
       "initialization": {
-        "image": "ghcr.io/cheftaco/magnus-server@sha256:ffe58134fb8e3424c38e8d62bdc53413eb236d8c0e54c27dccfed42f34f7f007",
+        "image": "ghcr.io/cheftaco/magnus-server@sha256:863c4266c15d3eef45e2b1c16ede83816fe23fb676dd59a2b92dbc88b73e1c8b",
         "command": [
           "migrate"
         ],
@@ -627,11 +627,11 @@
           "verify-initialization"
         ]
       },
-      "version": "2.3.1",
+      "version": "2.3.2",
       "agentPackage": {
         "name": "@hivemagnus/magnus-agent",
-        "version": "2.3.1",
-        "integrity": "sha512-+V1CS55M02/9z8m3mMcWecxFQKNO8mBk8qK21q/lvTtPuyqwjc7Ji4YmBYIXXXAXmcWEDH5kwxDs4yW8STsDvg=="
+        "version": "2.3.2",
+        "integrity": "sha512-bmRWb7YGpppJUF3ZPA+gOfB+1H+6WPz4yWv4QVFRhFarCDifyF17jMCLpIEYJwS7xvgEUUijGAocwgE++Kpefg=="
       },
       "catalog": {
         "displayName": "Magnus",
@@ -995,7 +995,7 @@
       }
     },
     "magnus-gateway": {
-      "image": "ghcr.io/cheftaco/magnus-fleet-gateway@sha256:121308f3907917336b23f1a1747bd3fe46c615e9f1103e4c4c5ad0759963e26e",
+      "image": "ghcr.io/cheftaco/magnus-fleet-gateway@sha256:c9e05b15b9c0895d5c79f708fa2b3be8822a5a91824454670be8fde072f1451c",
       "kind": "application",
       "storageFormat": "magnus-gateway-known-hosts-v1",
       "requiresLocal": [
@@ -1020,7 +1020,7 @@
           "start_period": "5s"
         }
       },
-      "version": "2.3.1",
+      "version": "2.3.2",
       "catalog": {
         "displayName": "Magnus Fleet Gateway",
         "description": "Optional web terminal for the Magnus console. Holds the restricted SSH key. Off unless selected.",
@@ -1087,5 +1087,5 @@
       }
     }
   },
-  "controllerSHA256": "7c2707180c6f15171cc5780ebe97f1e140e8a109dab1c1433d2b16d3f1931dd7"
+  "controllerSHA256": "6ab352e2fec4cf16ba847ac895d14d386e6d0125c6ca3d793abb9f65679605cb"
 }
