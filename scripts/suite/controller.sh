@@ -538,8 +538,12 @@ hive_host() {
   sudo_file=$(hive_sudo_file "$host")
   if [[ "$target" == local && "${HIVE_HOST_LOCAL_SUDO:-false}" == true ]]; then
     # Root on this host, as the sudo password prompt allows; the payload follows on stdin.
-    sudo -v || hive_die 'This step needs root on this host through sudo'
-    printf '%s\n' "$payload" | sudo -n bash -c "$script"
+    if [[ -n "$sudo_file" ]]; then
+      { cat -- "$sudo_file"; printf '%s\n' "$payload"; } | sudo -k -S -p '' bash -c "$script"
+    else
+      sudo -v || hive_die 'This step needs root through sudo; use --sudo-password-file for unattended agent commands'
+      printf '%s\n' "$payload" | sudo -n bash -c "$script"
+    fi
   elif [[ "$target" == local ]]; then
     printf '%s\n' "$payload" | bash -c "$script"
   else
@@ -559,7 +563,8 @@ hive_host() {
 # the SSH account directly.
 hive_sudo_file() {
   local file
-  file=$(jq -r --arg host "$1" '.hosts[$host].sudoPasswordFile // empty' "$HIVE_CONFIG")
+  file=${HIVE_HOST_SUDO_FILE:-}
+  [[ -n "$file" ]] || file=$(jq -r --arg host "$1" '.hosts[$host].sudoPasswordFile // empty' "$HIVE_CONFIG")
   [[ -n "$file" ]] || return 0
   [[ -f "$file" && ! -L "$file" && -r "$file" && $(stat -c %u "$file") == "$(id -u)" ]] || hive_die 'The sudo password file must be an operator-owned regular file'
   (( (8#$(stat -c %a "$file") & 077)==0 )) || hive_die 'The sudo password file must be owner-only'

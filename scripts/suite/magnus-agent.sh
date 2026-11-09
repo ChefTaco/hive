@@ -37,6 +37,8 @@ hive_magnus_agent_target() {
 # root; the request still travels on standard input only.
 hive_magnus_agent_action() {
   local host=$1 action=$2 request=$3 root=${4:-false} target
+  local HIVE_HOST_SUDO_FILE=${HIVE_HOST_SUDO_FILE:-}
+  if [[ "$host" == "${HIVE_AGENT_HOST:-}" && -n "${HIVE_AGENT_SUDO_FILE:-}" ]]; then HIVE_HOST_SUDO_FILE=$HIVE_AGENT_SUDO_FILE; fi
   target=$(jq -r --arg host "$host" '.hosts[$host].target' "$HIVE_CONFIG")
   if [[ "$root" == true && "$target" == local && $(id -u) != 0 ]]; then
     HIVE_HOST_LOCAL_SUDO=true HIVE_HOST_ACTION=$action HIVE_MAGNUS_AGENT_INPUT=$request hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/magnus-agent-host.sh")"
@@ -84,6 +86,7 @@ hive_magnus_agent_prepare_ardent() {
 # Reuse the signed native installer for required runtime upgrades and explicit full-node posture.
 hive_magnus_agent_enrollment_runtime() {
   local release_arguments=(--release "$HIVE_VERSION" --manifest "$HIVE_MANIFEST" --signature "$HIVE_SIGNATURE" --trust-key "$HIVE_TRUST_KEY")
+  [[ -z "${HIVE_AGENT_SUDO_FILE:-}" ]] || release_arguments+=(--sudo-password-file "$HIVE_AGENT_SUDO_FILE")
   HIVE_FULL_NODE_ENROLLMENT=true HIVE_MAGNUS_AGENT_ROOT="${HIVE_MAGNUS_AGENT_ROOT:-/opt/magnus-agent}" \
     bash "$HIVE_ROOT/hive.sh" magnus-agent install --config "$HIVE_CONFIG" "${release_arguments[@]}" --install-node --yes
 }
