@@ -246,6 +246,11 @@ never replayed: the product's migration outcome is unknown and needs its own rec
 **Start fresh** only when every host's phase is `complete` or `aborted`. Never edit
 `transaction.json` by hand.
 
+Finished isolated rehearsals release their stopped containers and networks, retaining restored
+files, receipts and protected diagnostics. Staging also cleans verified leftovers from earlier
+controllers before downtime. A repeated rehearsal preserves the finished prior attempt under
+`rehearsal-history/` and restores a fresh copy; incomplete or unverified attempts require review.
+
 ## Hive Registry
 
 Every installation runs a Hive Registry: its install catalog and lookup API, a small

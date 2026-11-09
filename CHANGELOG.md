@@ -24,12 +24,19 @@ All notable changes to this project are documented in this file. The format is b
   interrupted pauses.
 - Native agent setup configures the explicit restricted terminal account; full-node setup prepares
   cron only when the capability is selected. The standalone Ardent-only command remains available.
-- Pins Magnus server, fleet gateway and host agent 2.3.1, and HiveXUI 0.2.4. The console exposes
+- Pins Magnus server, fleet gateway and host agent 2.3.2, and HiveXUI 0.2.4. The console exposes
   approved command timeouts and finite UTC cron creation, pause and resume with explicit expiry.
   Other product image pins remain those of Hive 2.3.0.
 
 ### Fixed
 
+- Verified stopped rehearsal containers and networks are released after checks and before later
+  upgrades, while restored data, archive receipts and protected diagnostics remain available.
+  Retries retain finished prior attempts and restore fresh test stores.
+- Restricted terminals retain PTY marker traversal under the native service umask, while keeping
+  journals private and markers owner-only.
+- Managed cron last-run status and bounded execution history come from verified scheduler
+  occurrences, including earlier runs; uncertain results remain pending and legacy history is retained.
 - The native agent listener forwards the exact managed-terminal claim and receipt routes.
   Full enrollment checks these routes with non-mutating validation requests before pausing profiles.
 - Full enrollment prepares scheduler discovery before its final approval snapshot, so newly

@@ -153,6 +153,66 @@ check_reconciliation() {
     '.hosts[$host] | .installationUUID==$uuid and .archiveSHA256==$sha and .subsequentWritesReconciled==true and (.currentDataSHA256|test("^[a-f0-9]{64}$"))' \
     "$directory/reconciliation.$plan.json" >/dev/null || die 'Restore requires installation-bound write reconciliation'
 }
+# Rehearsal resources are disposable; their bind-mounted files and evidence are retained.
+hive_release_rehearsal_resources() (
+  local restored=$1 name spec result backup_receipt archive_sha running path diagnostics
+  name=${restored##*/}; spec="$restored/isolated.json"; result="$restored/result.json"
+  backup_receipt="$directory/backups/$name/receipt.json"
+  [[ "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]{0,95}$ && "$restored" == "$directory/rehearsals/$name" ]] || return 1
+  for path in "$restored" "$spec" "$result" "$backup_receipt" "$directory/backups/$name/state.tar.gz"; do
+    [[ -e "$path" && ! -L "$path" ]] || return 1
+  done
+  jq -e --arg uuid "$identity" --arg id "$installation" --arg host "$host" \
+    '.uuid==$uuid and .installation==$id and .host==$host and .verified==true' "$backup_receipt" >/dev/null || return 1
+  archive_sha=$(digest "$directory/backups/$name/state.tar.gz") || return 1
+  jq -e --arg sha "$archive_sha" '.sha256==$sha' "$backup_receipt" >/dev/null || return 1
+  jq -e --arg uuid "$identity" --arg sha "$archive_sha" \
+    '.schema==1 and .installationUUID==$uuid and .archiveSHA256==$sha and .isolated==true and .portsPublished==false and
+     (.result=="passed" or .result=="failed") and (.candidatePlan|test("^[a-f0-9]{64}$"))' "$result" >/dev/null || return 1
+  jq -e --arg name "rehearsal-$installation-$host-$name" --arg base "$restored/" '
+    .name==$name and .include==null and (.services|type=="object" and length>0) and
+    (.services|all(.ports==null and .network_mode==null and .external_links==null and .links==null and .container_name==null and .extends==null and
+      .environment.HIVE_REHEARSAL=="true" and
+      all(.volumes[]?; .type=="bind" and (.source|startswith($base) and (split("/")|index("..")==null))) and
+      all(.env_file[]?; type=="string" and startswith($base) and (split("/")|index("..")==null)))) and
+    ((.volumes // {})|length==0) and (.networks|type=="object" and length>0 and
+      all((keys|sort)==["driver","internal"] and .internal==true and .driver=="bridge"))' "$spec" >/dev/null || return 1
+  [[ ! -L "$restored/resources-released.json" && ! -L "$restored/resources-released.json.tmp" ]] || return 1
+  if [[ -f "$restored/resources-released.json" && ! -L "$restored/resources-released.json" ]]; then
+    jq -e --arg sha "$archive_sha" --arg uuid "$identity" --arg spec "$(digest "$spec")" \
+      '.archiveSHA256==$sha and .installationUUID==$uuid and .composeSHA256==$spec and .resourcesReleased==true' \
+      "$restored/resources-released.json" >/dev/null || return 1
+    return 0
+  fi
+  running=$(docker compose -f "$spec" ps --status running -q) || return 1
+  [[ -z "$running" ]] || return 1
+  # Preserve diagnostics before removing stopped containers. Never remove volumes, images or files.
+  diagnostics=$(mktemp -d "$restored/resource-evidence.XXXXXX") || return 1
+  docker compose -f "$spec" logs --no-color > "$diagnostics/container-output.log" 2>&1 || return 1
+  docker compose -f "$spec" ps --all --format json > "$diagnostics/container-state.json" || return 1
+  docker compose -f "$spec" down --timeout 45 > "$diagnostics/resource-cleanup.log" 2>&1 || return 1
+  jq -n --arg sha "$archive_sha" --arg uuid "$identity" --arg spec "$(digest "$spec")" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg evidence "${diagnostics##*/}" \
+    '{schema:1,installationUUID:$uuid,archiveSHA256:$sha,composeSHA256:$spec,resourcesReleased:true,releasedAt:$at,evidenceDirectory:$evidence}' |
+    atomic_json "$restored/resources-released.json" || return 1
+)
+hive_cleanup_completed_rehearsals() {
+  local restored
+  for restored in "$directory/rehearsals/"*; do
+    [[ -d "$restored" && ! -L "$restored" && -f "$restored/result.json" && ! -L "$restored/result.json" ]] || continue
+    hive_release_rehearsal_resources "$restored" || die 'Completed rehearsal resources could not be released; preserved evidence requires review before another upgrade'
+  done
+}
+hive_archive_rehearsal_attempt() {
+  local restored=$1 history saved name=${1##*/}
+  hive_release_rehearsal_resources "$restored" || return 1
+  history="$directory/rehearsal-history/$name"
+  [[ ! -L "$directory/rehearsal-history" && ! -L "$history" ]] || return 1
+  install -d -m 700 "$history" || return 1
+  saved=$(mktemp -d "$history/attempt.XXXXXX") || return 1
+  # Retry only on a fresh copy of the immutable archive; never replay writes in an old test store.
+  mv -T -- "$restored" "$saved" || return 1
+}
+# End rehearsal resources.
 case "$action" in
   adapters-preflight) assert_transaction; adapter_preflight;;
   adapters-stage) assert_transaction; adapter_stage_agents;;
@@ -212,6 +272,7 @@ case "$action" in
     [[ $(digest "$directory/manifest.$plan.json") == "$(jq -er .digest <<< "$input")" ]] || die 'Release digest differs'
     openssl pkeyutl -verify -pubin -inkey "$directory/trust.$plan.pub" -rawin -in "$directory/manifest.$plan.json" -sigfile "$directory/signature.$plan" >/dev/null 2>&1 || die 'Release signature differs'
     [[ $(digest "$directory/controller.$plan.tar.gz") == "$(jq -er .controllerArchiveSHA256 <<< "$input")" ]] || die 'Controller recovery artifact digest differs'
+    hive_cleanup_completed_rehearsals
     docker compose -f "$candidate" config --quiet
     while IFS= read -r path; do
       [[ "$path" == "$directory/config/"* && -f "$path" && ! -L "$path" ]] || die 'Environment files must be regular files in the protected config directory'
@@ -390,7 +451,9 @@ case "$action" in
   rehearse)
     verify_archive
     rehearsal="$directory/rehearsals/$archive"
-    [[ ! -e "$rehearsal" ]] || die 'A rehearsal with this ID already exists; retain it as evidence'
+    if [[ -e "$rehearsal" || -L "$rehearsal" ]]; then
+      hive_archive_rehearsal_attempt "$rehearsal" || die 'Existing rehearsal is incomplete or unverified; retain it for independent recovery'
+    fi
     install -d -m 700 "$rehearsal"
     tar --extract --gzip --file "$backup/state.tar.gz" --directory "$rehearsal" --same-owner --same-permissions
     candidate="$directory/candidate.$plan.json"
@@ -442,6 +505,7 @@ case "$action" in
     docker compose -f "$rehearsal/isolated.json" stop --timeout 45
     if ! check_data "$rehearsal" "$rehearsal/isolated.json"; then result=failed; fi
     jq -n --arg result "$result" --arg sha "$(digest "$backup/state.tar.gz")" --arg uuid "$identity" --arg plan "$plan" '{schema:1,result:$result,archiveSHA256:$sha,installationUUID:$uuid,candidatePlan:$plan,isolated:true,portsPublished:false}' | atomic_json "$rehearsal/result.json"
+    hive_release_rehearsal_resources "$rehearsal" || die 'Rehearsal resource cleanup failed; protected files and evidence retained'
     [[ "$result" == passed ]] || die 'Rehearsal readiness failed; isolated state and evidence retained'
     ;;
   restore-check)
