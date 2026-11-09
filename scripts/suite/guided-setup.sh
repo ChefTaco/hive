@@ -115,8 +115,8 @@ hive_setup_finish() {
   if jq -e '.components.magnus!=null and any(.console.nativeListeners[]?; .component=="magnus")' "$HIVE_CONFIG" >/dev/null &&
       hive_setup_ask 'Install the Magnus host agent here, so this machine can run agents?'; then
     bash "$HIVE_ROOT/hive.sh" magnus-agent install --config "$HIVE_CONFIG" --install-node --trust --yes
-    if jq -e '.components.ardentstudio!=null' "$HIVE_CONFIG" >/dev/null && hive_setup_ask 'Review this new host for managed Ardent actions?'; then
-      bash "$HIVE_ROOT/hive.sh" magnus-agent prepare-ardent --config "$HIVE_CONFIG"
+    if hive_setup_ask 'Review this host for full Magnus capabilities: commands, cron and web terminals?'; then
+      bash "$HIVE_ROOT/hive.sh" magnus-agent enroll --config "$HIVE_CONFIG"
     fi
   fi
 }

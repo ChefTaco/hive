@@ -37,6 +37,10 @@ case "$1" in
     HIVE_GUIDED_SETUP=true HIVE_SETUP_LOCAL=yes
     hive_setup_terminal
     printf 'account=%s key=%s\\n' "$HIVE_SETUP_TERMINAL_USER" "$HIVE_SETUP_TERMINAL_KEY";;
+  finish)
+    HIVE_GUIDED_SETUP=true HIVE_SETUP_LOCAL=yes HIVE_SETUP_TAILSCALE=false
+    HIVE_CONFIG=$2
+    hive_setup_finish;;
   directory)
     HIVE_GUIDED_SETUP=true HIVE_SETUP_LOCAL=yes
     hive_setup_directory /opt/example-suite;;
@@ -80,4 +84,8 @@ esac
     assert not calls and 'account= key=' in transcript
     transcript, calls = run('directory', ['directory'], [('Create /opt/example-suite', 'yes')])
     assert '--directory /opt/example-suite' in calls
+    config = base / 'finish-config.json'
+    config.write_text(json.dumps({'components': {'magnus': {'host': 'control'}}, 'console': {'nativeListeners': [{'component': 'magnus'}]}}))
+    transcript, calls = run('finish', ['finish', str(config)], [('Install the Magnus host agent', 'yes'), ('Review this host for full Magnus capabilities', 'yes')])
+    assert 'magnus-agent enroll' in transcript and 'prepare-ardent' not in transcript
     print('Passed: guided local and remote preparation, consent, TLS selection, terminal setup, and no changes for saved, planning or unattended commands.')

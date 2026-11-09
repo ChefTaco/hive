@@ -81,10 +81,46 @@ hive_magnus_agent_prepare_ardent() {
   hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$request" true || hive_die 'Enrollment held: retain its current drain and inspect the reported proof failure before retrying'
 }
 
+# Reuse the signed native installer for required runtime upgrades and explicit full-node posture.
+hive_magnus_agent_enrollment_runtime() {
+  local release_arguments=(--release "$HIVE_VERSION" --manifest "$HIVE_MANIFEST" --signature "$HIVE_SIGNATURE" --trust-key "$HIVE_TRUST_KEY")
+  HIVE_FULL_NODE_ENROLLMENT=true HIVE_MAGNUS_AGENT_ROOT="${HIVE_MAGNUS_AGENT_ROOT:-/opt/magnus-agent}" \
+    bash "$HIVE_ROOT/hive.sh" magnus-agent install --config "$HIVE_CONFIG" "${release_arguments[@]}" --install-node --yes
+}
+
+# Full-node enrollment deliberately includes the scheduler and retains its external OS boundary.
+hive_magnus_agent_enroll() (
+  local request=$1 review status runtime_ready=false terminal_user wanted
+  [[ "$HIVE_AGENT_HOST" == "$HIVE_MAGNUS_HOST" && "$HIVE_AGENT_ON_CONSOLE" == true ]] || hive_die 'Installer enrollment requires its single-host node; use Magnus independent review for other nodes'
+  jq -e '.bootstrap!=null and (.hosts|length)==1' "$HIVE_CONFIG" >/dev/null || hive_die 'Installer-owned single-host configuration required'
+  status=$(hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$(jq -c '.mode="status"' <<< "$request")" true)
+  wanted=$(hive_magnus_agent_release | jq -er .version)
+  terminal_user=$(jq -r '.bootstrap.magnusGateway.sshUsername // ""' "$HIVE_CONFIG")
+  if jq -e --arg version "$wanted" --arg terminal "$terminal_user" '.agentRuntime.version==$version and .agentRuntime.supervisor==true and .agentRuntime.terminalUser==$terminal' <<< "$status" >/dev/null; then runtime_ready=true; fi
+  if [[ $(jq -r .state <<< "$status") != enrolled || "$runtime_ready" != true ]]; then
+    hive_magnus_agent_confirm "${HIVE_CONFIRMED:-false}" 'Prepare full-node enrollment? This updates the pinned host agent and supervisor, enables cron, temporarily pauses owned Ardent profiles, and reviews commands, schedules and web terminals.' || hive_die 'Full-node review was not started'
+    [[ "$runtime_ready" == true ]] || hive_magnus_agent_enrollment_runtime
+  fi
+  if [[ $(jq -r .state <<< "$status") == enrolled ]]; then
+    hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$(jq -c '.mode="release"' <<< "$request")" true
+    hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-node-maintenance "$(jq -c '.mode="resume"' <<< "$request")" true
+    printf '%s\n' "$status"; return; fi
+  trap 'hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$(jq -c '\''.mode="release"'\'' <<< "$request")" true || printf "Admission remains held for independent review.\n" >&2; hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-node-maintenance "$(jq -c '\''.mode="resume"'\'' <<< "$request")" true || printf "Owned profiles need resume: rerun magnus-agent enroll to recover its maintenance receipt.\n" >&2' EXIT
+  hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-node-maintenance "$(jq -c '.mode="pause"' <<< "$request")" true
+  review=$(hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$request" true) || hive_die 'Full-node evidence is incomplete; enrollment remains held'
+  jq . <<< "$review"
+  hive_magnus_agent_confirm "${HIVE_CONFIRMED:-false}" 'Approve this exact full-node review? Magnus commands, managed cron and restricted web terminals will be enabled; observed OS maintenance schedules remain outside Magnus.' || hive_die 'Full-node review was not approved'
+  request=$(jq -c --arg sha "$(jq -er .reviewSHA256 <<< "$review")" '.mode="apply" | .reviewSHA256=$sha' <<< "$request")
+  hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$request" true || hive_die 'Enrollment held; retain evidence and retry after resolving the reported blocker'
+  hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$(jq -c '.mode="release"' <<< "$request")" true || hive_die 'Enrollment completed but admission remains held; rerun enrollment to recover'
+  hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-node-maintenance "$(jq -c '.mode="resume"' <<< "$request")" true || hive_die 'Enrollment completed but owned profiles need resume; rerun enrollment to recover'
+  trap - EXIT
+)
+
 hive_magnus_agent() {
   local subcommand=${1:-} port origin console_name preflight package fqdn request certificate magnus_directory started record fingerprint result
   jq -e '.components.magnus!=null' "$HIVE_CONFIG" >/dev/null || hive_die 'This installation has no Magnus'
-  case "$subcommand" in install|status|remove|prepare-ardent) ;; *) hive_die 'Use: magnus-agent install|status|remove|prepare-ardent --config FILE [--host TARGET] [--install-node] [--trust] [--yes]';; esac
+  case "$subcommand" in install|status|remove|prepare-ardent|enroll) ;; *) hive_die 'Use: magnus-agent install|status|remove|prepare-ardent|enroll --config FILE [--host TARGET] [--install-node] [--trust] [--yes]';; esac
   port=$(jq -r '[.console.nativeListeners // [] | .[] | select(.component=="magnus") | .port][0] // empty' "$HIVE_CONFIG")
   [[ -n "$port" || "$subcommand" != install ]] || hive_die 'This installation publishes no Magnus agent port, so an agent could not reach Magnus. A fresh installation gets one from the setup question "Port for Magnus host agents" (console.nativeListeners in the installation file); adding it to an existing installation is not supported yet. See deployment/FULL.md#magnus-host-agents'
   origin=$(jq -r .origin "$HIVE_CONFIG"); console_name=${origin#https://}; console_name=${console_name%%:*}
@@ -94,11 +130,13 @@ hive_magnus_agent() {
   if [[ "$HIVE_AGENT_ON_CONSOLE" == true ]]; then fqdn=$console_name; else fqdn=$(jq -r .tailnetName <<< "$preflight"); fi
 
   case "$subcommand" in
-    prepare-ardent)
+    prepare-ardent|enroll)
+      local script=ardent-enrollment.mjs
+      [[ "$subcommand" != enroll ]] || script=node-enrollment.mjs
       request=$(jq -nc --arg root "${HIVE_MAGNUS_AGENT_ROOT:-/opt/magnus-agent}" --arg compose "$magnus_directory/compose.json" --arg config "$magnus_directory/config" --arg fqdn "$fqdn" \
-        --arg script "$(base64 -w0 "$HIVE_ROOT/scripts/suite/ardent-enrollment.mjs")" --argjson gateway "$(jq '.components["magnus-gateway"]!=null' "$HIVE_CONFIG")" \
+        --arg script "$(base64 -w0 "$HIVE_ROOT/scripts/suite/$script")" --argjson gateway "$(jq '.components["magnus-gateway"]!=null' "$HIVE_CONFIG")" \
         '{root:$root,compose:$compose,configurationDirectory:$config,hostFqdn:$fqdn,reviewScript:$script,gatewaySelected:$gateway,mode:"inspect"}')
-      hive_magnus_agent_prepare_ardent "$request"; return;;
+      if [[ "$subcommand" == enroll ]]; then hive_magnus_agent_enroll "$request"; else hive_magnus_agent_prepare_ardent "$request"; fi; return;;
     status)
       record=$(hive_magnus_agent_node_record "$fqdn" 2>/dev/null || printf 'null\n')
       # The web terminal approval of this node, when the suite has the gateway; one JSON document.
@@ -148,6 +186,10 @@ hive_magnus_agent() {
   fi
   request=$(jq -nc --argjson package "$package" --arg control "https://$console_name:$port" --arg fqdn "$fqdn" --argjson certificate "$certificate" \
     --arg root "${HIVE_MAGNUS_AGENT_ROOT:-}" '{package:$package,controlApiUrl:$control,hostFqdn:$fqdn,certificate:$certificate}+(if $root!="" then {root:$root} else {} end)')
+  if [[ "$HIVE_AGENT_ON_CONSOLE" == true ]] && jq -e '.components["magnus-gateway"]!=null' "$HIVE_CONFIG" >/dev/null; then
+    request=$(jq -c --arg user "$(jq -er .bootstrap.magnusGateway.sshUsername "$HIVE_CONFIG")" '.terminalUser=$user' <<< "$request")
+  fi
+  if [[ ${HIVE_FULL_NODE_ENROLLMENT:-false} == true ]]; then request=$(jq -c '.enableSupervisor=true' <<< "$request"); fi
   # The node credentials: read on the Magnus host itself when the agent runs there; for another
   # host they stream through this controller in an owner-only file and on standard input only.
   local secrets=''

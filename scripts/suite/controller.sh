@@ -17,7 +17,7 @@ hive_runtime_files() {
     scripts/suite/magnus-gateway.sh scripts/suite/magnus-gateway-host.sh \
     scripts/suite/migrate-native.sh scripts/suite/migrate-native-host.sh scripts/suite/migrate-native-data.mjs scripts/suite/set-admin-password.sh \
     scripts/suite/cindertrace.sh scripts/suite/cindertrace-host.sh scripts/suite/ownership-host.sh \
-    scripts/suite/magnus-agent.sh scripts/suite/magnus-agent-host.sh scripts/suite/ardent-enrollment.mjs \
+    scripts/suite/magnus-agent.sh scripts/suite/magnus-agent-host.sh scripts/suite/ardent-enrollment.mjs scripts/suite/node-enrollment.mjs \
     scripts/suite/console-clients.sh scripts/suite/console-clients-host.sh
 }
 hive_controller_digest() {
@@ -100,9 +100,11 @@ init prepares protected configuration for an explicitly fresh installation.
 magnus-agent install|status|remove [--host TARGET] [--install-node] [--trust] runs the Magnus agent on a
 fleet host (default: the Magnus host): Node.js check (and NodeSource install with consent), the
 release's verified agent package, its root-only environment and service, the first accepted
-heartbeat, and the web terminal approval. magnus-agent prepare-ardent reviews an empty fresh
-single-host installation and, with approval, enables only managed Ardent actions. It excludes
-node-wide commands, cron and web terminals on that node. See deployment/FULL.md.
+heartbeat, and the web terminal approval. magnus-agent enroll reviews the installer-owned
+single-host node and, with approval, enables commands, managed cron and selected restricted
+web terminals. It retains completed Ardent history and restores paused profile units.
+magnus-agent prepare-ardent remains available for deliberately limited Ardent-only nodes.
+See deployment/FULL.md.
 cindertrace-collector provisions the credential a Cindertrace collector signs events with:
 cindertrace-collector add ID --sources SOURCE[,SOURCE]|list|remove ID. The credential is generated
 on the Cindertrace host into an owner-only file and never printed; Cindertrace ingests while a

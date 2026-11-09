@@ -12,7 +12,7 @@ bin="$temporary/bin"; mkdir -p "$bin" "$temporary/log"
 log="$temporary/log/calls"
 # Every stub records its arguments, so the test can prove no secret was ever an argument.
 stub() { printf '#!/usr/bin/env bash\nprintf "%%s %%s\\n" "%s" "$*" >> "%s"\n%s\n' "$1" "$log" "$2" > "$bin/$1"; chmod +x "$bin/$1"; }
-stub id 'case "$*" in -u) echo 0;; "-u hive-agent") echo 1234;; "-nG hive-agent") echo hive-agent;; hive-agent) [[ -f "'"$temporary"'/native-user-created" ]];; *) exec /usr/bin/id "$@";; esac'
+stub id 'case "$*" in -u) echo 0;; "-u hive-agent") echo 1234;; "-u terminal-fixture") echo 1235;; "-G terminal-fixture") echo 1235;; "-nG hive-agent") echo hive-agent;; hive-agent) [[ -f "'"$temporary"'/native-user-created" ]];; *) exec /usr/bin/id "$@";; esac'
 mkdir -p "$temporary/native-home"
 stub useradd 'touch "'"$temporary"'/native-user-created"'
 stub getent 'printf "hive-agent:x:1234:1234:Native runtimes:%s:/bin/bash\n" "'"$temporary"'/native-home"'
@@ -170,6 +170,18 @@ host magnus-agent-install "$(request 2.1.2)" || { cat "$temporary/err" >&2; fail
 rm -f "$temporary/active"; : > "$log"
 host magnus-agent-install "$(request 2.1.2)" || fail 'repair failed'
 /usr/bin/grep -q 'systemctl restart' "$log" || fail 'A stopped service was not restarted'
+
+# Full enrollment explicitly repairs disabled supervision and configures its selected terminal
+# identity; an ordinary repair preserves an operator's disabled supervisor.
+printf 'MAGNUS_EXECUTION_SUPERVISOR_ENABLED=false\n' >> "$agent/.env"
+host magnus-agent-install "$(request 2.1.2 | jq -c '.terminalUser="terminal-fixture"')" || fail 'ordinary repair failed'
+grep -qx 'MAGNUS_EXECUTION_SUPERVISOR_ENABLED=false' "$agent/.env" || fail 'Ordinary repair enabled disabled supervision'
+! grep -q '^MAGNUS_AGENT_MANAGED_TERMINAL_USER=' "$agent/.env" || fail 'Disabled supervision configured a terminal'
+host magnus-agent-install "$(request 2.1.2 | jq -c '.terminalUser="terminal-fixture" | .enableSupervisor=true')" || fail 'Full enrollment runtime setup failed'
+grep -qx 'MAGNUS_EXECUTION_SUPERVISOR_ENABLED=true' "$agent/.env" || fail 'Full enrollment did not enable supervision'
+grep -qx 'MAGNUS_AGENT_MANAGED_TERMINAL_USER=terminal-fixture' "$agent/.env" || fail 'Full enrollment did not configure its terminal identity'
+host magnus-agent-install "$(request 2.1.2)" || fail 'Managed terminal repair failed'
+grep -qx 'MAGNUS_AGENT_MANAGED_TERMINAL_USER=terminal-fixture' "$agent/.env" || fail 'A repair discarded the managed terminal identity'
 
 # Credentials for another host arrive in the request, never as an argument.
 host magnus-agent-install "$(request 2.1.2 | jq -c 'del(.magnusEnvironment)')" && fail 'Installed without credentials' || true

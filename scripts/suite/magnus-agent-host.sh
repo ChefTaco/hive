@@ -133,7 +133,7 @@ install_locked_package() {
 }
 
 write_environment() {
-  local environment="$root/.env" temporary secret_source control fqdn certificate key renewal reconciliation='' staged_path='' supervisor=''
+  local environment="$root/.env" temporary secret_source control fqdn certificate key renewal reconciliation='' staged_path='' supervisor='' terminal_user=''
   control=$(jq -er .controlApiUrl <<< "$request"); fqdn=$(jq -er .hostFqdn <<< "$request")
   certificate=$(jq -er .certificate.certificate <<< "$request"); key=$(jq -er .certificate.key <<< "$request")
   renewal=$(jq -r '.certificate.renewal // ""' <<< "$request")
@@ -142,15 +142,23 @@ write_environment() {
   if [[ -f "$environment" ]]; then staged_path=$(get "$environment" ARDENT_STAGED_PACKAGE); fi
   if [[ -f "$environment" ]]; then supervisor=$(get "$environment" MAGNUS_EXECUTION_SUPERVISOR_ENABLED); fi
   supervisor=${supervisor:-true}
+  if jq -e '.enableSupervisor==true' <<< "$request" >/dev/null; then supervisor=true; fi
+  terminal_user=$(jq -r '.terminalUser // ""' <<< "$request")
+  if [[ -z "$terminal_user" && -f "$environment" ]]; then terminal_user=$(get "$environment" MAGNUS_AGENT_MANAGED_TERMINAL_USER); fi
+  if [[ "$supervisor" != true ]]; then terminal_user=''; fi
+  if [[ -n "$terminal_user" ]]; then
+    [[ "$terminal_user" =~ ^[a-z_][a-z0-9_-]{0,31}$ && $(id -u "$terminal_user") != 0 && $(id -G "$terminal_user" | wc -w) == 1 ]] || die 'Managed terminal needs a dedicated non-root account without supplementary groups'
+  fi
   if [[ -z "$staged_path" || "$staged_path" == "$root-artifacts/"* ]]; then staged_path=${native_stage_path:-$staged_path}; fi
   {
     # Retain operator settings for native runtimes when repairing or upgrading the host agent.
     # Only the connection, credentials and certificate settings below are installer-owned.
     if [[ -f "$environment" ]]; then
-      awk '!/^(CONTROL_API_URL|HOST_FQDN|NODE_ENV|MAGNUS_AGENT_PRIVILEGED|NODE_MANAGER_PORT|TLS_CERT_PATH|TLS_KEY_PATH|LOG_LEVEL|MAGNUS_AGENT_TLS_RENEWAL|NODE_MANAGER_SECRET|RESULT_SIGNING_SECRET|COMMAND_RECONCILIATION_SECRET|ARDENT_OWNER_USER|ARDENT_STAGED_PACKAGE|MAGNUS_EXECUTION_SUPERVISOR_ENABLED)=/' "$environment"
+      awk '!/^(CONTROL_API_URL|HOST_FQDN|NODE_ENV|MAGNUS_AGENT_PRIVILEGED|NODE_MANAGER_PORT|TLS_CERT_PATH|TLS_KEY_PATH|LOG_LEVEL|MAGNUS_AGENT_TLS_RENEWAL|NODE_MANAGER_SECRET|RESULT_SIGNING_SECRET|COMMAND_RECONCILIATION_SECRET|ARDENT_OWNER_USER|ARDENT_STAGED_PACKAGE|MAGNUS_EXECUTION_SUPERVISOR_ENABLED|MAGNUS_AGENT_MANAGED_TERMINAL_USER)=/' "$environment"
     fi
     printf 'ARDENT_OWNER_USER=%s\n' "$native_owner"
     printf 'MAGNUS_EXECUTION_SUPERVISOR_ENABLED=%s\n' "$supervisor"
+    [[ -z "$terminal_user" ]] || printf 'MAGNUS_AGENT_MANAGED_TERMINAL_USER=%s\n' "$terminal_user"
     [[ -z "$staged_path" ]] || printf 'ARDENT_STAGED_PACKAGE=%s\n' "$staged_path"
     printf 'CONTROL_API_URL=%s\nHOST_FQDN=%s\nNODE_ENV=production\nMAGNUS_AGENT_PRIVILEGED=true\nNODE_MANAGER_PORT=%s\n' "$control" "$fqdn" "$port"
     printf 'TLS_CERT_PATH=%s\nTLS_KEY_PATH=%s\nLOG_LEVEL=info\n' "$certificate" "$key"
@@ -351,7 +359,7 @@ heartbeat() {
 
 ardent_review() {
   need_root
-  local owner uid home native_home profiles processes gateway=null config code mode proof initializer container
+  local owner uid home native_home profiles processes gateway=null config code mode proof initializer container maintenance=""
   [[ -f "$root.native-owner.json" && ! -L "$root.native-owner.json" ]] || die 'This host has no installer-owned native account; use the independent Magnus review workflow'
   owner=$(get "$root/.env" ARDENT_OWNER_USER)
   [[ "$owner" == "$(jq -er .username "$root.native-owner.json")" ]] || die 'Native owner differs from its installation record'
@@ -377,9 +385,62 @@ ardent_review() {
     --argjson profiles "$profiles" --argjson processes "$processes" --argjson gateway "$gateway" \
     --arg initializer "$(sha256sum "$initializer" | cut -d ' ' -f1)" --arg review "$(jq -r '.reviewSHA256 // ""' <<< "$request")" \
     '{mode:$mode,hostFqdn:$fqdn,freshInstallation:true,initializerSHA256:$initializer,reviewSHA256:$review,owner:{username:$owner,uid:$uid,profileCount:$profiles,processes:$processes},gatewayProcesses:$gateway}')
+  if [[ -f "$root/enrollment-maintenance.json" && ! -L "$root/enrollment-maintenance.json" ]]; then
+    maintenance=$(jq -er '.releaseId // ""' "$root/enrollment-maintenance.json")
+  fi
+  proof=$(jq -c --arg id "$maintenance" --arg version "$(installed_version)" \
+    --arg supervisor "$(get "$root/.env" MAGNUS_EXECUTION_SUPERVISOR_ENABLED)" --arg terminal "$(get "$root/.env" MAGNUS_AGENT_MANAGED_TERMINAL_USER)" \
+    '.maintenanceId=$id | .agentRuntime={version:$version,supervisor:($supervisor=="true"),terminalUser:$terminal}' <<< "$proof")
   code=$(jq -er .reviewScript <<< "$request")
   printf '%s' "$code" | base64 -d | docker compose -f "$(jq -er .compose <<< "$request")" exec -T \
     -e "HIVE_ARDENT_REVIEW=$proof" magnus node --input-type=module
+}
+
+node_maintenance() {
+  need_root
+  local owner uid home receipt="$root/enrollment-maintenance.json" mode profile service units temporary
+  mode=$(jq -er .mode <<< "$request")
+  [[ -f "$root.native-owner.json" && ! -L "$root.native-owner.json" ]] || die 'Installer-owned native account required'
+  owner=$(get "$root/.env" ARDENT_OWNER_USER); uid=$(id -u "$owner"); home=$(getent passwd "$owner" | cut -d: -f6)
+  jq -e --arg owner "$owner" --argjson uid "$uid" '.phase=="complete" and .username==$owner and .uid==$uid and .uid>0' "$root.native-owner.json" >/dev/null || die 'Native ownership record differs'
+  local native_home
+  native_home=$(get "$root/.env" ARDENT_HOME); native_home=${native_home:-$home/.ardent}
+  [[ "$native_home" == "$home/"* && ! -L "$native_home" && ! -L "$native_home/profiles" ]] || die 'Unsafe native profile location'
+  if [[ -e "$receipt" ]]; then
+    [[ -f "$receipt" && ! -L "$receipt" && $(stat -c %u "$receipt") == 0 && $(stat -c %a "$receipt") == 600 ]] || die 'Unsafe maintenance receipt'
+    jq -e --arg owner "$owner" --argjson uid "$uid" '.version==1 and .owner==$owner and .uid==$uid and (.units|type=="array") and all(.units[];test("^ardent@[A-Za-z0-9_-]+\\.service$"))' "$receipt" >/dev/null || die 'Maintenance receipt differs'
+  fi
+  user_service() { runuser -u "$owner" -- env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" /usr/bin/systemctl --user "$@"; }
+  if [[ "$mode" == resume ]]; then
+    [[ -f "$receipt" ]] || return 0
+    [[ $(jq -r .phase "$receipt") != resumed ]] || return 0
+    while IFS= read -r service; do user_service start "$service"; done < <(jq -r '.units[]' "$receipt")
+    temporary=$(mktemp "$root/.maintenance.XXXXXX"); jq '.phase="resumed"' "$receipt" > "$temporary"; sync -f "$temporary"; mv -T "$temporary" "$receipt"
+    printf '{"profilesResumed":true}\n'; return
+  fi
+  [[ "$mode" == pause ]] || die 'Unknown native maintenance mode'
+  # These are prerequisites of the selected full-node capability, not controller-only installs.
+  if ! command -v crontab >/dev/null || ! command -v script >/dev/null; then
+    command -v apt-get >/dev/null || die 'Install cron and util-linux before full-node enrollment'
+    apt-get update -qq >&2; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cron util-linux >&2
+  fi
+  systemctl enable --now cron >/dev/null 2>&1
+  if [[ ! -f "$receipt" || $(jq -r .phase "$receipt") == resumed ]]; then
+    units='[]'
+    if [[ -d "$native_home/profiles" ]]; then
+      while IFS= read -r profile; do
+        [[ "$profile" =~ ^[A-Za-z0-9_-]+$ && -d "$native_home/profiles/$profile" && ! -L "$native_home/profiles/$profile" ]] || die 'Unknown native profile entry requires independent review'
+        service="ardent@$profile.service"
+        if user_service is-active --quiet "$service"; then units=$(jq -c --arg unit "$service" '.+[$unit]' <<< "$units"); fi
+      done < <(find "$native_home/profiles" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
+    fi
+    temporary=$(mktemp "$root/.maintenance.XXXXXX")
+    jq -nc --arg owner "$owner" --argjson uid "$uid" --argjson units "$units" --arg id "$(cat /proc/sys/kernel/random/uuid)" '{version:1,owner:$owner,uid:$uid,releaseId:$id,phase:"pausing",units:$units}' > "$temporary"
+    sync -f "$temporary"; mv -T "$temporary" "$receipt"
+  fi
+  while IFS= read -r service; do user_service stop "$service"; done < <(jq -r '.units[]' "$receipt")
+  temporary=$(mktemp "$root/.maintenance.XXXXXX"); jq '.phase="paused"' "$receipt" > "$temporary"; sync -f "$temporary"; mv -T "$temporary" "$receipt"
+  jq '{phase,units}' "$receipt"
 }
 
 case "$action" in
@@ -392,5 +453,6 @@ case "$action" in
   magnus-agent-secrets) magnus_secrets;;
   magnus-agent-heartbeat) heartbeat;;
   magnus-agent-ardent-review) ardent_review;;
+  magnus-agent-node-maintenance) node_maintenance;;
   *) die 'Unknown magnus-agent action';;
 esac

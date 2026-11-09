@@ -40,11 +40,12 @@ launcher:
 
 ```bash
 git clone https://github.com/ChefTaco/hive.git && cd hive
-sudo ./scripts/install-prerequisites.sh --directory /opt/hive   # Docker Engine, Compose, jq, ...
-# log out and back in for the docker group, then:
-sudo ./scripts/console-certificate.sh tailscale    # or bring your own certificate and key
-./hive.sh --release latest         # terminal setup, then review and apply the plan
+./hive.sh --release latest
 ```
+
+The guided local setup offers prerequisites, HTTPS, account preparation and full Magnus node
+enrollment with consent. No logout is needed for new Docker group membership. Tailscale is
+optional; an existing login can provide the HTTPS certificate, or you can bring your own.
 
 [Install Hive on one host](deployment/QUICKSTART.md) walks through each step: the setup
 questions and their answers, other certificate sources, the first sign-in, backups, upgrades,

@@ -6,6 +6,15 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- Guided full-node enrollment includes commands, managed cron and selected restricted web terminals.
+  The installer reviews the scheduler boundary and can promote its Ardent-only nodes while retaining
+  completed history and profiles. Native profile maintenance resumes after refusal or interruption.
+- Native agent setup configures the explicit restricted terminal account; full-node setup prepares
+  cron only when the capability is selected. The standalone Ardent-only command remains available.
+
+
 ### Next
 
 - Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no

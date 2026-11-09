@@ -598,22 +598,34 @@ create a profile with **New Agent**, after the enrollment review below. Staging 
 `ARDENT_STAGED_PACKAGE` remains operator-managed. Removing the host agent retains its native owner
 record, runtime artifacts and profiles, so a reinstall can recover the same ownership.
 
-Before the first managed Ardent action on a fresh single-host installation, run:
+For full node capabilities on an installer-owned single-host installation, run:
 
 ```bash
-./hive.sh magnus-agent prepare-ardent --config FILE
+./hive.sh magnus-agent enroll --config FILE
 ```
 
-It inspects the fresh initializer, the installer-owned non-root runtime account, its processes,
-the API and gateway process trees, and the node's command, lease, participant and scheduler history.
-It refuses existing work or profiles. Review the printed evidence before approving: this is a
-one-way Ardent-only claim, so node-wide commands, managed cron and web terminals remain unavailable
-on this node. `--yes` applies the displayed review unattended; a changed inspection is refused.
-The product verifies live signed API, agent and gateway drain evidence before activation and
-records the administrator's approval. Incomplete evidence leaves the node held for review.
-Existing nodes and distributed installations use Magnus's independent enrollment workflow in
+The guided installer offers this after the host agent, whether or not Studio is selected.
+It prepares the host cron service, temporarily pauses the native owner's running Ardent profile
+units, and prints a review of initializer provenance, ownership, retained history, process trees,
+and the complete observed scheduler sources. Approval verifies all four live participants
+(agent, API, gateway or declared-absent console, and scheduler), then completes node enrollment.
+Commands and managed cron become available; a selected gateway provides restricted web terminals.
+OS maintenance cron and timers remain outside Magnus and are left unchanged. The managed terminal
+runs without sudo, with a read-only host filesystem and private temporary files. The node stops
+its entire bounded process group before signing completion; terminal bytes are never recorded.
+
+This also promotes an Ardent-only node created by the installer, preserving profiles and completed
+Ardent command history. Unknown or unrelated command effects, foreign user cron, native schedulers,
+incomplete source inventories and unsettled owners are held for independent review. The original
+profile units resume on success, refusal or a repeated command after interruption; stopped units
+are not newly enabled. `--yes` accepts the displayed bounded review unattended. If evidence changes,
+review again. Repeating completed enrollment does not drain or restart the agent.
+
+An intentionally limited installation can still use `magnus-agent prepare-ardent --config FILE`.
+That empty-node path enables only Ardent actions and leaves full enrollment pending. It is no
+longer the guided full-node default. Existing nodes outside installer provenance and distributed
+installations use Magnus's independent workflow in
 [command resource leases](https://github.com/ChefTaco/magnus/blob/main/docs/COMMAND_RESOURCE_LEASES.md).
-The guided installer offers this review after installing a local host agent beside Studio.
 
 Running it again repairs the installation, or upgrades the agent in place to the version a newer
 release pins. `./hive.sh magnus-agent status --config FILE` prints one JSON document: the

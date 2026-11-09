@@ -46,7 +46,9 @@ If Tailscale is already logged in with HTTPS certificates enabled, setup suggest
 HTTPS name and can obtain its certificate. Tailscale remains optional: bring your own DNS name
 and certificate on other networks. Selecting the optional local web terminal offers to prepare
 its dedicated account and key. After installation, setup offers the certificate renewal timer
-and, when its listener was selected, the Magnus host agent.
+and, when its listener was selected, the Magnus host agent. Full-node review then enables
+commands, managed cron and a selected web terminal gateway, while retaining the option to decline
+enrollment or deliberately choose the separate Ardent-only path.
 
 Every offer can be declined. Existing configuration files and non-interactive commands retain
 explicit prerequisite and certificate management. The following steps describe that manual path
