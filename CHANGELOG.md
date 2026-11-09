@@ -30,6 +30,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- Full enrollment prepares scheduler discovery before its final approval snapshot, so newly
+  activated user helpers cannot invalidate the first review. Post-approval drift still holds enrollment.
 - Native dependency failures report a bounded npm error code while keeping raw diagnostics private
   and retaining the previous agent.
 - Local agent commands accept a protected sudo-password file for unattended enrollment and

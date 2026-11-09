@@ -110,6 +110,9 @@ hive_magnus_agent_enroll() (
     printf '%s\n' "$status"; return; fi
   trap 'hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$(jq -c '\''.mode="release"'\'' <<< "$request")" true || printf "Admission remains held for independent review.\n" >&2; hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-node-maintenance "$(jq -c '\''.mode="resume"'\'' <<< "$request")" true || printf "Owned profiles need resume: rerun magnus-agent enroll to recover its maintenance receipt.\n" >&2' EXIT
   hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-node-maintenance "$(jq -c '.mode="pause"' <<< "$request")" true
+  # Source discovery may socket-activate an otherwise idle user D-Bus helper. Prepare
+  # discovery before capturing what the operator approves; never relax the apply digest.
+  hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$request" true >/dev/null || hive_die 'Full-node discovery is incomplete; enrollment remains held'
   review=$(hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$request" true) || hive_die 'Full-node evidence is incomplete; enrollment remains held'
   jq . <<< "$review"
   hive_magnus_agent_confirm "${HIVE_CONFIRMED:-false}" 'Approve this exact full-node review? Magnus commands, managed cron and restricted web terminals will be enabled; observed OS maintenance schedules remain outside Magnus.' || hive_die 'Full-node review was not approved'
