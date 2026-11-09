@@ -133,13 +133,25 @@ install_locked_package() {
 }
 
 write_environment() {
-  local environment="$root/.env" temporary secret_source control fqdn certificate key renewal reconciliation=''
+  local environment="$root/.env" temporary secret_source control fqdn certificate key renewal reconciliation='' staged_path='' supervisor=''
   control=$(jq -er .controlApiUrl <<< "$request"); fqdn=$(jq -er .hostFqdn <<< "$request")
   certificate=$(jq -er .certificate.certificate <<< "$request"); key=$(jq -er .certificate.key <<< "$request")
   renewal=$(jq -r '.certificate.renewal // ""' <<< "$request")
   [[ "$control" =~ ^https://[A-Za-z0-9.-]+:[0-9]+$ && "$fqdn" =~ ^[A-Za-z0-9.-]+$ ]] || die 'Invalid control API URL or host name'
   temporary=$(mktemp "$root/.env.XXXXXX")
+  if [[ -f "$environment" ]]; then staged_path=$(get "$environment" ARDENT_STAGED_PACKAGE); fi
+  if [[ -f "$environment" ]]; then supervisor=$(get "$environment" MAGNUS_EXECUTION_SUPERVISOR_ENABLED); fi
+  supervisor=${supervisor:-true}
+  if [[ -z "$staged_path" || "$staged_path" == "$root-artifacts/"* ]]; then staged_path=${native_stage_path:-$staged_path}; fi
   {
+    # Retain operator settings for native runtimes when repairing or upgrading the host agent.
+    # Only the connection, credentials and certificate settings below are installer-owned.
+    if [[ -f "$environment" ]]; then
+      awk '!/^(CONTROL_API_URL|HOST_FQDN|NODE_ENV|MAGNUS_AGENT_PRIVILEGED|NODE_MANAGER_PORT|TLS_CERT_PATH|TLS_KEY_PATH|LOG_LEVEL|MAGNUS_AGENT_TLS_RENEWAL|NODE_MANAGER_SECRET|RESULT_SIGNING_SECRET|COMMAND_RECONCILIATION_SECRET|ARDENT_OWNER_USER|ARDENT_STAGED_PACKAGE|MAGNUS_EXECUTION_SUPERVISOR_ENABLED)=/' "$environment"
+    fi
+    printf 'ARDENT_OWNER_USER=%s\n' "$native_owner"
+    printf 'MAGNUS_EXECUTION_SUPERVISOR_ENABLED=%s\n' "$supervisor"
+    [[ -z "$staged_path" ]] || printf 'ARDENT_STAGED_PACKAGE=%s\n' "$staged_path"
     printf 'CONTROL_API_URL=%s\nHOST_FQDN=%s\nNODE_ENV=production\nMAGNUS_AGENT_PRIVILEGED=true\nNODE_MANAGER_PORT=%s\n' "$control" "$fqdn" "$port"
     printf 'TLS_CERT_PATH=%s\nTLS_KEY_PATH=%s\nLOG_LEVEL=info\n' "$certificate" "$key"
     [[ "$renewal" != tailscale ]] || printf 'MAGNUS_AGENT_TLS_RENEWAL=tailscale\n'
@@ -161,6 +173,86 @@ write_environment() {
   chmod 600 "$temporary"
   if [[ -f "$environment" ]] && cmp -s "$temporary" "$environment"; then rm -f -- "$temporary"; return 1; fi
   mv -T -- "$temporary" "$environment"
+}
+
+# The signed agent package's shrinkwrap pins its Ardent dependency. Stage those exact
+# public bytes for the browser's Install package action, without installing a runtime.
+stage_ardent_package() {
+  local lock="$root/node_modules/$package/npm-shrinkwrap.json" version integrity base work archive actual target digest
+  version=$(jq -r '.packages["node_modules/@hivemagnus/ardent"].version // empty' "$lock")
+  [[ -n "$version" ]] || return 0
+  integrity=$(jq -er '.packages["node_modules/@hivemagnus/ardent"].integrity' "$lock")
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$integrity" =~ ^sha512-[A-Za-z0-9+/]{86}==$ ]] || die 'The signed agent has no valid Ardent dependency pin'
+  base="$root-artifacts"
+  [[ ! -L "$base" ]] || die 'Native package staging cannot be a symlink'
+  install -d -m 0755 "$base"
+  # Integrity identifies the immutable directory, even if a registry tag were replaced.
+  target="$base/$version-$(printf '%s' "$integrity" | sha256sum | cut -c1-16)"
+  if [[ -e "$target" || -L "$target" ]]; then
+    [[ -d "$target" && ! -L "$target" && -f "$target/ardent-package.tgz" && ! -L "$target/ardent-package.tgz" ]] || die 'Unsafe native package staging directory'
+    actual="sha512-$(openssl dgst -sha512 -binary "$target/ardent-package.tgz" | base64 -w0)"
+    [[ "$actual" == "$integrity" ]] || die 'The staged Ardent package changed; preserve and review it before retrying'
+  else
+    work=$(mktemp -d "$base/.stage-XXXXXX")
+    if ! (cd "$work" && npm pack --silent --ignore-scripts --registry=https://registry.npmjs.org/ "@hivemagnus/ardent@$version" > pack.out 2> pack.err); then rm -rf -- "$work"; die 'Could not stage the pinned Ardent package'; fi
+    archive="$work/$(tail -n 1 "$work/pack.out")"
+    [[ -f "$archive" && ! -L "$archive" ]] || { rm -rf -- "$work"; die 'npm did not return an Ardent archive'; }
+    actual="sha512-$(openssl dgst -sha512 -binary "$archive" | base64 -w0)"
+    [[ "$actual" == "$integrity" ]] || { rm -rf -- "$work"; die 'Ardent archive differs from the signed agent dependency; nothing was staged'; }
+    mv -- "$archive" "$work/ardent-package.tgz"
+    digest=$(sha256sum "$work/ardent-package.tgz" | cut -d ' ' -f1)
+    jq -nc --arg version "$version" --arg sha256 "$digest" '{name:"@hivemagnus/ardent",version:$version,sha256:$sha256}' > "$work/ardent-package.json"
+    jq -nc --arg archive "$digest" --arg sidecar "$(sha256sum "$work/ardent-package.json" | cut -d ' ' -f1)" \
+      '{component:"agent",files:[{path:"ardent-package.tgz",sha256:$archive},{path:"ardent-package.json",sha256:$sidecar}]}' > "$work/component-manifest.json"
+    rm -- "$work/pack.out" "$work/pack.err"
+    chmod 0755 "$work"; chmod 0644 "$work/ardent-package.tgz" "$work/ardent-package.json" "$work/component-manifest.json"
+    mv -T -- "$work" "$target"
+  fi
+  native_stage_path="$target/ardent-package.tgz"
+}
+
+# Native profiles run as an unprivileged account, never as the root management daemon.
+# Existing explicit ownership is retained. A new account is installation-owned and marked,
+# so a same-named unrelated account cannot silently become the runtime owner.
+prepare_native_owner() {
+  # Keep the ownership record beside the agent directory: removing the management
+  # daemon must not orphan the account that still owns native profiles.
+  local environment="$root/.env" marker="$root.native-owner.json" home uid recorded_uid temporary
+  [[ ! -L "$environment" && ! -L "$marker" ]] || die 'Native owner configuration cannot be a symlink'
+  native_owner=''
+  if [[ -f "$environment" ]]; then
+    native_owner=$(get "$environment" ARDENT_OWNER_USER)
+    [[ -n "$native_owner" ]] || native_owner=$(get "$environment" HERMES_USER)
+  fi
+  if [[ -z "$native_owner" && -f "$marker" ]]; then native_owner=$(jq -er .username "$marker"); fi
+  if [[ -z "$native_owner" ]]; then
+    native_owner=hive-agent
+    if id "$native_owner" >/dev/null 2>&1; then die 'The hive-agent account already exists without an ownership record; set ARDENT_OWNER_USER explicitly before installing'; fi
+    (set -o noclobber; jq -nc --arg username "$native_owner" '{schema:1,username:$username,phase:"preparing"}' > "$marker")
+    chmod 600 "$marker"
+    sync -f "$marker"
+  fi
+  [[ "$native_owner" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || die 'Invalid native runtime owner'
+  if ! id "$native_owner" >/dev/null 2>&1; then
+    [[ -f "$marker" ]] && jq -e --arg name "$native_owner" '.username==$name and .phase=="preparing"' "$marker" >/dev/null || die 'The configured native owner account is missing'
+    useradd --create-home --user-group --shell /bin/bash --comment 'Hive agent runtimes' "$native_owner"
+  fi
+  uid=$(id -u "$native_owner")
+  [[ "$uid" != 0 ]] || die 'Native agent profiles must have a non-root owner'
+  home=$(getent passwd "$native_owner" | cut -d: -f6)
+  [[ "$home" == /* && "$home" != / && -d "$home" && ! -L "$home" ]] || die 'Native runtime owner needs a regular home directory'
+  if [[ -f "$marker" && $(jq -r .username "$marker") == "$native_owner" ]]; then
+    recorded_uid=$(jq -r '.uid // empty' "$marker")
+    [[ -z "$recorded_uid" || "$recorded_uid" == "$uid" ]] || die 'The native owner UID changed; review account ownership before retrying'
+    [[ $(id -nG "$native_owner") == "$native_owner" ]] || die 'The dedicated native account has additional groups; review its privileges before retrying'
+    if [[ -z "$recorded_uid" ]]; then
+      temporary=$(mktemp "$marker.XXXXXX")
+      jq --argjson uid "$uid" '.phase="complete" | .uid=$uid' "$marker" > "$temporary"
+      sync -f "$temporary"; mv -T -- "$temporary" "$marker"
+    fi
+  fi
+  loginctl enable-linger "$native_owner"
+  systemctl start "user@$uid.service"
 }
 
 prepare_certificate() {
@@ -186,6 +278,7 @@ install_agent() {
   [[ ! -L "$root" ]] || die 'The agent directory cannot be a symlink'
   install -d -m 0700 "$root"
   prepare_certificate
+  prepare_native_owner
   if write_environment; then changed=true; fi
   current=$(installed_version)
   if [[ "$current" != "$wanted" ]]; then
@@ -204,6 +297,8 @@ install_agent() {
     rm -rf -- "$work"
     changed=true
   fi
+  stage_ardent_package
+  if write_environment; then changed=true; fi
   node "$(entry)" check --env-file "$root/.env" >/dev/null 2>"$root/check.log" || { cat -- "$root/check.log" >&2; die 'magnus-agent check failed; the service was not started'; }
   if [[ "$fresh" == true || ! -f "$unit" ]]; then
     # The agent's own service setup: versioned layout, upgrade launcher and unit.
@@ -254,6 +349,39 @@ heartbeat() {
     console.log(JSON.stringify(node ? { id: node.id, name: node.name, status: node.status, lastHeartbeatAt: node.lastHeartbeatAt, agentVersion: node.agent?.version ?? null } : null));'
 }
 
+ardent_review() {
+  need_root
+  local owner uid home native_home profiles processes gateway=null config code mode proof initializer container
+  [[ -f "$root.native-owner.json" && ! -L "$root.native-owner.json" ]] || die 'This host has no installer-owned native account; use the independent Magnus review workflow'
+  owner=$(get "$root/.env" ARDENT_OWNER_USER)
+  [[ "$owner" == "$(jq -er .username "$root.native-owner.json")" ]] || die 'Native owner differs from its installation record'
+  uid=$(id -u "$owner"); [[ "$uid" != 0 ]] || die 'Native owner must be non-root'
+  jq -e --argjson uid "$uid" '.phase=="complete" and .uid==$uid' "$root.native-owner.json" >/dev/null || die 'Native owner identity differs from its completed installation record'
+  home=$(getent passwd "$owner" | cut -d: -f6)
+  native_home=$(get "$root/.env" ARDENT_HOME); native_home=${native_home:-$home/.ardent}
+  [[ "$native_home" == "$home/"* && ! -L "$native_home" && ! -L "$native_home/profiles" ]] || die 'Native profile path needs independent review'
+  profiles=0
+  if [[ -d "$native_home/profiles" ]]; then profiles=$(find "$native_home/profiles" -mindepth 1 -maxdepth 1 | wc -l); fi
+  processes=$(ps -o comm= -u "$uid" | jq -Rsc 'split("\n")|map(gsub("^ +| +$";""))|map(select(length>0))')
+  config=$(jq -er .configurationDirectory <<< "$request")
+  initializer="$config/.initializer/receipt.json"
+  [[ -f "$initializer" && ! -L "$initializer" ]] && jq -e '.phase=="complete"' "$initializer" >/dev/null || die 'A completed fresh initializer is required'
+  if jq -e '.gatewaySelected==true' <<< "$request" >/dev/null; then
+    container=$(docker compose -f "$(jq -er .compose <<< "$request")" ps -q magnus-gateway)
+    [[ -n "$container" ]] || die 'The selected web terminal gateway is not running'
+    gateway=$(docker top "$container" -eo pid,ppid,comm |
+      awk '$1 ~ /^[0-9]+$/ {print $1, $2, $3}' | jq -Rsc 'split("\n")|map(select(length>0)|split(" ")|{pid:(.[0]|tonumber),ppid:(.[1]|tonumber),name:.[2]})')
+  fi
+  mode=$(jq -er .mode <<< "$request")
+  proof=$(jq -nc --arg mode "$mode" --arg fqdn "$(jq -er .hostFqdn <<< "$request")" --arg owner "$owner" --argjson uid "$uid" \
+    --argjson profiles "$profiles" --argjson processes "$processes" --argjson gateway "$gateway" \
+    --arg initializer "$(sha256sum "$initializer" | cut -d ' ' -f1)" --arg review "$(jq -r '.reviewSHA256 // ""' <<< "$request")" \
+    '{mode:$mode,hostFqdn:$fqdn,freshInstallation:true,initializerSHA256:$initializer,reviewSHA256:$review,owner:{username:$owner,uid:$uid,profileCount:$profiles,processes:$processes},gatewayProcesses:$gateway}')
+  code=$(jq -er .reviewScript <<< "$request")
+  printf '%s' "$code" | base64 -d | docker compose -f "$(jq -er .compose <<< "$request")" exec -T \
+    -e "HIVE_ARDENT_REVIEW=$proof" magnus node --input-type=module
+}
+
 case "$action" in
   magnus-agent-preflight) preflight;;
   magnus-agent-node) install_node;;
@@ -263,5 +391,6 @@ case "$action" in
   magnus-agent-remove) remove_agent;;
   magnus-agent-secrets) magnus_secrets;;
   magnus-agent-heartbeat) heartbeat;;
+  magnus-agent-ardent-review) ardent_review;;
   *) die 'Unknown magnus-agent action';;
 esac

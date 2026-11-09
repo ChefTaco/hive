@@ -224,7 +224,7 @@ if has_component oathweave; then for name in admin-password oath-cookie oath-age
 if has_component emberpath; then ensure_secret router-key; fi
 if has_component hivemem; then for name in memory-key memory-renewal qdrant-key; do ensure_secret "$name"; done; fi
 if has_component hiveskills; then ensure_secret skills-session; fi
-if has_component magnus; then for name in magnus-db magnus-redis magnus-api magnus-jwt magnus-manager magnus-audit magnus-result magnus-log magnus-rotation magnus-metrics magnus-webhook magnus-reconcile; do ensure_secret "$name"; done; fi
+if has_component magnus; then for name in magnus-db magnus-redis magnus-api magnus-jwt magnus-manager magnus-audit magnus-result magnus-log magnus-rotation magnus-metrics magnus-webhook magnus-reconcile magnus-resource-review; do ensure_secret "$name"; done; fi
 if has_component magnus-gateway; then for name in magnus-gateway-api magnus-gateway-drain; do ensure_secret "$name"; done; fi
 if has_component cindertrace; then for name in security-db security-redis security-admin-password security-session security-console security-audit security-receipt security-backup security-rate; do ensure_secret "$name"; done; fi
 if has_component chattermost; then for name in chat-db chat-cookie chat-token chat-admin-password chat-bot; do ensure_secret "$name"; done; fi
@@ -290,8 +290,10 @@ for component in oathweave emberpath hivemem hiveskills magnus magnus-gateway ci
   publish_file "$component" "$directory/config/$component/tls.crt" < "$certificate_reference"
   publish_file "$component" "$directory/config/$component/authority.pem" < "$ca"
 done
-# Studio serves plain HTTP behind the ingress, but verifies Oathweave, Magnus and HiveMem.
-if has_component ardentstudio; then publish_file ardentstudio "$directory/config/ardentstudio/authority.pem" < "$ca"; fi
+# HTTP services still need the authority named by their outbound TLS configuration.
+for component in ardentstudio emberfold; do
+  if has_component "$component"; then publish_file "$component" "$directory/config/$component/authority.pem" < "$ca"; fi
+done
 if has_component ingress; then
   publish_file ingress "$directory/config/ingress/console.crt" < "$(jq -er .bootstrap.certificateFile <<< "$input")"
   publish_file ingress "$directory/config/ingress/console.key" < "$(jq -er .bootstrap.privateKeyFile <<< "$input")"

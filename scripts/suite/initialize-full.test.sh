@@ -85,6 +85,9 @@ rg -q '^OATHWEAVE_JWKS_URL=https://oathweave:4200/api/v1/oauth/jwks$' "$temporar
 rg -q '^OATHWEAVE_USERINFO_URL=https://oathweave:4200/api/v1/oauth/userinfo$' "$temporary/install/config/magnus.env" || fail 'Magnus lacks online revocation'
 rg -q '^MAGNUS_CONSOLE_BASE_PATH=/fleet$' "$temporary/install/config/magnus.env" || fail 'Magnus console links lack the HiveXUI base path'
 rg -q '^MAGNUS_HERMES_ENABLED=true$' "$temporary/install/config/magnus.env" || fail 'Magnus does not report its Hermes capability'
+review_secret=$(sed -n 's/^RESOURCE_PARTICIPANT_RECONCILIATION_SECRET=//p' "$temporary/install/config/magnus.env")
+[[ "$review_secret" =~ ^[a-f0-9]{64}$ ]] || fail 'Managed resource review has no dedicated generated credential'
+[[ "$review_secret" != "$(sed -n 's/^COMMAND_RECONCILIATION_SECRET=//p' "$temporary/install/config/magnus.env")" ]] || fail 'Managed resource review reused another authority credential'
 sed -n 's/^MAGNUS_OATHWEAVE_IDENTITIES_JSON=//p' "$temporary/install/config/magnus.env" | jq -e --arg subject "$(cat "$temporary/install/config/.initializer/secrets/identity-id")" --arg id "$(cat "$temporary/install/config/.initializer/secrets/magnus-id")" '.==[{issuer:"https://localhost:65426/api/oathweave",subject:$subject,localUserId:$id,role:"ADMIN"}]' >/dev/null || fail 'Fresh operator is not an explicit Magnus ADMIN link'
 rg -q '^MAGNUS_ENDPOINT=https://magnus:4000$' "$temporary/install/config/ingress.env" || fail 'Ingress lacks the verified Magnus endpoint'
 rg -q '^MAGNUS_TLS_NAME=magnus$' "$temporary/install/config/ingress.env" || fail 'Ingress lacks the Magnus certificate name'
@@ -100,6 +103,8 @@ done
 # client with the scopes it grants agents plus admin:agents and workspaces:write, the matching
 # HiveMem service link on the native issuer, and the client in Magnus's environment only.
 install="$temporary/install/config"
+rg -q -F -x 'NODE_EXTRA_CA_CERTS=/config/authority.pem' "$install/emberfold.env" || fail 'Emberfold lacks outbound TLS trust'
+cmp -s "$install/emberfold/authority.pem" "$install/magnus/authority.pem" || fail 'Emberfold references a missing or different authority'
 value() { sed -n "s/^$2=//p" "$1" | tail -1; }
 magnus_memory_secret=$(cat "$install/.initializer/secrets/magnus-hivemem-client")
 [[ "$magnus_memory_secret" =~ ^[a-f0-9]{64}$ ]] || fail 'The Magnus HiveMem client secret is not a generated value'

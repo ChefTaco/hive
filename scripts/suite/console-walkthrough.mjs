@@ -304,6 +304,10 @@ async function createSession(browser) {
         while (await closed.count()) await closed.first().click();
       };
       const openNav = async () => {
+        // Studio replaces the console shell. Return through its visible close control
+        // before trying to open the next console screen.
+        const closeStudio = page.getByRole('button', { name: 'Close Studio', exact: true });
+        if (await closeStudio.isVisible()) await closeStudio.click();
         if (form === 'mobile') {
           const menu = page.getByRole('button', { name: 'Toggle navigation', exact: true });
           if ((await menu.getAttribute('aria-expanded')) !== 'true') await menu.click();
@@ -320,6 +324,7 @@ async function createSession(browser) {
           await openNav();
           await nav.nth(index).click();
         }));
+        writeFileSync(join(output, `${name}-progress.json`), JSON.stringify(rows, null, 2), { mode: 0o600 });
         for (const tab of SUBNAV[label === 'Cindertrace' ? 'security' : ''] ?? []) {
           const region = page.getByRole('navigation', { name: 'Security Fusion' });
           if (!(await region.count())) break;

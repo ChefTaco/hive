@@ -27,6 +27,7 @@ hive_full_configuration() {
       # The node agents hold the same key (hive.sh magnus-agent install copies it), so an ADMIN can
       # settle an Ardent action whose outcome is unknown.
       line COMMAND_RECONCILIATION_SECRET "$(secret magnus-reconcile)"
+      line RESOURCE_PARTICIPANT_RECONCILIATION_SECRET "$(secret magnus-resource-review)"
       line TLS_CERT_PATH /config/tls.crt; line TLS_KEY_PATH /config/tls.key; line CONTROL_API_BIND_HOST 0.0.0.0; line CONTROL_API_PORT 4000
       line CONTROL_API_URL "$(product_endpoint magnus https://magnus:4000)"; line CORS_ORIGIN "$origin"; line DASHBOARD_PUBLIC_ORIGIN "$origin"
       line SECURITY_FUSION_MODE off; line ENABLE_AGENT_DISCOVERY false

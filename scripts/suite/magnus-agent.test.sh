@@ -12,7 +12,11 @@ bin="$temporary/bin"; mkdir -p "$bin" "$temporary/log"
 log="$temporary/log/calls"
 # Every stub records its arguments, so the test can prove no secret was ever an argument.
 stub() { printf '#!/usr/bin/env bash\nprintf "%%s %%s\\n" "%s" "$*" >> "%s"\n%s\n' "$1" "$log" "$2" > "$bin/$1"; chmod +x "$bin/$1"; }
-stub id 'if [[ "$*" == -u ]]; then echo 0; else exec /usr/bin/id "$@"; fi'
+stub id 'case "$*" in -u) echo 0;; "-u hive-agent") echo 1234;; "-nG hive-agent") echo hive-agent;; hive-agent) [[ -f "'"$temporary"'/native-user-created" ]];; *) exec /usr/bin/id "$@";; esac'
+mkdir -p "$temporary/native-home"
+stub useradd 'touch "'"$temporary"'/native-user-created"'
+stub getent 'printf "hive-agent:x:1234:1234:Native runtimes:%s:/bin/bash\n" "'"$temporary"'/native-home"'
+stub loginctl 'exit 0'
 stub systemctl 'case "$1" in is-active) [[ -f "'"$temporary"'/active" ]] && echo active || echo inactive;; restart) touch "'"$temporary"'/active";; disable) rm -f "'"$temporary"'/active";; esac; exit 0'
 stub ss 'exit 0'
 stub jq 'exec /usr/bin/jq "$@"'
@@ -25,7 +29,8 @@ stub apt-get 'if [[ "$*" == *nodejs* ]]; then echo v24.22.1 > "'"$temporary"'/no
 stub curl 'while (($#)); do [[ "$1" == -o ]] && cp "'"$temporary"'/nodesource.asc" "$2"; shift; done'
 stub gpg 'printf "fpr:::::::::%s:\n" "$(cat "'"$temporary"'/fingerprint")"'
 stub npm 'case "$1" in
-  pack) v=${@: -1}; v=${v##*@}; cp "'"$temporary"'/fixtures/magnus-agent-$v.tgz" "magnus-agent-$v.tgz"; echo "magnus-agent-$v.tgz";;
+  pack) spec=${@: -1}; v=${spec##*@}; name=magnus-agent; [[ "$spec" != @hivemagnus/ardent@* ]] || name=ardent
+    cp "'"$temporary"'/fixtures/$name-$v.tgz" "$name-$v.tgz"; echo "$name-$v.tgz";;
   ci) [[ "$*" == *--ignore-scripts* && "$*" == *--registry=https://registry.npmjs.org/* && "$*" == *--omit=dev* ]] || exit 99
     [[ ! -f "'"$temporary"'/fail-ci" ]] || exit 98;;
   *) exit 97;;
@@ -47,10 +52,14 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 30 -s
 printf 'NODE_ENV=production\nNODE_MANAGER_SECRET=%s\nRESULT_SIGNING_SECRET=%s\nCOMMAND_RECONCILIATION_SECRET=%s\n' "$node_secret" "$result_secret" "$reconcile_secret" > "$temporary/magnus.env"; chmod 600 "$temporary/magnus.env"
 # Real archives exercise extraction and lock validation; only the npm transport is stubbed.
 mkdir -p "$temporary/fixtures"
+mkdir -p "$temporary/ardent-fixture/package"
+printf '{"name":"@hivemagnus/ardent","version":"1.0.0"}\n' > "$temporary/ardent-fixture/package/package.json"
+tar -czf "$temporary/fixtures/ardent-1.0.0.tgz" -C "$temporary/ardent-fixture" package
+ardent_integrity="sha512-$(openssl dgst -sha512 -binary "$temporary/fixtures/ardent-1.0.0.tgz" | base64 -w0)"
 for version in 2.1.1 2.1.2; do
   mkdir -p "$temporary/fixture/package/dist"
-  jq -n --arg version "$version" '{name:"@hivemagnus/magnus-agent",version:$version,dependencies:{"fixture-dependency":"1.0.0"}}' > "$temporary/fixture/package/package.json"
-  jq -n --slurpfile package "$temporary/fixture/package/package.json" '{name:$package[0].name,version:$package[0].version,lockfileVersion:3,packages:{"":$package[0],"node_modules/fixture-dependency":{version:"1.0.0",resolved:"https://registry.npmjs.org/fixture-dependency/-/fixture-dependency-1.0.0.tgz",integrity:("sha512-"+("A"*86)+"==")}}}' > "$temporary/fixture/package/npm-shrinkwrap.json"
+  jq -n --arg version "$version" '{name:"@hivemagnus/magnus-agent",version:$version,dependencies:{"fixture-dependency":"1.0.0","@hivemagnus/ardent":"1.0.0"}}' > "$temporary/fixture/package/package.json"
+  jq -n --arg ardentIntegrity "$ardent_integrity" --slurpfile package "$temporary/fixture/package/package.json" '{name:$package[0].name,version:$package[0].version,lockfileVersion:3,packages:{"":$package[0],"node_modules/fixture-dependency":{version:"1.0.0",resolved:"https://registry.npmjs.org/fixture-dependency/-/fixture-dependency-1.0.0.tgz",integrity:("sha512-"+("A"*86)+"==")},"node_modules/@hivemagnus/ardent":{version:"1.0.0",resolved:"https://registry.npmjs.org/@hivemagnus/ardent/-/ardent-1.0.0.tgz",integrity:$ardentIntegrity}}}' > "$temporary/fixture/package/npm-shrinkwrap.json"
   touch "$temporary/fixture/package/dist/index.js"
   tar -czf "$temporary/fixtures/magnus-agent-$version.tgz" -C "$temporary/fixture" package
 done
@@ -120,12 +129,38 @@ grep -qx 'CONTROL_API_URL=https://hive.example.com:4000' "$agent/.env" && grep -
 [[ -L "$agent/current" && -f "$MAGNUS_AGENT_UNIT" ]] || fail 'install-service did not set up the service'
 /usr/bin/grep -q 'install-service --dir' "$log" && /usr/bin/grep -q 'check --env-file' "$log" || fail 'The agent was not checked and set up with its own commands'
 no_secret "$log" "$temporary/out" "$temporary/err"
+grep -qx 'ARDENT_OWNER_USER=hive-agent' "$agent/.env" || fail 'Native runtimes have no non-root owner'
+/usr/bin/grep -q 'loginctl enable-linger hive-agent' "$log" && /usr/bin/grep -q 'systemctl start user@1234.service' "$log" || fail 'The native owner user service was not enabled'
+[[ -f "$agent.native-owner.json" ]] || fail 'The native owner has no installation ownership record'
+staged=$(sed -n 's/^ARDENT_STAGED_PACKAGE=//p' "$agent/.env")
+[[ -f "$staged" && $(stat -c %a "$staged") == 644 && $(stat -c %a "$(dirname "$staged")") == 755 ]] || fail 'The native owner cannot read the staged runtime package'
+cmp -s "$staged" "$temporary/fixtures/ardent-1.0.0.tgz" || fail 'The staged runtime differs from the signed dependency'
+jq -e '.name=="@hivemagnus/ardent" and .version=="1.0.0"' "$(dirname "$staged")/ardent-package.json" >/dev/null || fail 'Native package metadata is missing'
+printf 'ARDENT_HOME=%s\n' "$temporary/native-home/.ardent-custom" >> "$agent/.env"
+host magnus-agent-install "$(request 2.1.1)" || fail 'repair with native settings failed'
 
 # Repeating changes nothing; a new version upgrades in place; a lost service is repaired.
 : > "$log"
 host magnus-agent-install "$(request 2.1.1)" || fail 'repeat failed'
 jq -e '.changed==false' "$temporary/out" >/dev/null || fail 'A repeat reported a change'
+grep -qx "ARDENT_HOME=$temporary/native-home/.ardent-custom" "$agent/.env" || fail 'A repair discarded the native runtime configuration'
 ! /usr/bin/grep -q '^npm ' "$log" && ! /usr/bin/grep -q 'install-service' "$log" && ! /usr/bin/grep -q 'systemctl restart' "$log" || fail 'A repeat reinstalled or restarted'
+cp "$agent/.env" "$temporary/environment.before"
+sed -i 's/^ARDENT_OWNER_USER=.*/ARDENT_OWNER_USER=root/' "$agent/.env"
+if host magnus-agent-install "$(request 2.1.1)"; then fail 'Accepted root as the native runtime owner'; fi
+grep -q 'non-root owner' "$temporary/err" || fail 'Root runtime ownership refusal is unclear'
+cp "$temporary/environment.before" "$agent/.env"
+cp "$agent.native-owner.json" "$temporary/owner.before"
+jq '.uid=9876' "$temporary/owner.before" > "$agent.native-owner.json"
+if host magnus-agent-install "$(request 2.1.1)"; then fail 'Accepted a replaced native owner identity'; fi
+grep -q 'owner UID changed' "$temporary/err" || fail 'Replaced native owner identity refusal is unclear'
+if host magnus-agent-ardent-review "$(request 2.1.1)"; then fail 'Reviewed a replaced native owner identity'; fi
+grep -q 'identity differs from its completed installation record' "$temporary/err" || fail 'Enrollment owner identity refusal is unclear'
+cp "$temporary/owner.before" "$agent.native-owner.json"
+printf 'changed\n' > "$staged"
+if host magnus-agent-install "$(request 2.1.1)"; then fail 'Accepted a changed staged runtime'; fi
+grep -q 'staged Ardent package changed' "$temporary/err" || fail 'Changed native artifact refusal is unclear'
+cp "$temporary/fixtures/ardent-1.0.0.tgz" "$staged"
 touch "$temporary/fail-ci"
 if host magnus-agent-install "$(request 2.1.2)"; then fail 'Accepted a failed locked install'; fi
 [[ $(readlink "$agent/current") == versions/2.1.1 ]] || fail 'A failed locked install switched the active agent'
@@ -160,6 +195,7 @@ no_secret "$temporary/out"
 host magnus-agent-host-key '{}' && [[ $(jq -r .fingerprint "$temporary/out") == SHA256:* ]] || fail 'The host key fingerprint was not read'
 host magnus-agent-remove "$(jq -nc --arg root "$agent" '{root:$root}')" || fail 'remove failed'
 [[ ! -e "$agent" && ! -e "$MAGNUS_AGENT_UNIT" ]] || fail 'remove left the agent behind'
+[[ -f "$agent.native-owner.json" ]] || fail 'Removal orphaned the account that owns native profiles'
 /usr/bin/grep -q 'systemctl disable --now magnus-agent' "$log" || fail 'remove did not stop the service'
 
 # The controller: no agent port, no install; Node.js without consent, no install.

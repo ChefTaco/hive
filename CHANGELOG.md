@@ -6,6 +6,29 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- Guided local installation prepares Docker and controller tools with consent, activates new
+  Docker group membership without logging out, creates the installation directory, and offers
+  a Tailscale console certificate when the host is already configured for it. The optional local
+  web terminal can prepare its own restricted account and dedicated key. After installation,
+  setup offers certificate renewal and the Magnus host agent. Saved configurations, unattended
+  installs and planning retain their existing behavior.
+- Fresh single-host installations can review observed native-owner and service process evidence
+  before enabling managed Ardent actions. Setup obtains live participant drain proofs and uses
+  a separate generated reconciliation authority. Existing histories require independent review;
+  node-wide commands, cron and web terminals remain excluded on an Ardent-only node.
+
+### Fixed
+
+- The Magnus host installer prepares a non-root native-runtime owner and its user services,
+  preserves native settings on repair, and stages the exact Ardent dependency from the signed
+  agent's lockfile so the console can offer Install package. Runtime installation stays explicit.
+- Emberfold receives the certificate authority referenced by its outbound TLS environment.
+- Setup no longer asks for a native agent runtime when the selected release offers none.
+- The browser walkthrough returns from fullscreen Studio before visiting the next console page
+  and preserves intermediate results during long reviews.
+
 ### Next
 
 - Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no

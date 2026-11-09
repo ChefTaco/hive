@@ -35,6 +35,23 @@ version instead. The launcher prints the version and retained checkout path, und
 controller source. After setup, switch to the retained release checkout printed by the launcher
 for later commands and certificate renewal timers. Keep that directory.
 
+## Guided local setup
+
+With Hive 2.3.0 or later, run `./hive.sh --release latest` from the checkout for a fresh local installation. Interactive
+setup offers to prepare this machine with Docker and the required tools, using sudo only after
+showing its changes and asking for consent. A new Docker group membership takes effect in a
+child shell, so no logout is needed. Setup then offers to create the installation directory.
+
+If Tailscale is already logged in with HTTPS certificates enabled, setup suggests this host's
+HTTPS name and can obtain its certificate. Tailscale remains optional: bring your own DNS name
+and certificate on other networks. Selecting the optional local web terminal offers to prepare
+its dedicated account and key. After installation, setup offers the certificate renewal timer
+and, when its listener was selected, the Magnus host agent.
+
+Every offer can be declined. Existing configuration files and non-interactive commands retain
+explicit prerequisite and certificate management. The following steps describe that manual path
+and remote-host preparation.
+
 ## 2. Install the prerequisites
 
 ```bash

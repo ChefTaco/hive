@@ -69,10 +69,22 @@ hive_magnus_agent_node_record() { # FQDN
     "$(jq -nc --arg compose "$directory/compose.json" --arg fqdn "$1" '{compose:$compose,hostFqdn:$fqdn}')"
 }
 
+hive_magnus_agent_prepare_ardent() {
+  local request=$1 review
+  [[ "$HIVE_AGENT_HOST" == "$HIVE_MAGNUS_HOST" && "$HIVE_AGENT_ON_CONSOLE" == true ]] || hive_die 'Fresh Ardent preparation is for the single-host installation; other nodes use Magnus independent enrollment review'
+  jq -e '.bootstrap!=null and (.hosts|length)==1' "$HIVE_CONFIG" >/dev/null || hive_die 'Fresh Ardent preparation requires a single-host fresh installation'
+  review=$(hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$request" true) || hive_die 'Fresh Ardent review did not pass; no scope was granted'
+  jq . <<< "$review"
+  [[ $(jq -r .state <<< "$review") != active ]] || return 0
+  hive_magnus_agent_confirm "${HIVE_CONFIRMED:-false}" 'Approve this fresh-node review and enable only managed Ardent actions? Web terminals, node-wide commands and cron remain unavailable on this node.' || hive_die 'Review was not approved; nothing was enrolled'
+  request=$(jq -c --arg sha "$(jq -er .reviewSHA256 <<< "$review")" '.mode="apply" | .reviewSHA256=$sha' <<< "$request")
+  hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$request" true || hive_die 'Enrollment held: retain its current drain and inspect the reported proof failure before retrying'
+}
+
 hive_magnus_agent() {
   local subcommand=${1:-} port origin console_name preflight package fqdn request certificate magnus_directory started record fingerprint result
   jq -e '.components.magnus!=null' "$HIVE_CONFIG" >/dev/null || hive_die 'This installation has no Magnus'
-  case "$subcommand" in install|status|remove) ;; *) hive_die 'Use: magnus-agent install|status|remove --config FILE [--host TARGET] [--install-node] [--trust] [--yes]';; esac
+  case "$subcommand" in install|status|remove|prepare-ardent) ;; *) hive_die 'Use: magnus-agent install|status|remove|prepare-ardent --config FILE [--host TARGET] [--install-node] [--trust] [--yes]';; esac
   port=$(jq -r '[.console.nativeListeners // [] | .[] | select(.component=="magnus") | .port][0] // empty' "$HIVE_CONFIG")
   [[ -n "$port" || "$subcommand" != install ]] || hive_die 'This installation publishes no Magnus agent port, so an agent could not reach Magnus. A fresh installation gets one from the setup question "Port for Magnus host agents" (console.nativeListeners in the installation file); adding it to an existing installation is not supported yet. See deployment/FULL.md#magnus-host-agents'
   origin=$(jq -r .origin "$HIVE_CONFIG"); console_name=${origin#https://}; console_name=${console_name%%:*}
@@ -82,6 +94,11 @@ hive_magnus_agent() {
   if [[ "$HIVE_AGENT_ON_CONSOLE" == true ]]; then fqdn=$console_name; else fqdn=$(jq -r .tailnetName <<< "$preflight"); fi
 
   case "$subcommand" in
+    prepare-ardent)
+      request=$(jq -nc --arg root "${HIVE_MAGNUS_AGENT_ROOT:-/opt/magnus-agent}" --arg compose "$magnus_directory/compose.json" --arg config "$magnus_directory/config" --arg fqdn "$fqdn" \
+        --arg script "$(base64 -w0 "$HIVE_ROOT/scripts/suite/ardent-enrollment.mjs")" --argjson gateway "$(jq '.components["magnus-gateway"]!=null' "$HIVE_CONFIG")" \
+        '{root:$root,compose:$compose,configurationDirectory:$config,hostFqdn:$fqdn,reviewScript:$script,gatewaySelected:$gateway,mode:"inspect"}')
+      hive_magnus_agent_prepare_ardent "$request"; return;;
     status)
       record=$(hive_magnus_agent_node_record "$fqdn" 2>/dev/null || printf 'null\n')
       # The web terminal approval of this node, when the suite has the gateway; one JSON document.

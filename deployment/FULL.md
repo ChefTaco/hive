@@ -576,7 +576,10 @@ any fleet host, with `--ssh-config FILE` and `--sudo-password-file FILE` as that
    lifecycle scripts disabled and an explicit public npm registry, then runs the agent check
    before replacing a package. Older unlocked tarballs are refused; this controller requires a
    new locked Magnus agent artifact in a newly signed suite release;
-3. writes `/opt/magnus-agent/.env`, root-only, with `CONTROL_API_URL` from the console name and
+3. prepares a dedicated non-root `hive-agent` account for native profiles, enables its user
+   services at boot, and writes `ARDENT_OWNER_USER` in `/opt/magnus-agent/.env`. An explicitly
+   configured owner and other native-runtime settings survive repairs and upgrades. The root-only
+   environment also has `CONTROL_API_URL` from the console name and
    the agent port. The node credentials (`NODE_MANAGER_SECRET`, `RESULT_SIGNING_SECRET` and,
    when Magnus has one, `COMMAND_RECONCILIATION_SECRET`) come from the Magnus host's own configuration; for
    another host they stream through the controller on standard input only. They are never
@@ -586,6 +589,31 @@ any fleet host, with `--ssh-config FILE` and `--sudo-password-file FILE` as that
 5. waits up to two minutes for Magnus to accept the first heartbeat and reports the node ID;
 6. with the web terminal gateway, reads the host's SSH host key fingerprint on the host and
    offers to approve it (`--trust` agrees unattended), so the terminal works at once.
+
+The installer also stages the exact Ardent package pinned by the signed host agent's dependency
+lock. It verifies the npm integrity and prepares the package manifest the node agent checks. The
+public package files live beside the protected agent directory, readable by the native owner;
+credentials stay root-only. In **Magnus > Ardent installations**, choose **Install package**, then
+create a profile with **New Agent**, after the enrollment review below. Staging never installs or starts an Ardent runtime. A custom
+`ARDENT_STAGED_PACKAGE` remains operator-managed. Removing the host agent retains its native owner
+record, runtime artifacts and profiles, so a reinstall can recover the same ownership.
+
+Before the first managed Ardent action on a fresh single-host installation, run:
+
+```bash
+./hive.sh magnus-agent prepare-ardent --config FILE
+```
+
+It inspects the fresh initializer, the installer-owned non-root runtime account, its processes,
+the API and gateway process trees, and the node's command, lease, participant and scheduler history.
+It refuses existing work or profiles. Review the printed evidence before approving: this is a
+one-way Ardent-only claim, so node-wide commands, managed cron and web terminals remain unavailable
+on this node. `--yes` applies the displayed review unattended; a changed inspection is refused.
+The product verifies live signed API, agent and gateway drain evidence before activation and
+records the administrator's approval. Incomplete evidence leaves the node held for review.
+Existing nodes and distributed installations use Magnus's independent enrollment workflow in
+[command resource leases](https://github.com/ChefTaco/magnus/blob/main/docs/COMMAND_RESOURCE_LEASES.md).
+The guided installer offers this review after installing a local host agent beside Studio.
 
 Running it again repairs the installation, or upgrades the agent in place to the version a newer
 release pins. `./hive.sh magnus-agent status --config FILE` prints one JSON document: the

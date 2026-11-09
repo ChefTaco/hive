@@ -6,6 +6,7 @@ hive_need() { command -v "$1" >/dev/null || hive_die "Required tool missing: $1"
 hive_runtime_files() {
   printf '%s\n' LICENSE hive.sh deployment/Caddyfile \
     scripts/suite/controller.sh scripts/suite/release-launcher.sh scripts/suite/lifecycle.sh scripts/suite/host-runtime.sh \
+    scripts/suite/guided-setup.sh scripts/install-prerequisites.sh scripts/console-certificate.sh scripts/prepare-terminal.sh \
     scripts/suite/skills-integration.sh scripts/suite/skills-integration-host.sh scripts/suite/skills-preparation-host.sh \
     scripts/suite/adapters.sh scripts/suite/native-initialization-host.sh scripts/suite/adapters-host.sh scripts/suite/inference-registration.sh \
     scripts/suite/public-runtime.sh scripts/suite/preflight-host.sh scripts/suite/initialize.sh \
@@ -16,7 +17,7 @@ hive_runtime_files() {
     scripts/suite/magnus-gateway.sh scripts/suite/magnus-gateway-host.sh \
     scripts/suite/migrate-native.sh scripts/suite/migrate-native-host.sh scripts/suite/migrate-native-data.mjs scripts/suite/set-admin-password.sh \
     scripts/suite/cindertrace.sh scripts/suite/cindertrace-host.sh scripts/suite/ownership-host.sh \
-    scripts/suite/magnus-agent.sh scripts/suite/magnus-agent-host.sh \
+    scripts/suite/magnus-agent.sh scripts/suite/magnus-agent-host.sh scripts/suite/ardent-enrollment.mjs \
     scripts/suite/console-clients.sh scripts/suite/console-clients-host.sh
 }
 hive_controller_digest() {
@@ -99,7 +100,9 @@ init prepares protected configuration for an explicitly fresh installation.
 magnus-agent install|status|remove [--host TARGET] [--install-node] [--trust] runs the Magnus agent on a
 fleet host (default: the Magnus host): Node.js check (and NodeSource install with consent), the
 release's verified agent package, its root-only environment and service, the first accepted
-heartbeat, and the web terminal approval. See deployment/FULL.md.
+heartbeat, and the web terminal approval. magnus-agent prepare-ardent reviews an empty fresh
+single-host installation and, with approval, enables only managed Ardent actions. It excludes
+node-wide commands, cron and web terminals on that node. See deployment/FULL.md.
 cindertrace-collector provisions the credential a Cindertrace collector signs events with:
 cindertrace-collector add ID --sources SOURCE[,SOURCE]|list|remove ID. The credential is generated
 on the Cindertrace host into an owner-only file and never printed; Cindertrace ingests while a
@@ -181,6 +184,7 @@ hive_configure() {
   hive_prompt directory 'Installation directory on the selected host (absolute)' "/opt/$id"
   hive_prompt target 'Host SSH target (local or deploy@host)' local
   if [[ "$target" == local ]]; then
+    hive_setup_directory "$directory"
     # Checked now, not after the plan: fresh setup creates this directory as the current account.
     while ! hive_writable_directory "$directory"; do
       printf '%s must be a canonical absolute path that %s can create or write. To use it, create it in another terminal with:\n  sudo install -d -m 0750 -o %s -g %s %s\n' "$directory" "$(id -un)" "$(id -un)" "$(id -gn)" "$directory"
@@ -191,7 +195,8 @@ hive_configure() {
   fi
   architecture=$(uname -m); case "$architecture" in x86_64) architecture=amd64;; aarch64) architecture=arm64;; esac
   hive_prompt architecture 'Host architecture (amd64/arm64)' "$architecture"
-  hive_prompt origin 'Console HTTPS origin'
+  if [[ "$target" == local ]]; then hive_setup_origin; else HIVE_SETUP_ORIGIN=''; fi
+  hive_prompt origin 'Console HTTPS origin' "${HIVE_SETUP_ORIGIN:-}"
   hive_prompt profile 'Product profile (core/full/custom)' core
   if [[ "$profile" == custom ]]; then
     printf 'Available components: %s\n' "$(jq -r '.components|keys|join(",")' "$HIVE_MANIFEST")"
@@ -211,8 +216,9 @@ hive_configure() {
   if [[ "$mode" == fresh || "$mode" == distributed ]]; then
     hive_prompt username 'Initial operator username' admin
     hive_prompt email 'Initial operator email for identity recovery'
-    hive_prompt certificate 'Existing console certificate file on the selected host (absolute)'
-    hive_prompt private_key 'Protected console private key file on the selected host (absolute)'
+    if [[ "$target" == local ]]; then hive_setup_certificate "$origin"; fi
+    hive_prompt certificate 'Existing console certificate file on the selected host (absolute)' "${HIVE_SETUP_CERTIFICATE:-}"
+    hive_prompt private_key 'Protected console private key file on the selected host (absolute)' "${HIVE_SETUP_PRIVATE_KEY:-}"
   elif [[ "$mode" != prepared ]]; then hive_die 'Choose fresh, distributed or prepared configuration'; fi
   if [[ "$mode" == fresh || "$mode" == distributed ]]; then
     selected_json=$(jq -nc --argjson selected "$selected_json" '$selected+["oathweave","oathweave-redis","hivexui","ingress"]|unique')
@@ -222,8 +228,9 @@ hive_configure() {
       else hive_prompt gateway_deploy 'Deploy the Magnus web terminal gateway (yes/no)' no; fi
       if [[ "$gateway_deploy" == yes ]]; then
         selected_json=$(jq -nc --argjson selected "$selected_json" '$selected+["magnus-gateway"]|unique')
-        hive_prompt gateway_username 'Restricted SSH account on fleet nodes for the gateway'
-        hive_prompt gateway_key 'Protected SSH private key file on the Magnus host (absolute)'
+        if [[ "$target" == local ]]; then hive_setup_terminal; fi
+        hive_prompt gateway_username 'Restricted SSH account on fleet nodes for the gateway' "${HIVE_SETUP_TERMINAL_USER:-}"
+        hive_prompt gateway_key 'Protected SSH private key file on the Magnus host (absolute)' "${HIVE_SETUP_TERMINAL_KEY:-}"
         hive_prompt gateway_grant 'Grant magnus:terminal to the initial operator (yes/no)' no
       elif [[ "$gateway_deploy" != no ]]; then hive_die 'Answer yes or no'; fi
       [[ "$gateway_grant" == yes || "$gateway_grant" == no ]] || hive_die 'Answer yes or no'
@@ -268,7 +275,10 @@ hive_configure() {
       inference=$(jq --arg endpoint "$enrollment_endpoint" --arg prefix "$enrollment_prefix" --arg credential "$enrollment_credential" --arg ca "$enrollment_ca" --arg slug "$provider_slug" --arg aliases "$provider_aliases" '.[0].registration={endpoint:$endpoint,apiPrefix:$prefix,credentialFile:$credential,providerSlug:$slug,aliases:($aliases|split(",")|map(gsub("^ +| +$";"")|select(length>0)))} | if $ca!="" then .[0].registration.caFile=$ca else . end' <<< "$inference")
     else printf 'Endpoint verification only; Emberpath registration is not selected.\n'; fi
   fi
-  hive_prompt runtime 'Opt-in native agent runtime (magnus/ardent/hermes/codex; blank to skip)'
+  runtime=''
+  if jq -e 'any((.agentArtifacts // {})[]; length>0)' "$HIVE_MANIFEST" >/dev/null; then
+    hive_prompt runtime 'Opt-in native agent runtime (magnus/ardent/hermes/codex; blank to skip)'
+  fi
   while [[ -n "$runtime" ]]; do
     printf 'Released versions: %s\n' "$(jq -r --arg runtime "$runtime" '(.agentArtifacts[$runtime] // {})|keys|join(",")' "$HIVE_MANIFEST")"
     hive_prompt agent_id 'Unique agent installation ID' "$runtime"
@@ -754,4 +764,5 @@ hive_main() {
     init) hive_initialize;;
     install|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept) hive_lifecycle "$command";;
   esac
+  if [[ "$command" == install ]]; then hive_setup_finish; fi
 }

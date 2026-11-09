@@ -57,7 +57,7 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
         ('Emberpath API prefix', '/api/emberpath'),
         ('Protected Emberpath enrollment Authorization header file', '/opt/credentials/enrollment.header'),
         ('Protected Emberpath CA file', ''), ('Provider slug in Emberpath', 'synthetic-provider'),
-        ('Provider aliases', 'synthetic-fast, synthetic-default'), ('Opt-in native agent runtime', ''),
+        ('Provider aliases', 'synthetic-fast, synthetic-default'),
         ('Write protected installation configuration to', str(output)),
     ]
     arguments = [str(root / 'hive.sh'), 'plan', '--release', '0.1.0', '--manifest', str(release), '--trust-key', str(base / 'publisher.pub')]
@@ -241,7 +241,6 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     # Without the magnus component, setup offers a Magnus that runs outside the installation.
     custom_questions += [('External Magnus HTTPS URL', ''),
                          ('Existing external inference HTTPS endpoint', ''),
-                         ('Opt-in native agent runtime', ''),
                          ('Write protected installation configuration to', str(custom_output))]
     review.write_text(json.dumps({'command': arguments, 'questions': custom_questions,
                                  'transcriptFile': str(base / 'custom-transcript.log'), 'timeoutSeconds': 30}))

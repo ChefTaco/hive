@@ -29,7 +29,7 @@
     "test:router": "npm --prefix services/hive-router test",
     "test:iam": "npm --prefix services/hive-iam test",
     "test:audit": "node --experimental-strip-types --test scripts/audit-deployments.test.ts scripts/service-manifest.test.ts scripts/hive-doctor.test.ts scripts/hive-backup.test.ts scripts/dev-hive.test.ts scripts/hive-deploy.test.ts scripts/hivemem-token.test.ts scripts/architecture-boundaries.test.ts scripts/release-config-hardening.test.ts scripts/model-e2e.test.ts scripts/fresh-npm-e2e.test.mjs scripts/published-release.test.mjs scripts/candidate-registry.test.mjs scripts/deploy-npm.test.ts && python3 scripts/npm-deploy-host.test.py",
-    "test:install-scripts": "bash scripts/install-prerequisites.test.sh && bash scripts/console-certificate.test.sh",
+    "test:install-scripts": "bash scripts/install-prerequisites.test.sh && bash scripts/console-certificate.test.sh && python3 scripts/suite/guided-setup.test.py && node --test scripts/suite/ardent-enrollment.test.mjs && bash scripts/suite/ardent-enrollment-controller.test.sh",
     "check:release-docs": "bash scripts/check-release-docs.sh",
     "test:release-manager": "bash scripts/lib/release-manager.test.sh",
     "scan:secrets": "bash scripts/scan-secrets.sh",
@@ -103,6 +103,7 @@
     "test:suite:full": "node scripts/suite/distributed-core-roundtrip.mjs --full",
     "test:suite:custom": "node scripts/suite/distributed-core-roundtrip.mjs --components hive-registry,oathweave,oathweave-redis,hivexui,ingress,hiveskills",
     "release:suite": "node scripts/release/build-suite-manifest.mjs",
-    "release:suite:check": "bash scripts/release/check-suite-release.sh"
+    "release:suite:check": "bash scripts/release/check-suite-release.sh",
+    "test:terminal-host": "bash scripts/prepare-terminal.test.sh"
   }
 }
