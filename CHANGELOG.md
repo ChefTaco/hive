@@ -6,24 +6,6 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
-### Fixed
-
-- Upgrades verify signed product schema commands even when the storage format is unchanged.
-  Pending writes require explicit approval bound to the plan, run first on isolated restored
-  stores, and retain exact product-owned recovery evidence. Current schemas skip migration;
-  missing consent is detected before shutdown. Failed journal writes cannot start a migration.
-- Release candidates can promote to their stable release through the upgrade path; moving from
-  stable to its earlier candidate still requires an explicit rollback.
-
-### Added
-
-- Guided full-node enrollment includes commands, managed cron and selected restricted web terminals.
-  The installer reviews the scheduler boundary and can promote its Ardent-only nodes while retaining
-  completed history and profiles. Native profile maintenance resumes after refusal or interruption.
-- Native agent setup configures the explicit restricted terminal account; full-node setup prepares
-  cron only when the capability is selected. The standalone Ardent-only command remains available.
-
-
 ### Next
 
 - Pin the Magnus native agent bundle as `agentArtifacts` in the release, so the agent needs no
@@ -31,6 +13,50 @@ All notable changes to this project are documented in this file. The format is b
 - A bring-your-own certificate for `magnus-agent install` on a host without Tailscale.
 - Adding the Magnus agent port to an existing installation, as a reviewed configuration change.
 - An Emberfold area in HiveXUI; Emberfold is reachable only through its API.
+
+## [2.4.0] - 2026-11-09
+
+### Added
+
+- Guided full-node enrollment includes commands, managed cron and selected restricted web terminals.
+  The installer reviews the scheduler boundary and can promote its Ardent-only nodes while retaining
+  completed history and profiles. Native profile maintenance resumes after refusal; reruns recover
+  interrupted pauses.
+- Native agent setup configures the explicit restricted terminal account; full-node setup prepares
+  cron only when the capability is selected. The standalone Ardent-only command remains available.
+- Pins Magnus server, fleet gateway and host agent 2.3.1, and HiveXUI 0.2.4. The console exposes
+  approved command timeouts and finite UTC cron creation, pause and resume with explicit expiry.
+  Other product image pins remain those of Hive 2.3.0.
+
+### Fixed
+
+- Native dependency failures report a bounded npm error code while keeping raw diagnostics private
+  and retaining the previous agent.
+- Local agent commands accept a protected sudo-password file for unattended enrollment and
+  repair, using standard input only and retaining the interactive sudo prompt when no file is supplied.
+- Upgrades verify signed product schema commands even when the storage format is unchanged.
+  Pending writes require explicit approval bound to the plan, run first on isolated restored
+  stores, and retain exact product-owned recovery evidence. Current schemas skip migration;
+  missing consent is detected before shutdown. Failed journal writes cannot start a migration.
+- Release candidates can promote to their stable release through the upgrade path; moving from
+  stable to its earlier candidate still requires an explicit rollback.
+
+### Migration impact
+
+- Magnus applies two additive participant-claim migrations. Existing history, profiles and
+  credentials are retained; full enrollment requires an exact approved review. The upgrade
+  keeps the standard host-bound backup and isolated restore rehearsal before activation.
+
+### Security
+
+- All 18 pinned images passed the release scan on amd64 and arm64 with no fixable HIGH or
+  CRITICAL findings. Unfixed upstream advisories remain:
+  CVE-2023-2953, CVE-2023-45853, CVE-2025-69720, CVE-2026-119373, CVE-2026-119374,
+  CVE-2026-119379, CVE-2026-16742, CVE-2026-24882, CVE-2026-41992, CVE-2026-53613,
+  CVE-2026-53615, CVE-2026-54369, CVE-2026-6653, CVE-2026-74860, CVE-2026-76642,
+  CVE-2026-76844, CVE-2026-78408, CVE-2026-78409, CVE-2026-78410, CVE-2026-85091,
+  CVE-2026-86138, CVE-2026-86139, CVE-2026-86140, CVE-2026-86142, CVE-2026-86143,
+  CVE-2026-86144, CVE-2026-9538
 
 ## [2.3.0] - 2026-11-09
 

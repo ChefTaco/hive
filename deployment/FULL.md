@@ -54,6 +54,28 @@ The ingress also maps `GET /api/magnus/docs/openapi.json` to Magnus's public
 `/api/docs/openapi.json`, the one browser route outside `/api/v1`. The former
 `bootstrap.magnusConsoleOrigin` setting is refused with a clear message; remove it.
 
+## Upgrading product schemas
+
+A product can add database migrations without changing its storage-format label. Upgrade plans
+include the exact signed migration and verification commands under `upgradeSchemaMigrations`.
+The installer checks those product schemas before stopping services when migration writes have
+not been approved. Current schemas need no migration permission.
+
+When the check reports pending migrations, review the plan with the same permission you will use
+to apply it:
+
+```bash
+./hive.sh plan --config installation.json --release latest --allow-migrations
+./hive.sh upgrade --config installation.json --release latest --allow-migrations
+```
+
+Migration consent is bound to the plan digest. The installer takes a host-bound backup, applies
+and verifies the selected product migrations on isolated restored stores, then runs the same
+checks on stopped live stores before activation. Only private datastores start during this phase.
+A durable journal binds each migration to its exact signed product specification. An interrupted
+or uncertain attempt is reconciled by that product's verifier; it is never blindly replayed.
+Automatic migrations on ordinary application startup remain disabled.
+
 ## Magnus web terminal
 
 The browser terminal gives a person a shell on a fleet node, so it is off in every
@@ -110,9 +132,14 @@ Magnus can reach it. Its `/internal` route is for Magnus and has no route throug
 
 ### Preparing nodes and the gateway key
 
-The gateway signs in to each node as one restricted account, with one key. Create both before
-running setup; Hive refuses a key file it cannot read or that others can read. On a single host,
-the node is the host itself. As the account that runs `hive.sh` (UID 1000):
+The guided single-host installer offers to create the dedicated terminal account and gateway key
+with sudo, validates an existing pair, and fills in their configuration. No separate preparation
+commands are needed when accepting that offer. Full enrollment then enables the restricted managed
+terminal through the native agent.
+
+For a hand-written configuration or additional legacy SSH nodes, prepare the account and key
+before installation. Hive refuses a key file it cannot read or that others can read. The gateway
+uses this restricted SSH account for legacy nodes. As the account that runs `hive.sh` (UID 1000):
 
 ```bash
 # On each node: a dedicated account with no sudo rights.
@@ -605,6 +632,8 @@ For full node capabilities on an installer-owned single-host installation, run:
 ```
 
 The guided installer offers this after the host agent, whether or not Studio is selected.
+For unattended local commands, `--sudo-password-file FILE` accepts an operator-owned, owner-only
+file and sends its contents to sudo on standard input. Interactive commands use the sudo prompt.
 It prepares the host cron service, temporarily pauses the native owner's running Ardent profile
 units, and prints a review of initializer provenance, ownership, retained history, process trees,
 and the complete observed scheduler sources. Approval verifies all four live participants

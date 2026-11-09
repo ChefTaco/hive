@@ -29,7 +29,7 @@ cd hive
 ```
 
 Run the preparation commands from this checkout. `--release latest` resolves the published
-release once and runs its matching tagged controller; an exact `--release 2.3.0` selects that
+release once and runs its matching tagged controller; an exact `--release 2.4.0` selects that
 version instead. The launcher prints the version and retained checkout path, under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`. The signed release still pins the exact
 controller source. After setup, switch to the retained release checkout printed by the launcher
@@ -37,7 +37,7 @@ for later commands and certificate renewal timers. Keep that directory.
 
 ## Guided local setup
 
-With Hive 2.3.0 or later, run `./hive.sh --release latest` from the checkout for a fresh local installation. Interactive
+With Hive 2.4.0 or later, run `./hive.sh --release latest` from the checkout for a fresh local installation. Interactive
 setup offers to prepare this machine with Docker and the required tools, using sudo only after
 showing its changes and asking for consent. A new Docker group membership takes effect in a
 child shell, so no logout is needed. Setup then offers to create the installation directory.
@@ -146,7 +146,7 @@ questions. Press Enter to accept the default shown in brackets.
 | Deploy the Magnus web terminal gateway | `no`. For `yes`, first create the restricted account and key in [preparing nodes](FULL.md#preparing-nodes-and-the-gateway-key) |
 | Port for Magnus host agents | blank for none. Give a port, such as `4000`, to let hosts join the Magnus fleet; see [Magnus host agents](FULL.md#magnus-host-agents) |
 | Existing external inference HTTPS endpoint | blank to skip; see [external inference](INFERENCE.md) |
-| Native agent runtime | Release 2.3.0 skips this question because it pins no native runtime artifacts; the guided local setup offers a Magnus host agent after installation, as in [Magnus host agents](FULL.md#magnus-host-agents) |
+| Native agent runtime | Release 2.4.0 skips this question because it pins no native runtime artifacts; the guided local setup offers a Magnus host agent after installation, as in [Magnus host agents](FULL.md#magnus-host-agents) |
 | Write protected installation configuration to | the default, `~/.config/hive/hive/installation.json` |
 
 `hive.sh` then prints the plan: every product, image digest and host path. Answer `y` to apply
@@ -155,10 +155,10 @@ it. The first install pulls the images and takes a few minutes; later commands t
 If it stops after writing the configuration file, fix the cause and run `./hive.sh --release
 X.Y.Z` again, replacing `X.Y.Z` with the exact version it reported: after the installation name
 it offers to continue with the saved file instead of asking everything again. Use that exact version for retries and for planning then applying,
-so a new release cannot change the plan between commands. Unattended, for example with 2.3.0:
+so a new release cannot change the plan between commands. Unattended, for example with 2.4.0:
 
 ```bash
-./hive.sh install --config ~/.config/hive/hive/installation.json --release 2.3.0
+./hive.sh install --config ~/.config/hive/hive/installation.json --release 2.4.0
 ```
 
 After setup, change to the retained release checkout path printed by the launcher before
@@ -316,3 +316,8 @@ installation directory is owned by root:
 | `Requested HTTPS port is already occupied` | Something else listens on the port: `sudo ss -lntp 'sport = :443'`. Stop it or choose another port |
 | `Console certificate and private key do not match`, or `... is not valid for NAME` | Check the files with `./scripts/console-certificate.sh check --cert FILE --key FILE --name NAME` |
 | `Permission denied (publickey,password)`, or `Host control is not ready` | The controller's SSH key or host key is not accepted; see [Managing the host from another machine](#managing-the-host-from-another-machine) |
+
+For later upgrades, database schemas are checked separately from storage-format compatibility.
+If a check reports pending product migrations, review and apply with `--allow-migrations`;
+verification and migration run on restored copies before the live stores. See
+[Upgrading product schemas](FULL.md#upgrading-product-schemas).
