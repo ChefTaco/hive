@@ -266,6 +266,8 @@ client's deploy hook. Run these on the console host. Successful upgrades refresh
 existing matching Hive service automatically, preserving its renewal options and timer state. They
 do not create or enable a timer. Customized or unsafe service files remain unchanged and produce a
 review message; manage those through your existing service configuration.
+For unattended upgrades, this refresh uses the console host's configured owner-only
+`sudoPasswordFile`; otherwise it uses the account's normal sudo authorization.
 
 ## 10. Optional: add this host to the Magnus fleet
 

@@ -12,6 +12,7 @@ All notable changes to this project are documented in this file. The format is b
   to the verified controller checkout. Renewal options and timer state are retained; customized,
   unsafe or unrelated units are not replaced. The launcher can retain the new checkout without
   requiring a manual edit of the renewal service.
+  Unattended refresh honors the host's protected sudo-password file and sends its value only on stdin.
 - Pin Magnus server, gateway and native host agent 2.3.4. The corrected standalone agent lock
   allows clean native installation with lifecycle scripts disabled. The 2.3.3 lock used by
   Hive 2.4.1 was inconsistent; upgrades safely retained the previous native agent on failure.

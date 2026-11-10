@@ -124,7 +124,7 @@ hive_setup_finish() {
 # Rebind an existing local renewal service after a successful upgrade.
 # This does not create a timer, enable a disabled one, or change renewal options.
 hive_setup_refresh_certificate() {
-  local config=${HIVE_REGISTRY_ORIGINAL_CONFIG:-$HIVE_CONFIG} unit=${1:-/etc/systemd/system/hive-console-certificate.service} planned status overrides
+  local config=${HIVE_REGISTRY_ORIGINAL_CONFIG:-$HIVE_CONFIG} unit=${1:-/etc/systemd/system/hive-console-certificate.service} planned status overrides sudo_file=''
   [[ -e "$unit" || -L "$unit" ]] || return 0
   jq -e '.bootstrap!=null and .console!=null and .hosts[.console.host].target=="local"' "$config" >/dev/null || return 0
   if [[ $(hive_checkout_release) != "$HIVE_VERSION" ]]; then
@@ -142,7 +142,12 @@ hive_setup_refresh_certificate() {
   fi
   if planned=$(hive_certificate_service_plan "$unit" "$(realpath -- "$config")" "$(realpath -- "$HIVE_ROOT")"); then
     cmp -s "$unit" <(printf '%s\n' "$planned") && return 0
-    hive_setup_sudo bash "$HIVE_ROOT/scripts/console-certificate.sh" schedule --config "$config" --hive "$HIVE_ROOT" --refresh-existing
+    if [[ $(id -u) != 0 ]]; then sudo_file=$(hive_sudo_file "$(jq -r .console.host "$config")") || return 1; fi
+    if [[ -n "$sudo_file" ]]; then
+      { cat -- "$sudo_file"; printf '\n'; } | sudo -k -S -p '' bash "$HIVE_ROOT/scripts/console-certificate.sh" schedule --config "$config" --hive "$HIVE_ROOT" --refresh-existing
+    else
+      hive_setup_sudo bash "$HIVE_ROOT/scripts/console-certificate.sh" schedule --config "$config" --hive "$HIVE_ROOT" --refresh-existing
+    fi
   else
     status=$?
     [[ "$status" == 10 ]] || printf 'Hive: Existing certificate renewal service is customized or unsafe; it was retained. Review its controller path before the next renewal.\n' >&2
