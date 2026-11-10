@@ -101,6 +101,12 @@ jobs:
           for arch in amd64 arm64; do
             docker buildx build --load --platform "linux/$arch" "${args[@]}" -f "${{ matrix.file }}" -t "suite-image-check:$arch" "${{ matrix.context }}"
             docker run --rm --platform "linux/$arch" --read-only --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true --entrypoint "$(cut -d' ' -f1 <<< '${{ matrix.check }}')" "suite-image-check:$arch" $(cut -s -d' ' -f2- <<< '${{ matrix.check }}')
+            # New runtime images must also clear unfixed findings. Existing scoped
+            # upstream-SBOM exceptions remain visible and independently reviewed.
+            ignore=(); [[ ! -f "deployment/trivy/${{ matrix.image }}.trivyignore.yaml" ]] || ignore=(--ignorefile "/ignore/${{ matrix.image }}.trivyignore.yaml")
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/deployment/trivy:/ignore:ro" \
+              aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e image \
+              --image-src docker --platform "linux/$arch" --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "${ignore[@]}" "suite-image-check:$arch"
           done
       - name: Publish immutable image with provenance and SBOM
         id: build
