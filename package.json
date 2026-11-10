@@ -77,7 +77,7 @@
     "check:skills-install": "node scripts/check-skills-package.mjs",
     "release:manifest": "node scripts/release-manifest.mjs",
     "release:manifest:check": "node scripts/release-manifest.mjs --check",
-    "test:upgrades": "npm --prefix packages/hive-release test",
+    "test:upgrades": "node --test scripts/check-managed-install.test.mjs && npm --prefix packages/hive-release test",
     "check:upgrades": "node scripts/check-upgrade-install.mjs",
     "check:images": "node scripts/check-images.mjs",
     "check:compose-upgrades": "HIVE_UPGRADE_DRILL_COMPOSE=true node scripts/check-upgrade-install.mjs",

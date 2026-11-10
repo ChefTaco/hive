@@ -8,7 +8,7 @@ import { EnvDocument, writePrivateFile } from "../src/envfile.js";
 import { runInit } from "../src/init.js";
 import type { HivePaths } from "../src/paths.js";
 import { scriptedPrompter } from "../src/prompt.js";
-import { fakeQdrant, fakeRedis, freePort, installFakeServers, recordingOutput, tempHome } from "./helpers.js";
+import { fakeQdrant, fakeRedis, freePorts, installFakeServers, recordingOutput, tempHome } from "./helpers.js";
 
 const cli = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 const packageJson = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string; bin: Record<string, string> };
@@ -111,7 +111,8 @@ describe("hive start, status and doctor", () => {
   async function configured(withSkills = false): Promise<{ paths: HivePaths; cleanup: () => void }> {
     const home = tempHome();
     installFakeServers(home.paths, ["memory", "router", "iam", "skills"]);
-    const ports = { memory: await freePort(), iam: await freePort(), router: await freePort(), "router-admin": await freePort(), skills: await freePort() };
+    const [memory, iam, router, routerAdmin, skills] = await freePorts(5);
+    const ports = { memory: memory!, iam: iam!, router: router!, "router-admin": routerAdmin!, skills: skills! };
     await runInit({ paths: home.paths, output: recordingOutput(), prompter: scriptedPrompter([]), options: { services: withSkills ? ["memory", "router", "iam", "skills"] : ["memory", "router", "iam"], tls: withSkills, ports, dockerPrefix: "hive-test", qdrantUrl: qdrant.url, redisUrl: redis.url }, platform: "linux", username: "alice" });
     rmSync(`${home.paths.home}/events.log`, { force: true });
     return home;
