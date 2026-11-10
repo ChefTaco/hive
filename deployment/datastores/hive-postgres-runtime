@@ -22,10 +22,16 @@ if [[ ${1:-} == hive-pg-reconcile ]]; then
   if [[ -f "$marker" && $(cat "$marker") == "$expected" ]]; then echo 'PostgreSQL runtime already reconciled'; exit 0; fi
   temporary=$(mktemp -d /tmp/hive-reconcile.XXXXXXXX)
   started=false
+  template0_changed=false
   cleanup() {
     local status=$?
     trap - EXIT INT TERM
-    if [[ "$started" == true ]]; then pg_ctl -D "$PGDATA" -m fast -w -t 120 stop >/dev/null || status=1; fi
+    if [[ "$started" == true ]]; then
+      if [[ "$template0_changed" == true ]]; then
+        psql -Xq --dbname=postgres --set=ON_ERROR_STOP=1 -c 'ALTER DATABASE template0 ALLOW_CONNECTIONS false' >/dev/null || status=1
+      fi
+      pg_ctl -D "$PGDATA" -m fast -w -t 120 stop >/dev/null || status=1
+    fi
     rm -rf -- "$temporary"
     exit "$status"
   }
@@ -37,9 +43,16 @@ if [[ ${1:-} == hive-pg-reconcile ]]; then
   pg_ctl -D "$PGDATA" -o "-c listen_addresses='' -c unix_socket_directories='$temporary' -c port=5432" -l "$temporary/startup.log" -w -t 120 start >/dev/null || { cat "$temporary/startup.log" >&2; exit 1; }
   started=true
   unset PGHOSTADDR PGSERVICE PGSERVICEFILE PGDATABASE PGOPTIONS
-  export PGHOST="$temporary" PGPORT=5432 PGAPPNAME=hive-runtime-reconciliation
+  export PGHOST="$temporary" PGPORT=5432 PGAPPNAME=hive-runtime-reconciliation PGOPTIONS='-c client_min_messages=warning'
   blocked=$(psql -XqAt --dbname=postgres --set=ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_database WHERE NOT datallowconn AND datname <> 'template0'")
   [[ "$blocked" == 0 ]] || { echo 'A disabled database needs explicit reconciliation before this runtime can be admitted' >&2; exit 1; }
+  # template0 supplies the catalog for restores and later CREATE DATABASE calls.
+  # Reconcile it too, then restore its original connection-admission setting.
+  original_template0=$(psql -XqAt --dbname=postgres --set=ON_ERROR_STOP=1 -c "SELECT datallowconn FROM pg_database WHERE datname='template0'")
+  if [[ "$original_template0" == f ]]; then
+    template0_changed=true
+    psql -Xq --dbname=postgres --set=ON_ERROR_STOP=1 -c 'ALTER DATABASE template0 ALLOW_CONNECTIONS true' >/dev/null
+  fi
   psql -XqAt --record-separator-zero --dbname=postgres --set=ON_ERROR_STOP=1 -c 'SELECT datname FROM pg_database WHERE datallowconn ORDER BY datname' > "$temporary/databases"
   while IFS= read -r -d '' database; do
     uri="postgresql:///$(urlencode "$database")?host=$(urlencode "$temporary")"
@@ -53,12 +66,19 @@ SELECT format('ALTER COLLATION %I.%I REFRESH VERSION', n.nspname, c.collname)
 FROM pg_collation c JOIN pg_namespace n ON n.oid=c.collnamespace
 WHERE c.collversion IS NOT NULL AND c.collversion IS DISTINCT FROM pg_collation_actual_version(c.oid)
 \gexec
-ALTER DATABASE :"database_name" REFRESH COLLATION VERSION;
+SELECT format('ALTER DATABASE %I REFRESH COLLATION VERSION', datname)
+FROM pg_database WHERE datname=current_database() AND datcollversion IS NOT NULL
+  AND datcollversion IS DISTINCT FROM pg_database_collation_actual_version(oid)
+\gexec
 SQL
     fi
     remaining=$(psql -XqAt --dbname="$uri" --set=ON_ERROR_STOP=1 -c "SELECT ((SELECT count(*) FROM pg_database WHERE datname=current_database() AND datcollversion IS NOT NULL AND datcollversion IS DISTINCT FROM pg_database_collation_actual_version(oid)) + (SELECT count(*) FROM pg_collation WHERE collversion IS NOT NULL AND collversion IS DISTINCT FROM pg_collation_actual_version(oid)))")
     [[ "$remaining" == 0 ]] || { echo 'Collation verification failed after reindex' >&2; exit 1; }
   done < "$temporary/databases"
+  if [[ "$template0_changed" == true ]]; then
+    psql -Xq --dbname=postgres --set=ON_ERROR_STOP=1 -c 'ALTER DATABASE template0 ALLOW_CONNECTIONS false' >/dev/null
+    template0_changed=false
+  fi
   pg_ctl -D "$PGDATA" -m fast -w -t 120 stop >/dev/null
   started=false
   umask 077
