@@ -13,8 +13,8 @@ All notable changes to this project are documented in this file. The format is b
 - Pin Ardent Project Studio 0.1.1 with the published Magnus service contract and patched lint tooling.
 - Publish ingress 2.0.5 with Caddy 2.11.9 and its matching checksum-pinned base.
 
-- Refresh router dependencies, upgrade its console build to Vite 8 with React plugin 6,
-  and rebuild ingress from Caddy 2.11.9. Native install scripts stay explicitly versioned.
+- Refresh dependencies of the legacy Router workspace and its console build (Vite 8 and React
+  plugin 6). Native install scripts stay explicitly versioned.
 
 - Measure backup/recovery acceptance by phase and run it independently of Node verification.
   Presentation-only pull requests use a smaller real corpus; installer, shared, unknown, main
@@ -24,6 +24,16 @@ All notable changes to this project are documented in this file. The format is b
   coordinator stop fails the fixture instead of qualifying supervisor absence.
 - Synthetic recovery writers stop gracefully; client readiness replaces fixed sleeps, and
   ownership checks share one disposable sudo host with the recovery driver.
+
+### Security
+
+- All 18 pinned images passed the release scan on amd64 and arm64 with no fixable HIGH or
+  CRITICAL findings under the existing image-specific exception policy. Unfixed upstream
+  advisories remain: CVE-2023-2953, CVE-2023-45853, CVE-2025-69720, CVE-2026-119373,
+  CVE-2026-119374, CVE-2026-119379, CVE-2026-16742, CVE-2026-24882, CVE-2026-41992,
+  CVE-2026-53613, CVE-2026-53615, CVE-2026-54369, CVE-2026-6653, CVE-2026-74860, CVE-2026-76642,
+  CVE-2026-76844, CVE-2026-78408, CVE-2026-78409, CVE-2026-78410, CVE-2026-85091, CVE-2026-86138,
+  CVE-2026-86139, CVE-2026-86140, CVE-2026-86142, CVE-2026-86143, CVE-2026-86144, CVE-2026-9538.
 
 ### Next
 
