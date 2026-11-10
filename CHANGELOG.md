@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [3.0.2] - 2026-11-10
+
+### Security
+
+- Update HiveXUI to 0.2.6 with Alpine libxslt 1.1.43-r4 or newer, addressing CVE-2026-9947 and CVE-2026-87636. Both native image architectures now execute and pass an all-findings HIGH/CRITICAL scan before version publication. Keep package inventory and raw reports intact.
+
+### Upgrades
+
+- Include the corrected 3.0.1 controller: every storage migration receives isolated input, large SSH host programs stream separately from JSON, and a subsequent signed upgrade can recover an unchanged failed isolated rehearsal while preserving its evidence. Live schema journals and uncertain migration outcomes remain held.
+- Use 3.0.2 for full-stack upgrades. Version 3.0.0 could stop safely at its multi-PostgreSQL rehearsal; the 3.0.1 tag did not publish because its final image scan identified the libxslt findings. These earlier tags and signed bytes are retained unchanged.
+- Existing PostgreSQL stores still require `--allow-migrations`, a verified backup and an isolated rehearsal before reindexing and collation refresh. Code-only downgrade across the runtime transition is refused; see [upgrade and recovery guidance](UPGRADING.md).
+
 ## [3.0.1] - 2026-11-10
 
 ### Fixed
