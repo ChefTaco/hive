@@ -144,9 +144,22 @@ export async function fakeRedis(reply = "+PONG\r\n"): Promise<{ url: string; por
   return { url: `redis://127.0.0.1:${port}`, port, close: () => new Promise((resolve) => server.close(() => resolve())) };
 }
 
+/** Hold every listener until the whole service group has distinct port assignments. */
+export async function freePorts(count: number): Promise<number[]> {
+  const servers: ReturnType<typeof createNetServer>[] = [];
+  try {
+    const ports: number[] = [];
+    for (let index = 0; index < count; index++) {
+      const server = createNetServer();
+      servers.push(server);
+      ports.push(await listen(server));
+    }
+    return ports;
+  } finally {
+    await Promise.all(servers.map(server => new Promise<void>(resolve => server.close(() => resolve()))));
+  }
+}
+
 export async function freePort(): Promise<number> {
-  const server = createNetServer();
-  const port = await listen(server);
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  return port;
+  return (await freePorts(1))[0]!;
 }

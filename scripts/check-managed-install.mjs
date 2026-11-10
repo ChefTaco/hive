@@ -4,13 +4,18 @@ import { mkdirSync, openSync, closeSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { candidateRegistry } from './candidate-registry.mjs';
 
+/** Docker owns ephemeral publication; never reserve and release a port before setup. */
+export function mappedLoopbackPort(value) {
+  const match = typeof value === 'string' ? /^127\.0\.0\.1:([1-9][0-9]{0,4})$/.exec(value.trim()) : null;
+  assert(match && Number(match[1]) <= 65535, 'Expected one Docker-assigned loopback port');
+  return Number(match[1]);
+}
+
 /** Fresh packed launcher installation, using separate stores and no adopted state. */
 export async function freshManagedInstall({ work, packs, cli, env, runtime, run, port, version }) {
   const home = join(work, 'fresh-home');
   const project = `hive-fresh-${runtime.hash(home).slice(0, 8)}`;
   const isolated = { ...env, HIVE_HOME: home, NODE_EXTRA_CA_CERTS: join(home, 'tls/ca.crt') };
-  const qp = await port(),
-    rp = await port();
   let child;
   const registry = await candidateRegistry(packs, run);
   isolated.HIVE_UPDATE_REGISTRY = registry.registry;
@@ -22,7 +27,7 @@ export async function freshManagedInstall({ work, packs, cli, env, runtime, run,
       '--name',
       `${project}-qdrant`,
       '-p',
-      `127.0.0.1:${qp}:6333`,
+      '127.0.0.1::6333',
       'qdrant/qdrant:v1.18.1',
     ]);
     await run('docker', [
@@ -31,9 +36,11 @@ export async function freshManagedInstall({ work, packs, cli, env, runtime, run,
       '--name',
       `${project}-redis`,
       '-p',
-      `127.0.0.1:${rp}:6379`,
+      '127.0.0.1::6379',
       'redis:7.4.7-alpine',
     ]);
+    const qp = mappedLoopbackPort(await run('docker', ['port', `${project}-qdrant`, '6333/tcp']));
+    const rp = mappedLoopbackPort(await run('docker', ['port', `${project}-redis`, '6379/tcp']));
     for (let n = 0; n < 60; n++) {
       try {
         if ((await fetch(`http://127.0.0.1:${qp}/readyz`)).ok) break;

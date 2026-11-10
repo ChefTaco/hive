@@ -112,7 +112,14 @@ fi
   if (sudoHost) assert.equal(run('ssh', ['-F', sshConfig, username + '@identity.example.com', "sudo -k -S -p '' sh -c 'id -u; command -v docker'"], { input: readFileSync(process.env.HIVE_SUDO_PASSWORD_FILE), stdio: ['pipe', 'pipe', 'pipe'] }), '0\n' + join(output, 'bin/docker'));
   else assert.equal(run('ssh', ['-F', sshConfig, username + '@identity.example.com', 'command -v docker']), join(output, 'bin/docker'));
   let config = JSON.parse(readFileSync(join(root, 'examples/installation.json'), 'utf8'));
-  config.installation = id; if (selection) { config.profile='custom'; config.components=Object.fromEntries(Object.entries(config.components).filter(([name])=>selected(name))); } if (full) { config.profile = 'full'; for (const name of Object.keys(manifest.components)) if (!config.components[name] && (name !== 'magnus-gateway' || magnusGateway)) config.components[name] = { host: consoleHost, configDirectory: '/config/' + name, ...(/-(postgres|redis)$/.test(name) ? {} : { envFile: '/config/' + name + '.env' }) }; } config.origin = 'https://localhost:' + consolePort;
+  config.installation = id; if (selection) { config.profile='custom'; config.components=Object.fromEntries(Object.entries(config.components).filter(([name])=>selected(name))); } if (full) {
+    config.profile = 'full';
+    // Published manifests also offer optional products with their own placement
+    // requirements. A full-profile proof selects only that profile and explicit opt-ins.
+    const names = [...manifest.profiles.full, ...(magnusGateway ? ['magnus-gateway'] : [])];
+    for (const name of names) if (!config.components[name]) config.components[name] = { host: consoleHost, configDirectory: '/config/' + name, ...(/-(postgres|redis)$/.test(name) ? {} : { envFile: '/config/' + name + '.env' }) };
+    assert.deepEqual(Object.keys(config.components).sort(), [...new Set(names)].sort());
+  } config.origin = 'https://localhost:' + consolePort;
   config.hosts = Object.fromEntries(Object.entries(addresses).map(([host, directory]) => [host, { target: username + '@' + host + '.example.com', directory, sshConfig, ...(sudoHost ? { sudoPasswordFile: process.env.HIVE_SUDO_PASSWORD_FILE } : {}) }]));
   config.console = { host: consoleHost, bindAddress: '127.0.0.1', httpsPort: consolePort, runtimeFile: join(consoleDirectory, 'config/runtime.json') };
   for (const [name, placement] of Object.entries(config.components)) {
