@@ -6,6 +6,9 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+- Add an explicit reviewed datastore profile for patched Redis, Qdrant and PostgreSQL runtimes. Existing PostgreSQL stores require `--allow-migrations`, a verified pre-change backup and copy rehearsal before offline reindexing. Refuse code-only rollback across the collation runtime change; retain historical release pins and individual product selections.
+- Use the patched Node 26 image for backup and restore verification as well as product services. Verify datastore tags against signed manifest digests before publication.
+
 - Validate suite images on native amd64 and arm64 runners before publication, reuse their build caches, and require the full advisory scan before publishing a signed release. Run the Registry on the patched Node runtime.
 
 - Reconcile PostgreSQL template catalogs as well as ordinary databases so later database creation and restores inherit current ICU metadata. Restore the template connection-admission setting before finishing or recovering a failed migration.
