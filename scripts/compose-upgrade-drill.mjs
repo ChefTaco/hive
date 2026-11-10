@@ -11,6 +11,7 @@ import {
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { parseEnv } from 'node:util';
+import { stopFixtureProcess } from './fixture-process.mjs';
 
 /** Called only with a disposable synthetic installation from check-upgrade-install. */
 export async function composeDrill({
@@ -51,7 +52,7 @@ export async function composeDrill({
   await new Promise((r) => server.close(r));
   const registry = `hive-test-registry-${project.id.slice(0, 8)}`;
   const base = `127.0.0.1:${port}`;
-  let coordinator;
+  let coordinator, failed = false;
   const command = ['compose', '--project-directory', home, '-f', join(home, 'compose.yaml')];
   const future = join(work, 'future-packs');
   mkdirSync(future);
@@ -70,14 +71,13 @@ export async function composeDrill({
     coordinator = spawn(process.execPath, [cli, 'coordinator'], {
       cwd: home,
       env: { ...env, HIVE_INSTALL_FROM: future },
+      detached: true,
       stdio: ['ignore', fd, fd],
     });
     logs.closeSync(fd);
   }
   async function stopCoordinator() {
-    if (!coordinator || coordinator.exitCode !== null) return;
-    coordinator.kill('SIGTERM');
-    await new Promise((r) => coordinator.once('exit', r));
+    await stopFixtureProcess(coordinator, { group: true });
     await assert.rejects(
       runtime.coordinatorRequest(home, 'status'),
       'Coordinator must actually stop before the absence drill',
@@ -311,6 +311,7 @@ export async function composeDrill({
       }),
     );
   } catch (error) {
+    failed = true;
     // Diagnostics contain only this disposable fixture's state. Redact generated
     // credentials before exposing container logs in a public CI run.
     const secrets = Object.keys(services).flatMap((service) =>
@@ -320,6 +321,7 @@ export async function composeDrill({
     );
     const redact = (text) =>
       secrets.reduce((result, secret) => result.replaceAll(secret, '[redacted]'), text);
+    console.error('Synthetic Compose assertion failed:', redact(String(error)));
     try {
       console.error(
         'Synthetic coordinator log:',
@@ -341,7 +343,7 @@ export async function composeDrill({
           '--tail',
           '40',
           `hive-${project.id.slice(0, 8)}-${service}-1`,
-        ]);
+        ], { timeout: 10000, killSignal: 'SIGKILL' });
         let text = '';
         const append = (chunk) => {
           text = (text + chunk).slice(-12000);
@@ -355,8 +357,27 @@ export async function composeDrill({
     }
     throw error;
   } finally {
-    await run('docker', [...command, 'down', '--volumes', '--remove-orphans']).catch(() => {});
-    await stopCoordinator();
-    await run('docker', ['rm', '-fv', registry]).catch(() => {});
+    let cleanupFailed = false;
+    // Stop only this fixture's process group before Docker teardown. Keep a primary assertion
+    // visible even when a busy coordinator or Docker command cannot shut down normally.
+    await stopCoordinator().catch(() => {
+      cleanupFailed = true;
+      console.error('Synthetic coordinator cleanup failed');
+    });
+    await run('docker', [...command, 'down', '--volumes', '--remove-orphans'], {
+      timeout: 60000,
+      killSignal: 'SIGKILL',
+    }).catch(() => {
+      cleanupFailed = true;
+      console.error('Synthetic Compose cleanup failed');
+    });
+    await run('docker', ['rm', '-fv', registry], {
+      timeout: 15000,
+      killSignal: 'SIGKILL',
+    }).catch(() => {
+      cleanupFailed = true;
+      console.error('Synthetic registry cleanup failed');
+    });
+    if (cleanupFailed && !failed) throw new Error('Synthetic Compose cleanup did not finish safely');
   }
 }

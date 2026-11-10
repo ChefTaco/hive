@@ -12,6 +12,8 @@ All notable changes to this project are documented in this file. The format is b
   Presentation-only pull requests use a smaller real corpus; installer, shared, unknown, main
   and release changes retain the full corpus, with conservative fallback on classification failure.
   Both sizes retain ownership, failure recovery, rehearsals and both restore paths.
+- Synthetic Compose failure cleanup is bounded and retains the original assertion; a forced
+  coordinator stop fails the fixture instead of qualifying supervisor absence.
 - Synthetic recovery writers stop gracefully; client readiness replaces fixed sleeps, and
   ownership checks share one disposable sudo host with the recovery driver.
 

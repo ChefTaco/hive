@@ -35,10 +35,13 @@ browser integration remain enabled. The focused corpus changes only this recover
 
 Recovery has a separate runner and can overlap the existing verification jobs. This reduces the
 critical path, with an extra runner and image preparation; it does not eliminate recovery work.
+Fast regression tests remain in the canonical Node jobs instead of running a third copy in the
+recovery job; the latter runs the real ownership and recovery acceptance.
 The same disposable sudo host runs ownership and recovery checks, retaining a real password-
 requiring SSH/sudo transport and separate service UID/GID. A synthetic PID-1 shell writer handles
 TERM so stopping it does not consume the controller's kill timeout. Production stop timeouts are
-unchanged. Client readiness and post-backup recovery require observed successful responses rather
+unchanged. Synthetic Compose cleanup also has bounded coordinator and Docker shutdown; forced
+termination fails the fixture, and the original assertion is logged before cleanup. Client readiness and post-backup recovery require observed successful responses rather
 than fixed sleeps, and restored writers must demonstrably advance before the next restore.
 
 Container inspection is batched. Independent Redis, Qdrant and PostgreSQL inspection copies start

@@ -34,12 +34,6 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y jq openssl sqlite3 util-linux
       - name: Runner comparison metadata
         run: node --input-type=module -e 'import {arch,availableParallelism} from "node:os"; console.log(JSON.stringify({image:process.env.ImageOS,version:process.env.ImageVersion,arch:arch(),cpus:availableParallelism()}))'
-      - name: Backup/recovery regression contracts
-        run: |
-          node --test scripts/ci-recovery-scope.test.mjs scripts/suite/recovery-timing.test.mjs scripts/suite/recovery-client.test.mjs scripts/suite/snapshot-data.test.mjs
-          bash scripts/suite/snapshot-host.test.sh
-          bash scripts/suite/rehearsal-resources.test.sh
-          bash scripts/suite/local-sudo.test.sh
       - name: ${{ inputs.full != false && 'Installation-size' || 'Focused-corpus' }} backup, rehearsals, failure recovery and two restores through sudo
         if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.baseline) }}
         env:

@@ -105,6 +105,6 @@
     "release:suite": "node scripts/release/build-suite-manifest.mjs",
     "release:suite:check": "bash scripts/release/check-suite-release.sh",
     "test:terminal-host": "bash scripts/prepare-terminal.test.sh",
-    "test:ci": "node --test scripts/ci-recovery-scope.test.mjs scripts/suite/recovery-timing.test.mjs scripts/suite/recovery-client.test.mjs"
+    "test:ci": "node --test scripts/ci-recovery-scope.test.mjs scripts/suite/recovery-timing.test.mjs scripts/suite/recovery-client.test.mjs scripts/fixture-process.test.mjs"
   }
 }
