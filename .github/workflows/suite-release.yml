@@ -40,6 +40,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
+      native_matrix: ${{ steps.select.outputs.native_matrix }}
     steps:
       - uses: actions/checkout@v7
       - name: Select from deployment/images.json
@@ -55,10 +56,77 @@ jobs:
              | . + {check: (.check|join(" ")), buildArgs: ((.buildArgs // {})|to_entries|map(.key+"="+.value)|join("\n"))}]' deployment/images.json)
           [[ $(jq length <<< "$matrix") -gt 0 ]] || { echo "::error::No image in deployment/images.json matches $SELECTED"; exit 1; }
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          native_matrix=$(jq -c '[.[] as $image | [{arch:"amd64",runner:"ubuntu-24.04"},{arch:"arm64",runner:"ubuntu-24.04-arm"}][] | $image + .]' <<< "$matrix")
+          echo "native_matrix=$native_matrix" >> "$GITHUB_OUTPUT"
+
+  native:
+    name: Validate ${{ matrix.image }}:${{ matrix.version }} (${{ matrix.arch }})
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.native_matrix) }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE: ghcr.io/cheftaco/${{ matrix.image }}
+      VERSION: ${{ matrix.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Immutable tag
+        id: meta
+        run: |
+          if docker buildx imagetools inspect "$IMAGE:$VERSION" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build on the matching architecture
+        if: steps.meta.outputs.exists == 'false'
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: suite-image-check:${{ matrix.arch }}
+          build-args: ${{ matrix.buildArgs }}
+          cache-from: type=gha,scope=suite-${{ matrix.image }}-${{ matrix.version }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=suite-${{ matrix.image }}-${{ matrix.version }}-${{ matrix.arch }}
+      - name: Execute runtime, recovery and security checks
+        if: steps.meta.outputs.exists == 'false'
+        env:
+          BUILD_ARGS: ${{ matrix.buildArgs }}
+        run: |
+          arch="${{ matrix.arch }}"
+          docker run --rm --platform "linux/$arch" --read-only --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true --entrypoint "$(cut -d' ' -f1 <<< '${{ matrix.check }}')" "suite-image-check:$arch" $(cut -s -d' ' -f2- <<< '${{ matrix.check }}')
+          if [[ '${{ matrix.image }}' == hive-postgres ]]; then
+            baseline=; major=
+            while IFS= read -r line; do
+              case "$line" in POSTGRES_IMAGE=*) baseline=${line#POSTGRES_IMAGE=};; POSTGRES_MAJOR=*) major=${line#POSTGRES_MAJOR=};; esac
+            done <<< "$BUILD_ARGS"
+            [[ -n "$baseline" && -n "$major" ]] || { echo '::error::PostgreSQL recovery inputs are missing'; exit 1; }
+            python3 scripts/release/check-postgres-runtime.py --platform "linux/$arch" --major "$major" --baseline "$baseline" --candidate "suite-image-check:$arch"
+          fi
+          # New runtime images must also clear unfixed findings. Existing scoped
+          # upstream-SBOM exceptions remain visible and independently reviewed.
+          ignore=(); [[ ! -f "deployment/trivy/${{ matrix.image }}.trivyignore.yaml" ]] || ignore=(--ignorefile "/ignore/${{ matrix.image }}.trivyignore.yaml")
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/deployment/trivy:/ignore:ro" \
+            aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e image \
+            --image-src docker --platform "linux/$arch" --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "${ignore[@]}" "suite-image-check:$arch"
+
 
   images:
     name: Publish ${{ matrix.image }}:${{ matrix.version }}
-    needs: plan
+    needs: [plan, native]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -92,30 +160,6 @@ jobs:
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Build and execute each architecture before publication
-        if: steps.meta.outputs.exists == 'false'
-        env:
-          BUILD_ARGS: ${{ matrix.buildArgs }}
-        run: |
-          args=(); while IFS= read -r line; do [[ -n "$line" ]] && args+=(--build-arg "$line"); done <<< "$BUILD_ARGS"
-          for arch in amd64 arm64; do
-            docker buildx build --load --platform "linux/$arch" "${args[@]}" -f "${{ matrix.file }}" -t "suite-image-check:$arch" "${{ matrix.context }}"
-            docker run --rm --platform "linux/$arch" --read-only --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true --entrypoint "$(cut -d' ' -f1 <<< '${{ matrix.check }}')" "suite-image-check:$arch" $(cut -s -d' ' -f2- <<< '${{ matrix.check }}')
-            if [[ '${{ matrix.image }}' == hive-postgres ]]; then
-              baseline=; major=
-              while IFS= read -r line; do
-                case "$line" in POSTGRES_IMAGE=*) baseline=${line#POSTGRES_IMAGE=};; POSTGRES_MAJOR=*) major=${line#POSTGRES_MAJOR=};; esac
-              done <<< "$BUILD_ARGS"
-              [[ -n "$baseline" && -n "$major" ]] || { echo '::error::PostgreSQL recovery inputs are missing'; exit 1; }
-              python3 scripts/release/check-postgres-runtime.py --platform "linux/$arch" --major "$major" --baseline "$baseline" --candidate "suite-image-check:$arch"
-            fi
-            # New runtime images must also clear unfixed findings. Existing scoped
-            # upstream-SBOM exceptions remain visible and independently reviewed.
-            ignore=(); [[ ! -f "deployment/trivy/${{ matrix.image }}.trivyignore.yaml" ]] || ignore=(--ignorefile "/ignore/${{ matrix.image }}.trivyignore.yaml")
-            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/deployment/trivy:/ignore:ro" \
-              aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e image \
-              --image-src docker --platform "linux/$arch" --scanners vuln --severity HIGH,CRITICAL --exit-code 1 "${ignore[@]}" "suite-image-check:$arch"
-          done
       - name: Publish immutable image with provenance and SBOM
         id: build
         if: steps.meta.outputs.exists == 'false'
@@ -132,6 +176,9 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ env.VERSION }}
             org.opencontainers.image.licenses=Apache-2.0
+          cache-from: |
+            type=gha,scope=suite-${{ matrix.image }}-${{ matrix.version }}-amd64
+            type=gha,scope=suite-${{ matrix.image }}-${{ matrix.version }}-arm64
           provenance: mode=max
           sbom: true
       - uses: actions/attest-build-provenance@v4
@@ -182,6 +229,16 @@ jobs:
             [[ "$pinned" == "${tag%:*}@$published" ]] || { echo "::error::$component pins $pinned, but $tag is $published"; exit 1; }
             echo "$component: $tag = $published"
           done < <(jq -r '.products|to_entries[]|"\(.key) \(.value.image)"' "releases/$version.inputs.json")
+      - name: Require the full release security policy
+        env:
+          HIVE_IMAGE_SECURITY_MODE: all
+        run: bash scripts/release/scan-suite-images.sh "releases/${GITHUB_REF_NAME#v}.json" image-security-reports
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-image-security
+          path: image-security-reports
+          if-no-files-found: ignore
       - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

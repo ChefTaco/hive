@@ -43,6 +43,8 @@ packages. The first compatibility prototype used libxml2 2.13.9 without current 
 despite a clean scan. It was rejected. The replacement builds PostgreSQL 17.11
 and 18.6 from checksum-verified upstream source against libxml2 2.15.4 and ICU
 79.1. It preserves XML, XSLT, LDAP, GSSAPI, PAM, TLS and bundled core extensions.
+LLVM JIT is omitted from these images; ordinary SQL and core extensions remain available.
+Workloads depending on JIT acceleration require separate performance validation.
 Compilers, headers and Perl stay in the build stage. Existing legacy procedural
 language extensions require a separately reviewed migration and are refused.
 

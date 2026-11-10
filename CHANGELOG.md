@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+- Validate suite images on native amd64 and arm64 runners before publication, reuse their build caches, and require the full advisory scan before publishing a signed release. Run the Registry on the patched Node runtime.
+
 - Reconcile PostgreSQL template catalogs as well as ordinary databases so later database creation and restores inherit current ICU metadata. Restore the template connection-admission setting before finishing or recovering a failed migration.
 
 - Build PostgreSQL 17.11 and 18.6 against patched XML and locale libraries. Require explicit offline collation reconciliation for existing data, with authenticated private-socket execution, reindex-before-refresh and a durable runtime receipt. Publish only after ownership, failure, backup and restore checks on both architectures; installer adoption requires a separate declared storage-format migration.
