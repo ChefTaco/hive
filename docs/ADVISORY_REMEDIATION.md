@@ -7,9 +7,9 @@ Independent checks additionally found affected SQLite embedded inside Node 24
 and the latest better-sqlite3 package. Neither npm audit nor the image scanner
 reported those bundled copies. A clean scan alone is insufficient acceptance.
 
-## Hive 3.0.2 disposition
+## Hive 3.0.3 disposition
 
-The [signed release manifest](../releases/3.0.2.json) pins 18 distinct images.
+The [signed release manifest](../releases/3.0.3.json) pins 18 distinct images.
 All were checked on linux/amd64 and linux/arm64 with the full HIGH/CRITICAL policy,
 including findings without a published fix. None of the original 27 advisory
 identifiers, nor either newly reported libxslt identifier below, remains in the unfiltered reports. The gated reports contain zero
@@ -27,6 +27,11 @@ record the backports in 1.1.43-r4. Hive 3.0.2 retains the corrected controller a
 other reviewed product pins and selects HiveXUI 0.2.6 with that minimum revision.
 Existing full installations should use 3.0.2 or later; see
 [upgrade and recovery guidance](../UPGRADING.md).
+
+Hive 3.0.3 retains the patched datastore runtime and migration controller. It
+updates Magnus to 2.3.7 so managed Ardent can apply the patched whole package
+while preserving an earlier verified package checkpoint. No additional
+storage format or dependency exception is introduced.
 
 ## Runtime replacements
 
