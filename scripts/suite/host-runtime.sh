@@ -213,6 +213,47 @@ hive_archive_rehearsal_attempt() {
   mv -T -- "$restored" "$saved" || return 1
 }
 # End rehearsal resources.
+# A newer signed upgrade may replace a failed isolated rehearsal only when the
+# original live state is still exactly its verified pre-upgrade archive. Never
+# infer completion of a claimed/live migration or take custody of staged agents.
+hive_unchanged_failed_rehearsal() (
+  local previous restored archive backup file mode owner size day clock member metadata
+  local -a expected_paths=()
+  [[ $(jq -r .operation <<< "$input") == upgrade && $(phase) == recovery-required ]] || return 1
+  jq -e '.operation=="upgrade" and (.plan|test("^[a-f0-9]{64}$"))' "$transaction" >/dev/null || return 1
+  previous=$(jq -r .plan "$transaction")
+  [[ "$previous" != "$plan" ]] || return 1
+  upgrade_version_allowed "$(jq -r .version "$transaction")" "$version" || return 1
+  assert_stopped || return 1
+  [[ -z $(find "$directory/agents" "$directory/agent-profiles" -type f -print -quit 2>/dev/null) ]] || return 1
+  for restored in "$directory/rehearsals/"*; do
+    [[ -d "$restored" && ! -L "$restored" && -f "$restored/result.json" && ! -L "$restored/result.json" ]] || continue
+    archive=${restored##*/}
+    backup="$directory/backups/$archive"
+    [[ -f "$backup/receipt.json" && ! -L "$backup/receipt.json" ]] || continue
+    jq -e --arg plan "$previous" --arg uuid "$identity" --arg sha "$(jq -r .sha256 "$backup/receipt.json")" \
+      '.schema==1 and .result=="failed" and .isolated==true and .portsPublished==false and .candidatePlan==$plan and .installationUUID==$uuid and .archiveSHA256==$sha' "$restored/result.json" >/dev/null || continue
+    verify_archive || return 1
+    [[ $(tree_digest "$directory/data") == "$(jq -er .dataSHA256 "$backup/receipt.json")" && $(tree_digest "$directory/config") == "$(jq -er .configSHA256 "$backup/receipt.json")" ]] || return 1
+    for file in compose.json receipt.json data-formats.json; do
+      [[ -f "$directory/$file" && ! -L "$directory/$file" ]] || return 1
+      [[ $(digest "$directory/$file") == "$(tar -xOzf "$backup/state.tar.gz" "$file" | sha256sum | cut -d ' ' -f1)" ]] || return 1
+    done
+    # Compare archive modes/owners as well as bytes, allowing harmless rewrites
+    # of identical protected configuration without trusting modification times.
+    metadata=$(tar --numeric-owner -tvzf "$backup/state.tar.gz") || return 1
+    while read -r mode owner size day clock member; do
+      [[ "$member" != agents* && "$member" != agent-profiles* ]] || return 1
+      [[ $(stat -c '%A %u/%g' -- "$directory/$member") == "$mode $owner" ]] || return 1
+      case ${member%/} in data|data/*|config|config/*) expected_paths+=("${member%/}");; esac
+    done <<< "$metadata"
+    cmp -s <(printf '%s\0' "${expected_paths[@]}" | sort -z) <(cd "$directory" && find data config -print0 | sort -z) || return 1
+    jq -n --arg previous "$previous" --arg next "$plan" --arg archive "$archive" --arg sha "$(digest "$backup/state.tar.gz")" \
+      '{schema:1,previousPlan:$previous,nextPlan:$next,archive:$archive,archiveSHA256:$sha,liveStateUnchanged:true,failedIsolatedRehearsal:true}'
+    return 0
+  done
+  return 1
+)
 case "$action" in
   adapters-preflight) assert_transaction; adapter_preflight;;
   adapters-stage) assert_transaction; adapter_stage_agents;;
@@ -226,6 +267,16 @@ case "$action" in
         verify_archive; check_reconciliation
         cp -- "$transaction" "$directory/recovery-transaction.$(date -u +%Y%m%d%H%M%S).json"
         record prepared
+      elif recovery_proof=$(hive_unchanged_failed_rehearsal); then
+        previous_plan=$(jq -er .previousPlan <<< "$recovery_proof")
+        previous_record="$directory/recovery-transaction.$previous_plan.json"
+        [[ ! -L "$previous_record" ]] || die 'Previous recovery record cannot be a symlink'
+        if [[ -e "$previous_record" ]]; then
+          cmp -s -- "$transaction" "$previous_record" || die 'Previous recovery record differs'
+        else cp -p -- "$transaction" "$previous_record" || die 'Previous recovery transaction could not be retained'; fi
+        atomic_json "$directory/recovery-supersession.$plan.json" <<< "$recovery_proof" || die 'Recovery handoff proof could not be recorded'
+        record prepared
+        printf 'Hive host: unchanged live stores verified; retained failed rehearsal and continuing the newer signed upgrade\n'
       else assert_transaction; fi
     fi
     if [[ -f "$directory/receipt.json" && $(jq -r .version "$directory/receipt.json") != "$version" ]]; then
@@ -342,7 +393,7 @@ case "$action" in
         [[ $(jq -r .allowMigrations <<< "$input") == true ]] || die 'Migration execution requires --allow-migrations'
         record migration-started
         mapfile -t arguments < <(jq -r --arg name "$component" '.components[$name].migration.command[]' "$manifest")
-        docker compose -f "$directory/candidate.$plan.json" run --no-deps --rm -T "$component" "${arguments[@]}"
+        docker compose -f "$directory/candidate.$plan.json" run --no-deps --rm -T "$component" "${arguments[@]}" < /dev/null
         jq -n --arg name "$component" --arg format "$format" --slurpfile previous "$directory/data-formats.json" '$previous[0]+{($name):$format}' | atomic_json "$directory/data-formats.json"
         record migrated
       fi
@@ -494,7 +545,7 @@ case "$action" in
         if component_is_new "$component" "$from" "$rehearsal"; then continue; fi
         if [[ "$from" != "$target" && $(jq -r .operation <<< "$input") != rollback ]]; then
           mapfile -t arguments < <(jq -r --arg name "$component" '.components[$name].migration.command[]' "$directory/manifest.$plan.json")
-          if ((${#arguments[@]}==0)) || ! docker compose -f "$rehearsal/isolated.json" run --no-deps --rm -T "$component" "${arguments[@]}"; then result=failed; break; fi
+          if ((${#arguments[@]}==0)) || ! docker compose -f "$rehearsal/isolated.json" run --no-deps --rm -T "$component" "${arguments[@]}" < /dev/null; then result=failed; break; fi
         fi
       done < <(jq -r '.services|keys[]' "$rehearsal/isolated.json")
     fi
