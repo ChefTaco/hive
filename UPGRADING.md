@@ -16,7 +16,7 @@ JIT acceleration need separate performance validation.
 For an existing full installation, use the published release controller:
 
 ```bash
-./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.0.1 --allow-migrations
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.0.2 --allow-migrations
 ```
 
 The installer verifies a pre-change backup, rehearses the new runtime and migration
@@ -38,7 +38,7 @@ postinstall download or manual rebuild.
 
 ### Retrying a failed 3.0.0 full-stack rehearsal
 
-Use 3.0.1 or later for an existing full installation. Version 3.0.0 could reconcile
+Use 3.0.2 or later for an existing full installation. Version 3.0.0 could reconcile
 only the first PostgreSQL store when a migration subprocess consumed the controller's
 component list. The remaining stores refused startup, and the isolated rehearsal
 held activation before live migration. Fresh installations do not use that transition.

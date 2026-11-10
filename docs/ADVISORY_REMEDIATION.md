@@ -7,20 +7,26 @@ Independent checks additionally found affected SQLite embedded inside Node 24
 and the latest better-sqlite3 package. Neither npm audit nor the image scanner
 reported those bundled copies. A clean scan alone is insufficient acceptance.
 
-## Hive 3.0.0 disposition
+## Hive 3.0.2 disposition
 
-The [signed release manifest](../releases/3.0.0.json) pins 18 distinct images.
+The [signed release manifest](../releases/3.0.2.json) pins 18 distinct images.
 All were checked on linux/amd64 and linux/arm64 with the full HIGH/CRITICAL policy,
 including findings without a published fix. None of the original 27 advisory
-identifiers remains in the unfiltered reports. The gated reports contain zero
+identifiers, nor either newly reported libxslt identifier below, remains in the unfiltered reports. The gated reports contain zero
 HIGH/CRITICAL findings; the two existing Qdrant workspace-SBOM exceptions below
 remain scoped and were not expanded. Application SQLite was executed separately
 because image and npm scanners did not identify the affected embedded copies.
 
-Hive 3.0.1 retains every reviewed 3.0.0 product and image pin and corrects the
-controller's multi-store migration enumeration and guarded retry after an unchanged
-failed isolated rehearsal. Existing full installations should use 3.0.1 or later;
-see [upgrade and recovery guidance](../UPGRADING.md).
+The 3.0.1 controller corrects multi-store migration enumeration, large SSH program
+transport and guarded retry after an unchanged failed isolated rehearsal. Its tag
+did not publish a release: the final scan identified CVE-2026-9947 and
+CVE-2026-87636 in the unchanged HiveXUI 0.2.5 image's libxslt 1.1.43-r3.
+Alpine's [security database](https://secdb.alpinelinux.org/v3.24/main.json) and
+[package source](https://gitlab.alpinelinux.org/alpine/aports/-/raw/3.24-stable/main/libxslt/APKBUILD)
+record the backports in 1.1.43-r4. Hive 3.0.2 retains the corrected controller and
+other reviewed product pins and selects HiveXUI 0.2.6 with that minimum revision.
+Existing full installations should use 3.0.2 or later; see
+[upgrade and recovery guidance](../UPGRADING.md).
 
 ## Runtime replacements
 
@@ -132,6 +138,7 @@ package names and scanner silence are insufficient.
 
 | Family | Advisory identifiers | Remediation |
 |---|---|---|
+| libxslt | CVE-2026-9947, CVE-2026-87636 | Require Alpine 1.1.43-r4 or newer in HiveXUI 0.2.6; verify vendor backports and execute/scan both native images before publication. |
 | OpenLDAP | CVE-2023-2953 | Replace old client libraries with maintained compatible libraries; execute database backup clients. |
 | zlib | CVE-2023-45853, CVE-2026-76844, CVE-2026-85091 | Use patched runtime libraries. Debian notes the first finding concerns MiniZip code absent from older zlib binary packages; retain that distinction in evidence. |
 | ncurses | CVE-2025-69720 | Remove unused terminal utilities; use patched libraries for tools that need them. |
