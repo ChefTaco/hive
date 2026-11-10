@@ -16,7 +16,7 @@ JIT acceleration need separate performance validation.
 For an existing full installation, use the published release controller:
 
 ```bash
-./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.0.2 --allow-migrations
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.0.3 --allow-migrations
 ```
 
 The installer verifies a pre-change backup, rehearses the new runtime and migration
@@ -35,6 +35,16 @@ Ardent 3.0 changes its low-level SQLite handle; integrations using driver-specif
 methods must adapt. HTTP/CLI contracts remain compatible. The new driver packages
 Linux x64/arm64 Node-API binaries, so native installs need no database compiler,
 postinstall download or manual rebuild.
+
+When upgrading from 3.0.2 to 3.0.3, omit `--allow-migrations`: the PostgreSQL
+runtime and storage formats are unchanged. For an existing native Magnus node,
+run the signed release's `hive.sh magnus-agent enroll` with the same installation
+configuration. This upgrades the agent and stages the verified Ardent package
+while retaining the node identity. In **Magnus → Ardent → Installations**, stop
+running profiles, choose **Update package**, then start the profiles again.
+Magnus 2.3.7 retains verified older package checkpoints automatically. Preserve
+any checkpoint it refuses to verify and use the recovery guidance rather than
+removing it by hand.
 
 ### Retrying a failed 3.0.0 full-stack rehearsal
 

@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [3.0.3] - 2026-11-10
+
+### Fixed
+
+- Update Magnus to 2.3.7 so successive managed Ardent package updates retain verified older checkpoints instead of blocking at an existing `ardent.previous` directory. The agent refuses unsafe or uncertain state and restores the prior package paths on a failed promotion.
+- Preserve the 3.0.2 migration controller, datastore formats and other product pins. An existing 3.0.2 installation does not repeat the PostgreSQL runtime migration when upgrading to 3.0.3.
+
 ## [3.0.2] - 2026-11-10
 
 ### Security
