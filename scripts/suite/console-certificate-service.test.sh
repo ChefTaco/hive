@@ -44,7 +44,7 @@ mkdir "$work/bin"
 stat_binary=$(command -v stat)
 cat > "$work/bin/stat" <<EOF
 #!/usr/bin/env bash
-if [[ \$1 == -c && \$2 == %u ]]; then echo 0; else exec "$stat_binary" "\$@"; fi
+if [[ \$1 == -c && \$2 == %u && \$3 == "$unit" ]]; then echo 0; else exec "$stat_binary" "\$@"; fi
 EOF
 cat > "$work/bin/systemctl" <<EOF
 #!/usr/bin/env bash
@@ -54,6 +54,7 @@ chmod +x "$work/bin/"*
 printf 'normal\n' > "$work/systemctl-mode"
 (
   export PATH="$work/bin:$PATH"
+  source "$ROOT/scripts/suite/controller.sh"
   source "$ROOT/scripts/suite/guided-setup.sh"
   HIVE_ROOT=$ROOT HIVE_CONFIG=$config HIVE_VERSION=2.4.2
   unset HIVE_REGISTRY_ORIGINAL_CONFIG
@@ -80,5 +81,25 @@ printf 'normal\n' > "$work/systemctl-mode"
   hive_certificate_service_text "$ROOT" "$config" ' --owner deploy' > "$unit"
   hive_setup_refresh_certificate "$unit"
   [[ ! -e "$work/sudo.log" ]] || fail 'repeat requested sudo'
+  # The configured credential is validated by the real transport helper and sent
+  # on stdin, so unattended upgrades do not fall back to a terminal prompt.
+  hive_certificate_service_text "$old" "$config" ' --owner deploy' > "$unit"
+  printf 'obviously-fake-sudo-password\n' > "$work/password"; chmod 0600 "$work/password"
+  jq --arg file "$work/password" '.hosts.control.sudoPasswordFile=$file' "$config" > "$work/config.new"; mv "$work/config.new" "$config"
+  cat > "$work/bin/sudo" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+IFS= read -r password
+[[ \$password == obviously-fake-sudo-password ]]
+printf '%s\\n' "\$*" >> "$work/sudo.log"
+EOF
+  chmod +x "$work/bin/sudo"
+  hive_setup_refresh_certificate "$unit"
+  grep -qF -- '-k -S -p' "$work/sudo.log" || fail 'configured sudo file was not used'
+  ! grep -qF 'obviously-fake-sudo-password' "$work/sudo.log" || fail 'password entered arguments'
+  rm "$work/sudo.log"
+  chmod 0644 "$work/password"
+  ( hive_setup_refresh_certificate "$unit" ) > "$work/unsafe" 2>&1 && fail 'group-readable sudo credential was accepted'
+  [[ ! -e "$work/sudo.log" ]] || fail 'unsafe credential reached sudo'
 )
 printf 'Passed: legacy service rebind, both renewal modes, repeat no-op, isolation, customizations, ownership, modes and symlink refusal.\n'
