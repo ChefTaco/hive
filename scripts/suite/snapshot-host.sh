@@ -189,8 +189,9 @@ snapshot_postgres_capture() {
   container=$(snapshot_id "$service")
   user=$(snapshot_service "$service" '.services[$name].environment.POSTGRES_USER // "postgres"')
   [[ "$user" =~ ^[a-z_][a-z0-9_]{0,62}$ && $(snapshot_service "$service" '.services[$name].environment.PGDATA') == /data/pgdata ]] || die "PostgreSQL layout differs: $service"
-  # A physical base backup over the local socket, with the WAL it needs streamed beside it.
-  timeout 3600 docker exec "$container" pg_basebackup -h /var/run/postgresql -U "$user" -D "/data/.hive-snapshot-$archive" \
+  # Use this image's compiled-in Unix socket location, with streamed WAL.
+  # Clear libpq routing overrides so no host, address or service can select TCP.
+  timeout 3600 docker exec "$container" env -u PGHOST -u PGHOSTADDR -u PGSERVICE -u PGSERVICEFILE pg_basebackup -U "$user" -D "/data/.hive-snapshot-$archive" \
     -X stream --checkpoint=fast --no-password >/dev/null || die "PostgreSQL base backup failed: $service"
   jq -nc --arg at "$(date -u +%FT%T.%3NZ)" '{method:"pg_basebackup",capturedAt:$at}' > "$snapshot_staging/work/$service/store.json"
 }
@@ -350,7 +351,7 @@ snapshot_postgres_verify() {
   name=$(snapshot_temporary --user "$user" --tmpfs "/var/run/postgresql:uid=${user%:*},gid=${user#*:},mode=700" -e PGDATA=/data/pgdata \
     --mount "type=bind,source=$snapshot_staging/data/$service,target=/data" "$image")
   for attempt in $(seq 1 180); do
-    databases=$(docker exec "$name" psql -h /var/run/postgresql -U "$owner" -d postgres -Atc "SELECT json_agg(json_build_object('name',datname,'bytes',pg_database_size(datname)) ORDER BY datname) FROM pg_database WHERE NOT datistemplate AND NOT pg_is_in_recovery()" 2>/dev/null) && [[ "$databases" == '['* ]] && break
+    databases=$(docker exec "$name" env -u PGHOST -u PGHOSTADDR -u PGSERVICE -u PGSERVICEFILE psql -U "$owner" -d postgres -Atc "SELECT json_agg(json_build_object('name',datname,'bytes',pg_database_size(datname)) ORDER BY datname) FROM pg_database WHERE NOT datistemplate AND NOT pg_is_in_recovery()" 2>/dev/null) && [[ "$databases" == '['* ]] && break
     databases=''; sleep 1
   done
   [[ -n "$databases" ]] || die "PostgreSQL base backup did not recover: $service"
