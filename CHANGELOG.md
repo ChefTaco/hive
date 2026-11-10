@@ -4,6 +4,27 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.4.2] - 2026-11-10
+
+### Fixed
+
+- Successful upgrades refresh an existing local Hive certificate-renewal service
+  to the verified controller checkout. Renewal options and timer state are retained; customized,
+  unsafe or unrelated units are not replaced. The launcher can retain the new checkout without
+  requiring a manual edit of the renewal service.
+- Pin Magnus server, gateway and native host agent 2.3.4. The corrected standalone agent lock
+  allows clean native installation with lifecycle scripts disabled. The 2.3.3 lock used by
+  Hive 2.4.1 was inconsistent; upgrades safely retained the previous native agent on failure.
+- Magnus now checks a clean installation of its actual packed agent before publication and
+  on both supported Node versions, including a regression for development dependencies that
+  remain validated when omitted from the installed runtime.
+
+### Security
+
+- All 18 pinned images passed on amd64 and arm64 with zero fixable HIGH/CRITICAL findings
+  under the existing image-specific exception policy; no new exceptions were added. Unfixed
+  upstream advisories remain: CVE-2023-2953, CVE-2023-45853, CVE-2025-69720, CVE-2026-119373, CVE-2026-119374, CVE-2026-119379, CVE-2026-16742, CVE-2026-24882, CVE-2026-41992, CVE-2026-53613, CVE-2026-53615, CVE-2026-54369, CVE-2026-6653, CVE-2026-74860, CVE-2026-76642, CVE-2026-76844, CVE-2026-78408, CVE-2026-78409, CVE-2026-78410, CVE-2026-85091, CVE-2026-86138, CVE-2026-86139, CVE-2026-86140, CVE-2026-86142, CVE-2026-86143, CVE-2026-86144, CVE-2026-9538.
+
 ## [2.4.1] - 2026-11-10
 
 ### Changed
