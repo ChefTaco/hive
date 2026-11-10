@@ -35,6 +35,7 @@ for profile in core full; do
 done
 
 if [[ "${2:-}" == --registry ]]; then
+  node "$root/scripts/release/build-suite-manifest.mjs" --version "$version" --check --resolve-tags --inputs "$inputs" --output "$manifest"
   buildx=(docker buildx); docker buildx version >/dev/null 2>&1 || buildx=("${DOCKER_BUILDX:-/usr/libexec/docker/cli-plugins/docker-buildx}")
   while IFS= read -r image; do
     "${buildx[@]}" imagetools inspect "$image" --format '{{json .Manifest.Digest}}' >/dev/null || { echo "Not resolvable: $image" >&2; exit 1; }

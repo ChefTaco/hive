@@ -16,6 +16,59 @@ export const DATASTORE_IMAGES = Object.freeze({
 });
 export const DATASTORE_VERSIONS = Object.freeze({ redis: '8.2.10', qdrant: '1.18.3', postgres17: '17.11', postgres18: '18.6' });
 
+// Historical releases retain their original default pins. New releases explicitly select
+// this reviewed tag set; the manifest builder resolves and verifies both architectures.
+export const DATASTORE_RELEASE_PROFILES = Object.freeze({
+  'runtime-2026-11': Object.freeze({
+    redis: { image: 'ghcr.io/cheftaco/hive-redis:8.2.10-2', version: '8.2.10' },
+    qdrant: { image: 'ghcr.io/cheftaco/hive-qdrant:1.18.3-3', version: '1.18.3' },
+    postgres17: { image: 'ghcr.io/cheftaco/hive-postgres:17.11-3', version: '17.11' },
+    postgres18: { image: 'ghcr.io/cheftaco/hive-postgres:18.6-3', version: '18.6' },
+  }),
+});
+const DATASTORE_COMPONENTS = Object.freeze({
+  redis: ['oathweave-redis', 'magnus-redis', 'cindertrace-redis'],
+  qdrant: ['hivemem-qdrant'],
+  postgres17: ['magnus-postgres', 'chattermost-postgres'],
+  postgres18: ['cindertrace-postgres'],
+});
+export function datastoreProfileReferences(profile) {
+  if (profile === undefined) return {};
+  if (typeof profile !== 'string' || !Object.hasOwn(DATASTORE_RELEASE_PROFILES, profile)) {
+    throw new Error('Unknown reviewed datastore profile');
+  }
+  return Object.fromEntries(Object.entries(DATASTORE_RELEASE_PROFILES[profile]).map(([name, spec]) => [
+    'datastore:' + name, { ...spec, platforms: ['linux/amd64', 'linux/arm64'] },
+  ]));
+}
+export function datastoreProfileComponent(reference) {
+  const name = reference.replace(/^datastore:/, '');
+  if (!reference.startsWith('datastore:') || !Object.hasOwn(DATASTORE_COMPONENTS, name)) {
+    throw new Error('Unknown datastore reference');
+  }
+  return DATASTORE_COMPONENTS[name][0];
+}
+export function applyDatastoreProfile(manifest, profile, pinned) {
+  for (const reference of Object.keys(datastoreProfileReferences(profile))) {
+    const name = reference.slice('datastore:'.length);
+    const image = pinned[reference];
+    if (typeof image !== 'string' || !/^[a-z0-9./-]+@sha256:[a-f0-9]{64}$/.test(image)) {
+      throw new Error('The reviewed datastore profile requires every exact image digest');
+    }
+    for (const component of DATASTORE_COMPONENTS[name]) {
+      const target = manifest.components[component];
+      if (!target) continue;
+      target.image = image;
+      if (name.startsWith('postgres')) {
+        const from = target.storageFormat;
+        target.storageFormat = from + '-runtime2';
+        target.readableFormats = [target.storageFormat];
+        target.migration = { from, command: ['hive-pg-reconcile'] };
+      }
+    }
+  }
+}
+
 // Product images each profile needs. chat-migrator is ChatterMost's initialization image.
 export const CORE_PRODUCTS = Object.freeze(['hive-registry', 'oathweave', 'emberpath', 'hivemem', 'hiveskills', 'hivexui', 'ingress']);
 export const FULL_PRODUCTS = Object.freeze(['magnus', 'cindertrace', 'chattermost', 'chat-migrator', 'emberfold', 'magnus-gateway']);
