@@ -19,6 +19,12 @@ All notable changes to this project are documented in this file. The format is b
   on both supported Node versions, including a regression for development dependencies that
   remain validated when omitted from the installed runtime.
 
+### Security
+
+- All 18 pinned images passed on amd64 and arm64 with zero fixable HIGH/CRITICAL findings
+  under the existing image-specific exception policy; no new exceptions were added. Unfixed
+  upstream advisories remain: CVE-2023-2953, CVE-2023-45853, CVE-2025-69720, CVE-2026-119373, CVE-2026-119374, CVE-2026-119379, CVE-2026-16742, CVE-2026-24882, CVE-2026-41992, CVE-2026-53613, CVE-2026-53615, CVE-2026-54369, CVE-2026-6653, CVE-2026-74860, CVE-2026-76642, CVE-2026-76844, CVE-2026-78408, CVE-2026-78409, CVE-2026-78410, CVE-2026-85091, CVE-2026-86138, CVE-2026-86139, CVE-2026-86140, CVE-2026-86142, CVE-2026-86143, CVE-2026-86144, CVE-2026-9538.
+
 ## [2.4.1] - 2026-11-10
 
 ### Changed
