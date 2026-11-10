@@ -37,6 +37,7 @@ jobs:
 
   verify:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -45,7 +46,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Configure bounded authenticated package downloads
+        run: sudo env GITHUB_ACTIONS=true bash scripts/ci-apt-setup.sh
+
       - name: Install repository check tools
+        timeout-minutes: 10
         run: sudo apt-get update -qq && sudo apt-get install -y ripgrep redis-server
 
       - name: Setup Node
@@ -183,6 +188,7 @@ jobs:
         run: npm run check:npm12
 
       - name: Install browser
+        timeout-minutes: 10
         run: npx playwright install --with-deps chromium
         working-directory: services/hive-router
 
@@ -213,6 +219,8 @@ jobs:
       HIVE_IMAGE_TEST_PLATFORM: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v7
+      - name: Configure bounded authenticated package downloads
+        run: sudo env GITHUB_ACTIONS=true bash scripts/ci-apt-setup.sh
       - uses: actions/setup-node@v7
         with:
           node-version: 24.22.1
@@ -239,6 +247,8 @@ jobs:
         node: ['24.22.1', '26.13.0']
     steps:
       - uses: actions/checkout@v7
+      - name: Configure bounded authenticated package downloads
+        run: sudo env GITHUB_ACTIONS=true bash scripts/ci-apt-setup.sh
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}

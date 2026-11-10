@@ -24,6 +24,8 @@ All notable changes to this project are documented in this file. The format is b
   coordinator stop fails the fixture instead of qualifying supervisor absence.
 - Synthetic recovery writers stop gracefully; client readiness replaces fixed sleeps, and
   ownership checks share one disposable sudo host with the recovery driver.
+- CI package setup uses authenticated HTTPS sources, bounded retries and download inactivity
+  deadlines. Failed fixture builds expose package diagnostics; browser setup has a bounded deadline.
 
 ### Fixed
 
