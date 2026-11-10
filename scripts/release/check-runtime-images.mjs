@@ -21,6 +21,7 @@ async function ready(fn) {
 try {
   // This is the exact flock interface used for HiveMem single-writer protection.
   const script = `const {spawn,execFileSync}=require('node:child_process');
+    const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(':memory:');const v=db.prepare('select sqlite_version() v').get().v.split('.').map(Number);if(v[0]<3||(v[0]===3&&v[1]<54))throw Error('Unpatched embedded SQLite');db.close();
     const fs=require('node:fs');fs.writeFileSync('/tmp/state','fixture');
     execFileSync('flock',['--version']);
     const child=spawn('flock',['--exclusive','--nonblock','/tmp/writer.lock','sh','-c','printf ready; cat >/dev/null'],{stdio:['pipe','pipe','inherit']});

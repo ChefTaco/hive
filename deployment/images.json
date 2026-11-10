@@ -76,7 +76,7 @@
     },
     {
       "image": "hive-node-runtime",
-      "version": "24.22.2-1",
+      "version": "26.13.0-1",
       "context": "deployment/runtime",
       "file": "deployment/runtime/node.Dockerfile",
       "check": [

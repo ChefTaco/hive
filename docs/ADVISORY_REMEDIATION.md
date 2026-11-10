@@ -1,21 +1,25 @@
 # Runtime advisory remediation
 
 The Hive 2.4.2 image review recorded 27 unique HIGH/CRITICAL advisory identifiers
-without fixes in their installed Debian suites. These are OS packages, not npm
-findings. An `npm audit --omit=dev` recheck of the nine affected application
-repositories reported zero vulnerabilities. Replacing JavaScript libraries does
-not remove vulnerable OS code.
+without fixes in their installed Debian suites. The original scanner findings are OS packages. An `npm audit --omit=dev`
+recheck of the nine affected application repositories reported zero vulnerabilities.
+Independent checks additionally found affected SQLite embedded inside Node 24
+and the latest better-sqlite3 package. Neither npm audit nor the image scanner
+reported those bundled copies. A clean scan alone is insufficient acceptance.
 
 ## Runtime replacements
 
 Use a minimal glibc runtime with patched, inventoried distribution packages for
 Node services. `deployment/runtime/node.Dockerfile` pins the Wolfi base by digest
-and Node 24.22.2 by package revision. It supplies OpenSSL 3 compatibility libraries
+and Node 26.13.0 by package revision. It supplies OpenSSL 3 compatibility libraries
 for native addons and the GNU `flock` command used for single-writer protection.
 It retains package metadata. Production products copy only their built artifacts
 and install their specific runtime tools; compilers and npm remain in build stages.
 
-Wolfi uses glibc, so this change preserves the native-module ABI family. Alpine's
+Wolfi uses glibc, preserving the C library family. Node 26 changes the Node
+module ABI; addons must be rebuilt for that major or use stable Node-API prebuilts.
+The base build and runtime acceptance check execute Node's embedded SQLite and
+refuse versions older than 3.54.0, independently of scanner coverage. Alpine's
 musl Node builds require different native artifacts and have weaker upstream Node
 architecture support. They are not interchangeable with existing glibc builds.
 Native addons still require execution tests on amd64 and arm64; a version command
@@ -36,7 +40,10 @@ Changing glibc or ICU can change collation behavior even when the PostgreSQL maj
 and binary are unchanged. XML, LDAP, OpenSSL, locale and extension dependencies
 also need their real compatible library interfaces, not just similarly named
 packages. The initial replacement prototype is deliberately excluded from
-`deployment/images.json` until this proof passes.
+`deployment/images.json` until this proof passes. Its compatibility libxml2 2.13.9
+had no current security backports despite a clean image scan. It is rejected;
+the replacement must link a patched libxml2 (2.15.4 or later), rather than keep
+an older ABI merely to reuse upstream binaries.
 
 The acceptable paths are either a compatible, maintained PostgreSQL runtime with
 explicit collation reconciliation before admission, or a staged logical migration
@@ -47,6 +54,13 @@ for rollback. The installer must orchestrate that path; an operator should not
 need manual SQL or a hidden volume replacement. Never refresh collation version
 metadata without rebuilding affected indexes first. Do not downgrade PostgreSQL
 to obtain a cleaner scanner result.
+
+The distribution's zlib version sorts below 1.4, so a numeric floor alone would
+incorrectly reject it. Its pinned source commit
+`767c4c947852e143f582c85f14cf573411df1b35` descends from the upstream fix
+`df84af25dc1942490e1d1c899a07619152a46148` for CVE-2026-76844 and
+CVE-2026-85091. Preserve source provenance when accepting such backports;
+package names and scanner silence are insufficient.
 
 ## Advisory disposition by dependency family
 
