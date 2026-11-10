@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# The runtime is deliberately non-root. Reconciliation runs only against a private
+# Unix socket, before ordinary service admission and after the installer's backup.
+source /usr/local/bin/docker-entrypoint.sh
+docker_setup_env
+export PGUSER="$POSTGRES_USER" PGPASSWORD="$POSTGRES_PASSWORD"
+marker="$PGDATA/.hive-runtime-collation"
+expected=$(cat /usr/share/hive/postgres-runtime-id)
+[[ "$expected" =~ ^[a-f0-9]{64}$ && ! -L "$marker" ]] || { echo 'Unsafe runtime receipt' >&2; exit 1; }
+urlencode() {
+  local input=$1 result='' char hex index
+  local LC_ALL=C
+  for ((index=0; index<${#input}; index++)); do
+    char=${input:index:1}
+    case "$char" in [a-zA-Z0-9.~_-]) result+=$char;; *) printf -v hex '%%%02X' "'$char"; result+=$hex;; esac
+  done
+  printf '%s' "$result"
+}
+if [[ ${1:-} == hive-pg-reconcile ]]; then
+  [[ $(id -u) != 0 && -s "$PGDATA/PG_VERSION" && $(cat "$PGDATA/PG_VERSION") == "$PG_MAJOR" ]] || { echo 'Reconciliation requires the existing PostgreSQL major and its non-root owner' >&2; exit 1; }
+  if [[ -f "$marker" && $(cat "$marker") == "$expected" ]]; then echo 'PostgreSQL runtime already reconciled'; exit 0; fi
+  temporary=$(mktemp -d /tmp/hive-reconcile.XXXXXXXX)
+  started=false
+  cleanup() {
+    local status=$?
+    trap - EXIT INT TERM
+    if [[ "$started" == true ]]; then pg_ctl -D "$PGDATA" -m fast -w -t 120 stop >/dev/null || status=1; fi
+    rm -rf -- "$temporary"
+    exit "$status"
+  }
+  trap cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  # No TCP listener; this private socket has mode 0700. Reuse existing HBA and
+  # credentials. Authentication failure never enables trust or changes roles.
+  pg_ctl -D "$PGDATA" -o "-c listen_addresses='' -c unix_socket_directories='$temporary' -c port=5432" -l "$temporary/startup.log" -w -t 120 start >/dev/null || { cat "$temporary/startup.log" >&2; exit 1; }
+  started=true
+  unset PGHOSTADDR PGSERVICE PGSERVICEFILE PGDATABASE PGOPTIONS
+  export PGHOST="$temporary" PGPORT=5432 PGAPPNAME=hive-runtime-reconciliation
+  blocked=$(psql -XqAt --dbname=postgres --set=ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_database WHERE NOT datallowconn AND datname <> 'template0'")
+  [[ "$blocked" == 0 ]] || { echo 'A disabled database needs explicit reconciliation before this runtime can be admitted' >&2; exit 1; }
+  psql -XqAt --record-separator-zero --dbname=postgres --set=ON_ERROR_STOP=1 -c 'SELECT datname FROM pg_database WHERE datallowconn ORDER BY datname' > "$temporary/databases"
+  while IFS= read -r -d '' database; do
+    uri="postgresql:///$(urlencode "$database")?host=$(urlencode "$temporary")"
+    unsupported=$(psql -XqAt --dbname="$uri" --set=ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_language WHERE lanname IN ('plperl','plperlu','plpython3u','pltcl','pltclu')")
+    [[ "$unsupported" == 0 ]] || { echo 'A legacy procedural-language extension needs a separately reviewed logical migration' >&2; exit 1; }
+    mismatch=$(psql -XqAt --dbname="$uri" --set=ON_ERROR_STOP=1 -c "SELECT ((SELECT count(*) FROM pg_database WHERE datname=current_database() AND datcollversion IS NOT NULL AND datcollversion IS DISTINCT FROM pg_database_collation_actual_version(oid)) + (SELECT count(*) FROM pg_collation WHERE collversion IS NOT NULL AND collversion IS DISTINCT FROM pg_collation_actual_version(oid)))")
+    if [[ "$mismatch" != 0 ]]; then
+      psql -Xq --dbname="$uri" --set=ON_ERROR_STOP=1 --set=database_name="$database" <<'SQL'
+REINDEX DATABASE :"database_name";
+SELECT format('ALTER COLLATION %I.%I REFRESH VERSION', n.nspname, c.collname)
+FROM pg_collation c JOIN pg_namespace n ON n.oid=c.collnamespace
+WHERE c.collversion IS NOT NULL AND c.collversion IS DISTINCT FROM pg_collation_actual_version(c.oid)
+\gexec
+ALTER DATABASE :"database_name" REFRESH COLLATION VERSION;
+SQL
+    fi
+    remaining=$(psql -XqAt --dbname="$uri" --set=ON_ERROR_STOP=1 -c "SELECT ((SELECT count(*) FROM pg_database WHERE datname=current_database() AND datcollversion IS NOT NULL AND datcollversion IS DISTINCT FROM pg_database_collation_actual_version(oid)) + (SELECT count(*) FROM pg_collation WHERE collversion IS NOT NULL AND collversion IS DISTINCT FROM pg_collation_actual_version(oid)))")
+    [[ "$remaining" == 0 ]] || { echo 'Collation verification failed after reindex' >&2; exit 1; }
+  done < "$temporary/databases"
+  pg_ctl -D "$PGDATA" -m fast -w -t 120 stop >/dev/null
+  started=false
+  umask 077
+  receipt=$(mktemp "$PGDATA/.hive-runtime.XXXXXXXX")
+  printf '%s\n' "$expected" > "$receipt"
+  sync "$receipt"
+  mv "$receipt" "$marker"
+  sync "$PGDATA"
+  echo 'PostgreSQL runtime reconciled with indexes rebuilt before version refresh'
+  exit 0
+fi
+if [[ ${1:-} == postgres || ${1:-} == -* ]]; then
+  if [[ -s "$PGDATA/PG_VERSION" && ( ! -f "$marker" || $(cat "$marker") != "$expected" ) ]]; then
+    echo 'PostgreSQL runtime change requires backed-up offline reconciliation; run the installer with --allow-migrations' >&2
+    exit 1
+  fi
+fi
+exec /usr/local/bin/docker-entrypoint.sh "$@"
