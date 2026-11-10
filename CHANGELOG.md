@@ -4,9 +4,14 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.4.1] - 2026-11-10
 
 ### Changed
+
+- Pin HiveXUI 0.2.5 for canonical command-result status and initial Studio agent guidance.
+- Pin Magnus server, gateway and native host agent 2.3.3, tracking Ardent 2.3.1.
+- Pin Ardent Project Studio 0.1.1 with the published Magnus service contract and patched lint tooling.
+- Publish ingress 2.0.5 with Caddy 2.11.9 and its matching checksum-pinned base.
 
 - Refresh router dependencies, upgrade its console build to Vite 8 with React plugin 6,
   and rebuild ingress from Caddy 2.11.9. Native install scripts stay explicitly versioned.
