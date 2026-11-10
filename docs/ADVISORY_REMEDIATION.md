@@ -7,6 +7,16 @@ Independent checks additionally found affected SQLite embedded inside Node 24
 and the latest better-sqlite3 package. Neither npm audit nor the image scanner
 reported those bundled copies. A clean scan alone is insufficient acceptance.
 
+## Hive 3.0.0 disposition
+
+The [signed release manifest](../releases/3.0.0.json) pins 18 distinct images.
+All were checked on linux/amd64 and linux/arm64 with the full HIGH/CRITICAL policy,
+including findings without a published fix. None of the original 27 advisory
+identifiers remains in the unfiltered reports. The gated reports contain zero
+HIGH/CRITICAL findings; the two existing Qdrant workspace-SBOM exceptions below
+remain scoped and were not expanded. Application SQLite was executed separately
+because image and npm scanners did not identify the affected embedded copies.
+
 ## Runtime replacements
 
 Use a minimal glibc runtime with patched, inventoried distribution packages for
@@ -33,6 +43,41 @@ vulnerable crates. Redis uses the same upstream Redis version on official Alpine
 with the unused root-only gosu helper removed. Preserve non-root ownership and
 prove old-image data can be opened by the candidate before rollout.
 
+## Embedded SQLite: replace the npm driver
+
+Updating better-sqlite3 to its latest reviewed release, 13.0.3, still carried
+SQLite 3.53.4. The application packages instead pin
+[`@photostructure/sqlite` 3.3.1](https://github.com/photostructure/node-sqlite),
+which embeds SQLite 3.54.1 and supplies Node-API binaries. Its amalgamation source
+hash was compared with the [upstream SQLite release](https://www.sqlite.org/changes.html),
+and registry signatures and available publisher attestations were verified.
+Startup checks the actual embedded version rather than trusting package metadata.
+
+Ardent 3.0 and Studio 0.2 expose a new low-level database boundary; integrations
+using driver-specific methods must update. Their HTTP/CLI contracts and database
+schemas remain compatible. Emberpath and Oathweave use an attributed Apache-2.0
+Prisma adapter for the replacement driver, preserving query conversion, constraint
+errors and transaction ownership. Active application and recovery connections use
+the same SQLite engine within a process. HiveSkills retains released migration
+bytes and adapts only the connection boundary; HiveMem's packaged recovery engine
+also uses the patched driver.
+
+Acceptance executes native FTS5, failed transaction admission, rollback, prior-file
+retention, read-only and required-existing-file refusal, committed WAL backup,
+integrity checks, owner-only backup modes and overwrite refusal. Supported Linux
+x64/arm64 installations work with dependency scripts disabled and need no database
+compiler or binary download. Magnus's context bundle includes both native binaries
+inside the protected candidate tree, within existing payload limits; its real
+old-runtime adoption and rollback checks remain offline.
+
+The shared Node 26 image separately requires embedded SQLite 3.54.0 or newer and
+ships only the supported 64-bit amd64/arm64 platforms. Application driver guards
+require 3.54.1 regardless of the supported host Node version.
+
+ChatterMost 0.4.4 and Magnus 2.3.6 adapt local HTTPS/WebSocket and terminal gateway
+readiness probes to Node 26: IP certificate identities are verified without sending an IP address as
+TLS SNI. Trusted CA and wrong-name refusal tests cover both transports.
+
 ## PostgreSQL needs a separate migration proof
 
 Do not point an existing PostgreSQL data directory at an untested replacement OS.
@@ -54,11 +99,12 @@ checks every connectable database and then writes a durable runtime receipt.
 Ordinary startup refuses existing data without the matching receipt. Failure
 leaves no receipt, does not weaken authentication and stops the temporary server.
 
-Publishing these images does not authorize replacing an existing data directory.
-A new installer release must declare a new storage format and the explicit
-migration from the prior format, require `--allow-migrations`, rehearse on a copy,
-and take its pre-change backup. The old controller must refuse code-only rollback
-to the old collation runtime; recovery uses the rehearsed original-state restore.
+Hive 3.0.0 selects these pinned datastores through the reviewed `runtime-2026-11`
+profile. Each affected component declares its new storage format and explicit
+migration from the prior format. Existing stores require `--allow-migrations`;
+the installer rehearses on a copy and takes its verified pre-change backup.
+Code-only rollback to the old collation runtime is refused; recovery uses the
+rehearsed original-state restore. Individual product selections remain supported.
 
 The acceptable paths are either a compatible, maintained PostgreSQL runtime with
 explicit collation reconciliation before admission, or a staged logical migration

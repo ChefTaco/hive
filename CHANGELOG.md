@@ -4,19 +4,49 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## [3.0.0] - 2026-11-10
 
-- Add an explicit reviewed datastore profile for patched Redis, Qdrant and PostgreSQL runtimes. Existing PostgreSQL stores require `--allow-migrations`, a verified pre-change backup and copy rehearsal before offline reindexing. Refuse code-only rollback across the collation runtime change; retain historical release pins and individual product selections.
-- Use the patched Node 26 image for backup and restore verification as well as product services. Verify datastore tags against signed manifest digests before publication.
+### Security
 
-- Validate suite images on native amd64 and arm64 runners before publication, reuse their build caches, and require the full advisory scan before publishing a signed release. Run the Registry on the patched Node runtime.
+- Replace affected Debian runtime libraries with maintained, inventoried runtimes. Container services and recovery verification use the pinned Node 26.13.0 image; Redis and Qdrant retain their service versions and tested data formats.
+- Replace affected embedded SQLite with `@photostructure/sqlite` 3.3.1 (SQLite 3.54.1), including application and packaged recovery handles. Native Linux x64/arm64 installs use bundled Node-API binaries without a compiler or dependency install scripts. See [the advisory remediation review](docs/ADVISORY_REMEDIATION.md).
+- Require full HIGH/CRITICAL image checks, including findings without a fix, on both architectures before publishing a signed suite release. Retain unfiltered reports and existing narrowly scoped upstream-SBOM exceptions.
 
-- Reconcile PostgreSQL template catalogs as well as ordinary databases so later database creation and restores inherit current ICU metadata. Restore the template connection-admission setting before finishing or recovering a failed migration.
+### Breaking changes
 
-- Build PostgreSQL 17.11 and 18.6 against patched XML and locale libraries. Require explicit offline collation reconciliation for existing data, with authenticated private-socket execution, reindex-before-refresh and a durable runtime receipt. Publish only after ownership, failure, backup and restore checks on both architectures; installer adoption requires a separate declared storage-format migration.
+- Existing PostgreSQL stores need `--allow-migrations` to enter the new collation runtime. The installer takes a verified pre-change backup, rehearses migration on a copy, then rebuilds indexes offline before refreshing metadata. Authentication and ownership remain intact. Code-only rollback across this boundary is refused; recovery requires the rehearsed original-state backup and write reconciliation.
+- PostgreSQL remains on versions 17.11 and 18.6, rebuilt against libxml2 2.15.4 and ICU 79.1. LLVM JIT is omitted; workloads relying on it need separate performance validation. Legacy Perl/Python/Tcl procedural-language extensions require a separately reviewed migration and are refused.
+- Ardent 3.0 and Studio 0.2 change their low-level database handles. Driver-specific integrations must adapt; HTTP/CLI contracts and application schemas remain compatible.
 
-- Add a patched glibc Node runtime and reduce Qdrant and Redis userspace while preserving their upstream service binaries and datastore formats.
-- Retain complete image advisory reports, add an all-findings gate for new suite image publication, and exercise runtime locking and persisted datastore restarts. PostgreSQL base changes remain gated on locale, extension and recovery compatibility proof; see `docs/ADVISORY_REMEDIATION.md`.
+### Changed
+
+- Select the patched datastore tags through an explicit reviewed profile while retaining historical release defaults and individual product selections. Verify every product and datastore tag against its signed digest before publication.
+- Reconcile PostgreSQL template catalogs as well as ordinary databases, restoring the original template connection setting on success and failure. Later database creation inherits current ICU metadata.
+- Build and validate suite images on matching native amd64/arm64 runners, preserving recovery checks and reusing their validated caches for publication with provenance and an SBOM.
+- Keep ChatterMost HTTPS/WebSocket and Magnus terminal gateway readiness working for IP product endpoints on Node 26, with full certificate identity verification.
+- Use each PostgreSQL image's native Unix socket for online capture and isolated recovery verification, clearing libpq host/service overrides so backup stays local.
+- Wait for disposable registry readiness and clean up resources created by failed rehearsal setup.
+
+### Product versions
+
+| Product | Version |
+|---|---|
+| Ardent | 3.0.0 |
+| Ardent Project Studio | 0.2.0 |
+| Magnus packages and images | 2.3.6 |
+| Oathweave | 2.1.1 |
+| Emberpath | 2.0.4 |
+| HiveMem | 1.4.1 |
+| HiveSkills | 1.3.3 |
+| Cindertrace | 0.2.2 |
+| ChatterMost | 0.4.4 |
+| Emberfold | 0.2.2 |
+| Hive Registry image | 2.0.4 (application 1.1.0) |
+| PostgreSQL runtime images | 17.11-3 and 18.6-3 |
+| Redis runtime image | 8.2.10-2 |
+| Qdrant runtime image | 1.18.3-3 |
+
+HiveXUI 0.2.5, ingress 2.0.5 and the previously published document engine/codec remain compatible. Existing installations retain their product selection, credentials, agent enrollment and execution history.
 
 ## [2.4.2] - 2026-11-10
 
