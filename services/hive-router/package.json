@@ -96,13 +96,13 @@
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
-    "@vitejs/plugin-react": "^5.1.1",
+    "@vitejs/plugin-react": "^6.2.1",
     "prisma": "^7.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
-    "vite": "^7.2.2",
+    "vite": "^8.3.6",
     "vitest": "^5.0.5"
   },
   "overrides": {
@@ -289,5 +289,11 @@
     "summary": "Harden TLS verification, queue error privacy, operator output and URL handling; add verified npm deployment orchestration.",
     "notesUrl": "https://github.com/ChefTaco/hive/releases/tag/v1.2.2",
     "breaking": false
+  },
+  "allowScripts": {
+    "@prisma/engines@7.10.1": true,
+    "better-sqlite3@12.11.1": true,
+    "esbuild@0.28.1": true,
+    "prisma@7.10.1": true
   }
 }
