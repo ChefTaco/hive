@@ -547,25 +547,30 @@ hive_host() {
     payload=$(jq -c --slurpfile secret "$HIVE_HOST_SECRET_FILE" '.secret=$secret[0]' <<< "$payload") || hive_die 'The secret could not be prepared'
   fi
   sudo_file=$(hive_sudo_file "$host")
+  # Frame the trusted program separately from its JSON input. Neither belongs
+  # in argv: Linux limits a single argument even when total ARG_MAX is larger.
+  local encoded launcher='set -euo pipefail
+IFS= read -r hive_program
+hive_program=$(printf "%s" "$hive_program" | base64 -d)
+source <(printf "%s\n" "$hive_program")'
+  encoded=$(printf '%s' "$script" | base64 -w0)
   if [[ "$target" == local && "${HIVE_HOST_LOCAL_SUDO:-false}" == true ]]; then
     # Root on this host, as the sudo password prompt allows; the payload follows on stdin.
     if [[ -n "$sudo_file" ]]; then
-      { cat -- "$sudo_file"; printf '%s\n' "$payload"; } | sudo -k -S -p '' bash -c "$script"
+      { cat -- "$sudo_file"; printf '%s\n%s\n' "$encoded" "$payload"; } | sudo -k -S -p '' bash -c "$launcher"
     else
       sudo -v || hive_die 'This step needs root through sudo; use --sudo-password-file for unattended agent commands'
-      printf '%s\n' "$payload" | sudo -n bash -c "$script"
+      printf '%s\n%s\n' "$encoded" "$payload" | sudo -n bash -c "$launcher"
     fi
   elif [[ "$target" == local ]]; then
-    printf '%s\n' "$payload" | bash -c "$script"
+    printf '%s\n%s\n' "$encoded" "$payload" | bash -c "$launcher"
   else
-    # The remote command is fixed. Dynamic data is base64 stdin, never shell code.
-    local encoded
-    encoded=$(printf '%s' "$script" | base64 -w0)
+    # The remote command is fixed; the program and JSON travel only on stdin.
     if [[ -n "$sudo_file" ]]; then
       # sudo reads exactly its password line from standard input; the payload follows it.
-      { cat -- "$sudo_file"; printf '%s\n' "$payload"; } | ssh "${ssh_options[@]}" -- "$target" "sudo -k -S -p '' bash -c \"\$(printf '%s' '$encoded' | base64 -d)\""
+      { cat -- "$sudo_file"; printf '%s\n%s\n' "$encoded" "$payload"; } | ssh "${ssh_options[@]}" -- "$target" "sudo -k -S -p '' bash -c '$launcher'"
     else
-      printf '%s\n' "$payload" | ssh "${ssh_options[@]}" -- "$target" "bash -c \"\$(printf '%s' '$encoded' | base64 -d)\""
+      printf '%s\n%s\n' "$encoded" "$payload" | ssh "${ssh_options[@]}" -- "$target" "bash -c '$launcher'"
     fi
   fi
 }

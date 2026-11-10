@@ -223,6 +223,7 @@ hive_unchanged_failed_rehearsal() (
   jq -e '.operation=="upgrade" and (.plan|test("^[a-f0-9]{64}$"))' "$transaction" >/dev/null || return 1
   previous=$(jq -r .plan "$transaction")
   [[ "$previous" != "$plan" ]] || return 1
+  [[ ! -e "$directory/schema-upgrade.$previous.json" && ! -L "$directory/schema-upgrade.$previous.json" ]] || return 1
   upgrade_version_allowed "$(jq -r .version "$transaction")" "$version" || return 1
   assert_stopped || return 1
   [[ -z $(find "$directory/agents" "$directory/agent-profiles" -type f -print -quit 2>/dev/null) ]] || return 1

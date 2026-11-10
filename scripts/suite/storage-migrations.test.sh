@@ -99,7 +99,7 @@ host prepare || { cat "$temporary/host.log" >&2; fail 'Unchanged failed rehearsa
 jq -e --arg old "$previous" --arg next "$plan" '.previousPlan==$old and .nextPlan==$next and .liveStateUnchanged==true and .failedIsolatedRehearsal==true' "$directory/recovery-supersession.$plan.json" >/dev/null || fail 'Recovery proof missing'
 jq -e --arg plan "$previous" '.plan==$plan and .phase=="recovery-required"' "$directory/recovery-transaction.$previous.json" >/dev/null || fail 'Previous failure record lost'
 [[ -f "$directory/rehearsals/archive/result.json" && -f "$directory/backups/archive/state.tar.gz" ]] || fail 'Recovery evidence lost'
-for corruption in data mode config empty-directory format receipt compose phase result archive plan agent running downgrade; do
+for corruption in data mode config empty-directory format receipt compose phase schema-journal result archive plan agent running downgrade; do
   failed_rehearsal; previous=$plan; new_plan
   case $corruption in
     data) printf 'later-write\n' >> "$directory/data/alpha/state.txt";;
@@ -110,6 +110,7 @@ for corruption in data mode config empty-directory format receipt compose phase 
     receipt) printf '{}' > "$directory/receipt.json";;
     compose) printf '{}' > "$directory/compose.json";;
     phase) jq '.phase="migration-started"' "$directory/transaction.json" > "$temporary/edit"; mv "$temporary/edit" "$directory/transaction.json";;
+    schema-journal) printf '{"phase":"claimed"}' > "$directory/schema-upgrade.$previous.json";;
     result) jq '.result="passed"' "$directory/rehearsals/archive/result.json" > "$temporary/edit"; mv "$temporary/edit" "$directory/rehearsals/archive/result.json";;
     archive) printf 'tampered' >> "$directory/backups/archive/state.tar.gz";;
     plan) jq '.candidatePlan=("9"*64)' "$directory/rehearsals/archive/result.json" > "$temporary/edit"; mv "$temporary/edit" "$directory/rehearsals/archive/result.json";;
