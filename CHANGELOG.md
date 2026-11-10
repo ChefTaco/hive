@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [3.0.1] - 2026-11-10
+
+### Fixed
+
+- Stream the verified host program separately from its JSON input over local and SSH stdin, including protected and cached sudo. Large full-stack controllers no longer exceed the operating system's per-argument size limit; script and secret bytes remain out of process arguments.
+- Isolate storage migration subprocess input from the controller's component enumeration. A full-stack upgrade now reconciles every PostgreSQL store in both the isolated rehearsal and live migration, even when a subprocess reads stdin. Unknown migration outcomes remain held and are never replayed.
+- Allow a newer signed upgrade to recover an earlier failed isolated rehearsal only when every live data/configuration byte, storage format, active definition, receipt, ownership and mode still matches its verified pre-upgrade archive, all live containers are stopped, and no native agent was staged. Preserve the original transaction, backup, failed rehearsal and a bound recovery handoff receipt. A live schema-migration journal, changed state or an uncertain live migration still requires explicit recovery.
+
 ## [3.0.0] - 2026-11-10
 
 ### Security

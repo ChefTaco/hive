@@ -17,6 +17,11 @@ HIGH/CRITICAL findings; the two existing Qdrant workspace-SBOM exceptions below
 remain scoped and were not expanded. Application SQLite was executed separately
 because image and npm scanners did not identify the affected embedded copies.
 
+Hive 3.0.1 retains every reviewed 3.0.0 product and image pin and corrects the
+controller's multi-store migration enumeration and guarded retry after an unchanged
+failed isolated rehearsal. Existing full installations should use 3.0.1 or later;
+see [upgrade and recovery guidance](../UPGRADING.md).
+
 ## Runtime replacements
 
 Use a minimal glibc runtime with patched, inventoried distribution packages for
