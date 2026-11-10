@@ -1,11 +1,14 @@
-# Hive suite Qdrant: the official image at an exact digest with its pending Debian security
-# updates applied, apt removed, and the bundled web dashboard (/qdrant/static) removed; the
-# suite never exposes it and its JavaScript dependencies carry known vulnerabilities. The
-# Qdrant binary, and so the storage format, is the upstream one.
-# Build: docker build -f qdrant.Dockerfile --build-arg QDRANT_IMAGE=qdrant/qdrant:TAG@sha256:... .
+# Preserve the upstream Qdrant binary, configuration, SBOM and recovery entrypoint.
+# The glibc runtime supplies patched libraries without unrelated Debian tools.
 ARG QDRANT_IMAGE
-FROM ${QDRANT_IMAGE}
-RUN apt-get update \
- && apt-get install -y --only-upgrade --no-install-recommends $(dpkg-query -W -f '${Package}\n') \
- && dpkg --purge --force-remove-protected --force-remove-essential apt $(dpkg-query -W -f '${Package}\n' 'libapt-pkg*') \
- && rm -rf /etc/apt /var/lib/apt /var/cache/apt /var/log/apt /qdrant/static
+FROM ${QDRANT_IMAGE} AS upstream
+FROM cgr.dev/chainguard/wolfi-base@sha256:b7787f1d3f29dcfb48730372d3515391ac3b218723201a765c94949922676099
+RUN apk add --no-cache libunwind bash ca-certificates tzdata
+COPY --from=upstream /qdrant/qdrant /qdrant/qdrant
+COPY --from=upstream /qdrant/qdrant.spdx.json /qdrant/qdrant.spdx.json
+COPY --from=upstream /qdrant/config /qdrant/config
+COPY --from=upstream /qdrant/entrypoint.sh /qdrant/entrypoint.sh
+WORKDIR /qdrant
+ENV TZ=Etc/UTC RUN_MODE=production
+EXPOSE 6333 6334
+CMD ["./entrypoint.sh"]

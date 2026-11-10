@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- Add a patched glibc Node runtime and reduce Qdrant and Redis userspace while preserving their upstream service binaries and datastore formats.
+- Retain complete image advisory reports, add an all-findings gate for new suite image publication, and exercise runtime locking and persisted datastore restarts. PostgreSQL base changes remain gated on locale, extension and recovery compatibility proof; see `docs/ADVISORY_REMEDIATION.md`.
+
 ## [2.4.2] - 2026-11-10
 
 ### Fixed

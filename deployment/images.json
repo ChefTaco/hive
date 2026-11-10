@@ -50,7 +50,7 @@
     },
     {
       "image": "hive-redis",
-      "version": "8.2.10-1",
+      "version": "8.2.10-2",
       "context": "deployment/datastores",
       "file": "deployment/datastores/redis.Dockerfile",
       "check": [
@@ -58,12 +58,12 @@
         "--version"
       ],
       "buildArgs": {
-        "REDIS_IMAGE": "redis:8.2.10-bookworm@sha256:e5f23377739f95a2f530b9c99f93accb4f634577f09d00a7d8e0638f2fdf69e0"
+        "REDIS_IMAGE": "redis:8.2.10-alpine@sha256:cead8b06d60a363832e64f5007101ae917fe8a77ec354dfb3be3655a2a351018"
       }
     },
     {
       "image": "hive-qdrant",
-      "version": "1.18.3-2",
+      "version": "1.18.3-3",
       "context": "deployment/datastores",
       "file": "deployment/datastores/qdrant.Dockerfile",
       "check": [
@@ -73,6 +73,16 @@
       "buildArgs": {
         "QDRANT_IMAGE": "qdrant/qdrant:v1.18.3@sha256:0bd98fa7977f1e75694779359ca4e212822e5a71334e28421182f72f209d5286"
       }
+    },
+    {
+      "image": "hive-node-runtime",
+      "version": "26.13.0-1",
+      "context": "deployment/runtime",
+      "file": "deployment/runtime/node.Dockerfile",
+      "check": [
+        "node",
+        "--version"
+      ]
     }
   ]
 }
