@@ -8,6 +8,9 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Changed
 
+- Refresh router dependencies, upgrade its console build to Vite 8 with React plugin 6,
+  and rebuild ingress from Caddy 2.11.9. Native install scripts stay explicitly versioned.
+
 - Measure backup/recovery acceptance by phase and run it independently of Node verification.
   Presentation-only pull requests use a smaller real corpus; installer, shared, unknown, main
   and release changes retain the full corpus, with conservative fallback on classification failure.
