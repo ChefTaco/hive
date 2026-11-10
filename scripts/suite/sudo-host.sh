@@ -39,9 +39,15 @@ compose=$(docker info --format '{{range .ClientInfo.Plugins}}{{if eq .Name "comp
 
 dockerfile=$(cat <<'EOF'
 FROM node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS node
+RUN node -e 'require("node:fs").writeFileSync("/node-roots.pem", require("node:tls").rootCertificates.join("\n") + "\n")'
 FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+# Bootstrap HTTPS from the same immutable image already trusted for the Node binary.
+# Ubuntu's distribution signing keys and package signature checks remain unchanged.
+COPY --from=node /node-roots.pem /etc/ssl/certs/ca-certificates.crt
+RUN printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAPT::Update::Error-Mode "any";\n' > /etc/apt/apt.conf.d/99hive-ci-network \
+    && sed -i 's#http://archive.ubuntu.com/#https://archive.ubuntu.com/#g; s#http://security.ubuntu.com/#https://security.ubuntu.com/#g' /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       openssh-server openssh-client sudo jq curl ca-certificates openssl sqlite3 git util-linux procps xz-utils python3 iproute2 diffutils findutils \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /bin/bash deploy \
@@ -50,7 +56,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 EOF
 )
 image="hive-sudo-host:$(printf '%s' "$dockerfile" | sha256sum | cut -c1-16)"
-docker image inspect "$image" >/dev/null 2>&1 || printf '%s\n' "$dockerfile" | docker build --quiet --tag "$image" - >/dev/null
+# Build output contains only public packages; credentials are generated after the image
+# exists. Keep diagnostics visible if repository access fails before the driver starts.
+docker image inspect "$image" >/dev/null 2>&1 || printf '%s\n' "$dockerfile" | docker build --progress=plain --tag "$image" - >/dev/null
 
 # --name lets a companion process reach the root side with docker exec, for files only root can read.
 [[ -n "$name" ]] || name="hive-sudo-host-$(od -An -N5 -tx1 /dev/urandom | tr -d ' \n')"

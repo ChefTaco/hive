@@ -27,6 +27,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
+      - name: Configure bounded authenticated package downloads
+        run: sudo env GITHUB_ACTIONS=true bash scripts/ci-apt-setup.sh
       - uses: actions/setup-node@v7
         with:
           node-version: 24.22.1
