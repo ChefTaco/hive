@@ -123,6 +123,21 @@ jq -n '{version:"9.9.0",controllerSHA256:("0"*64)}' > "$checkout/releases/9.9.0.
 [[ $(HIVE_ROOT=$checkout hive_checkout_release) == 9.9.1 ]] || fail 'The checkout release was not found'
 cp "$checkout/releases/9.9.1.json" "$checkout/releases/9.9.2.json"
 [[ -z $(HIVE_ROOT=$checkout hive_checkout_release) ]] || fail 'An ambiguous checkout release was chosen'
+# A tagged product-only release can share its controller with a prior release. Renewal
+# must use the exact tagged release rather than falling back to the old configuration.
+jq '.version="9.9.2"' "$checkout/releases/9.9.1.json" > "$checkout/releases/9.9.2.json"
+git -C "$checkout" init -q
+git -C "$checkout" add .
+git -C "$checkout" -c user.name='Synthetic Test' -c user.email=test@example.com commit -qm 'Synthetic shared controller fixture'
+git -C "$checkout" tag v9.9.2
+[[ $(HIVE_ROOT=$checkout hive_checkout_release) == 9.9.2 ]] || fail 'A tagged shared controller did not select its release for certificate renewal'
+git -C "$checkout" tag v9.9.1
+[[ -z $(HIVE_ROOT=$checkout hive_checkout_release) ]] || fail 'Multiple matching release tags were silently resolved'
+git -C "$checkout" tag -d v9.9.1 v9.9.2 >/dev/null
+git -C "$checkout" tag v9.9.0
+[[ -z $(HIVE_ROOT=$checkout hive_checkout_release) ]] || fail 'An incompatible tag selected a shared controller release'
+git -C "$checkout" tag -d v9.9.0 >/dev/null
+[[ -z $(HIVE_ROOT=$checkout hive_checkout_release) ]] || fail 'An untagged shared controller release was chosen'
 rm "$checkout/releases/9.9.2.json"
 # After an upgrade the installation file still names the earlier release: the checkout's own
 # release is used, and said so, without rewriting the file.

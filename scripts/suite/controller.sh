@@ -25,15 +25,26 @@ hive_controller_digest() {
   while IFS= read -r file; do [[ -f "$HIVE_ROOT/$file" && ! -L "$HIVE_ROOT/$file" ]] || hive_die 'Controller runtime must contain regular bundled source files'; done < <(hive_runtime_files)
   (cd "$HIVE_ROOT"; hive_runtime_files | while IFS= read -r file; do sha256sum --zero -- "$file"; done) | sha256sum | cut -d ' ' -f1
 }
-# The one signed release in releases/ that pins exactly this controller source, if any.
+# The sole release that pins this controller, or a unique matching exact checkout tag.
+# Product-only releases can share runtime bytes. In that case a unique matching tag
+# identifies the intended release; an untagged or multiply tagged checkout stays ambiguous.
 hive_checkout_release() {
-  local digest file versions=()
+  local digest file tag version versions=() tagged=()
   digest=$(hive_controller_digest)
   for file in "$HIVE_ROOT"/releases/*.json; do
     [[ -f "$file" ]] || continue
     if jq -e --arg digest "$digest" '.controllerSHA256==$digest' "$file" >/dev/null 2>&1; then versions+=("$(jq -r .version "$file")"); fi
   done
-  if ((${#versions[@]} == 1)); then printf '%s\n' "${versions[0]}"; fi
+  if ((${#versions[@]} == 1)); then printf '%s\n' "${versions[0]}"; return; fi
+  if ((${#versions[@]} > 1)) && command -v git >/dev/null && [[ $(git -C "$HIVE_ROOT" rev-parse --show-toplevel 2>/dev/null) == "$HIVE_ROOT" ]]; then
+    while IFS= read -r tag; do
+      [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+      for version in "${versions[@]}"; do
+        if [[ "$tag" == "v$version" ]]; then tagged+=("$version"); break; fi
+      done
+    done < <(git -C "$HIVE_ROOT" tag --points-at HEAD 2>/dev/null)
+    if ((${#tagged[@]} == 1)); then printf '%s\n' "${tagged[0]}"; fi
+  fi
 }
 # The release a command uses when --release is not given. The installation file records the
 # release it was set up with, and an upgrade does not rewrite that file. When it names a release

@@ -224,7 +224,8 @@ different controller source`. Run `schedule` again from the new checkout
 
 When two releases share the same controller source, the checkout retains the compatible release
 named in the installation file. Pass the new exact version to later commands to keep using its
-product pins, for example `./hive.sh doctor --config FILE --release 2.4.1`.
+product pins, for example `./hive.sh doctor --config FILE --release 2.4.1`. Certificate renewal
+uses a unique matching release tag in this case, so its receipt follows that checkout.
 
 If this host has a fully enrolled Magnus agent, update it through the installer as well. Its
 enrollment command retains full node capabilities, profiles and completed history while selecting

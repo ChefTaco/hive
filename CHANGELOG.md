@@ -25,6 +25,12 @@ All notable changes to this project are documented in this file. The format is b
 - Synthetic recovery writers stop gracefully; client readiness replaces fixed sleeps, and
   ownership checks share one disposable sudo host with the recovery driver.
 
+### Fixed
+
+- Certificate renewal selects the exact tagged release when multiple signed releases share
+  controller code. Untagged, incompatible and multiply tagged choices remain ambiguous;
+  signature and source verification still apply. Compatible saved configuration pins are retained.
+
 ### Security
 
 - All 18 pinned images passed the release scan on amd64 and arm64 with no fixable HIGH or
