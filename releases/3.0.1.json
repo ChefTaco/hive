@@ -1,0 +1,1118 @@
+{
+  "schema": 1,
+  "version": "3.0.1",
+  "profiles": {
+    "core": [
+      "emberpath",
+      "hive-registry",
+      "hivemem",
+      "hivemem-qdrant",
+      "hiveskills",
+      "hivexui",
+      "ingress",
+      "oathweave",
+      "oathweave-redis"
+    ],
+    "full": [
+      "chattermost",
+      "chattermost-postgres",
+      "cindertrace",
+      "cindertrace-postgres",
+      "cindertrace-redis",
+      "emberfold",
+      "emberpath",
+      "hive-registry",
+      "hivemem",
+      "hivemem-qdrant",
+      "hiveskills",
+      "hivexui",
+      "ingress",
+      "magnus",
+      "magnus-postgres",
+      "magnus-redis",
+      "oathweave",
+      "oathweave-redis"
+    ]
+  },
+  "networks": {
+    "identity-data": {
+      "driver": "bridge",
+      "internal": true
+    },
+    "memory-data": {
+      "driver": "bridge",
+      "internal": true
+    },
+    "magnus-data": {
+      "driver": "bridge",
+      "internal": true
+    },
+    "cindertrace-data": {
+      "driver": "bridge",
+      "internal": true
+    },
+    "chattermost-data": {
+      "driver": "bridge",
+      "internal": true
+    }
+  },
+  "components": {
+    "hive-registry": {
+      "image": "ghcr.io/cheftaco/hive-registry@sha256:7ea36e2bded5235f49a51f5c47704ee026f7b2659bfcac3322670a3432b01a0a",
+      "kind": "application",
+      "version": "1.1.0",
+      "storageFormat": "hive-registry-v1",
+      "catalog": {
+        "displayName": "Hive Registry",
+        "description": "Install catalog and lookup API for this installation. Not the HiveSkills skills registry.",
+        "repository": "https://github.com/ChefTaco/hive",
+        "documentation": "https://github.com/ChefTaco/hive/blob/HEAD/docs/hive-registry-api.md",
+        "license": "https://github.com/ChefTaco/hive/blob/HEAD/LICENSE",
+        "licenseSpdx": "Apache-2.0",
+        "consoleSection": null,
+        "required": true,
+        "dependencies": [],
+        "connection": {
+          "browserPrefix": "/api/registry",
+          "consolePath": null,
+          "nativeApis": {},
+          "internalEndpoints": {
+            "api": "http://hive-registry:8095"
+          }
+        }
+      },
+      "service": {
+        "user": "1000:1000",
+        "networks": [
+          "default"
+        ],
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "node",
+            "/app/dist/cli.js",
+            "health"
+          ],
+          "interval": "2s",
+          "timeout": "4s",
+          "retries": 30,
+          "start_period": "2s"
+        }
+      }
+    },
+    "oathweave": {
+      "image": "ghcr.io/cheftaco/oathweave@sha256:a86bbbbcd2fac7f39f58577d5c7112d2feeafa886e841ea6a8ceb6ef7a191546",
+      "storageFormat": "oathweave-v1",
+      "kind": "application",
+      "service": {
+        "user": "1000:1000",
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "node",
+            "/app/healthcheck.mjs"
+          ],
+          "interval": "2s",
+          "timeout": "4s",
+          "start_period": "2s",
+          "retries": 30
+        },
+        "networks": [
+          "default",
+          "identity-data"
+        ],
+        "depends_on": {
+          "oathweave-redis": {
+            "condition": "service_healthy"
+          }
+        }
+      },
+      "requiresLocal": [
+        "oathweave-redis"
+      ],
+      "version": "2.1.1",
+      "catalog": {
+        "displayName": "Oathweave",
+        "description": "Identity, authentication, authorization, OAuth/OIDC and service identities.",
+        "repository": "https://github.com/ChefTaco/Oathweave",
+        "documentation": "https://github.com/ChefTaco/Oathweave/blob/HEAD/README.md",
+        "license": "https://github.com/ChefTaco/Oathweave/blob/HEAD/LICENSE",
+        "licenseSpdx": "Apache-2.0",
+        "consoleSection": "identity",
+        "required": true,
+        "dependencies": [
+          "oathweave-redis"
+        ],
+        "connection": {
+          "browserPrefix": "/api/oathweave",
+          "consolePath": null,
+          "nativeApis": {},
+          "internalEndpoints": {
+            "api": "https://oathweave:4200"
+          }
+        }
+      }
+    },
+    "emberpath": {
+      "image": "ghcr.io/cheftaco/emberpath@sha256:90b146293bbac9141465b8a775ff514de10c171a63e192dd1bae88db1103a832",
+      "storageFormat": "emberpath-v1",
+      "kind": "application",
+      "service": {
+        "user": "1000:1000",
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "node",
+            "/app/healthcheck.mjs"
+          ],
+          "interval": "2s",
+          "timeout": "4s",
+          "start_period": "2s",
+          "retries": 30
+        },
+        "networks": [
+          "default"
+        ]
+      },
+      "version": "2.0.4",
+      "catalog": {
+        "displayName": "Emberpath",
+        "description": "Model gateway: external providers, routing, aliases, quotas and inference telemetry.",
+        "repository": "https://github.com/ChefTaco/Emberpath",
+        "documentation": "https://github.com/ChefTaco/Emberpath/blob/HEAD/README.md",
+        "license": "https://github.com/ChefTaco/Emberpath/blob/HEAD/LICENSE",
+        "licenseSpdx": "Apache-2.0",
+        "consoleSection": "models",
+        "required": false,
+        "dependencies": [
+          "oathweave"
+        ],
+        "connection": {
+          "browserPrefix": "/api/emberpath",
+          "consolePath": null,
+          "nativeApis": {
+            "model": "/v1"
+          },
+          "internalEndpoints": {
+            "admin": "https://emberpath:9443",
+            "model": "https://emberpath:4020"
+          }
+        }
+      }
+    },
+    "hivemem": {
+      "image": "ghcr.io/cheftaco/hivemem@sha256:40b9463a63802c1feab423813df45ed8fcc4c67f56557411d422452a1f3fb0f7",
+      "storageFormat": "hivemem-v1",
+      "kind": "application",
+      "service": {
+        "user": "1000:1000",
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "node",
+            "/app/healthcheck.mjs"
+          ],
+          "interval": "2s",
+          "timeout": "4s",
+          "start_period": "2s",
+          "retries": 30
+        },
+        "networks": [
+          "default",
+          "memory-data"
+        ],
+        "depends_on": {
+          "hivemem-qdrant": {
+            "condition": "service_healthy"
+          }
+        }
+      },
+      "requiresLocal": [
+        "hivemem-qdrant"
+      ],
+      "version": "1.4.1",
+      "catalog": {
+        "displayName": "HiveMem",
+        "description": "Memory, workspaces, retrieval and consolidation.",
+        "repository": "https://github.com/ChefTaco/HiveMem",
+        "documentation": "https://github.com/ChefTaco/HiveMem/blob/HEAD/README.md",
+        "license": "https://github.com/ChefTaco/HiveMem/blob/HEAD/LICENSE",
+        "licenseSpdx": "Apache-2.0",
+        "consoleSection": "memory",
+        "required": false,
+        "dependencies": [
+          "oathweave",
+          "hivemem-qdrant"
+        ],
+        "connection": {
+          "browserPrefix": "/api/hivemem",
+          "consolePath": null,
+          "nativeApis": {
+            "memory": "/memory/v1"
+          },
+          "internalEndpoints": {
+            "api": "https://hivemem:18790"
+          }
+        }
+      }
+    },
+    "hiveskills": {
+      "image": "ghcr.io/cheftaco/hiveskills@sha256:b38594ebe0c3d9284153687861f04506aaa258d9fce0829955ad34e904117268",
+      "storageFormat": "hiveskills-v1",
+      "kind": "application",
+      "service": {
+        "user": "1000:1000",
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "node",
+            "/app/healthcheck.mjs"
+          ],
+          "interval": "2s",
+          "timeout": "4s",
+          "start_period": "2s",
+          "retries": 30
+        },
+        "networks": [
+          "default"
+        ]
+      },
+      "version": "1.3.3",
+      "catalog": {
+        "displayName": "HiveSkills",
+        "description": "Skills registry: immutable skill archives, assignments and distribution to agents.",
+        "repository": "https://github.com/ChefTaco/HiveSkills",
+        "documentation": "https://github.com/ChefTaco/HiveSkills/blob/HEAD/README.md",
+        "license": "https://github.com/ChefTaco/HiveSkills/blob/HEAD/LICENSE",
+        "licenseSpdx": "Apache-2.0",
+        "consoleSection": "skills",
+        "required": false,
+        "dependencies": [
+          "oathweave"
+        ],
+        "connection": {
+          "browserPrefix": "/api/hiveskills",
+          "consolePath": null,
+          "nativeApis": {},
+          "internalEndpoints": {
+            "api": "https://hiveskills:4030"
+          }
+        }
+      }
+    },
+    "hivexui": {
+      "image": "ghcr.io/cheftaco/hivexui@sha256:75e67898b3932c3e07b6f6cec0e4a04a0ca1be88aff36f4fa35a231b4d415dd3",
+      "kind": "static-ui",
+      "service": {
+        "user": "101:101",
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "wget",
+            "-q",
+            "-O",
+            "/dev/null",
+            "http://127.0.0.1:8080/"
+          ],
+          "interval": "2s",
+          "timeout": "3s",
+          "retries": 20
+        }
+      },
+      "version": "0.2.5",
+      "catalog": {
+        "displayName": "HiveXUI",
+        "description": "The browser console for every installed Hive:Magnus product.",
+        "repository": "https://github.com/ChefTaco/HiveXUI",
+        "documentation": "https://github.com/ChefTaco/HiveXUI/blob/HEAD/README.md",
+        "license": "https://github.com/ChefTaco/HiveXUI/blob/HEAD/LICENSE",
+        "licenseSpdx": "Apache-2.0",
+        "consoleSection": null,
+        "required": true,
+        "dependencies": [],
+        "connection": {
+          "browserPrefix": null,
+          "consolePath": "/",
+          "nativeApis": {},
+          "internalEndpoints": {
+            "ui": "http://hivexui:8080"
+          }
+        }
+      }
+    },
+    "ingress": {
+      "image": "ghcr.io/cheftaco/hive-ingress@sha256:1e8f817fb122d8cc7ac7990e4096c74620a9a6d7117ee0c4d89e7e54f0dc2958",
+      "kind": "ingress",
+      "requiresLocal": [
+        "hivexui"
+      ],
+      "service": {
+        "user": "1000:1000",
+        "command": [
+          "caddy",
+          "run",
+          "--config",
+          "/config/Caddyfile",
+          "--adapter",
+          "caddyfile"
+        ],
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "wget",
+            "-q",
+            "-O",
+            "/dev/null",
+            "http://127.0.0.1:8081/ready"
+          ],
+          "interval": "2s",
+          "timeout": "3s",
+          "retries": 20
+        },
+        "depends_on": {
+          "hivexui": {
+            "condition": "service_healthy"
+          }
+        }
+      },
+      "version": "2.0.5",
+      "catalog": {
+        "displayName": "Hive Ingress",
+        "description": "HTTPS entry point with explicit browser and native path mappings.",
+        "repository": "https://github.com/ChefTaco/hive",
+        "documentation": "https://github.com/ChefTaco/hive/blob/HEAD/deployment/README.md",
+        "license": "https://github.com/ChefTaco/hive/blob/HEAD/LICENSE",
+        "licenseSpdx": "Apache-2.0",
+        "consoleSection": null,
+        "required": true,
+        "dependencies": [
+          "hivexui"
+        ],
+        "connection": {
+          "browserPrefix": null,
+          "consolePath": null,
+          "nativeApis": {},
+          "internalEndpoints": {}
+        }
+      }
+    },
+    "oathweave-redis": {
+      "image": "ghcr.io/cheftaco/hive-redis@sha256:0a43087b00722b882e78ee024c68a0fcb8c4e6f815a49dc7821956e45acf6b36",
+      "kind": "datastore",
+      "storageFormat": "redis-aof-v1",
+      "service": {
+        "user": "1000:1000",
+        "command": [
+          "redis-server",
+          "/config/redis.conf"
+        ],
+        "networks": [
+          "identity-data"
+        ],
+        "healthcheck": {
+          "test": [
+            "CMD-SHELL",
+            "REDISCLI_AUTH=\"$(sed -n \"s/^requirepass //p\" /config/redis.conf)\" redis-cli --no-auth-warning ping | grep -q PONG"
+          ],
+          "interval": "2s",
+          "timeout": "3s",
+          "retries": 20
+        }
+      },
+      "version": "8.2.10",
+      "catalog": {
+        "displayName": "Oathweave Redis",
+        "description": "Private Redis datastore for Oathweave.",
+        "repository": "https://github.com/redis/redis",
+        "documentation": "https://redis.io/docs/latest/",
+        "license": "https://github.com/redis/redis/blob/unstable/LICENSE.txt",
+        "licenseSpdx": null,
+        "consoleSection": null,
+        "required": true,
+        "dependencies": [],
+        "connection": {
+          "browserPrefix": null,
+          "consolePath": null,
+          "nativeApis": {},
+          "internalEndpoints": {}
+        }
+      }
+    },
+    "hivemem-qdrant": {
+      "image": "ghcr.io/cheftaco/hive-qdrant@sha256:78466d7bd03ceffb6baf57fdf2fffc4ea45f6b08b771d9a3425ace629741b48d",
+      "kind": "datastore",
+      "storageFormat": "qdrant-v1.18.1",
+      "service": {
+        "user": "1000:1000",
+        "working_dir": "/data",
+        "entrypoint": [
+          "/qdrant/qdrant"
+        ],
+        "command": [
+          "--config-path",
+          "/config/qdrant.yaml"
+        ],
+        "networks": [
+          "memory-data"
+        ],
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "bash",
+            "-ec",
+            "exec 3<>/dev/tcp/127.0.0.1/6333; printf \"GET /readyz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3; IFS= read -r status <&3; [[ \"$$status\" == *\" 200 \"* ]]"
+          ],
+          "interval": "2s",
+          "timeout": "3s",
+          "retries": 20
+        }
+      },
+      "version": "1.18.3",
+      "catalog": {
+        "displayName": "HiveMem Qdrant",
+        "description": "Private vector datastore for HiveMem.",
+        "repository": "https://github.com/qdrant/qdrant",
+        "documentation": "https://qdrant.tech/documentation/",
+        "license": "https://github.com/qdrant/qdrant/blob/master/LICENSE",
+        "licenseSpdx": "Apache-2.0",
+        "consoleSection": null,
+        "required": false,
+        "dependencies": [],
+        "connection": {
+          "browserPrefix": null,
+          "consolePath": null,
+          "nativeApis": {},
+          "internalEndpoints": {}
+        }
+      }
+    },
+    "magnus-postgres": {
+      "image": "ghcr.io/cheftaco/hive-postgres@sha256:0224a713e2942d7ec0f826843b733cccbeb13a3283c8f38c27c3f020c0a13cd8",
+      "kind": "datastore",
+      "storageFormat": "magnus-postgres-17-runtime2",
+      "service": {
+        "user": "1000:1000",
+        "tmpfs": [
+          "/var/run/postgresql"
+        ],
+        "environment": {
+          "PGDATA": "/data/pgdata",
+          "POSTGRES_DB": "magnus",
+          "POSTGRES_USER": "magnus",
+          "POSTGRES_PASSWORD_FILE": "/config/password",
+          "POSTGRES_INITDB_ARGS": "--data-checksums"
+        },
+        "networks": [
+          "magnus-data"
+        ],
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "pg_isready",
+            "-h",
+            "127.0.0.1",
+            "-U",
+            "magnus",
+            "-d",
+            "magnus"
+          ],
+          "interval": "2s",
+          "timeout": "5s",
+          "retries": 40,
+          "start_period": "5s"
+        }
+      },
+      "readableFormats": [
+        "magnus-postgres-17-runtime2"
+      ],
+      "migration": {
+        "from": "magnus-postgres-17",
+        "command": [
+          "hive-pg-reconcile"
+        ]
+      },
+      "version": "17.11",
+      "catalog": {
+        "displayName": "Magnus PostgreSQL",
+        "description": "Private PostgreSQL datastore for Magnus.",
+        "repository": "https://github.com/postgres/postgres",
+        "documentation": "https://www.postgresql.org/docs/",
+        "license": "https://www.postgresql.org/about/licence/",
+        "licenseSpdx": "PostgreSQL",
+        "consoleSection": null,
+        "required": false,
+        "dependencies": [],
+        "connection": {
+          "browserPrefix": null,
+          "consolePath": null,
+          "nativeApis": {},
+          "internalEndpoints": {}
+        }
+      }
+    },
+    "magnus-redis": {
+      "image": "ghcr.io/cheftaco/hive-redis@sha256:0a43087b00722b882e78ee024c68a0fcb8c4e6f815a49dc7821956e45acf6b36",
+      "kind": "datastore",
+      "storageFormat": "redis-aof-v1",
+      "service": {
+        "user": "1000:1000",
+        "command": [
+          "redis-server",
+          "/config/redis.conf"
+        ],
+        "networks": [
+          "magnus-data"
+        ],
+        "healthcheck": {
+          "test": [
+            "CMD-SHELL",
+            "REDISCLI_AUTH=\"$(sed -n \"s/^requirepass //p\" /config/redis.conf)\" redis-cli --no-auth-warning ping | grep -q PONG"
+          ],
+          "interval": "2s",
+          "timeout": "3s",
+          "retries": 20
+        }
+      },
+      "version": "8.2.10",
+      "catalog": {
+        "displayName": "Magnus Redis",
+        "description": "Private Redis datastore for Magnus.",
+        "repository": "https://github.com/redis/redis",
+        "documentation": "https://redis.io/docs/latest/",
+        "license": "https://github.com/redis/redis/blob/unstable/LICENSE.txt",
+        "licenseSpdx": null,
+        "consoleSection": null,
+        "required": false,
+        "dependencies": [],
+        "connection": {
+          "browserPrefix": null,
+          "consolePath": null,
+          "nativeApis": {},
+          "internalEndpoints": {}
+        }
+      }
+    },
+    "magnus": {
+      "image": "ghcr.io/cheftaco/magnus-server@sha256:d69878c73b2c9d0d2be2bf450d848377cfd0fa3b072027305ffd1686cb23c135",
+      "kind": "application",
+      "storageFormat": "magnus-v1",
+      "requiresLocal": [
+        "magnus-postgres",
+        "magnus-redis"
+      ],
+      "service": {
+        "user": "1000:1000",
+        "networks": [
+          "default",
+          "magnus-data"
+        ],
+        "depends_on": {
+          "magnus-postgres": {
+            "condition": "service_healthy"
+          },
+          "magnus-redis": {
+            "condition": "service_healthy"
+          }
+        },
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "node",
+            "-e",
+            "fetch('https://localhost:4000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+          ],
+          "interval": "2s",
+          "timeout": "5s",
+          "retries": 40,
+          "start_period": "5s"
+        }
+      },
+      "initialization": {
+        "image": "ghcr.io/cheftaco/magnus-server@sha256:d69878c73b2c9d0d2be2bf450d848377cfd0fa3b072027305ffd1686cb23c135",
+        "command": [
+          "migrate"
+        ],
+        "verificationCommand": [
+          "verify-initialization"
+        ]
+      },
+      "version": "2.3.6",
+      "agentPackage": {
+        "name": "@hivemagnus/magnus-agent",
+        "version": "2.3.6",
+        "integrity": "sha512-r5L6ewKZ1KMEa4psluAOHM41UGRRztAdoI/Eg+rNKg8O4AatCFClkdFGpkHbv/XE9HmiqT6HWVd7J+zRIFeddw=="
+      },
+      "catalog": {
+        "displayName": "Magnus",
+        "description": "Fleet control, authenticated jobs, privileged host operations and agent execution.",
+        "repository": "https://github.com/ChefTaco/magnus",
+        "documentation": "https://github.com/ChefTaco/magnus/blob/HEAD/README.md",
+        "license": "https://github.com/ChefTaco/magnus/blob/HEAD/LICENSE",
+        "licenseSpdx": "Apache-2.0",
+        "consoleSection": "fleet",
+        "required": false,
+        "dependencies": [
+          "oathweave",
+          "magnus-postgres",
+          "magnus-redis"
+        ],
+        "connection": {
+          "browserPrefix": "/api/magnus",
+          "consolePath": "/fleet",
+          "nativeApis": {},
+          "internalEndpoints": {
+            "api": "https://magnus:4000"
+          }
+        }
+      }
+    },
+    "cindertrace-postgres": {
+      "image": "ghcr.io/cheftaco/hive-postgres@sha256:e3a07752c24c9b5aebd6e1d3dd508add407ecdc3d26d945ed62a8219606a2bdb",
+      "kind": "datastore",
+      "storageFormat": "cindertrace-postgres-18-runtime2",
+      "service": {
+        "user": "1000:1000",
+        "tmpfs": [
+          "/var/run/postgresql"
+        ],
+        "environment": {
+          "PGDATA": "/data/pgdata",
+          "POSTGRES_DB": "cindertrace",
+          "POSTGRES_USER": "cindertrace",
+          "POSTGRES_PASSWORD_FILE": "/config/password",
+          "POSTGRES_INITDB_ARGS": "--data-checksums"
+        },
+        "networks": [
+          "cindertrace-data"
+        ],
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "pg_isready",
+            "-h",
+            "127.0.0.1",
+            "-U",
+            "cindertrace",
+            "-d",
+            "cindertrace"
+          ],
+          "interval": "2s",
+          "timeout": "5s",
+          "retries": 40,
+          "start_period": "5s"
+        }
+      },
+      "readableFormats": [
+        "cindertrace-postgres-18-runtime2"
+      ],
+      "migration": {
+        "from": "cindertrace-postgres-18",
+        "command": [
+          "hive-pg-reconcile"
+        ]
+      },
+      "version": "18.6",
+      "catalog": {
+        "displayName": "Cindertrace PostgreSQL",
+        "description": "Private PostgreSQL datastore for Cindertrace.",
+        "repository": "https://github.com/postgres/postgres",
+        "documentation": "https://www.postgresql.org/docs/",
+        "license": "https://www.postgresql.org/about/licence/",
+        "licenseSpdx": "PostgreSQL",
+        "consoleSection": null,
+        "required": false,
+        "dependencies": [],
+        "connection": {
+          "browserPrefix": null,
+          "consolePath": null,
+          "nativeApis": {},
+          "internalEndpoints": {}
+        }
+      }
+    },
+    "cindertrace-redis": {
+      "image": "ghcr.io/cheftaco/hive-redis@sha256:0a43087b00722b882e78ee024c68a0fcb8c4e6f815a49dc7821956e45acf6b36",
+      "kind": "datastore",
+      "storageFormat": "redis-aof-v1",
+      "service": {
+        "user": "1000:1000",
+        "command": [
+          "redis-server",
+          "/config/redis.conf"
+        ],
+        "networks": [
+          "cindertrace-data"
+        ],
+        "healthcheck": {
+          "test": [
+            "CMD-SHELL",
+            "REDISCLI_AUTH=\"$(sed -n \"s/^requirepass //p\" /config/redis.conf)\" redis-cli --no-auth-warning ping | grep -q PONG"
+          ],
+          "interval": "2s",
+          "timeout": "3s",
+          "retries": 20
+        }
+      },
+      "version": "8.2.10",
+      "catalog": {
+        "displayName": "Cindertrace Redis",
+        "description": "Private Redis datastore for Cindertrace.",
+        "repository": "https://github.com/redis/redis",
+        "documentation": "https://redis.io/docs/latest/",
+        "license": "https://github.com/redis/redis/blob/unstable/LICENSE.txt",
+        "licenseSpdx": null,
+        "consoleSection": null,
+        "required": false,
+        "dependencies": [],
+        "connection": {
+          "browserPrefix": null,
+          "consolePath": null,
+          "nativeApis": {},
+          "internalEndpoints": {}
+        }
+      }
+    },
+    "cindertrace": {
+      "image": "ghcr.io/cheftaco/cindertrace@sha256:822b204772d03c8be15b0d99740159483c0d6e3ae741a3eea58561d0f118103b",
+      "kind": "application",
+      "storageFormat": "cindertrace-v1",
+      "requiresLocal": [
+        "cindertrace-postgres",
+        "cindertrace-redis"
+      ],
+      "service": {
+        "user": "1000:1000",
+        "networks": [
+          "default",
+          "cindertrace-data"
+        ],
+        "depends_on": {
+          "cindertrace-postgres": {
+            "condition": "service_healthy"
+          },
+          "cindertrace-redis": {
+            "condition": "service_healthy"
+          }
+        },
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "node",
+            "-e",
+            "fetch('https://localhost:4101/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+          ],
+          "interval": "2s",
+          "timeout": "5s",
+          "retries": 40,
+          "start_period": "5s"
+        }
+      },
+      "initialization": {
+        "image": "ghcr.io/cheftaco/cindertrace@sha256:822b204772d03c8be15b0d99740159483c0d6e3ae741a3eea58561d0f118103b",
+        "command": [
+          "node",
+          "scripts/apply-migrations.mjs"
+        ],
+        "verificationCommand": [
+          "node",
+          "scripts/apply-migrations.mjs",
+          "--verify-current"
+        ],
+        "workingDirectory": "/app/services/security-fusion"
+      },
+      "version": "0.2.2",
+      "catalog": {
+        "displayName": "Cindertrace",
+        "description": "Security collection, cases, investigations, evidence and response approvals.",
+        "repository": "https://github.com/ChefTaco/cindertrace",
+        "documentation": "https://github.com/ChefTaco/cindertrace/blob/HEAD/README.md",
+        "license": "https://github.com/ChefTaco/cindertrace/blob/HEAD/LICENSE",
+        "licenseSpdx": "Apache-2.0",
+        "consoleSection": "security",
+        "required": false,
+        "dependencies": [
+          "oathweave",
+          "cindertrace-postgres",
+          "cindertrace-redis"
+        ],
+        "connection": {
+          "browserPrefix": "/api/cindertrace",
+          "consolePath": "/security-fusion",
+          "nativeApis": {
+            "security": "/api/v1/security-fusion"
+          },
+          "internalEndpoints": {
+            "api": "https://cindertrace:4101"
+          }
+        }
+      }
+    },
+    "chattermost-postgres": {
+      "image": "ghcr.io/cheftaco/hive-postgres@sha256:0224a713e2942d7ec0f826843b733cccbeb13a3283c8f38c27c3f020c0a13cd8",
+      "kind": "datastore",
+      "storageFormat": "chattermost-postgres-17-runtime2",
+      "service": {
+        "user": "1000:1000",
+        "tmpfs": [
+          "/var/run/postgresql"
+        ],
+        "environment": {
+          "PGDATA": "/data/pgdata",
+          "POSTGRES_DB": "chattermost",
+          "POSTGRES_USER": "chattermost_app",
+          "POSTGRES_PASSWORD_FILE": "/config/password",
+          "POSTGRES_INITDB_ARGS": "--data-checksums"
+        },
+        "networks": {
+          "chattermost-data": {
+            "aliases": [
+              "postgres"
+            ]
+          }
+        },
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "pg_isready",
+            "-h",
+            "127.0.0.1",
+            "-U",
+            "chattermost_app",
+            "-d",
+            "chattermost"
+          ],
+          "interval": "2s",
+          "timeout": "5s",
+          "retries": 40,
+          "start_period": "5s"
+        }
+      },
+      "readableFormats": [
+        "chattermost-postgres-17-runtime2"
+      ],
+      "migration": {
+        "from": "chattermost-postgres-17",
+        "command": [
+          "hive-pg-reconcile"
+        ]
+      },
+      "version": "17.11",
+      "catalog": {
+        "displayName": "ChatterMost PostgreSQL",
+        "description": "Private PostgreSQL datastore for ChatterMost.",
+        "repository": "https://github.com/postgres/postgres",
+        "documentation": "https://www.postgresql.org/docs/",
+        "license": "https://www.postgresql.org/about/licence/",
+        "licenseSpdx": "PostgreSQL",
+        "consoleSection": null,
+        "required": false,
+        "dependencies": [],
+        "connection": {
+          "browserPrefix": null,
+          "consolePath": null,
+          "nativeApis": {},
+          "internalEndpoints": {}
+        }
+      }
+    },
+    "chattermost": {
+      "image": "ghcr.io/cheftaco/chattermost@sha256:3033417418834a8dbda9375a7405260e603d643cc3a41b3d363a80df5b749fc1",
+      "kind": "application",
+      "storageFormat": "chattermost-v1",
+      "requiresLocal": [
+        "chattermost-postgres"
+      ],
+      "service": {
+        "user": "1000:1000",
+        "networks": [
+          "default",
+          "chattermost-data"
+        ],
+        "depends_on": {
+          "chattermost-postgres": {
+            "condition": "service_healthy"
+          }
+        },
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "node",
+            "dist/scripts/container.js",
+            "health"
+          ],
+          "interval": "2s",
+          "timeout": "5s",
+          "retries": 40,
+          "start_period": "5s"
+        }
+      },
+      "initialization": {
+        "image": "ghcr.io/cheftaco/chattermost-migrator@sha256:52a7ce316981305fe3493050165cefa36d149e99b51ce7d21f3dc57bbc8bc281",
+        "command": [
+          "migrate"
+        ],
+        "verificationCommand": [
+          "validate-current"
+        ]
+      },
+      "version": "0.4.4",
+      "catalog": {
+        "displayName": "ChatterMost",
+        "description": "Chat APIs, storage, realtime events and attachments with Mattermost compatibility.",
+        "repository": "https://github.com/ChefTaco/ChatterMost",
+        "documentation": "https://github.com/ChefTaco/ChatterMost/blob/HEAD/README.md",
+        "license": "https://github.com/ChefTaco/ChatterMost/blob/HEAD/LICENSE",
+        "licenseSpdx": "Apache-2.0",
+        "consoleSection": "chat",
+        "required": false,
+        "dependencies": [
+          "oathweave",
+          "chattermost-postgres"
+        ],
+        "connection": {
+          "browserPrefix": "/api/chattermost",
+          "consolePath": null,
+          "nativeApis": {
+            "chat": "/api/v4"
+          },
+          "internalEndpoints": {
+            "api": "https://chattermost:8065"
+          }
+        }
+      }
+    },
+    "emberfold": {
+      "image": "ghcr.io/cheftaco/emberfold@sha256:6d3e820f8c3bb8e835ef68aa9e51410f293a205b7c7c7794fb0b2b935c1b9d1d",
+      "kind": "application",
+      "storageFormat": "emberfold-stateless-v1",
+      "service": {
+        "user": "1000:1000",
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "node",
+            "-e",
+            "fetch('http://127.0.0.1:8096/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+          ],
+          "interval": "2s",
+          "timeout": "5s",
+          "retries": 40,
+          "start_period": "5s"
+        }
+      },
+      "version": "0.2.2",
+      "catalog": {
+        "displayName": "Emberfold",
+        "description": "Context engine HTTP service.",
+        "repository": "https://github.com/ChefTaco/emberfold",
+        "documentation": "https://github.com/ChefTaco/emberfold/blob/HEAD/README.md",
+        "license": "https://github.com/ChefTaco/emberfold/blob/HEAD/LICENSE",
+        "licenseSpdx": "Apache-2.0",
+        "consoleSection": null,
+        "required": false,
+        "dependencies": [],
+        "connection": {
+          "browserPrefix": "/api/emberfold",
+          "consolePath": null,
+          "nativeApis": {},
+          "internalEndpoints": {
+            "api": "http://emberfold:8096"
+          }
+        }
+      }
+    },
+    "magnus-gateway": {
+      "image": "ghcr.io/cheftaco/magnus-fleet-gateway@sha256:00a2b58d53d1890479dcca079f0dce7d450a6e48ec0d5b73ecf184b8d4e07fcd",
+      "kind": "application",
+      "storageFormat": "magnus-gateway-known-hosts-v1",
+      "requiresLocal": [
+        "magnus"
+      ],
+      "service": {
+        "user": "1000:1000",
+        "depends_on": {
+          "magnus": {
+            "condition": "service_healthy"
+          }
+        },
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "magnus-fleet-gateway",
+            "healthcheck"
+          ],
+          "interval": "2s",
+          "timeout": "5s",
+          "retries": 40,
+          "start_period": "5s"
+        }
+      },
+      "version": "2.3.6",
+      "catalog": {
+        "displayName": "Magnus Fleet Gateway",
+        "description": "Optional web terminal for the Magnus console. Holds the restricted SSH key. Off unless selected.",
+        "repository": "https://github.com/ChefTaco/magnus",
+        "documentation": "https://github.com/ChefTaco/magnus/blob/HEAD/services/fleet-gateway/README.md",
+        "license": "https://github.com/ChefTaco/magnus/blob/HEAD/LICENSE",
+        "licenseSpdx": "Apache-2.0",
+        "consoleSection": null,
+        "required": false,
+        "dependencies": [
+          "magnus"
+        ],
+        "connection": {
+          "browserPrefix": "/api/magnus/terminal",
+          "consolePath": null,
+          "nativeApis": {},
+          "internalEndpoints": {
+            "api": "https://magnus-gateway:4310"
+          }
+        }
+      }
+    },
+    "ardentstudio": {
+      "image": "ghcr.io/cheftaco/ardent-studio@sha256:4c90b4c9ebe293a3b78643296e7ee200299201fd54adefb320326555fcabe252",
+      "kind": "application",
+      "storageFormat": "ardentstudio-v1",
+      "service": {
+        "user": "1000:1000",
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "node",
+            "/app/healthcheck.mjs"
+          ],
+          "interval": "2s",
+          "timeout": "5s",
+          "retries": 40,
+          "start_period": "5s"
+        }
+      },
+      "version": "0.2.0",
+      "catalog": {
+        "displayName": "Ardent Project Studio",
+        "description": "Team projects for Ardent agents: team assignment, the conversation room and deliverable review.",
+        "repository": "https://github.com/ChefTaco/ArdentStudio",
+        "documentation": "https://github.com/ChefTaco/ArdentStudio/blob/HEAD/README.md",
+        "license": "https://github.com/ChefTaco/ArdentStudio/blob/HEAD/LICENSE",
+        "licenseSpdx": "Apache-2.0",
+        "consoleSection": "studio",
+        "required": false,
+        "dependencies": [
+          "magnus",
+          "oathweave",
+          "hivemem"
+        ],
+        "connection": {
+          "browserPrefix": "/api/ardentstudio",
+          "consolePath": "/studio",
+          "nativeApis": {},
+          "internalEndpoints": {
+            "api": "http://ardentstudio:8097"
+          }
+        }
+      }
+    }
+  },
+  "controllerSHA256": "e92815d627c4f34eca9b5d56176a37c5d5e0667f1341c435ca11efaabaf2cc9f"
+}

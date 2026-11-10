@@ -16,7 +16,7 @@ JIT acceleration need separate performance validation.
 For an existing full installation, use the published release controller:
 
 ```bash
-./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.0.0 --allow-migrations
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.0.1 --allow-migrations
 ```
 
 The installer verifies a pre-change backup, rehearses the new runtime and migration
@@ -35,6 +35,21 @@ Ardent 3.0 changes its low-level SQLite handle; integrations using driver-specif
 methods must adapt. HTTP/CLI contracts remain compatible. The new driver packages
 Linux x64/arm64 Node-API binaries, so native installs need no database compiler,
 postinstall download or manual rebuild.
+
+### Retrying a failed 3.0.0 full-stack rehearsal
+
+Use 3.0.1 or later for an existing full installation. Version 3.0.0 could reconcile
+only the first PostgreSQL store when a migration subprocess consumed the controller's
+component list. The remaining stores refused startup, and the isolated rehearsal
+held activation before live migration. Fresh installations do not use that transition.
+
+Run the same upgrade command above with `--allow-migrations`. A subsequent signed
+upgrade can continue only after verifying that stopped live data, configuration,
+storage formats, active definition, receipt, ownership and permissions still match
+the original verified backup and that no native agent was staged. It retains the
+failed transaction, backup and rehearsal, and records an archive-bound handoff.
+Changed data or an uncertain live migration remains held for explicit recovery.
+Do not edit transaction or runtime receipts, or refresh collation metadata manually.
 
 ## Managed npm installations
 
