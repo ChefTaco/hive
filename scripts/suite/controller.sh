@@ -6,7 +6,7 @@ hive_need() { command -v "$1" >/dev/null || hive_die "Required tool missing: $1"
 hive_runtime_files() {
   printf '%s\n' LICENSE hive.sh deployment/Caddyfile \
     scripts/suite/controller.sh scripts/suite/release-launcher.sh scripts/suite/lifecycle.sh scripts/suite/host-runtime.sh \
-    scripts/suite/guided-setup.sh scripts/install-prerequisites.sh scripts/console-certificate.sh scripts/prepare-terminal.sh \
+    scripts/suite/guided-setup.sh scripts/suite/console-certificate-service.sh scripts/install-prerequisites.sh scripts/console-certificate.sh scripts/prepare-terminal.sh \
     scripts/suite/skills-integration.sh scripts/suite/skills-integration-host.sh scripts/suite/skills-preparation-host.sh \
     scripts/suite/adapters.sh scripts/suite/native-initialization-host.sh scripts/suite/adapters-host.sh scripts/suite/inference-registration.sh \
     scripts/suite/public-runtime.sh scripts/suite/preflight-host.sh scripts/suite/initialize.sh \
@@ -788,4 +788,5 @@ hive_main() {
     install|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept) hive_lifecycle "$command";;
   esac
   if [[ "$command" == install ]]; then hive_setup_finish; fi
+  if [[ "$command" == upgrade ]]; then hive_setup_refresh_certificate; fi
 }

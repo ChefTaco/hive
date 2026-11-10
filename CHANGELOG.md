@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.4.2] - 2026-11-10
+
+### Fixed
+
+- Successful upgrades refresh an existing local Hive certificate-renewal service
+  to the verified controller checkout. Renewal options and timer state are retained; customized,
+  unsafe or unrelated units are not replaced. The launcher can retain the new checkout without
+  requiring a manual edit of the renewal service.
+- Pin Magnus server, gateway and native host agent 2.3.4. The corrected standalone agent lock
+  allows clean native installation with lifecycle scripts disabled. The 2.3.3 lock used by
+  Hive 2.4.1 was inconsistent; upgrades safely retained the previous native agent on failure.
+- Magnus now checks a clean installation of its actual packed agent before publication and
+  on both supported Node versions, including a regression for development dependencies that
+  remain validated when omitted from the installed runtime.
+
 ## [2.4.1] - 2026-11-10
 
 ### Changed

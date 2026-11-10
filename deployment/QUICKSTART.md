@@ -219,8 +219,8 @@ cannot run, and says so (`Hive: using release X.Y.Z, which this checkout's contr
 so `backup`, `upgrade` and `rollback` work from the new checkout without options. `--release`
 chooses another release, and `--manifest` uses that manifest's version. Earlier controllers need
 `--release X.Y.Z`, or `"release"` set in the file, or they refuse with `Signed release requires
-different controller source`. Run `schedule` again from the new checkout
-(step 9).
+different controller source`. Starting with 2.4.2, a successful upgrade refreshes an
+existing local Hive certificate-renewal service to its verified controller checkout.
 
 When two releases share the same controller source, the checkout retains the compatible release
 named in the installation file. Pass the new exact version to later commands to keep using its
@@ -262,8 +262,10 @@ sudo ./scripts/console-certificate.sh schedule --config ~/.config/hive/hive/inst
 Tailscale certificates last 90 days, and `tailscale cert` returns a new one as expiry nears.
 `sudo ./scripts/console-certificate.sh renew --config FILE` runs the same step once. For a
 certificate you renew another way, add `--no-tailscale`, or run `tls-refresh` from your ACME
-client's deploy hook. Run these on the console host. After an upgrade, run `schedule` again from
-the new release's checkout, so the timer uses its `hive.sh`.
+client's deploy hook. Run these on the console host. Successful upgrades refresh an
+existing matching Hive service automatically, preserving its renewal options and timer state. They
+do not create or enable a timer. Customized or unsafe service files remain unchanged and produce a
+review message; manage those through your existing service configuration.
 
 ## 10. Optional: add this host to the Magnus fleet
 

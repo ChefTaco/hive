@@ -120,3 +120,31 @@ hive_setup_finish() {
     fi
   fi
 }
+
+# Rebind an existing local renewal service after a successful upgrade.
+# This does not create a timer, enable a disabled one, or change renewal options.
+hive_setup_refresh_certificate() {
+  local config=${HIVE_REGISTRY_ORIGINAL_CONFIG:-$HIVE_CONFIG} unit=${1:-/etc/systemd/system/hive-console-certificate.service} planned status overrides
+  [[ -e "$unit" || -L "$unit" ]] || return 0
+  jq -e '.bootstrap!=null and .console!=null and .hosts[.console.host].target=="local"' "$config" >/dev/null || return 0
+  if [[ $(hive_checkout_release) != "$HIVE_VERSION" ]]; then
+    printf 'Hive: Certificate renewal needs the selected release checkout; its service was retained for review.\n' >&2
+    return 0
+  fi
+  source "$HIVE_ROOT/scripts/suite/console-certificate-service.sh"
+  if ! overrides=$(systemctl show hive-console-certificate.service --property=DropInPaths --value 2>/dev/null); then
+    printf 'Hive: Could not inspect certificate renewal overrides; its service was retained for review.\n' >&2
+    return 0
+  fi
+  if [[ -n "$overrides" ]]; then
+    printf 'Hive: Certificate renewal has custom systemd overrides; its controller path was retained for review.\n' >&2
+    return 0
+  fi
+  if planned=$(hive_certificate_service_plan "$unit" "$(realpath -- "$config")" "$(realpath -- "$HIVE_ROOT")"); then
+    cmp -s "$unit" <(printf '%s\n' "$planned") && return 0
+    hive_setup_sudo bash "$HIVE_ROOT/scripts/console-certificate.sh" schedule --config "$config" --hive "$HIVE_ROOT" --refresh-existing
+  else
+    status=$?
+    [[ "$status" == 10 ]] || printf 'Hive: Existing certificate renewal service is customized or unsafe; it was retained. Review its controller path before the next renewal.\n' >&2
+  fi
+}

@@ -28,7 +28,7 @@ say() { printf '%s\n' "$*"; }
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; }
 
 command=${1:-}; [[ -n "$command" ]] || { usage >&2; exit 2; }; shift
-dir=/etc/hive/tls owner=${SUDO_USER:-} name='' cert='' key='' config='' use_tailscale=true hive=''
+dir=/etc/hive/tls owner=${SUDO_USER:-} name='' cert='' key='' config='' use_tailscale=true hive='' refresh_existing=false
 while (($#)); do
   case "$1" in
     --dir) dir=${2:?--dir needs a value}; shift;;
@@ -39,6 +39,7 @@ while (($#)); do
     --config) config=${2:?--config needs a value}; shift;;
     --hive) hive=${2:?--hive needs a value}; shift;;
     --no-tailscale) use_tailscale=false;;
+    --refresh-existing) refresh_existing=true;;
     -h|--help) usage; exit 0;;
     *) die "unknown option: $1";;
   esac
@@ -154,6 +155,27 @@ case "$command" in
     fi;;
   schedule)
     need_root; installation; release_checkout
+    if [[ "$refresh_existing" == true ]]; then
+      overrides=$(systemctl show hive-console-certificate.service --property=DropInPaths --value) || die 'Could not inspect certificate renewal overrides; nothing was replaced'
+      [[ -z "$overrides" ]] || die 'Certificate renewal has custom systemd overrides; nothing was replaced'
+      source "$(dirname -- "$(realpath -- "$0")")/suite/console-certificate-service.sh"
+      service=/etc/systemd/system/hive-console-certificate.service
+      if planned=$(hive_certificate_service_plan "$service" "$config" "$hive"); then
+        if cmp -s "$service" <(printf '%s\n' "$planned"); then say 'Certificate renewal controller is already current.'; exit 0; fi
+        temporary=$(mktemp /etc/systemd/system/.hive-console-certificate.XXXXXX)
+        trap 'rm -f -- "$temporary"' EXIT
+        printf '%s\n' "$planned" > "$temporary"
+        chmod 0644 "$temporary"
+        mv -T -- "$temporary" "$service"
+        systemctl daemon-reload
+        say 'Updated the existing certificate renewal controller; timer state and renewal options were retained.'
+        exit 0
+      else
+        status=$?
+        [[ "$status" == 10 ]] && exit 0
+        die 'Existing certificate renewal service is customized or unsafe; nothing was replaced'
+      fi
+    fi
     command -v systemctl >/dev/null && [[ -d /run/systemd/system ]] || die 'systemd is not running; schedule renew with your own scheduler instead'
     if [[ "$use_tailscale" == true && -z "$owner" ]]; then owner=$(stat -c %U "$source_key"); fi
     flags=" --hive $hive"; [[ "$use_tailscale" == true ]] && flags+=" --owner $owner" || flags+=' --no-tailscale'
@@ -168,6 +190,6 @@ case "$command" in
     say "  next run: $(systemctl show hive-console-certificate.timer --property=NextElapseUSecRealtime --value)"
     say '  run now:  sudo systemctl start hive-console-certificate.service'
     say '  logs:     journalctl -u hive-console-certificate.service'
-    say 'After upgrading to a new release, run schedule again from its checkout.';;
+    say 'Successful Hive upgrades refresh this existing service to their selected controller checkout.';;
   *) usage >&2; exit 2;;
 esac
