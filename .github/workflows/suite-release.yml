@@ -101,6 +101,14 @@ jobs:
           for arch in amd64 arm64; do
             docker buildx build --load --platform "linux/$arch" "${args[@]}" -f "${{ matrix.file }}" -t "suite-image-check:$arch" "${{ matrix.context }}"
             docker run --rm --platform "linux/$arch" --read-only --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true --entrypoint "$(cut -d' ' -f1 <<< '${{ matrix.check }}')" "suite-image-check:$arch" $(cut -s -d' ' -f2- <<< '${{ matrix.check }}')
+            if [[ '${{ matrix.image }}' == hive-postgres ]]; then
+              baseline=; major=
+              while IFS= read -r line; do
+                case "$line" in POSTGRES_IMAGE=*) baseline=${line#POSTGRES_IMAGE=};; POSTGRES_MAJOR=*) major=${line#POSTGRES_MAJOR=};; esac
+              done <<< "$BUILD_ARGS"
+              [[ -n "$baseline" && -n "$major" ]] || { echo '::error::PostgreSQL recovery inputs are missing'; exit 1; }
+              python3 scripts/release/check-postgres-runtime.py --platform "linux/$arch" --major "$major" --baseline "$baseline" --candidate "suite-image-check:$arch"
+            fi
             # New runtime images must also clear unfixed findings. Existing scoped
             # upstream-SBOM exceptions remain visible and independently reviewed.
             ignore=(); [[ ! -f "deployment/trivy/${{ matrix.image }}.trivyignore.yaml" ]] || ignore=(--ignorefile "/ignore/${{ matrix.image }}.trivyignore.yaml")

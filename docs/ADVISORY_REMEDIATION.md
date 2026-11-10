@@ -39,11 +39,24 @@ Do not point an existing PostgreSQL data directory at an untested replacement OS
 Changing glibc or ICU can change collation behavior even when the PostgreSQL major
 and binary are unchanged. XML, LDAP, OpenSSL, locale and extension dependencies
 also need their real compatible library interfaces, not just similarly named
-packages. The initial replacement prototype is deliberately excluded from
-`deployment/images.json` until this proof passes. Its compatibility libxml2 2.13.9
-had no current security backports despite a clean image scan. It is rejected;
-the replacement must link a patched libxml2 (2.15.4 or later), rather than keep
-an older ABI merely to reuse upstream binaries.
+packages. The first compatibility prototype used libxml2 2.13.9 without current backports,
+despite a clean scan. It was rejected. The replacement builds PostgreSQL 17.11
+and 18.6 from checksum-verified upstream source against libxml2 2.15.4 and ICU
+79.1. It preserves XML, XSLT, LDAP, GSSAPI, PAM, TLS and bundled core extensions.
+Compilers, headers and Perl stay in the build stage. Existing legacy procedural
+language extensions require a separately reviewed migration and are refused.
+
+`hive-pg-reconcile` runs offline through a private Unix socket, with the original
+HBA and credentials. It rebuilds indexes before refreshing collation metadata,
+checks every connectable database and then writes a durable runtime receipt.
+Ordinary startup refuses existing data without the matching receipt. Failure
+leaves no receipt, does not weaken authentication and stops the temporary server.
+
+Publishing these images does not authorize replacing an existing data directory.
+A new installer release must declare a new storage format and the explicit
+migration from the prior format, require `--allow-migrations`, rehearse on a copy,
+and take its pre-change backup. The old controller must refuse code-only rollback
+to the old collation runtime; recovery uses the rehearsed original-state restore.
 
 The acceptable paths are either a compatible, maintained PostgreSQL runtime with
 explicit collation reconciliation before admission, or a staged logical migration
@@ -93,6 +106,12 @@ shutdown and persisted datastore restart. Supply `--redis-from OLD_IMAGE` and
 `--qdrant-from OLD_IMAGE` to exercise existing-format data across the image change.
 These checks supplement full suite ownership, backup, failure-recovery, restore,
 product initialization and browser tests; they do not replace them.
+
+The PostgreSQL image publication workflow also runs
+`scripts/release/check-postgres-runtime.py` for each major on both architectures.
+It exercises fresh non-root initialization, admission refusal before migration,
+authentication failure, repeated reconciliation, quoted database names, retained
+and new records, XML/pg_trgm queries, logical backup and physical restore.
 
 Publish new immutable runtime and product images only after their owning checks
 pass. Build a new signed installer manifest; never rewrite 2.4.2 or its pinned
