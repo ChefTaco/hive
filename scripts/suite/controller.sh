@@ -483,6 +483,9 @@ hive_manifest() {
     (.profiles.core|type=="array") and (.profiles.full|type=="array") and
     ((.networks // {})|type=="object" and all(.[]; .driver=="bridge" and (has("external")|not) and (keys-["driver","internal"]|length==0)))
   ' "$HIVE_MANIFEST" >/dev/null || hive_die 'Invalid release manifest or unpinned image'
+  if jq -e '.components.embermend!=null' "$HIVE_CONFIG" >/dev/null; then
+    jq -e '.components.magnus.version as $v | ($v|type=="string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and (($v|split(".")|map(tonumber)) >= [2,4,0]) and .components.embermend.image==.components["embermend-worker"].image' "$HIVE_MANIFEST" >/dev/null || hive_die 'Embermend needs a compatible Magnus 2.4+ release and matching API/worker images'
+  fi
   # Reject hidden privileged mounts and unsupported release/config mismatches.
   jq -e --slurpfile config "$HIVE_CONFIG" '
     . as $r | $config[0] as $c |

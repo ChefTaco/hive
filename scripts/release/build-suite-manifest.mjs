@@ -40,6 +40,10 @@ for (const [name, product] of Object.entries(products)) {
   assert(Array.isArray(product.platforms) && product.platforms.includes('linux/amd64'), name + ': platforms must include linux/amd64');
 }
 const repository = (reference) => reference.replace(/[:@].*$/, '');
+if (products.embermend) {
+  const parts = (products.magnus.version ?? '').split('.').map(Number);
+  assert(parts.length === 3 && (parts[0] > 2 || parts[0] === 2 && parts[1] >= 4), 'Embermend requires the Magnus 2.4 managed remediation bridge or newer');
+}
 // The Magnus agent package hive.sh magnus-agent installs: Magnus's own version, with the npm
 // tarball integrity reviewed into the inputs. Publishing checks it against the registry.
 const magnusAgent = inputs.magnusAgent;
@@ -94,6 +98,7 @@ addFullComponents(manifest, { images: pinned, user: inputs.user });
 manifest.controllerSHA256 = controllerSHA256;
 // Each component records the version of what it runs; applySuiteCatalog falls back to the suite version.
 for (const [name, product] of Object.entries(products)) if (product.version && manifest.components[name]) manifest.components[name].version = product.version;
+if (products.embermend?.version) manifest.components['embermend-worker'].version = products.embermend.version;
 const datastoreVersion = { [DATASTORE_IMAGES.redis]: DATASTORE_VERSIONS.redis, [DATASTORE_IMAGES.qdrant]: DATASTORE_VERSIONS.qdrant, [DATASTORE_IMAGES.postgres17]: DATASTORE_VERSIONS.postgres17, [DATASTORE_IMAGES.postgres18]: DATASTORE_VERSIONS.postgres18 };
 for (const component of Object.values(manifest.components)) if (component.kind === 'datastore') component.version = datastoreVersion[component.image] ?? assert.fail('Unreviewed datastore image ' + component.image);
 if (magnusAgent) {

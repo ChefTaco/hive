@@ -546,6 +546,18 @@
 			header_down -Set-Cookie
 		}
 	}
+	@embermend {
+		path /api/embermend/*
+		expression `"{$EMBERMEND_ENDPOINT:}" != ""`
+	}
+	handle @embermend {
+		uri strip_prefix /api/embermend
+		reverse_proxy {$EMBERMEND_ENDPOINT:http://unconfigured.invalid} {
+			import plain_backend
+			header_up -Cookie
+			header_down -Set-Cookie
+		}
+	}
 	# Emberfold has an optional co-located HTTP listener. HTTPS terminates here;
 	# its own bearer token remains mandatory and is supplied by the native client.
 	handle_path /api/emberfold/* {

@@ -22,7 +22,7 @@ export const FULL_PRODUCTS = Object.freeze(['magnus', 'cindertrace', 'chattermos
 // Offered only when the release inputs name an image, and never selected by a profile, so an
 // installation without them, and the upgrade of one, is unchanged. Ardent Project Studio is
 // published as ghcr.io/cheftaco/ardent-studio.
-export const OPTIONAL_PRODUCTS = Object.freeze(['ardentstudio']);
+export const OPTIONAL_PRODUCTS = Object.freeze(['ardentstudio', 'embermend']);
 // HiveXUI's nginx image runs as its own unprivileged account.
 export const STATIC_UI_USER = '101:101';
 
@@ -185,6 +185,17 @@ export function addFullComponents(manifest, { images, user }) {
       service: { user, healthcheck: health(['node', '/app/healthcheck.mjs']) },
     };
   }
-  manifest.profiles.full = Object.keys(manifest.components).filter((name) => name !== 'magnus-gateway' && !OPTIONAL_PRODUCTS.includes(name)).sort();
+  if (images.embermend) {
+    const network = 'embermend-data';
+    manifest.networks[network] = { driver: 'bridge', internal: true };
+    manifest.components['embermend-postgres'] = {
+      image: images['embermend-postgres'] ?? DATASTORE_IMAGES.postgres18, kind: 'datastore', storageFormat: 'embermend-postgres-18',
+      service: { user, networks: [network], tmpfs: ['/var/run/postgresql'], environment: { PGDATA: '/data/pgdata', POSTGRES_DB: 'embermend', POSTGRES_USER: 'embermend', POSTGRES_PASSWORD_FILE: '/config/password', POSTGRES_INITDB_ARGS: '--data-checksums' }, healthcheck: health(['pg_isready', '-h', '127.0.0.1', '-U', 'embermend', '-d', 'embermend']) },
+    };
+    const service = { user, networks: ['default', network], depends_on: { 'embermend-postgres': { condition: 'service_healthy' } } };
+    manifest.components['embermend-worker'] = { image: images.embermend, kind: 'application', storageFormat: 'embermend-worker-stateless-v1', requiresLocal: ['embermend-postgres'], service: { ...service, command: ['worker'], healthcheck: health(['node', '/app/healthcheck.mjs', 'worker']) } };
+    manifest.components.embermend = { image: images.embermend, kind: 'application', storageFormat: 'embermend-v1', requiresLocal: ['magnus', 'oathweave', 'hivexui', 'embermend-postgres', 'embermend-worker'], service: { ...service, command: ['api'], healthcheck: health(['node', '/app/healthcheck.mjs']) }, initialization: { image: images.embermend, command: ['migrate'], verificationCommand: ['verify-initialization'] } };
+  }
+  manifest.profiles.full = Object.keys(manifest.components).filter((name) => name !== 'magnus-gateway' && !name.startsWith('embermend') && !OPTIONAL_PRODUCTS.includes(name)).sort();
   return manifest;
 }

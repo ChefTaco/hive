@@ -230,6 +230,7 @@ if has_component cindertrace; then for name in security-db security-redis securi
 if has_component chattermost; then for name in chat-db chat-cookie chat-token chat-admin-password chat-bot; do ensure_secret "$name"; done; fi
 if has_component emberfold; then ensure_secret context-api; fi
 # Studio runs with Oathweave, so its client secrets are generated once, on that host.
+if has_component embermend; then for name in embermend-db embermend-magnus embermend-coordinator embermend-verifier; do ensure_secret "$name"; done; fi
 if has_component ardentstudio; then for name in studio-id studio-magnus-client studio-hivemem-client; do ensure_secret "$name"; done; fi
 if [[ "$magnus_memory" == true ]] && has_component magnus; then ensure_secret magnus-hivemem-client; fi
 secret() { cat "$state/secrets/$1"; }
@@ -291,7 +292,7 @@ for component in oathweave emberpath hivemem hiveskills magnus magnus-gateway ci
   publish_file "$component" "$directory/config/$component/authority.pem" < "$ca"
 done
 # HTTP services still need the authority named by their outbound TLS configuration.
-for component in ardentstudio emberfold; do
+for component in ardentstudio emberfold embermend embermend-worker; do
   if has_component "$component"; then publish_file "$component" "$directory/config/$component/authority.pem" < "$ca"; fi
 done
 if has_component ingress; then
@@ -324,6 +325,7 @@ jq -n --arg id "$subject" --arg redirect "$origin/auth/callback" --argjson selec
  .clients += ((if $selection.cindertrace then [{id:"hivexui-cindertrace",audience:"cindertrace",permissions:["cindertrace:view","cindertrace:investigate","cindertrace:admin"],redirectUris:[$redirect],firstParty:true}] else [] end) +
  (if $selection.chattermost then [{id:"hivexui-chattermost",audience:"chattermost",permissions:["chattermost:session"],redirectUris:[$redirect],firstParty:true}] else [] end) +
  (if $selection.magnus then [{id:"hivexui-magnus",audience:"magnus",permissions:(["magnus:view","magnus:operate","magnus:admin"]+(if $terminal then ["magnus:terminal"] else [] end)),redirectUris:[$redirect],firstParty:true}] else [] end) +
+ (if $selection.embermend then [{id:"hivexui-embermend",audience:"embermend",permissions:["embermend:read","embermend:evidence","embermend:assess","embermend:prepare","embermend:propose","embermend:publish-explanation","embermend:ingest","embermend:policy"],redirectUris:[$redirect],firstParty:true}] else [] end) +
  (if $selection.ardentstudio then [{id:"hivexui-ardentstudio",audience:"ardentstudio",permissions:["ardentstudio:projects:read","ardentstudio:projects:write","ardentstudio:templates:read","ardentstudio:templates:write","ardentstudio:review:write","ardentstudio:agents:admin"],redirectUris:[$redirect],firstParty:true}] else [] end)) | .clients |= map(select(.audience as $name|$selection[$name]!=null))' | publish_file oathweave "$directory/config/oathweave/suite-bootstrap.json"
 policies=$(jq -c '.clients|map({key:.id,value:{audience,permissions}})|from_entries' "$directory/config/oathweave/suite-bootstrap.json")
 fi
@@ -361,6 +363,10 @@ if has_component oathweave; then
     ($magnus):{audience:"magnus",permissions:["magnus:ardent"],lifetimeSeconds:300,rotationOwner:"hive-suite",issuer:"browser"},
     ($memory):{audience:"hivemem",permissions:["hivemem:workspaces:write","hivemem:memories:write"],lifetimeSeconds:300,rotationOwner:"hive-suite"}}' <<< "$machine_policies")
   machine_secrets=$(jq -c --arg magnus "$studio_magnus_client" --arg memory "$studio_hivemem_client" --rawfile magnusSecret "$state/secrets/studio-magnus-client" --rawfile memorySecret "$state/secrets/studio-hivemem-client" '. + {($magnus):($magnusSecret|rtrimstr("\n")),($memory):($memorySecret|rtrimstr("\n"))}' <<< "$machine_secrets")
+  fi
+  if has_component embermend; then
+  machine_policies=$(jq -c '. + {"embermend-coordinator":{audience:"embermend",permissions:["embermend:read","embermend:evidence","embermend:assess","embermend:prepare","embermend:propose","embermend:publish-explanation"],lifetimeSeconds:300,rotationOwner:"hive-suite",issuer:"browser"},"embermend-verifier":{audience:"embermend",permissions:["embermend:read","embermend:evidence","embermend:ingest"],lifetimeSeconds:300,rotationOwner:"hive-suite",issuer:"browser"}}' <<< "$machine_policies")
+  machine_secrets=$(jq -c --rawfile coordinator "$state/secrets/embermend-coordinator" --rawfile verifier "$state/secrets/embermend-verifier" '. + {"embermend-coordinator":($coordinator|rtrimstr("\n")),"embermend-verifier":($verifier|rtrimstr("\n"))}' <<< "$machine_secrets")
   fi
   if [[ "$magnus_memory" == true ]]; then
   # Magnus enrolls each Ardent agent in HiveMem: it holds every scope it grants an agent.
@@ -447,6 +453,7 @@ if has_component ingress; then
     line "${label}_ENDPOINT" "$endpoint"; line "${label}_TLS_NAME" "$hostname"
   done
   # Studio is plain HTTP on this host's private network; without it the route answers 404.
+  if selected embermend; then line EMBERMEND_ENDPOINT http://embermend:4180; fi
   if selected ardentstudio; then line ARDENTSTUDIO_ENDPOINT http://ardentstudio:8097; fi
   if jq -e '.bootstrapServiceUsers.emberpath!=null' <<< "$input" >/dev/null; then
   endpoint=$(product_endpoint emberpath https://emberpath:4020 inferenceOrigin)
@@ -461,6 +468,7 @@ jq -n --arg issuer "$issuer" --arg installation "$installation" --argjson select
  if $selection.cindertrace then .products.cindertrace="/api/cindertrace" | .identity.clients.cindertrace="hivexui-cindertrace" else . end |
  if $selection.chattermost then .products.chattermost="/api/chattermost" | .identity.clients.chattermost="hivexui-chattermost" else . end |
  if $selection.magnus then .products.magnus="/api/magnus" | .identity.clients.magnus="hivexui-magnus" else . end |
+ if $selection.embermend then .products.embermend="/api/embermend" | .identity.clients.embermend="hivexui-embermend" else . end |
  if $selection.ardentstudio then .products.ardentstudio="/api/ardentstudio" | .identity.clients.ardentstudio="hivexui-ardentstudio" else . end |
  .products |= with_entries(select(.key as $name|$selection[$name]!=null)) | .identity.clients |= with_entries(select(.key as $name|$selection[$name]!=null)) |
  if ($selection.emberpath and $selection.hivemem) then . else del(.enrollmentInstallationId) end' | publish_file hivexui "$directory/config/runtime.json" 644
