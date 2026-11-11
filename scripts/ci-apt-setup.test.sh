@@ -25,6 +25,7 @@ for unchanged in 'https://archive.ubuntu.com/ubuntu priority:2' 'http://mirror.e
   grep -qxF "$unchanged" "$mirrors" || fail 'An unrelated mirror was rewritten'
 done
 [[ $(sha256sum "$fixture/etc/apt/sources.list.d/ubuntu.sources") == "$before" ]] || fail 'Distribution signing keys were changed'
+[[ $(grep -cxF $'https://mirrors.kernel.org/ubuntu\tpriority:0' "$mirrors") == 1 ]] || fail 'Independent authenticated mirror is absent or duplicated'
 config="$fixture/etc/apt/apt.conf.d/99hive-ci-network"
 [[ $(stat -c %a "$config") == 644 ]] || fail 'APT sandbox cannot read the configuration'
 apt-config -c "$config" dump > "$temporary/parsed-apt-config"
@@ -34,11 +35,18 @@ grep -qxF 'APT::Update::Error-Mode "any";' "$temporary/parsed-apt-config" || fai
 sha=$(sha256sum "$config" "$mirrors")
 run
 [[ $(sha256sum "$config" "$mirrors") == "$sha" ]] || fail 'Repeated setup changed the configuration'
+printf 'https://mirror.example.com/ubuntu priority:1\n' > "$mirrors"
+custom=$(sha256sum "$mirrors")
+run
+[[ $(sha256sum "$mirrors") == "$custom" ]] || fail 'A custom non-Ubuntu mirror list was changed'
+rm "$mirrors"
+run
+[[ ! -e "$mirrors" ]] || fail 'A mirror list was invented for a different distribution layout'
 printf 'outside\n' > "$temporary/outside"
-rm "$mirrors"; ln -s "$temporary/outside" "$mirrors"
+rm -f "$mirrors"; ln -s "$temporary/outside" "$mirrors"
 if run >/dev/null 2>&1; then fail 'A mirror symlink was accepted'; fi
 [[ $(cat "$temporary/outside") == outside ]] || fail 'A symlink target was modified'
 rm "$mirrors" "$config"; ln -s "$temporary/outside" "$config"
 if run >/dev/null 2>&1; then fail 'A configuration symlink was accepted'; fi
 if HIVE_CI_APT_ROOT=/ GITHUB_ACTIONS=false bash "$root/scripts/ci-apt-setup.sh" >/dev/null 2>&1; then fail 'System configuration was changed outside CI'; fi
-printf 'Passed: bounded authenticated APT setup, exact mirror selection, signing-key preservation, repeatability and symlink refusal.\n'
+printf 'Passed: bounded authenticated APT setup, independent Ubuntu mirror fallback, custom-source and signing-key preservation, repeatability and symlink refusal.\n'

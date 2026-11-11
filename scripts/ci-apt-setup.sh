@@ -30,3 +30,11 @@ if [[ -f "$mirrors" ]]; then
   # Retain priority attributes, other mirrors and all distribution signing-key settings.
   sed -E -i 's#^http://azure\.archive\.ubuntu\.com/ubuntu(/?)([[:space:]].*)?$#https://archive.ubuntu.com/ubuntu\1\2#' "$mirrors"
 fi
+
+if [[ -f "$mirrors" ]] && grep -Eq '^https?://(azure\.archive|archive|security)\.ubuntu\.com/ubuntu/?([[:space:]]|$)' "$mirrors"; then
+  # Independent HTTPS mirror listed by Ubuntu: https://packages.ubuntu.com/noble/all/lsb-base/download
+  # APT still verifies Ubuntu's signed indexes and package hashes using its existing keyring.
+  # Lower mirror priorities are tried first; retain the runner's entries as fallbacks.
+  fallback=$'https://mirrors.kernel.org/ubuntu\tpriority:0'
+  if ! grep -qxF "$fallback" "$mirrors"; then printf '\n%s\n' "$fallback" >> "$mirrors"; fi
+fi
