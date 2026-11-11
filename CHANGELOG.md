@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+- Supply explicit preparation and stopped-restore context to installation-specific migration checkers. A long recovery rehearsal can verify matching conservative scheduling refusals while live admission keeps its freshness requirements.
+
 - Preserve pinned private extension packages and protected profile bindings through explicit legacy migration and future managed updates. Keep modern schedule bytes and revisions unchanged, repeat compatibility checks on the restored stopped backup, and validate every current task/session before code rollback. Stream archive and journal digests to bound recovery memory use.
 
 - Add an explicit host-local legacy Ardent migration with verified package pins, journal and rollback rehearsals, host-bound recovery archives, off-host acknowledgement, preserved adoption checkpoints and service-user ownership.

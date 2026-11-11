@@ -87,3 +87,10 @@ test('streamed journal proofs retain binary, unknown state and stable key order 
  db.prepare('UPDATE journal SET bytes=?').run(Buffer.from([0,255,4]));assert.notEqual(journalSnapshot(db,original).journal.sha256,original.journal.sha256);db.prepare('UPDATE journal SET bytes=?').run(Buffer.from([0,255,3]));db.exec("UPDATE journal SET state='completed'");assert.notEqual(journalSnapshot(db,original).journal.sha256,original.journal.sha256);db.exec('DELETE FROM keyed');assert.equal(journalSnapshot(db,original).keyed.count,0);
  }finally{db.close();}
 });
+
+
+test('compatibility checkers receive explicit preparation or stopped-restore context without changing their argument contract',async()=>{
+ const {compatibilityEnvironment}=await import('./migrate-legacy-ardent.mjs');
+ for(const phase of ['prepared-copy','restored-backup'])assert.deepEqual(compatibilityEnvironment(phase),{HIVE_ARDENT_COMPATIBILITY_PHASE:phase});
+ for(const phase of ['',undefined,'live','ready','skip-ownership'])assert.throws(()=>compatibilityEnvironment(phase));
+});
