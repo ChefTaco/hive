@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Security
+
+- Build the shared Node runtime from digest-pinned Node.js 26.13.1 on the hardened glibc base. Verify the exact runtime version, embedded SQLite, non-root startup and real TLS/HTTP2 exchanges on both architectures before publication.
+
 ## [3.1.1] - 2026-11-11
 
 ### Fixed
