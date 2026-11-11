@@ -47,7 +47,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: 24.22.1
+          node-version: 24.22.3
           registry-url: https://registry.npmjs.org
 
       - name: Check npm supports provenance and trusted publishing
@@ -109,7 +109,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 24.22.1
+          node-version: 24.22.3
       - name: Wait for registry metadata and verified tarballs
         if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
         run: node scripts/wait-published-release.mjs
@@ -134,7 +134,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 24.22.1
+          node-version: 24.22.3
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - name: Exact release and immutable tag

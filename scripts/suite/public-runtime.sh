@@ -10,7 +10,7 @@ hive_check_public_runtime() {
         (keys-["schema","mode","products","identity","links","enrollmentInstallationId"]|length==0) and
         (if has("enrollmentInstallationId") then .enrollmentInstallationId|type=="string" and test("^[a-z][a-z0-9-]{0,47}$") else true end) and
         (.products|type=="object" and has("oathweave") and
-          (keys-["emberpath","oathweave","hivemem","hiveskills","cindertrace","chattermost","magnus","ardentstudio"]|length==0) and
+          (keys-["emberpath","oathweave","hivemem","hiveskills","cindertrace","chattermost","magnus","ardentstudio","embermend"]|length==0) and
           all(to_entries[];.value==("/api/"+.key))) and
         (.identity|type=="object" and (keys-["issuer","apiPrefix","clients"]|length==0) and
           .apiPrefix=="/api/oathweave" and (.issuer|type=="string" and test("^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[-A-Za-z0-9._~]+)*$")) and

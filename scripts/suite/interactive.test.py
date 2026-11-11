@@ -189,7 +189,8 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
             result.append((label, answer))
             if label == 'Protected console private key file': result += answers
         review.write_text(json.dumps({'command': arguments, 'questions': result, 'transcriptFile': str(base / (name + '-transcript.log')), 'timeoutSeconds': 30}))
-        subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
+        completed = subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], stdout=subprocess.DEVNULL)
+        assert completed.returncode == 0, (base / (name + '-transcript.log')).read_text()
         return json.loads(target.read_text()), target
     declined, _ = with_gateway_answers('gateway-default', [('Deploy the Magnus web terminal gateway', '')])
     assert 'magnus-gateway' not in declined['components'] and 'magnusGateway' not in declined['bootstrap']
@@ -230,6 +231,35 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     release.write_text(json.dumps(with_catalog(manifest)))
     openssl('pkeyutl', '-sign', '-inkey', base / 'publisher.key', '-rawin', '-in', release, '-out', str(release) + '.sig')
     print('Passed: interactive Ardent Project Studio, suggested by the full profile and left out when declined.')
+
+    # Optional Embermend is offered by hive.sh only with a declared local bridge.
+    manifest['components']['magnus']['version'] = '2.4.2'
+    manifest['components']['magnus']['embermendProtocol'] = 1
+    for name in ['embermend', 'embermend-worker', 'embermend-postgres']:
+        manifest['components'][name] = {'image': 'example.com/synthetic@sha256:' + '4' * 64,
+                                       'service': {'user': f'{os.getuid()}:{os.getgid()}', 'healthcheck': {'test': ['CMD', 'true']}}}
+    manifest['components']['embermend']['requiresLocal'] = ['magnus', 'oathweave', 'hivexui', 'embermend-worker', 'embermend-postgres']
+    manifest['components']['embermend']['initialization'] = {'image': manifest['components']['embermend']['image'], 'command': ['migrate'], 'verificationCommand': ['verify-initialization']}
+    manifest['components']['embermend-postgres']['kind'] = 'datastore'
+    release.write_text(json.dumps(with_catalog(manifest)))
+    openssl('pkeyutl', '-sign', '-inkey', base / 'publisher.key', '-rawin', '-in', release, '-out', str(release) + '.sig')
+    selected, target = with_gateway_answers('embermend-selected', [('Deploy the Magnus web terminal gateway', 'no'), ('Deploy Embermend security assessment and remediation', 'yes')])
+    assert all(name in selected['components'] for name in ['embermend', 'embermend-worker', 'embermend-postgres'])
+    assert selected['components']['embermend']['envFile'].endswith('/config/embermend.env')
+    subprocess.run([*arguments[:2], '--config', str(target), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
+    declined, _ = with_gateway_answers('embermend-default', [('Deploy the Magnus web terminal gateway', 'no'), ('Deploy Embermend security assessment and remediation', '')])
+    assert not any(name.startswith('embermend') for name in declined['components'])
+    del manifest['components']['magnus']['embermendProtocol']
+    release.write_text(json.dumps(with_catalog(manifest)))
+    openssl('pkeyutl', '-sign', '-inkey', base / 'publisher.key', '-rawin', '-in', release, '-out', str(release) + '.sig')
+    undeclared, _ = with_gateway_answers('embermend-undeclared', [('Deploy the Magnus web terminal gateway', 'no')])
+    assert not any(name.startswith('embermend') for name in undeclared['components'])
+    for name in ['embermend', 'embermend-worker', 'embermend-postgres']:
+        del manifest['components'][name]
+    del manifest['components']['magnus']['version']
+    release.write_text(json.dumps(with_catalog(manifest)))
+    openssl('pkeyutl', '-sign', '-inkey', base / 'publisher.key', '-rawin', '-in', release, '-out', str(release) + '.sig')
+    print('Passed: hive.sh offers Embermend only with declared local Magnus, defaults off, and preserves unattended planning.')
 
     custom_output = base / 'inventory' / 'custom.json'
     custom_questions = []

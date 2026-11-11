@@ -10,6 +10,10 @@ All notable changes to this project are documented in this file. The format is b
 
 - Build the shared Node runtime from digest-pinned Node.js 26.13.1 on the hardened glibc base. Verify the exact runtime version, embedded SQLite, non-root startup and real TLS/HTTP2 exchanges on both architectures before publication.
 
+### Added
+
+- Add optional Embermend catalog, ingress, identity initialization and shared API/worker contracts for a compatible Magnus release. Existing profiles and mutation authority remain unchanged; combined acceptance is required before production adoption.
+
 ## [3.1.1] - 2026-11-11
 
 ### Fixed

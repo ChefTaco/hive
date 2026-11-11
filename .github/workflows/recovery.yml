@@ -31,7 +31,7 @@ jobs:
         run: sudo env GITHUB_ACTIONS=true bash scripts/ci-apt-setup.sh
       - uses: actions/setup-node@v7
         with:
-          node-version: 24.22.1
+          node-version: 24.22.3
       - name: Install recovery verification tools
         run: sudo apt-get update -qq && sudo apt-get install -y jq openssl sqlite3 util-linux
       - name: Runner comparison metadata

@@ -12,6 +12,7 @@
 hive_console_clients_wanted() {
   jq -c --arg redirect "$(jq -r .origin "$HIVE_CONFIG")/auth/callback" '
     (if .components.magnus or .external.magnus then [{id:"hivexui-magnus",audience:"magnus",permissions:["magnus:view","magnus:operate","magnus:admin"]}] else [] end) +
+    (if .components.embermend then [{id:"hivexui-embermend",audience:"embermend",permissions:["embermend:read","embermend:evidence","embermend:assess","embermend:prepare","embermend:propose","embermend:publish-explanation","embermend:ingest","embermend:policy"]}] else [] end) +
     (if .components.ardentstudio then [{id:"hivexui-ardentstudio",audience:"ardentstudio",permissions:["ardentstudio:projects:read","ardentstudio:projects:write","ardentstudio:templates:read","ardentstudio:templates:write","ardentstudio:review:write","ardentstudio:agents:admin"]}] else [] end) |
     map(.+{redirectUris:[$redirect],firstParty:true})' "$HIVE_CONFIG"
 }
