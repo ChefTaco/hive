@@ -7,7 +7,7 @@ signing keys, Redis namespace, Qdrant collection or Hermes profile.
 
 ## Prerequisites
 
-- Node `^24.22.1 || ^26.13.0`, npm, OpenSSL and a POSIX host.
+- Node `^24.22.3 || ^26.13.1`, npm, OpenSSL and a POSIX host.
 - A running Docker daemon whose published loopback ports are reachable locally.
   The command starts dedicated `qdrant/qdrant:v1.18.1` and `redis:7.4.7-alpine`
   containers; Docker may download these images if they are absent.

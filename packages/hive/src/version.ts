@@ -42,11 +42,11 @@ export function serverRange(): string {
 }
 
 export function supportedNodeRange(): string {
-  return packageJson().engines?.node ?? "^24.22.1 || ^26.13.0";
+  return packageJson().engines?.node ?? "^24.22.3 || ^26.13.1";
 }
 
 function parseVersion(text: string): [number, number, number] | null {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)/u.exec(text.trim());
+  const match = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(text.trim());
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 

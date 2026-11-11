@@ -8,6 +8,11 @@ TARGET_USER="${HIVE_SKILLS_DEPLOY_USER:-deploy}"
 [[ "$TARGET_HOST" =~ ^[A-Za-z0-9.-]+$ && "$TARGET_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || exit 64
 SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$TARGET_USER@$TARGET_HOST")
 SCP=(scp -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15)
+NODE_RUNTIME_GUARD="$ROOT/scripts/check-node-runtime.mjs"
+node "$NODE_RUNTIME_GUARD"
+NODE_RUNTIME_RANGE="$(node "$NODE_RUNTIME_GUARD" --print-range)"
+"${SSH[@]}" "node --input-type=module - --engines '$NODE_RUNTIME_RANGE'" < "$NODE_RUNTIME_GUARD"
+"${SSH[@]}" "/usr/bin/node --input-type=module - --engines '$NODE_RUNTIME_RANGE'" < "$NODE_RUNTIME_GUARD"
 source "$ROOT/scripts/lib/release-manager.sh"
 RELEASE_ID="$(release_manager_new_id)"
 REVISION="$(git -C "$ROOT" rev-parse HEAD)"

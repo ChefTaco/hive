@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { deployTargets, parseOptions, readConfig, rpcCommand, shellQuote, type Adapter, type Config, type Inventory, type ModelReport } from './deploy-npm.ts';
 const env = {HIVE_NPM_DEPLOY_TARGETS:'[{"name":"primary","host":"hive.example.com"},{"name":"secondary","host":"memory.example.com"}]', DEPLOY_USERNAME:'deploy', DEPLOY_SSH_KEY:'/opt/fixture/key', HIVE_E2E_PROVIDER_URL:'http://client.example.com:8000', HIVE_E2E_MODEL:'example-model', HIVE_E2E_USERNAME:'admin', HIVE_E2E_PASSWORD:'dummy-password'};
 const config = readConfig(env);
-const inventory = (version = '1.2.1'): Inventory => ({host:'fixture',machine:'fixture-machine',node:'v24.22.1',projects:[{base:'/opt/hive-npm',current:'releases/previous',versions:{'@hivemagnus/hive':version}}],services:{'hive-router':{component:'router',switches:{HIVE_AUTO_UPGRADE:'false'}}}});
+const inventory = (version = '1.2.1'): Inventory => ({host:'fixture',machine:'fixture-machine',node:'v24.22.3',projects:[{base:'/opt/hive-npm',current:'releases/previous',versions:{'@hivemagnus/hive':version}}],services:{'hive-router':{component:'router',switches:{HIVE_AUTO_UPGRADE:'false'}}}});
 function fixture(options: {failBackup?:boolean; failModel?:boolean; cleanup?:boolean; version?:string; failPreflight?:boolean; terminal?:string} = {}) {
   const events: string[] = []; const states = new Map<string, string[]>();
   const report: ModelReport = {success:!options.failModel,checks:[{passed:true}],cleanup:[{passed:!options.cleanup}]};

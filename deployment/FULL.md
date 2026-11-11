@@ -592,7 +592,7 @@ for your sudo password, as the agent is a root service), or over SSH with the ho
 any fleet host, with `--ssh-config FILE` and `--sudo-password-file FILE` as that host needs. It:
 
 1. checks the host: systemd, port 4100 free for the agent, and Node.js against the agent's
-   `^24.22.1 || ^26.13.0`. Without a suitable Node.js it offers to install Node.js 24 from
+   `^24.22.3 || ^26.13.1`. Without a suitable Node.js it offers to install Node.js 24 from
    NodeSource's signed apt repository, after checking its key fingerprint
    `6F71F525282841EEDAF851B42F59B5F99B1BE0B4`; `--install-node` agrees unattended, and
    without consent it stops and prints the manual steps;

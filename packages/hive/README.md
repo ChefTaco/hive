@@ -10,7 +10,7 @@ that the Router serves.
 ## Requirements
 
 - Linux or macOS
-- Node.js 24 (24.22.1 or later) or Node.js 26 (26.13.0 or later), with npm
+- Node.js 24 (24.22.3 or later) or Node.js 26 (26.13.1 or later), with npm
 - `openssl`, to create the local TLS certificates (or use `--no-tls` for plain HTTP on 127.0.0.1)
 - Docker (optional). `hive init` uses it to run Qdrant (for HiveMem) and Redis (for IAM) when they
   are not already running. Without Docker, install them yourself and `hive init` prints what to run.

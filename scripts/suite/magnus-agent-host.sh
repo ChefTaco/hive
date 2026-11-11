@@ -25,15 +25,15 @@ die() { printf 'Magnus agent: %s\n' "$*" >&2; exit 1; }
 NODESOURCE_FINGERPRINT=6F71F525282841EEDAF851B42F59B5F99B1BE0B4
 unit=${MAGNUS_AGENT_UNIT:-/etc/systemd/system/magnus-agent.service}
 entry() { printf '%s/node_modules/%s/dist/index.js\n' "$root" "$package"; }
-# Node.js satisfies the agent's engines: ^24.22.1 || ^26.13.0.
+# Node.js satisfies the agent's engines: ^24.22.3 || ^26.13.1.
 node_ok() {
   local version major minor patch
   version=$(node --version 2>/dev/null) || return 1
   [[ "$version" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || return 1
   major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
   case "$major" in
-    24) (( minor > 22 || (minor == 22 && patch >= 1) ));;
-    26) (( minor > 13 || (minor == 13 && patch >= 0) ));;
+    24) (( minor > 22 || (minor == 22 && patch >= 3) ));;
+    26) (( minor > 13 || (minor == 13 && patch >= 1) ));;
     *) return 1;;
   esac
 }
@@ -81,7 +81,7 @@ install_node() {
   chmod 0644 /etc/apt/sources.list.d/nodesource.sources
   apt-get update -qq
   apt-get install -y nodejs >/dev/null
-  node_ok || die "Node.js $(node --version 2>/dev/null || echo missing) does not satisfy ^24.22.1 || ^26.13.0"
+  node_ok || die "Node.js $(node --version 2>/dev/null || echo missing) does not satisfy ^24.22.3 || ^26.13.1"
   jq -nc --arg version "$(node --version)" '{node:$version}'
 }
 
@@ -284,7 +284,7 @@ prepare_certificate() {
 
 install_agent() {
   need_root
-  node_ok || die "Node.js $(node --version 2>/dev/null || echo 'is missing and') does not satisfy ^24.22.1 || ^26.13.0"
+  node_ok || die "Node.js $(node --version 2>/dev/null || echo 'is missing and') does not satisfy ^24.22.3 || ^26.13.1"
   local wanted current work tarball changed=false fresh=false
   wanted=$(jq -er .package.version <<< "$request")
   [[ ! -L "$root" ]] || die 'The agent directory cannot be a symlink'

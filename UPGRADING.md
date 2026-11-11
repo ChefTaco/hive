@@ -63,7 +63,7 @@ Do not edit transaction or runtime receipts, or refresh collation metadata manua
 
 ## Managed npm installations
 
-Requirements: Linux, supported Node.js (`^24.22.1 || ^26.13.0`), npm, `flock`, and working backup access to
+Requirements: Linux, supported Node.js (`^24.22.3 || ^26.13.1`), npm, `flock`, and working backup access to
 the configured datastores. First create an installation:
 
 ```bash

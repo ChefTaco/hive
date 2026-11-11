@@ -14,7 +14,7 @@ Skills OS/PAM administration remains separate from IAM sign-in. See the
 
 ## Install from npm
 
-Requires Linux, Node.js 24.22.1+ or 26.13.0+, TLS certificates, and `pamtester` for
+Requires Linux, Node.js 24.22.3+ or 26.13.1+, TLS certificates, and `pamtester` for
 OS-backed sign-in. SQLite is provided by Node; there are no native npm add-ons.
 Agent deployment also needs Bash, OpenSSH, and permission to enable the target's user timer.
 

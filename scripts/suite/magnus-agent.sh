@@ -184,7 +184,7 @@ hive_magnus_agent() {
   [[ $(jq -r .port.state <<< "$preflight") != occupied ]] || hive_die "Port 4100 on $HIVE_AGENT_HOST is in use by something other than the Magnus agent"
   [[ -n "$fqdn" ]] || hive_die "Host $HIVE_AGENT_HOST is not the console host and has no Tailscale certificate name; the agent needs a certificate for its listener"
   if [[ $(jq -r '.node.ok // false' <<< "$preflight") != true ]]; then
-    printf 'Node.js on %s: %s. The Magnus agent needs ^24.22.1 or ^26.13.0.\n' "$HIVE_AGENT_HOST" "$(jq -r '.node.version // "not installed"' <<< "$preflight")"
+    printf 'Node.js on %s: %s. The Magnus agent needs ^24.22.3 or ^26.13.1.\n' "$HIVE_AGENT_HOST" "$(jq -r '.node.version // "not installed"' <<< "$preflight")"
     if ! hive_magnus_agent_confirm "$HIVE_AGENT_INSTALL_NODE" "Install Node.js 24 on $HIVE_AGENT_HOST from NodeSource's signed apt repository?"; then
       hive_die "Node.js was not installed. Install it yourself, then run this again: on $HIVE_AGENT_HOST, as root, add https://deb.nodesource.com/node_24.x (suite nodistro, component main) signed by https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key with fingerprint 6F71F525282841EEDAF851B42F59B5F99B1BE0B4, then apt-get install nodejs; or rerun with --install-node"
     fi

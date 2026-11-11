@@ -17,7 +17,7 @@ which writes the env files and secrets for you. To run the Router on its own:
 
 **Requirements**
 
-- Node.js 24 (`>=24.22.1`) or 26 (`>=26.13.0`). `better-sqlite3` installs from
+- Node.js 24 (`>=24.22.3`) or 26 (`>=26.13.1`). `better-sqlite3` installs from
   a prebuilt binary on common platforms, or compiles with a C++ toolchain.
 - For console sign-in, either Linux with `pamtester` installed
   (`HIVE_ROUTER_AUTH_MODE=os`, the default: operators use their OS password),
@@ -159,7 +159,7 @@ schemas; `npm run typecheck` fails if the generated file is stale.
 
 ## Requirements (source checkout)
 
-- Node.js 24 (`>=24.22.1`) or 26 (`>=26.13.0`) and npm
+- Node.js 24 (`>=24.22.3`) or 26 (`>=26.13.1`) and npm
 - For OS (PAM) login in production: `pamtester` on the host
 
 ## Run from a source checkout

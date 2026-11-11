@@ -1,6 +1,6 @@
 # Build with the docker/ context, or use the canonical docker/server.Dockerfile.
 # Public runtime images install the same exact npm artifacts as the launcher.
-FROM node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS builder
+FROM node:24.22.3-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS builder
 ARG HIVE_PACKAGE=@hivemagnus/hivemem-server
 ARG HIVE_VERSION=1.2.0
 RUN apt-get update -qq && apt-get install -y --no-install-recommends python3 make g++ util-linux ca-certificates && rm -rf /var/lib/apt/lists/*
@@ -11,7 +11,7 @@ RUN node -e 'const fs=require("fs");if(!/^@hivemagnus\/(hive-router|hive-iam-ser
  && npm rebuild better-sqlite3 argon2 --ignore-scripts=false \
  && node -e 'const p=require(process.env.HIVE_PACKAGE+"/package.json");if(p.version!==process.env.HIVE_VERSION)throw Error("package/image version mismatch")'
 
-FROM node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205
+FROM node:24.22.3-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54
 ARG HIVE_PACKAGE=@hivemagnus/hivemem-server
 ARG HIVE_VERSION=1.2.0
 LABEL org.opencontainers.image.version=$HIVE_VERSION io.hivemagnus.package=$HIVE_PACKAGE

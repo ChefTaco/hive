@@ -171,6 +171,15 @@ remote_scp() {
   fi
 }
 
+# Validate both install-shell and service Node.js before uploads or activation.
+NODE_RUNTIME_GUARD="$MONOREPO_ROOT/scripts/check-node-runtime.mjs"
+node "$NODE_RUNTIME_GUARD"
+NODE_RUNTIME_RANGE="$(node "$NODE_RUNTIME_GUARD" --print-range)"
+if [[ "$DRY_RUN" != "true" ]]; then
+  remote_exec "node --input-type=module - --engines '$NODE_RUNTIME_RANGE'" < "$NODE_RUNTIME_GUARD"
+  remote_exec "/usr/bin/node --input-type=module - --engines '$NODE_RUNTIME_RANGE'" < "$NODE_RUNTIME_GUARD"
+fi
+
 cd "$REPO_ROOT"
 
 if [[ ! -f "$RELEASE_MANAGER_LIB" ]]; then
@@ -715,7 +724,7 @@ After=network.target
 Type=simple
 WorkingDirectory=${REMOTE_PATH}/current
 EnvironmentFile=${REMOTE_PATH}/shared/.env
-ExecStart=/usr/bin/env node ${REMOTE_PATH}/current/dist/src/index.js
+ExecStart=/usr/bin/node ${REMOTE_PATH}/current/dist/src/index.js
 Restart=always
 RestartSec=5
 User=\$USER

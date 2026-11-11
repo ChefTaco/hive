@@ -135,6 +135,17 @@ remote_scp() {
   fi
 }
 
+# Check the current package policy before key handling, upload or service changes.
+NODE_RUNTIME_GUARD="$MONOREPO_ROOT/scripts/check-node-runtime.mjs"
+node "$NODE_RUNTIME_GUARD"
+NODE_RUNTIME_RANGE="$(node "$NODE_RUNTIME_GUARD" --print-range)"
+if [[ "$DRY_RUN" != "true" ]]; then
+  [[ -n "$REMOTE_HOST" ]] || { err "HIVE_IAM_DEPLOY_HOST is required"; exit 1; }
+  [[ "$REMOTE_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || { err "unsafe HIVE_IAM_DEPLOY_HOST"; exit 1; }
+  remote_exec "node --input-type=module - --engines '$NODE_RUNTIME_RANGE'" < "$NODE_RUNTIME_GUARD"
+  remote_exec "/usr/bin/node --input-type=module - --engines '$NODE_RUNTIME_RANGE'" < "$NODE_RUNTIME_GUARD"
+fi
+
 # ── Pre-flight checks ────────────────────────────────────────────────────────
 if [[ ! -f "$CERTS_DIR/iam-private.pem" ]] || [[ ! -f "$CERTS_DIR/iam-public.pem" ]]; then
   err "Missing IAM RS256 keys in $CERTS_DIR/. Run: bash scripts/generate-keys.sh"

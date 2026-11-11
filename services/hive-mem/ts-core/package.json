@@ -50,7 +50,7 @@
     "postbuild": "node ../../../scripts/build-release-runtime.mjs services/hive-mem/ts-core --copy"
   },
   "engines": {
-    "node": "^24.22.1 || ^26.13.0"
+    "node": "^24.22.3 || ^26.13.1"
   },
   "publishConfig": {
     "access": "public"
@@ -64,7 +64,7 @@
     "version": "1.2.2",
     "engineProtocol": 1,
     "engines": {
-      "node": "^24.22.1 || ^26.13.0"
+      "node": "^24.22.3 || ^26.13.1"
     },
     "components": {
       "@hivemagnus/hive": "1.2.2",

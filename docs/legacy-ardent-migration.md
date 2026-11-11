@@ -5,7 +5,7 @@ runtime with a recorded context-engine adoption. Ordinary package updates delibe
 refuse that state. Fresh installations and current public packages use the regular
 installer and Magnus package actions instead.
 
-The migration requires Linux, root, Node 24.22.1+ or 26.13.0+, npm, tar, gzip and
+The migration requires Linux, root, Node 24.22.3+ or 26.13.1+, npm, tar, gzip and
 runuser. It retains the original owner and every profile sharing the runtime.
 Only canonical Magnus user units are accepted. Review custom units separately.
 It never initializes profiles, changes their credential files, rotates identities,

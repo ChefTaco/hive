@@ -13,7 +13,7 @@ skills_integration_artifact() {
     select((keys-["version","url","sha256","nodeVersion","files"]|length)==0) |
     select(.url|type=="string" and test("^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+$") and (split("/")|all(.!=".."))) |
     select(.sha256|test("^[a-f0-9]{64}$")) |
-    select(.nodeVersion|IN("v24.22.1","v26.13.0")) |
+    select(.nodeVersion|IN("v24.22.3","v26.13.1")) |
     select(.files|type=="object" and (keys-["LICENSE","NOTICE","archive-utils.mjs","hermes-sync.mjs"]|length)==0 and has("LICENSE") and has("NOTICE") and has("archive-utils.mjs") and has("hermes-sync.mjs") and all(.[];type=="string" and test("^[a-f0-9]{64}$")))
   ' "$manifest" || { skills_integration_error 'Selected exact native client is absent from the signed release'; return 1; }
 }

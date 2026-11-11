@@ -32,7 +32,7 @@ hive_skills_manifest() {
     (.hiveskills|type=="object" and (keys-["version","url","sha256","nodeVersion","files"]|length)==0 and
       (.version|type=="string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and
       (.url|type=="string" and test("^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+$") and (split("/")|all(.!=".."))) and
-      (.sha256|type=="string" and test("^[a-f0-9]{64}$")) and (.nodeVersion|IN("v24.22.1","v26.13.0")) and
+      (.sha256|type=="string" and test("^[a-f0-9]{64}$")) and (.nodeVersion|IN("v24.22.3","v26.13.1")) and
       (.files|type=="object" and (keys|sort)==(["LICENSE","NOTICE","archive-utils.mjs","hermes-sync.mjs"]|sort) and all(.[];type=="string" and test("^[a-f0-9]{64}$"))))
   ' "$HIVE_MANIFEST" >/dev/null || hive_die 'Invalid signed native Skills client: exact archive, file and tested runtime digests are required'
   if jq -e 'has("skillsDeployment")' "$HIVE_CONFIG" >/dev/null; then

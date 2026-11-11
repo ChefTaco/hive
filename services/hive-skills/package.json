@@ -3,7 +3,7 @@
   "version": "1.2.2",
   "type": "module",
   "engines": {
-    "node": "^24.22.1 || ^26.13.0"
+    "node": "^24.22.3 || ^26.13.1"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@hono/node-server": "2.1.6",
-    "hono": "^4.13.1"
+    "hono": "^4.13.18"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
@@ -70,7 +70,7 @@
     "version": "1.2.2",
     "engineProtocol": 1,
     "engines": {
-      "node": "^24.22.1 || ^26.13.0"
+      "node": "^24.22.3 || ^26.13.1"
     },
     "components": {
       "@hivemagnus/hive": "1.2.2",
