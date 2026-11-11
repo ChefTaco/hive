@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [3.1.1] - 2026-11-11
+
+### Fixed
+
+- Update HiveXUI to 0.2.7 and Magnus to 2.4.2. Command status and selected output follow read-only updates without a manual refresh; transient reads retry without redispatching commands.
+- Use the registered `/usr/bin/uptime` diagnostic with its exact 60-second completion budget. Explain custom-command outcome review and the stop/update/start sequence for Ardent package changes.
+- Preserve Ardent 3.1.1, optional extension packages, existing datastore formats and other product pins.
+
 ## [3.1.0] - 2026-11-11
 
 ### Changed
