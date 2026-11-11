@@ -4,7 +4,12 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## [3.1.0] - 2026-11-11
+
+### Changed
+
+- Update Magnus to 2.4.1 and its pinned Ardent 3.1.1 runtime. Reviewed plugins preserve owner-bound workflows, permissions, scheduling, channels and recovery through managed native updates. Bounded plugin ingress supports large image batches without widening authentication. Private extensions and protected bindings remain optional and installation-specific.
+- Retain existing datastore formats and all other product pins. Custom runtimes require an explicit compatibility and recovery transaction that preserves adoption records.
 
 - Supply explicit preparation and stopped-restore context to installation-specific migration checkers. A long recovery rehearsal can verify matching conservative scheduling refusals while live admission keeps its freshness requirements.
 
