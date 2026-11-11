@@ -138,6 +138,11 @@ export function classifyReadiness(config,status,body) {
   assert(status===503&&config.execution.backend==='codex'&&config.providers.codex.auth_mode==='chatgpt'&&JSON.stringify(body.problems)===JSON.stringify(['Codex login required']),'An unrelated dependency or runtime failure blocks activation');
   return {ready:false,requiresCodexLogin:true};
 }
+/** Rehearsal context is supplied by the transaction, never by editable profile settings. */
+export function compatibilityEnvironment(phase) {
+  assert(['prepared-copy','restored-backup'].includes(phase),'Unknown compatibility rehearsal phase');
+  return {HIVE_ARDENT_COMPATIBILITY_PHASE:phase};
+}
 export async function main(argv=process.argv.slice(2)) {
   assert(argv.length===2&&['prepare','quiesce','apply','check-held','start-for-auth','finish','verify','cancel-before-promotion','repair-disabled-jobs','rollback-code'].includes(argv[0]),'Usage: node scripts/migrate-legacy-ardent.mjs ACTION ROOT_OWNED_CONFIG.json');
   assert(process.platform==='linux'&&process.getuid()===0,'Run this explicit native migration as root on Linux');
@@ -151,9 +156,9 @@ export async function main(argv=process.argv.slice(2)) {
   const recordDir=path.join(c.recordRoot,c.id);fs.mkdirSync(recordDir,{mode:0o700,recursive:true});rootControlled(recordDir);
   const lock=path.join(c.recordRoot,'.lock');const lockFd=fs.openSync(lock,'wx',0o600);fs.writeFileSync(lockFd,JSON.stringify({pid:process.pid,id:c.id}));fs.fsyncSync(lockFd);
   const log=fs.openSync(path.join(recordDir,'diagnostic.private.log'),'a',0o600);
-  function run(args,{asOwner=false,input,inputFd,allowFailure=false,cwd,timeout=600000}={}) {
+  function run(args,{asOwner=false,input,inputFd,allowFailure=false,cwd,timeout=600000,environment={}}={}) {
     if(asOwner)args=['runuser','-u',c.owner,'--','env',`HOME=${home}`,`XDG_RUNTIME_DIR=/run/user/${owner.uid}`,...args];
-    const r=spawnSync(args[0],args.slice(1),{input,cwd,...(inputFd===undefined?{}:{stdio:[inputFd,'pipe','pipe']}),encoding:'utf8',timeout,maxBuffer:64*1024*1024,env:{...process.env,HOME:asOwner?home:'/root'}});
+    const r=spawnSync(args[0],args.slice(1),{input,cwd,...(inputFd===undefined?{}:{stdio:[inputFd,'pipe','pipe']}),encoding:'utf8',timeout,maxBuffer:64*1024*1024,env:{...process.env,...environment,HOME:asOwner?home:'/root'}});
     if(r.stdout)fs.writeSync(log,r.stdout);if(r.stderr)fs.writeSync(log,r.stderr);
     if(!allowFailure)assert(r.status===0,'A migration command failed; inspect the private diagnostic');return r;
   }
@@ -306,7 +311,7 @@ export async function main(argv=process.argv.slice(2)) {
         ownerFile(path.join(copy,'config.yaml'),translatedProfileConfig(read(path.join(copy,'config.yaml')).toString(),c.extensions?.profiles[p]));
         const jobs=path.join(copy,'jobs/active.json');if(fs.existsSync(jobs)){ownerFile(jobs,preservedJobs(read(jobs).toString(),c.version));run(['/usr/bin/node',path.join(pkg,'dist/cli.js'),'--profile-path',copy,'jobs','definitions','validate','--source',jobs],{asOwner:true});}
         const d=run(['/usr/bin/node',path.join(pkg,'dist/cli.js'),'--profile-path',copy,'doctor'],{asOwner:true});const result=JSON.parse(d.stdout);assert(result.config_valid&&result.runtime_problems.length===0,'Candidate profile validation failed');
-        run(['/usr/bin/node',c.compatibilityCheck.path,p,legacy,pkg,copy],{asOwner:true});
+        run(['/usr/bin/node',c.compatibilityCheck.path,p,legacy,pkg,copy],{asOwner:true,environment:compatibilityEnvironment('prepared-copy')});
         for(const n of fs.readdirSync(path.join(copy,'state')).filter(n=>n.endsWith('.sqlite')||n.endsWith('.db')))probe(pkg,'compare',path.join(copy,'state',n),path.join(copy,'state',n)+'.before.json');
       }
       record.preparedRuntimeSHA256=tree(stage);save('prepared');
@@ -336,7 +341,7 @@ export async function main(argv=process.argv.slice(2)) {
     for(const p of c.profiles) {
       const copy=path.join(restored,'.ardent/profiles',p);
       bindingFiles(p,copy,path.join(stage,'profile-files'));ownerFile(path.join(copy,'config.yaml'),translatedProfileConfig(read(path.join(copy,'config.yaml')).toString(),c.extensions?.profiles[p]));
-      run(['/usr/bin/node',c.compatibilityCheck.path,p,legacy,pkg,copy],{asOwner:true});
+      run(['/usr/bin/node',c.compatibilityCheck.path,p,legacy,pkg,copy],{asOwner:true,environment:compatibilityEnvironment('restored-backup')});
       for(const n of fs.readdirSync(path.join(copy,'state')).filter(n=>n.endsWith('.sqlite')||n.endsWith('.db')))probe(pkg,'compare',path.join(copy,'state',n),path.join(copy,'state',n)+'.before.json');
     }
     record.profileStateSHA256=Object.fromEntries(c.profiles.map(p=>[p,tree(profile(p))]));save('backed-up');console.log(JSON.stringify({id:c.id,phase:'backed-up',backup,backupSHA256:record.backupSHA256,machineIdSHA256:record.machineIdSHA256,configurationSHA256:record.configurationSHA256}));return;

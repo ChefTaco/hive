@@ -43,7 +43,16 @@ Port custom tools, scheduler handlers, routes and workflow behavior to supported
 plugins, then provide a root-owned checker under root-controlled directories with
 its exact SHA-256. Preparation runs it as the service owner with arguments:
 `PROFILE LEGACY_PACKAGE_DIRECTORY CANDIDATE_PACKAGE_DIRECTORY COPIED_PROFILE_DIRECTORY`.
-It must exit successfully only after its isolated parity checks pass. Do not use a
+The transaction supplies `HIVE_ARDENT_COMPATIBILITY_PHASE=prepared-copy` during
+preparation and `restored-backup` when checking the independently restored stopped
+archive. The four positional arguments remain unchanged. Profile settings cannot
+override this context. The checker must exit successfully only after its isolated
+parity checks pass. Live readiness and restored-state compatibility are separate:
+a long stopped backup may outlast a scheduling observation's freshness window.
+Restore checks must prove the same conservative refusal in both implementations;
+they must never refresh timestamps, fabricate an owner receipt, or treat that refusal
+as live scheduling readiness. Preparation and activation still need the original
+current ownership gates. Do not use a
 placeholder checker or run live effects to prove parity. Missing or changed checks
 fail before activation. Configuration validation alone does not prove compatibility.
 
