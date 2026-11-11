@@ -22,7 +22,7 @@ directory. Use the actual legacy package name and installed version:
   "profiles": ["assistant"],
   "legacyPackage": "@legacy/ardent",
   "legacyVersion": "0.1.0",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "archive": "/opt/upgrade/ardent.tgz",
   "integrity": "sha512-REPLACE_WITH_VERIFIED_PUBLISHED_INTEGRITY",
   "recordRoot": "/var/lib/ardent-migrations",
@@ -57,15 +57,15 @@ sudo node scripts/migrate-legacy-ardent.mjs prepare /etc/hive/ardent-migration.j
 sudo node scripts/migrate-legacy-ardent.mjs quiesce /etc/hive/ardent-migration.json
 ```
 
-Preparation installs only the exact verified public archive, with dependency scripts
-disabled. It records and checks the generated public dependency lock, audits production dependencies, validates copied profile configuration,
+Preparation installs the exact verified public archive and any explicitly pinned
+extension packages, with dependency scripts disabled and strict runtime peers. It records and checks the generated public dependency lock, audits production dependencies, validates copied profile configuration,
 opens copied journals with the new storage engine, proves that every existing row
-survives, and proves the old runtime can reopen those migrated copies. The only
-configuration translation is `channels.chattermost` to `channels.mattermost`.
+survives, and proves the old runtime can reopen and validate every retained task and session. Configuration translation preserves unrelated bytes while changing
+`channels.chattermost` to `channels.mattermost` and appending explicitly reviewed plugins.
 Ambiguous channel ownership fails before activation. Copied job definitions also
-pass the candidate's full handler validation. Disabled `hermes` job references can
-be recorded in a new revision as `external`; enabled legacy ownership needs an
-explicit handoff. Unknown handlers require plugins and are never discarded.
+pass the candidate's full handler validation. Ardent 3.1 and later preserve original job bytes, revisions and external owner labels;
+only the literal `ardent` owner can admit jobs. For older targets, disabled `hermes`
+references need a new `external` revision; enabled legacy ownership needs an explicit handoff. Unknown handlers require plugins and are never discarded.
 
 Quiescence stops agent lifecycle admission and the named gateways while retaining
 service enablement. A remaining execution lock blocks transfer. It takes a private,
@@ -150,3 +150,50 @@ job definitions from the stopped recovery archive, accepts only the exact origin
 or intended translated bytes, validates the candidate handlers, and preserves the
 old definition under its content digest before installing a new revision. It does
 not start gateways, enable jobs, admit work, or rewrite historical receipts.
+
+
+## Preserving private extensions
+
+For Ardent 3.1 or later, add an optional `extensions` object to the reviewed plan:
+
+```json
+{
+  "packages": [{
+    "name": "@example/profile-extension",
+    "version": "1.0.0",
+    "archive": "/opt/upgrade/profile-extension.tgz",
+    "integrity": "sha512-REPLACE_WITH_REVIEWED_ARCHIVE_INTEGRITY"
+  }],
+  "profiles": {
+    "assistant": {
+      "plugins": ["@example/profile-extension"],
+      "files": [{
+        "source": "/opt/upgrade/bindings.json",
+        "sha256": "REPLACE_WITH_REVIEWED_BINDING_SHA256",
+        "target": ".extensions/example/bindings.json"
+      }]
+    }
+  }
+}
+```
+
+Every profile must have an explicit entry. Each configured plugin must belong to a
+pinned package. Existing plugin declarations require reconciliation before migration.
+Binding inputs and package archives must be regular, single-link, root-owned mode-0600
+files below root-controlled directories. Binding destinations are bounded JSON paths
+under `.extensions`; an existing destination is never silently replaced. Do not place
+private binding values or private plugin code in this public repository.
+
+Preparation creates an owner-controlled extension bundle, pins its manifest in the
+package receipt, and validates copied profiles with their bindings installed. It repeats
+the compatibility checker against independently restored, quiesced profile copies and
+verifies original journal rows afterward. The recovery archive includes the prepared
+extension payloads. Candidate bytes and original schedule files are pinned before
+promotion. A second runtime peer or a dependency from an unreviewed origin fails closed.
+
+Magnus agents with extension-bundle support retain these exact plugin archives during
+subsequent managed package upgrades. Upgrade that agent before using package actions on
+an extended installation. Incompatible peers hold the current runtime for review.
+Recovery hashes stream large archives and database rows; checks cover every original
+column, binary values and row count. Code rollback refuses new task or session contexts
+that the legacy reader cannot understand and never rewinds current journals.
