@@ -25,7 +25,7 @@ stub cat 'exec /usr/bin/cat "$@"'
 stub grep 'exec /usr/bin/grep "$@"'
 stub tailscale 'exit 1'
 stub dpkg 'echo amd64'
-stub apt-get 'if [[ "$*" == *nodejs* ]]; then echo v24.22.1 > "'"$temporary"'/node-version"; fi'
+stub apt-get 'if [[ "$*" == *nodejs* ]]; then echo v24.22.3 > "'"$temporary"'/node-version"; fi'
 stub curl 'while (($#)); do [[ "$1" == -o ]] && cp "'"$temporary"'/nodesource.asc" "$2"; shift; done'
 stub gpg 'printf "fpr:::::::::%s:\n" "$(cat "'"$temporary"'/fingerprint")"'
 stub npm 'case "$1" in
@@ -76,8 +76,8 @@ request() { # VERSION [INTEGRITY]
 }
 no_secret() { if /usr/bin/grep -nF -e "$node_secret" -e "$result_secret" -e "$reconcile_secret" "$@" | cut -c1-300 >&2; then fail "A secret appeared in $*"; fi; }
 
-# Node.js: the engines range ^24.22.1 || ^26.13.0.
-for case in 'none false' 'v22.12.0 false' 'v24.21.9 false' 'v24.22.1 true' 'v24.30.0 true' 'v25.0.0 false' 'v26.13.0 true' 'v26.12.9 false'; do
+# Node.js: the engines range ^24.22.3 || ^26.13.1.
+for case in 'none false' 'v22.12.0 false' 'v24.21.9 false' 'v24.22.1 false' 'v24.22.2 false' 'v24.22.3 true' 'v24.30.0 true' 'v25.0.0 false' 'v26.13.0 false' 'v26.13.1 true' 'v26.12.9 false'; do
   read -r version expected <<< "$case"
   if [[ "$version" == none ]]; then rm -f "$temporary/node-version"; else nodes "$version"; fi
   host magnus-agent-preflight '{}' || fail 'preflight failed'
@@ -96,7 +96,7 @@ printf '6F71F525282841EEDAF851B42F59B5F99B1BE0B4\n' > "$temporary/fingerprint"
 nodes v22.12.0
 
 # The package must match the pinned integrity.
-nodes v24.22.1
+nodes v24.22.3
 if host magnus-agent-install "$(request 2.1.1 "sha512-$(printf 'B%.0s' {1..86})==")"; then fail 'Installed a tarball with another integrity'; fi
 grep -q 'does not match the integrity' "$temporary/err" || fail 'The integrity refusal is unclear'
 [[ ! -e "$agent/node_modules" ]] || fail 'A refused package was installed'
@@ -239,7 +239,7 @@ jq '.console.nativeListeners=[{port:4000,component:"magnus"}]' "$temporary/confi
 rm -f "$temporary/node-version"
 if controller install; then fail 'Installed without Node.js'; fi
 grep -q "Node.js was not installed. Install it yourself" "$temporary/controller.log" && grep -q 6F71F525282841EEDAF851B42F59B5F99B1BE0B4 "$temporary/controller.log" || { cat "$temporary/controller.log" >&2; fail "No manual alternative without consent"; }
-jq 'del(.components.magnus.agentPackage)' "$temporary/release.json" > "$temporary/next.json"; mv "$temporary/next.json" "$temporary/release.json"; nodes v24.22.1
+jq 'del(.components.magnus.agentPackage)' "$temporary/release.json" > "$temporary/next.json"; mv "$temporary/next.json" "$temporary/release.json"; nodes v24.22.3
 if controller install; then fail 'Installed from a release with no pinned package'; fi
 grep -q 'pins no Magnus agent package' "$temporary/controller.log" || fail 'The missing pin refusal is unclear'
 no_secret "$log" "$temporary/controller.log"

@@ -113,7 +113,7 @@ Skills uses your OS/PAM login independently of IAM; see the
 
 ## Legacy services: local development
 
-Requirements: Node.js 24 (`>=24.22.1`) or 26 (`>=26.13.0`); `.nvmrc` pins the development version. Docker with Compose is optional and only
+Requirements: Node.js 24 (`>=24.22.3`) or 26 (`>=26.13.1`); `.nvmrc` pins the development version. Docker with Compose is optional and only
 needed to run Redis and Qdrant locally.
 
 ```bash

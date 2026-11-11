@@ -110,7 +110,7 @@ class HostTests(unittest.TestCase):
             protected = root/'signing-key'
             protected.write_text('synthetic signing material')
             service = dict(component='iam', package='hive-iam-server', entry='dist/cli.js', cwd=str(root), env={key:'false' for key in host.SWITCHES}, user='deploy', uid=1000, gid=1000, groups=[1000], database=str(database), protected=[str(protected)], base=str(base))
-            inv = dict(host='example', machine='synthetic-machine', node='v24.22.1', services={'hive-iam':service}, projects=[dict(base=str(base), current='releases/old', versions={'@hivemagnus/hive':'1.2.1', '@hivemagnus/hive-iam-server':'1.2.1', '@hivemagnus/hivemem-server':'1.2.1'})])
+            inv = dict(host='example', machine='synthetic-machine', node='v24.22.3', services={'hive-iam':service}, projects=[dict(base=str(base), current='releases/old', versions={'@hivemagnus/hive':'1.2.1', '@hivemagnus/hive-iam-server':'1.2.1', '@hivemagnus/hivemem-server':'1.2.1'})])
             inv['services']['hivemem']={**service,'component':'memory','database':None,'env':{**service['env'],'HIVEMEM_STORAGE_PATH':str(root)}}
             request = dict(id=tx.name, version='1.2.2', model='example-model', nativePolicy={})
             host.private_json(tx/'request.json',request)

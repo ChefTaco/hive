@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { runDoctor } from './hive-doctor.ts';
+import { checkNodeRuntime, runDoctor } from './hive-doctor.ts';
 import { makeTempRoot } from './test-fixtures.ts';
 
 const tmp = makeTempRoot('hive-doctor-test-');
@@ -48,6 +48,15 @@ function makeFixture(name: string): string {
 }
 
 describe('hive doctor', () => {
+  it('rejects unpatched and unsupported runtimes before reporting tooling healthy', () => {
+    for (const version of ['v22.23.4', 'v24.22.1', 'v24.22.2', 'v25.0.0', 'v26.13.0', 'v27.0.0', 'v26.13.1-rc.0', 'v24.22.3garbage']) {
+      assert.equal(checkNodeRuntime(version).status, 'fail', version);
+    }
+    for (const version of ['v24.22.3', 'v24.23.0', 'v26.13.1', 'v26.14.0']) {
+      assert.equal(checkNodeRuntime(version).status, 'pass', version);
+    }
+  });
+
   it('renders a setup report without printing secret values', () => {
     const root = makeFixture('ok');
     const result = runDoctor(['--root', root]);

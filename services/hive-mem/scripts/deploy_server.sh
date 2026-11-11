@@ -98,6 +98,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+NODE_RUNTIME_GUARD="$(cd "$REPO_DIR/../.." && pwd)/scripts/check-node-runtime.mjs"
+node "$NODE_RUNTIME_GUARD"
+
 if [[ "$ENV_FILE" != /* ]]; then
   ENV_FILE="$REPO_DIR/$ENV_FILE"
 fi
@@ -136,16 +139,6 @@ if [[ "$REFRESH_ADMIN_TOKEN" != "true" && "$REFRESH_ADMIN_TOKEN" != "false" ]]; 
   exit 1
 fi
 
-# A copied local env keeps the established refresh behavior by default. A
-# preserved remote env retains its existing admin bearer unless the operator
-# explicitly opts in with HIVEMEM_REFRESH_ADMIN_TOKEN=true.
-if [[ "$PRESERVE_REMOTE_ENV" != "true" && "$REFRESH_ADMIN_TOKEN" == "true" ]]; then
-  if [[ "$DRY_RUN" != "true" ]]; then
-    node "$REPO_DIR/scripts/refresh_admin_token.mjs" "$ENV_FILE"
-  else
-    node "$REPO_DIR/scripts/refresh_admin_token.mjs" "$ENV_FILE" --check
-  fi
-fi
 
 SSH_USER="${SSH_USERNAME:-${DEPLOY_USERNAME:-deploy}}"
 SSH_PASS="${SSH_PASSWORD:-${DEPLOY_PASSWORD:-}}"
@@ -273,6 +266,24 @@ remote_sudo() {
 ' "$script" | remote_cmd "sudo -n bash -s"
   fi
 }
+
+NODE_RUNTIME_RANGE="$(node "$NODE_RUNTIME_GUARD" --print-range)"
+if [[ "$DRY_RUN" != "true" ]]; then
+  remote_cmd "node --input-type=module - --engines '$NODE_RUNTIME_RANGE'" < "$NODE_RUNTIME_GUARD"
+  remote_cmd "/usr/bin/node --input-type=module - --engines '$NODE_RUNTIME_RANGE'" < "$NODE_RUNTIME_GUARD"
+fi
+
+# A copied local env keeps the established refresh behavior by default. A
+# preserved remote env retains its existing admin bearer unless the operator
+# explicitly opts in with HIVEMEM_REFRESH_ADMIN_TOKEN=true.
+if [[ "$PRESERVE_REMOTE_ENV" != "true" && "$REFRESH_ADMIN_TOKEN" == "true" ]]; then
+  if [[ "$DRY_RUN" != "true" ]]; then
+    node "$REPO_DIR/scripts/refresh_admin_token.mjs" "$ENV_FILE"
+  else
+    node "$REPO_DIR/scripts/refresh_admin_token.mjs" "$ENV_FILE" --check
+  fi
+fi
+
 
 echo ""
 echo "=============================================="
@@ -506,7 +517,8 @@ remote_sudo "mkdir -p ${STORAGE_PATH} ${BACKUP_PATH} ${EMBEDDING_MODEL_DIR} ${ST
   chown -R hivemem:hivemem ${STORAGE_PATH} /var/log/hivemem"
 
 SERVICE_UNIT="$REPO_DIR/docker/hivemem-ts.service"
-remote_copy "$SERVICE_UNIT" "${SSH_USER}@${TARGET_HOST}:/tmp/hivemem.service"
+# Use the interpreter checked by preflight, independently of systemd's PATH.
+sed 's|^ExecStart=/usr/bin/env node |ExecStart=/usr/bin/node |' "$SERVICE_UNIT" | remote_cmd "umask 077; cat > /tmp/hivemem.service"
 remote_sudo "mv /tmp/hivemem.service /etc/systemd/system/hivemem.service && \
   chmod 644 /etc/systemd/system/hivemem.service && \
   systemctl daemon-reload && \

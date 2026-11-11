@@ -15,7 +15,7 @@
   },
   "type": "module",
   "engines": {
-    "node": "^24.22.1 || ^26.13.0"
+    "node": "^24.22.3 || ^26.13.1"
   },
   "scripts": {
     "bootstrap": "for d in packages/hive-release services/hive-router services/hive-iam services/hive-mem/ts-core services/hive-mem/sdks/typescript services/hive-skills services/hive-registry packages/hive; do (cd \"$d\" && npm ci) || exit 1; done && npm run hooks:install",
@@ -105,6 +105,6 @@
     "release:suite": "node scripts/release/build-suite-manifest.mjs",
     "release:suite:check": "bash scripts/release/check-suite-release.sh",
     "test:terminal-host": "bash scripts/prepare-terminal.test.sh",
-    "test:ci": "node --test scripts/coordinator-poll.test.mjs scripts/ci-recovery-scope.test.mjs scripts/suite/recovery-timing.test.mjs scripts/suite/recovery-client.test.mjs scripts/fixture-process.test.mjs && bash scripts/ci-apt-setup.test.sh && bash scripts/suite/sudo-host.test.sh"
+    "test:ci": "node --test scripts/body-limit-security.test.mjs scripts/native-node-preflight.test.mjs scripts/coordinator-poll.test.mjs scripts/ci-recovery-scope.test.mjs scripts/suite/recovery-timing.test.mjs scripts/suite/recovery-client.test.mjs scripts/fixture-process.test.mjs && bash scripts/ci-apt-setup.test.sh && bash scripts/suite/sudo-host.test.sh"
   }
 }

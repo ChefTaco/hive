@@ -30,7 +30,7 @@ const root = new URL('../..', import.meta.url).pathname;
 const latest = readdirSync(join(root, 'releases')).filter((name) => /^\d+\.\d+\.\d+\.json$/.test(name))
   .sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).pop();
 const ingressImage = process.env.HIVE_INGRESS_TEST_IMAGE || JSON.parse(readFileSync(join(root, 'releases', latest), 'utf8')).components.ingress.image;
-const nodeImage = 'node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205';
+const nodeImage = 'node:24.22.3-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54';
 // The backend's keep-alive timeout: Node's default, which the suite products keep.
 const BACKEND_KEEPALIVE_MS = 5000;
 const caddyfile = readFileSync(args.caddyfile ?? join(root, 'deployment/Caddyfile'), 'utf8');

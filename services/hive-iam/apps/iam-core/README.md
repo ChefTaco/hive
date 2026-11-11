@@ -24,7 +24,7 @@ own.
 
 ## Requirements
 
-- Node.js 24 (`>=24.22.1`) or 26 (`>=26.13.0`) on Linux or macOS
+- Node.js 24 (`>=24.22.3`) or 26 (`>=26.13.1`) on Linux or macOS
 - Redis 7 or later (queues, rate limiting, WebAuthn ceremonies)
 - npm must be allowed to run the install scripts of `better-sqlite3` and
   `argon2`. `better-sqlite3` downloads a prebuilt binary during install, and

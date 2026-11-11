@@ -53,7 +53,7 @@ assert(sudoHost || process.getuid() !== 0, 'Run acceptance as an unprivileged op
 let target;
 
 const release = JSON.parse(readFileSync(join(root, 'releases/2.0.1.json'), 'utf8'));
-const images = { node: 'node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205', redis: release.components['oathweave-redis'].image, qdrant: release.components['hivemem-qdrant'].image, postgres: release.components['magnus-postgres'].image };
+const images = { node: 'node:24.22.3-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54', redis: release.components['oathweave-redis'].image, qdrant: release.components['hivemem-qdrant'].image, postgres: release.components['magnus-postgres'].image };
 const secrets = { redis: randomBytes(18).toString('hex'), qdrant: randomBytes(18).toString('hex'), postgres: randomBytes(18).toString('hex') };
 
 // One tick writes every store of the probe in this order, so a restored copy taken at one

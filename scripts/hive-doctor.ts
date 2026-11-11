@@ -2,6 +2,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { satisfiesCaretRange, supportedNodeRange } from '../packages/hive/src/version.ts';
 import {
   HIVE_SERVICES,
   hiveServicesForHost,
@@ -62,9 +63,11 @@ function hasCommand(command: string): boolean {
   return result.status === 0;
 }
 
-function parseNodeMajor(version: string): number {
-  const match = /^v?(\d+)/.exec(version.trim());
-  return match ? Number(match[1]) : 0;
+export function checkNodeRuntime(version: string): DoctorCheck {
+  const range = supportedNodeRange();
+  return satisfiesCaretRange(version, range)
+    ? check('pass', 'tools', `Node ${version} satisfies ${range}`)
+    : check('fail', 'tools', `Node ${version} does not satisfy ${range}`);
 }
 
 function isExecutable(path: string): boolean {
@@ -135,10 +138,7 @@ function checkLocalFiles(rootDir: string): DoctorCheck[] {
 
 function checkTooling(): DoctorCheck[] {
   const checks: DoctorCheck[] = [];
-  const nodeMajor = parseNodeMajor(process.version);
-  checks.push(nodeMajor >= 24
-    ? check('pass', 'tools', `Node ${process.version} satisfies >=24`)
-    : check('fail', 'tools', `Node ${process.version} is below required >=24`));
+  checks.push(checkNodeRuntime(process.version));
   for (const command of ['npm', 'bash', 'ssh', 'curl', 'openssl']) {
     checks.push(hasCommand(command)
       ? check('pass', 'tools', `${command} is available`)

@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 const helper=resolve(import.meta.dirname,'skills-integration-host.sh'),sha=value=>createHash('sha256').update(value).digest('hex');
 test('verifies signed client metadata and protected exact registry bindings without executing a client',()=>{
  const dir=mkdtempSync(join(tmpdir(),'skills-integration-'));try{
- const pair=generateKeyPairSync('ed25519'),artifact={version:'1.2.2',url:'https://artifacts.example.com/client.tgz',sha256:'a'.repeat(64),nodeVersion:'v24.22.1',files:Object.fromEntries(['hermes-sync.mjs','archive-utils.mjs','LICENSE','NOTICE'].map(name=>[name,'b'.repeat(64)]))};
+ const pair=generateKeyPairSync('ed25519'),artifact={version:'1.2.2',url:'https://artifacts.example.com/client.tgz',sha256:'a'.repeat(64),nodeVersion:'v24.22.3',files:Object.fromEntries(['hermes-sync.mjs','archive-utils.mjs','LICENSE','NOTICE'].map(name=>[name,'b'.repeat(64)]))};
  const manifest=JSON.stringify({nativeClients:{hiveskills:artifact}});writeFileSync(join(dir,'manifest.fixture.json'),manifest);writeFileSync(join(dir,'signature.fixture'),sign(null,Buffer.from(manifest),pair.privateKey));writeFileSync(join(dir,'trust.fixture.pub'),pair.publicKey.export({type:'spki',format:'pem'}));
  const token='obviously-fake-registry-token-for-fixture';writeFileSync(join(dir,'token'),token,{mode:0o600});
  const target={target:'fixture-target',host:'fixture-host',nodeId:'fixture-node',agentTarget:'fixture-native',owner:'operator',home:'/opt/operator',hermesHome:'/opt/hermes',environmentFile:'/protected/native.env',clientDirectory:'/opt/skills-client',nodeBinary:'/usr/bin/node'};

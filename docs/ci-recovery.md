@@ -57,7 +57,7 @@ SQLite integrity, immutable blob bytes, store write order, Redis expiry and reta
 
 ## Measuring changes
 
-Use comparable `ubuntu-24.04` runners, Node 24.22.1 and seed scale 1 for before/after claims.
+Use comparable `ubuntu-24.04` runners, Node 24.22.3 and seed scale 1 for before/after claims.
 Record runner image version, CPU count, exact commit/run, corpus/archive sizes, phase durations,
 first/second backup and longest pauses. Include cold image/host setup and cleanup in totals;
 separate those from driver phases. Focused-versus-full timings are different workloads and must

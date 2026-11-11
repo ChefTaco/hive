@@ -15,7 +15,7 @@ This package is the server. Clients use the REST API directly or the
 
 ## Requirements
 
-- Node.js 24 (24.22.1 or later) or Node.js 26 (26.13.0 or later)
+- Node.js 24 (24.22.3 or later) or Node.js 26 (26.13.1 or later)
 - Linux or macOS with the `flock` command (part of util-linux on Linux; on macOS install a `flock`
   package, for example with Homebrew). HiveMem uses it to guarantee a single writer per data
   directory.

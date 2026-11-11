@@ -9,7 +9,7 @@ const options={};for(let i=2;i<process.argv.length;i+=2){assert(['--output','--s
 const output=options.output;mkdirSync(output,{recursive:true,mode:0o700});chmodSync(output,0o700);
 const put=(name,value)=>writeFileSync(join(output,name),value,{mode:0o600});
 const {buildNativeClient}=await import(join(options['skills-root'],'scripts/build-native-client.mjs'));
-const artifact=buildNativeClient({sourceRoot:options['skills-root'],output:join(output,'artifact'),url:'https://artifacts.example.com/hiveskills-client-1.2.2.tar.gz',nodeVersion:'v24.22.1'});
+const artifact=buildNativeClient({sourceRoot:options['skills-root'],output:join(output,'artifact'),url:'https://artifacts.example.com/hiveskills-client-1.2.2.tar.gz',nodeVersion:'v24.22.3'});
 copyFileSync(join(output,'artifact','hiveskills-client-'+artifact.version+'.tar.gz'),join(output,'client.tgz'));
 copyFileSync(resolve(import.meta.dirname,'skills-integration-host.sh'),join(output,'helper.sh'));
 const manifest=JSON.stringify({schema:1,version:'1.2.2',profiles:{core:['hiveskills','magnus'],full:['hiveskills','magnus']},components:Object.fromEntries(['hiveskills','magnus'].map(name=>[name,{image:'example.com/fixture@sha256:'+('0'.repeat(64)),service:{user:'1000:1000',healthcheck:{test:['CMD','true']}}}])),nativeClients:{hiveskills:artifact}}),keys=generateKeyPairSync('ed25519');put('manifest.fixture.json',manifest);put('signature.fixture',sign(null,Buffer.from(manifest),keys.privateKey));put('trust.fixture.pub',keys.publicKey.export({format:'pem',type:'spki'}));
@@ -19,7 +19,7 @@ const publicRoot=resolve(import.meta.dirname,'../..'),runtimeFiles=execFileSync(
 for(const file of runtimeFiles){const destination=join(output,'runtime',file);mkdirSync(dirname(destination),{recursive:true,mode:0o700});copyFileSync(join(publicRoot,file),destination)}
 const payload=JSON.parse(readFileSync(join(output,'input.json')));put('installation.json',JSON.stringify({schema:1,installation:'fixture',release:'1.2.2',profile:'custom',origin:'https://console.example.com',hosts:{'fixture-host':{target:'local',directory:'/opt/suite'}},components:{hiveskills:{host:'fixture-host'},magnus:{host:'fixture-host'}},agents:[],inference:[],skillsDeployment:payload.skillsDeployment}));
 
-put('Dockerfile',`FROM node:24.22.1-bookworm-slim\nRUN apt-get update && apt-get install -y --no-install-recommends jq openssl curl && rm -rf /var/lib/apt/lists/*\nCOPY . /fixture\nRUN chmod 700 /fixture && install -d -o node -g node -m 700 /opt/operator /opt/operator/hermes && printf 'HIVE_SKILLS_URL=https://skills.example.com\\nHIVE_SKILLS_TARGET_TOKEN=obviously-fake-protected-native-token-for-fixture\\n' > /opt/operator/native.env && chown node:node /opt/operator/native.env && chmod 600 /opt/operator/native.env\nENTRYPOINT ["bash","/fixture/proof.sh"]\n`);
+put('Dockerfile',`FROM node:24.22.3-bookworm-slim\nRUN apt-get update && apt-get install -y --no-install-recommends jq openssl curl && rm -rf /var/lib/apt/lists/*\nCOPY . /fixture\nRUN chmod 700 /fixture && install -d -o node -g node -m 700 /opt/operator /opt/operator/hermes && printf 'HIVE_SKILLS_URL=https://skills.example.com\\nHIVE_SKILLS_TARGET_TOKEN=obviously-fake-protected-native-token-for-fixture\\n' > /opt/operator/native.env && chown node:node /opt/operator/native.env && chmod 600 /opt/operator/native.env\nENTRYPOINT ["bash","/fixture/proof.sh"]\n`);
 put('proof.sh',`set -euo pipefail
 source /fixture/helper.sh
 directory=/fixture; plan=fixture; host=fixture-host; input=$(cat /fixture/input.json)

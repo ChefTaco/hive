@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto';
 import https from 'node:https';
 const caddyImage = process.env.HIVE_INGRESS_TEST_IMAGE || 'hive-ingress:candidate';
 const nodeImage =
-  'node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205';
+  'node:24.22.3-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54';
 const root = new URL('../..', import.meta.url).pathname;
 const temporary = mkdtempSync(join(tmpdir(), 'hive-ingress-acceptance-'));
 const network = 'hive-ingress-test-' + randomBytes(5).toString('hex');

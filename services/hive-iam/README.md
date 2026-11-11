@@ -29,7 +29,7 @@ operational scripts used to deploy and maintain them.
 
 ## Requirements
 
-- Node.js 24 (`>=24.22.1`) or 26 (`>=26.13.0`)
+- Node.js 24 (`>=24.22.3`) or 26 (`>=26.13.1`)
 - Redis (local, used for queues and rate limiting)
 - OpenSSL (key and certificate generation)
 

@@ -56,7 +56,7 @@ async function sqliteRows(file, scratch) {
 function inContainer(container, code, environment = {}) {
   const result = docker('run', '--rm', '--network', 'container:' + container, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--user', serviceUser,
     ...Object.entries(environment).flatMap(([key, value]) => ['-e', key + '=' + value]), '--mount', `type=bind,source=${join(root, 'scripts/suite')},target=/tools,readonly`,
-    'node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205', 'node', '--no-warnings', '--input-type=module', '-e', code);
+    'node:24.22.3-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54', 'node', '--no-warnings', '--input-type=module', '-e', code);
   return JSON.parse(result);
 }
 const qdrantPoints = (container, key) => inContainer(container, `

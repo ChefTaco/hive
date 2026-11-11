@@ -30,7 +30,7 @@ tree_lines() {
   while IFS= read -r -d '' path; do printf '%s  %s\0' "${sums[$path]:?}" "$path"; done < <(cd "$1" && find . -type f -print0 | sort -z)
 }
 tree_digest() { tree_lines "$1" | sha256sum | cut -d ' ' -f1; }
-recovery_image='ghcr.io/cheftaco/hive-node-runtime:26.13.0-1@sha256:48948514bce59a27f8ee2a3eabaea0a04cbfa87e087297a52f8501c0d465c84f'
+recovery_image='ghcr.io/cheftaco/hive-node-runtime:26.13.1-1@sha256:7671ab0a702c273c37a84d089ba6fe821c6d85cbeab888e7e43522a057da5e6d'
 atomic_json() {
   jq . > "$1.tmp" || return 1
   chmod 600 "$1.tmp" || return 1

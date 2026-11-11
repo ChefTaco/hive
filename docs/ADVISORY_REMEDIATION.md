@@ -1,7 +1,7 @@
 # Runtime advisory remediation
 
 The Hive 2.4.2 image review recorded 27 unique HIGH/CRITICAL advisory identifiers
-without fixes in their installed Debian suites. The original scanner findings are OS packages. An `npm audit --omit=dev`
+without fixes in their installed Debian suites. The original scanner findings are OS packages. At that review, an `npm audit --omit=dev`
 recheck of the nine affected application repositories reported zero vulnerabilities.
 Independent checks additionally found affected SQLite embedded inside Node 24
 and the latest better-sqlite3 package. Neither npm audit nor the image scanner
@@ -37,7 +37,10 @@ storage format or dependency exception is introduced.
 
 Use a minimal glibc runtime with patched, inventoried distribution packages for
 Node services. `deployment/runtime/node.Dockerfile` pins the Wolfi base by digest
-and Node 26.13.0 by package revision. It supplies OpenSSL 3 compatibility libraries
+and the official Node 26.13.1 image by digest. The patched Node binary is copied
+from that image because the distribution package can lag upstream security fixes;
+no Debian userspace or build tooling is copied. The runtime explicitly installs
+`libatomic`, which the upstream binary requires. It supplies OpenSSL 3 compatibility libraries
 for native addons and the GNU `flock` command used for single-writer protection.
 It retains package metadata. Production products copy only their built artifacts
 and install their specific runtime tools; compilers and npm remain in build stages.
@@ -189,3 +192,21 @@ Sources: [Debian zlib tracking](https://security-tracker.debian.org/tracker/sour
 [Debian Perl tracking](https://security-tracker.debian.org/tracker/CVE-2026-9538),
 [Wolfi architecture](https://www.chainguard.dev/supply-chain-security-101/wolfi-overview),
 [Node image architecture support](https://github.com/nodejs/docker-node#musl-builds-for-alpine).
+
+## November Node and Hono security updates
+
+Node 26.13.1 fixes upstream TLS and HTTP/2 advisories; supported Node 24
+installations require 24.22.3. These are runtime minimums, including native agent
+enrollment, build tools and recovery helpers. Preserve historical signed releases;
+a new suite release must pin rebuilt dependent images before deployment.
+Individual CVE reachability still depends on TLS termination, HTTP/2 use, mTLS,
+SNI and deployment configuration; these compatibility checks do not establish
+that every upstream exploit path is exposed by every product.
+
+Hono 4.13.18 addresses GHSA-39q9-qp46-w8xg by coalescing tiny transfer chunks
+into a bounded buffer. A payload-byte limit alone did not prevent the previous
+per-chunk memory amplification. Regression checks exercise the installed Hono
+copies with one-byte chunks, exact-limit and over-limit bodies.
+
+Sources: [Node security release](https://github.com/nodejs/node/releases/tag/v26.13.1),
+[Hono advisory](https://github.com/honojs/hono/security/advisories/GHSA-39q9-qp46-w8xg).

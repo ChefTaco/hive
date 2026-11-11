@@ -9,6 +9,8 @@ All notable changes to this project are documented in this file. The format is b
 ### Security
 
 - Build the shared Node runtime from digest-pinned Node.js 26.13.1 on the hardened glibc base. Verify the exact runtime version, embedded SQLite, non-root startup and real TLS/HTTP2 exchanges on both architectures before publication.
+- Require Node.js 24.22.3 or 26.13.1 across supported native installations, build tooling and recovery helpers. Reject earlier vulnerable patch versions during enrollment and diagnosis. Native source deployments check install-shell and service runtimes before remote writes or credential refresh.
+- Upgrade legacy Router, IAM and Skills Hono dependencies to 4.13.18 to bound memory for request bodies delivered in tiny chunks.
 
 ### Added
 

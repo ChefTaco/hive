@@ -73,13 +73,16 @@ describe("arguments and names", () => {
   it("pins the servers to the launcher's major version and checks the engines range", () => {
     assert.match(launcherVersion(), /^\d+\.\d+\.\d+/);
     assert.equal(serverRange(), `^${launcherVersion().split(".")[0]}.0.0`);
-    const range = "^24.22.1 || ^26.13.0";
-    assert.ok(satisfiesCaretRange("24.22.1", range));
+    const range = "^24.22.3 || ^26.13.1";
+    assert.ok(satisfiesCaretRange("24.22.3", range));
     assert.ok(satisfiesCaretRange("v24.30.0", range));
-    assert.ok(satisfiesCaretRange("26.13.0", range));
+    assert.ok(satisfiesCaretRange("26.13.1", range));
     assert.ok(!satisfiesCaretRange("24.21.9", range));
     assert.ok(!satisfiesCaretRange("25.0.0", range));
     assert.ok(!satisfiesCaretRange("22.12.0", range));
+    for (const version of ["24.22.1", "24.22.2", "26.13.0", "26.13.1-rc.0", "24.22.3garbage"]) {
+      assert.ok(!satisfiesCaretRange(version, range), version);
+    }
     assert.ok(compareVersions("1.10.0", "1.9.9") > 0);
   });
 
