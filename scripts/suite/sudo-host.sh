@@ -46,7 +46,9 @@ COPY --from=node /usr/local/bin/node /usr/local/bin/node
 # Ubuntu's distribution signing keys and package signature checks remain unchanged.
 COPY --from=node /node-roots.pem /etc/ssl/certs/ca-certificates.crt
 RUN printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAPT::Update::Error-Mode "any";\n' > /etc/apt/apt.conf.d/99hive-ci-network \
-    && sed -i 's#http://archive.ubuntu.com/#https://archive.ubuntu.com/#g; s#http://security.ubuntu.com/#https://security.ubuntu.com/#g' /etc/apt/sources.list.d/ubuntu.sources \
+    && printf 'https://mirrors.kernel.org/ubuntu\tpriority:0\nhttps://archive.ubuntu.com/ubuntu\tpriority:1\nhttps://security.ubuntu.com/ubuntu\tpriority:2\n' > /etc/apt/hive-ci-mirrors.txt \
+    && printf 'https://mirrors.mit.edu/ubuntu-ports\tpriority:0\nhttps://ports.ubuntu.com/ubuntu-ports\tpriority:1\n' > /etc/apt/hive-ci-ports-mirrors.txt \
+    && sed -E -i 's#https?://(archive|security)\.ubuntu\.com/ubuntu/?#mirror+file:/etc/apt/hive-ci-mirrors.txt#g; s#https?://ports\.ubuntu\.com/ubuntu-ports/?#mirror+file:/etc/apt/hive-ci-ports-mirrors.txt#g' /etc/apt/sources.list.d/ubuntu.sources \
     && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       openssh-server openssh-client sudo jq curl ca-certificates openssl sqlite3 git util-linux procps xz-utils python3 iproute2 diffutils findutils \
     && rm -rf /var/lib/apt/lists/* \
