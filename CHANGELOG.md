@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- Add optional Embermend catalog, ingress, identity initialization and shared API/worker contracts for a compatible Magnus release. Existing profiles and mutation authority remain unchanged; combined acceptance is required before production adoption.
+
 ## [3.1.1] - 2026-11-11
 
 ### Fixed

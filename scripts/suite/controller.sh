@@ -167,7 +167,7 @@ hive_configure() {
   local inference='[]' agents='[]' temporary config selected_json runtime version agent_id agent_profile agent_environment agent_service authorized
   local external_ca enrollment_endpoint enrollment_prefix enrollment_credential enrollment_ca provider_slug provider_aliases
   local product product_host product_origin product_bind product_certificate product_key product_inference trust_bundle ssh_config magnus_console
-  local gateway_deploy='' gateway_username='' gateway_key='' gateway_grant=no agent_port='' external_magnus=''
+  local gateway_deploy='' gateway_username='' gateway_key='' gateway_grant=no agent_port='' external_magnus='' embermend_deploy=''
   if [[ -z "$HIVE_VERSION" ]]; then hive_prompt HIVE_VERSION 'Exact suite release version'; fi
   if [[ -z "$HIVE_MANIFEST" ]]; then
     HIVE_MANIFEST="$HIVE_ROOT/releases/$HIVE_VERSION.json"
@@ -260,6 +260,17 @@ hive_configure() {
       else hive_prompt studio_deploy 'Deploy Ardent Project Studio, team projects for Ardent agents (yes/no)' "$([[ "$profile" == full ]] && printf yes || printf no)"; fi
       if [[ "$studio_deploy" == yes ]]; then selected_json=$(jq -nc --argjson selected "$selected_json" '$selected+["ardentstudio"]|unique')
       elif [[ "$studio_deploy" != no ]]; then hive_die 'Answer yes or no'; fi
+    fi
+    # A signed protocol declaration is required: a Magnus version alone does not
+    # establish the optional managed remediation bridge. New installs opt in.
+    if jq -e '.components.embermend!=null and .components.magnus.embermendProtocol==1' "$HIVE_MANIFEST" >/dev/null && jq -ne --argjson selected "$selected_json" '$selected|index("magnus")!=null' >/dev/null; then
+      if jq -ne --argjson selected "$selected_json" '$selected|index("embermend")!=null' >/dev/null; then embermend_deploy=yes
+      else hive_prompt embermend_deploy 'Deploy Embermend security assessment and remediation (yes/no)' no; fi
+      if [[ "$embermend_deploy" == yes ]]; then
+        selected_json=$(jq -nc --argjson selected "$selected_json" --slurpfile release "$HIVE_MANIFEST" '
+          def dependencies: . as $before | ((. + [ .[] as $name|$release[0].components[$name].requiresLocal[]? ])|unique) as $after | if $after==$before then . else $after|dependencies end;
+          ($selected+["embermend"])|dependencies')
+      elif [[ "$embermend_deploy" != no ]]; then hive_die 'Answer yes or no'; fi
     fi
     # Host agents reach Magnus on its own published port; a distributed Magnus has its endpoint.
     if [[ "$mode" == fresh ]] && jq -ne --argjson selected "$selected_json" '$selected|index("magnus")!=null' >/dev/null; then
@@ -483,6 +494,9 @@ hive_manifest() {
     (.profiles.core|type=="array") and (.profiles.full|type=="array") and
     ((.networks // {})|type=="object" and all(.[]; .driver=="bridge" and (has("external")|not) and (keys-["driver","internal"]|length==0)))
   ' "$HIVE_MANIFEST" >/dev/null || hive_die 'Invalid release manifest or unpinned image'
+  if jq -e '.components.embermend!=null' "$HIVE_CONFIG" >/dev/null; then
+    jq -e '.components.magnus.version as $v | ($v|type=="string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and (($v|split(".")|map(tonumber)) >= [2,4,0]) and .components.magnus.embermendProtocol==1 and .components.embermend.image==.components["embermend-worker"].image' "$HIVE_MANIFEST" >/dev/null || hive_die 'Embermend needs a compatible Magnus release declaring embermendProtocol 1 and matching API/worker images'
+  fi
   # Reject hidden privileged mounts and unsupported release/config mismatches.
   jq -e --slurpfile config "$HIVE_CONFIG" '
     . as $r | $config[0] as $c |

@@ -19,6 +19,9 @@ hive_full_configuration() {
   if has_component magnus; then
     {
       common_environment; resource_identity; line MAGNUS_HOME /data; line MAGNUS_AUTO_MIGRATE false; line MAGNUS_UPDATE_CHECK false; line MAGNUS_AGENT_UPGRADES false
+      if selected embermend; then
+        line MAGNUS_EMBERMEND_GRANTS_JSON "$(jq -nc --arg token "$(printf '%s' "$(secret embermend-magnus)" | sha256sum | cut -d ' ' -f1)" --arg installation "$installation" '{"embermend":{tokenSha256:$token,installationId:$installation,productInstallationId:$installation,applicationIds:[],targets:{}}}')"
+      fi
       line DATABASE_URL "postgresql://magnus:$(secret magnus-db)@magnus-postgres:5432/magnus"
       line REDIS_URL "redis://:$(secret magnus-redis)@magnus-redis:6379"
       line API_SECRET "$(secret magnus-api)"; line JWT_SECRET "$(secret magnus-jwt)"; line NODE_MANAGER_SECRET "$(secret magnus-manager)"
@@ -124,6 +127,17 @@ hive_full_configuration() {
       common_environment; line EMBERFOLD_API_TOKEN "$(secret context-api)"
     } | publish_file emberfold "$directory/config/emberfold.env"
     printf '%s\n' '{"host":"0.0.0.0","port":8096,"providers":[],"concurrency":2,"timeout_ms":120000}' | publish_file emberfold "$directory/config/emberfold/service.json"
+  fi
+  if has_component embermend; then
+    printf '%s\n' "$(secret embermend-db)" | publish_file embermend-postgres "$directory/config/embermend-postgres/password"
+    {
+      common_environment; resource_identity
+      line DATABASE_URL "postgresql://embermend:$(secret embermend-db)@embermend-postgres:5432/embermend"
+      line MAGNUS_URL "$(product_endpoint magnus https://magnus:4000)"; line MAGNUS_EMBERMEND_TOKEN "$(secret embermend-magnus)"
+      line EMBERMEND_BIND 0.0.0.0; line EMBERMEND_PORT 4180
+      line EMBERMEND_IDENTITY_GRANTS "$(jq -nc --arg subject "$subject" --arg installation "$installation" '[{subject:$subject,kind:"operator",permissions:["read","evidence","assess","prepare","propose","publish-explanation","ingest","policy"],scope:{installationId:$installation,applicationIds:[],targetIds:[]}},{subject:"embermend-coordinator",kind:"coordinator",permissions:["read","evidence","assess","prepare","propose","publish-explanation"],scope:{installationId:$installation,applicationIds:[],targetIds:[]}},{subject:"embermend-verifier",kind:"integration",permissions:["read","evidence","ingest"],scope:{installationId:$installation,applicationIds:[],targetIds:[]}}]')"
+    } | publish_file embermend "$directory/config/embermend.env"
+    publish_file embermend-worker "$directory/config/embermend-worker.env" < "$directory/config/embermend.env"
   fi
   if has_component ardentstudio; then
     # Studio reaches Magnus and HiveMem directly on their verified HTTPS endpoints, as itself,

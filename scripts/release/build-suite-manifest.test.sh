@@ -115,4 +115,13 @@ for mutation in 'del(.["datastore:postgres17"])' '.["datastore:redis"]="ghcr.io/
   jq "$mutation" "$temporary/runtime-pinned.json" > "$temporary/bad-pinned.json"
   if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/runtime-inputs.json" --pinned "$temporary/bad-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An incomplete or foreign datastore pin passed' >&2; exit 1; fi
 done
+# Embermend requires an explicit reviewed bridge declaration, not a version guess.
+jq '.products.embermend={image:"ghcr.io/example/embermend:0.1.0",version:"0.1.0",platforms:["linux/amd64","linux/arm64"]} | .products.magnus.version="2.4.2" | .products.magnus.embermendProtocol=1' "$temporary/inputs.json" > "$temporary/embermend-inputs.json"
+jq --arg digest "$(digest 95)" '.+{embermend:("ghcr.io/example/embermend@"+$digest)}' "$temporary/pinned.json" > "$temporary/embermend-pinned.json"
+node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/embermend-inputs.json" --pinned "$temporary/embermend-pinned.json" --output "$temporary/embermend.json" >/dev/null
+jq -e '.components.magnus.embermendProtocol==1 and .components.embermend.image==.components["embermend-worker"].image and .components["embermend-worker"].version=="0.1.0"' "$temporary/embermend.json" >/dev/null
+for change in 'del(.products.magnus.embermendProtocol)' '.products.magnus.embermendProtocol=2' '.products.magnus.version="2.3.7"'; do
+  jq "$change" "$temporary/embermend-inputs.json" > "$temporary/embermend-bad.json"
+  if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/embermend-bad.json" --pinned "$temporary/embermend-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An undeclared/incompatible Magnus bridge passed' >&2; exit 1; fi
+done
 echo 'build-suite-manifest: ok'

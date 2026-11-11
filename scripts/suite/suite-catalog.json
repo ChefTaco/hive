@@ -9,7 +9,14 @@
     "consoleSection": null,
     "required": true,
     "dependencies": [],
-    "connection": { "browserPrefix": "/api/registry", "consolePath": null, "nativeApis": {}, "internalEndpoints": { "api": "http://hive-registry:8095" } }
+    "connection": {
+      "browserPrefix": "/api/registry",
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {
+        "api": "http://hive-registry:8095"
+      }
+    }
   },
   "oathweave": {
     "displayName": "Oathweave",
@@ -20,8 +27,17 @@
     "licenseSpdx": "Apache-2.0",
     "consoleSection": "identity",
     "required": true,
-    "dependencies": ["oathweave-redis"],
-    "connection": { "browserPrefix": "/api/oathweave", "consolePath": null, "nativeApis": {}, "internalEndpoints": { "api": "https://oathweave:4200" } }
+    "dependencies": [
+      "oathweave-redis"
+    ],
+    "connection": {
+      "browserPrefix": "/api/oathweave",
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {
+        "api": "https://oathweave:4200"
+      }
+    }
   },
   "oathweave-redis": {
     "displayName": "Oathweave Redis",
@@ -33,7 +49,12 @@
     "consoleSection": null,
     "required": true,
     "dependencies": [],
-    "connection": { "browserPrefix": null, "consolePath": null, "nativeApis": {}, "internalEndpoints": {} }
+    "connection": {
+      "browserPrefix": null,
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {}
+    }
   },
   "hivexui": {
     "displayName": "HiveXUI",
@@ -45,7 +66,14 @@
     "consoleSection": null,
     "required": true,
     "dependencies": [],
-    "connection": { "browserPrefix": null, "consolePath": "/", "nativeApis": {}, "internalEndpoints": { "ui": "http://hivexui:8080" } }
+    "connection": {
+      "browserPrefix": null,
+      "consolePath": "/",
+      "nativeApis": {},
+      "internalEndpoints": {
+        "ui": "http://hivexui:8080"
+      }
+    }
   },
   "ingress": {
     "displayName": "Hive Ingress",
@@ -56,8 +84,15 @@
     "licenseSpdx": "Apache-2.0",
     "consoleSection": null,
     "required": true,
-    "dependencies": ["hivexui"],
-    "connection": { "browserPrefix": null, "consolePath": null, "nativeApis": {}, "internalEndpoints": {} }
+    "dependencies": [
+      "hivexui"
+    ],
+    "connection": {
+      "browserPrefix": null,
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {}
+    }
   },
   "emberpath": {
     "displayName": "Emberpath",
@@ -68,8 +103,20 @@
     "licenseSpdx": "Apache-2.0",
     "consoleSection": "models",
     "required": false,
-    "dependencies": ["oathweave"],
-    "connection": { "browserPrefix": "/api/emberpath", "consolePath": null, "nativeApis": { "model": "/v1" }, "internalEndpoints": { "admin": "https://emberpath:9443", "model": "https://emberpath:4020" } }
+    "dependencies": [
+      "oathweave"
+    ],
+    "connection": {
+      "browserPrefix": "/api/emberpath",
+      "consolePath": null,
+      "nativeApis": {
+        "model": "/v1"
+      },
+      "internalEndpoints": {
+        "admin": "https://emberpath:9443",
+        "model": "https://emberpath:4020"
+      }
+    }
   },
   "hivemem": {
     "displayName": "HiveMem",
@@ -80,8 +127,20 @@
     "licenseSpdx": "Apache-2.0",
     "consoleSection": "memory",
     "required": false,
-    "dependencies": ["oathweave", "hivemem-qdrant"],
-    "connection": { "browserPrefix": "/api/hivemem", "consolePath": null, "nativeApis": { "memory": "/memory/v1" }, "internalEndpoints": { "api": "https://hivemem:18790" } }
+    "dependencies": [
+      "oathweave",
+      "hivemem-qdrant"
+    ],
+    "connection": {
+      "browserPrefix": "/api/hivemem",
+      "consolePath": null,
+      "nativeApis": {
+        "memory": "/memory/v1"
+      },
+      "internalEndpoints": {
+        "api": "https://hivemem:18790"
+      }
+    }
   },
   "hivemem-qdrant": {
     "displayName": "HiveMem Qdrant",
@@ -93,7 +152,12 @@
     "consoleSection": null,
     "required": false,
     "dependencies": [],
-    "connection": { "browserPrefix": null, "consolePath": null, "nativeApis": {}, "internalEndpoints": {} }
+    "connection": {
+      "browserPrefix": null,
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {}
+    }
   },
   "hiveskills": {
     "displayName": "HiveSkills",
@@ -104,8 +168,17 @@
     "licenseSpdx": "Apache-2.0",
     "consoleSection": "skills",
     "required": false,
-    "dependencies": ["oathweave"],
-    "connection": { "browserPrefix": "/api/hiveskills", "consolePath": null, "nativeApis": {}, "internalEndpoints": { "api": "https://hiveskills:4030" } }
+    "dependencies": [
+      "oathweave"
+    ],
+    "connection": {
+      "browserPrefix": "/api/hiveskills",
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {
+        "api": "https://hiveskills:4030"
+      }
+    }
   },
   "magnus": {
     "displayName": "Magnus",
@@ -116,8 +189,19 @@
     "licenseSpdx": "Apache-2.0",
     "consoleSection": "fleet",
     "required": false,
-    "dependencies": ["oathweave", "magnus-postgres", "magnus-redis"],
-    "connection": { "browserPrefix": "/api/magnus", "consolePath": "/fleet", "nativeApis": {}, "internalEndpoints": { "api": "https://magnus:4000" } }
+    "dependencies": [
+      "oathweave",
+      "magnus-postgres",
+      "magnus-redis"
+    ],
+    "connection": {
+      "browserPrefix": "/api/magnus",
+      "consolePath": "/fleet",
+      "nativeApis": {},
+      "internalEndpoints": {
+        "api": "https://magnus:4000"
+      }
+    }
   },
   "magnus-gateway": {
     "displayName": "Magnus Fleet Gateway",
@@ -128,8 +212,17 @@
     "licenseSpdx": "Apache-2.0",
     "consoleSection": null,
     "required": false,
-    "dependencies": ["magnus"],
-    "connection": { "browserPrefix": "/api/magnus/terminal", "consolePath": null, "nativeApis": {}, "internalEndpoints": { "api": "https://magnus-gateway:4310" } }
+    "dependencies": [
+      "magnus"
+    ],
+    "connection": {
+      "browserPrefix": "/api/magnus/terminal",
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {
+        "api": "https://magnus-gateway:4310"
+      }
+    }
   },
   "magnus-postgres": {
     "displayName": "Magnus PostgreSQL",
@@ -141,7 +234,12 @@
     "consoleSection": null,
     "required": false,
     "dependencies": [],
-    "connection": { "browserPrefix": null, "consolePath": null, "nativeApis": {}, "internalEndpoints": {} }
+    "connection": {
+      "browserPrefix": null,
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {}
+    }
   },
   "magnus-redis": {
     "displayName": "Magnus Redis",
@@ -153,7 +251,12 @@
     "consoleSection": null,
     "required": false,
     "dependencies": [],
-    "connection": { "browserPrefix": null, "consolePath": null, "nativeApis": {}, "internalEndpoints": {} }
+    "connection": {
+      "browserPrefix": null,
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {}
+    }
   },
   "cindertrace": {
     "displayName": "Cindertrace",
@@ -164,8 +267,21 @@
     "licenseSpdx": "Apache-2.0",
     "consoleSection": "security",
     "required": false,
-    "dependencies": ["oathweave", "cindertrace-postgres", "cindertrace-redis"],
-    "connection": { "browserPrefix": "/api/cindertrace", "consolePath": "/security-fusion", "nativeApis": { "security": "/api/v1/security-fusion" }, "internalEndpoints": { "api": "https://cindertrace:4101" } }
+    "dependencies": [
+      "oathweave",
+      "cindertrace-postgres",
+      "cindertrace-redis"
+    ],
+    "connection": {
+      "browserPrefix": "/api/cindertrace",
+      "consolePath": "/security-fusion",
+      "nativeApis": {
+        "security": "/api/v1/security-fusion"
+      },
+      "internalEndpoints": {
+        "api": "https://cindertrace:4101"
+      }
+    }
   },
   "cindertrace-postgres": {
     "displayName": "Cindertrace PostgreSQL",
@@ -177,7 +293,12 @@
     "consoleSection": null,
     "required": false,
     "dependencies": [],
-    "connection": { "browserPrefix": null, "consolePath": null, "nativeApis": {}, "internalEndpoints": {} }
+    "connection": {
+      "browserPrefix": null,
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {}
+    }
   },
   "cindertrace-redis": {
     "displayName": "Cindertrace Redis",
@@ -189,7 +310,12 @@
     "consoleSection": null,
     "required": false,
     "dependencies": [],
-    "connection": { "browserPrefix": null, "consolePath": null, "nativeApis": {}, "internalEndpoints": {} }
+    "connection": {
+      "browserPrefix": null,
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {}
+    }
   },
   "chattermost": {
     "displayName": "ChatterMost",
@@ -200,8 +326,20 @@
     "licenseSpdx": "Apache-2.0",
     "consoleSection": "chat",
     "required": false,
-    "dependencies": ["oathweave", "chattermost-postgres"],
-    "connection": { "browserPrefix": "/api/chattermost", "consolePath": null, "nativeApis": { "chat": "/api/v4" }, "internalEndpoints": { "api": "https://chattermost:8065" } }
+    "dependencies": [
+      "oathweave",
+      "chattermost-postgres"
+    ],
+    "connection": {
+      "browserPrefix": "/api/chattermost",
+      "consolePath": null,
+      "nativeApis": {
+        "chat": "/api/v4"
+      },
+      "internalEndpoints": {
+        "api": "https://chattermost:8065"
+      }
+    }
   },
   "chattermost-postgres": {
     "displayName": "ChatterMost PostgreSQL",
@@ -213,7 +351,12 @@
     "consoleSection": null,
     "required": false,
     "dependencies": [],
-    "connection": { "browserPrefix": null, "consolePath": null, "nativeApis": {}, "internalEndpoints": {} }
+    "connection": {
+      "browserPrefix": null,
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {}
+    }
   },
   "emberfold": {
     "displayName": "Emberfold",
@@ -225,7 +368,14 @@
     "consoleSection": null,
     "required": false,
     "dependencies": [],
-    "connection": { "browserPrefix": "/api/emberfold", "consolePath": null, "nativeApis": {}, "internalEndpoints": { "api": "http://emberfold:8096" } }
+    "connection": {
+      "browserPrefix": "/api/emberfold",
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {
+        "api": "http://emberfold:8096"
+      }
+    }
   },
   "ardentstudio": {
     "displayName": "Ardent Project Studio",
@@ -236,7 +386,80 @@
     "licenseSpdx": "Apache-2.0",
     "consoleSection": "studio",
     "required": false,
-    "dependencies": ["magnus", "oathweave", "hivemem"],
-    "connection": { "browserPrefix": "/api/ardentstudio", "consolePath": "/studio", "nativeApis": {}, "internalEndpoints": { "api": "http://ardentstudio:8097" } }
+    "dependencies": [
+      "magnus",
+      "oathweave",
+      "hivemem"
+    ],
+    "connection": {
+      "browserPrefix": "/api/ardentstudio",
+      "consolePath": "/studio",
+      "nativeApis": {},
+      "internalEndpoints": {
+        "api": "http://ardentstudio:8097"
+      }
+    }
+  },
+  "embermend": {
+    "repository": "https://github.com/ChefTaco/Embermend",
+    "documentation": "https://github.com/ChefTaco/Embermend/blob/HEAD/README.md",
+    "license": "https://github.com/ChefTaco/Embermend/blob/HEAD/LICENSE",
+    "licenseSpdx": "Apache-2.0",
+    "required": false,
+    "displayName": "Embermend",
+    "description": "Assessment, recommendations, authorized remediation and independent verification through Magnus.",
+    "consoleSection": "embermend",
+    "dependencies": [
+      "magnus",
+      "oathweave",
+      "hivexui",
+      "embermend-postgres",
+      "embermend-worker"
+    ],
+    "connection": {
+      "browserPrefix": "/api/embermend",
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {
+        "api": "http://embermend:4180"
+      }
+    }
+  },
+  "embermend-worker": {
+    "repository": "https://github.com/ChefTaco/Embermend",
+    "documentation": "https://github.com/ChefTaco/Embermend/blob/HEAD/README.md",
+    "license": "https://github.com/ChefTaco/Embermend/blob/HEAD/LICENSE",
+    "licenseSpdx": "Apache-2.0",
+    "required": false,
+    "displayName": "Embermend worker",
+    "description": "Durable scheduling and orchestration. Repository code runs only in admitted Magnus workers.",
+    "consoleSection": null,
+    "dependencies": [
+      "magnus",
+      "embermend-postgres"
+    ],
+    "connection": {
+      "browserPrefix": null,
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {}
+    }
+  },
+  "embermend-postgres": {
+    "displayName": "Embermend PostgreSQL",
+    "description": "Private authoritative security records and durable jobs.",
+    "repository": "https://github.com/postgres/postgres",
+    "documentation": "https://www.postgresql.org/docs/",
+    "license": "https://www.postgresql.org/about/licence/",
+    "licenseSpdx": "PostgreSQL",
+    "required": false,
+    "consoleSection": null,
+    "dependencies": [],
+    "connection": {
+      "browserPrefix": null,
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {}
+    }
   }
 }
