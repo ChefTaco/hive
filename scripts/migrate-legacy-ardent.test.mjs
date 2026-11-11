@@ -57,3 +57,33 @@ test('capability checker paths and digests must be explicit and pinned',()=>{
  validateConfig({...config(),compatibilityCheck:{path:'/opt/upgrade/parity.mjs',sha256:'a'.repeat(64)}});
  for(const compatibilityCheck of [null,[],{path:'relative.mjs',sha256:'a'.repeat(64)},{path:'/opt/../etc/parity.mjs',sha256:'a'.repeat(64)},{path:'/opt/parity.mjs',sha256:'latest'},{path:'/opt/parity.mjs',sha256:'a'.repeat(64),unreviewed:true}])assert.throws(()=>validateConfig({...config(),compatibilityCheck}));
 });
+
+test('reviewed extension plans bind every profile without alternate plugins, traversal or unpinned packages',async()=>{
+ const {validateExtensions,translatedProfileConfig,preservedJobs}=await import('./migrate-legacy-ardent.mjs');const c={...config(),version:'3.1.0'};
+ const fixture=()=>({packages:[{name:'@example/extension',version:'1.0.0',archive:'/opt/upgrade/extension.tgz',integrity:c.integrity}],profiles:{assistant:{plugins:['@example/extension'],files:[{source:'/opt/upgrade/binding.json',target:'.extensions/example/bindings.json',sha256:'a'.repeat(64)}]}}});
+ assert.deepEqual(validateExtensions(fixture(),c),fixture());validateConfig({...c,extensions:fixture()});
+ for(const mutate of [e=>delete e.profiles.assistant,e=>e.packages.push(e.packages[0]),e=>e.packages[0].name='@hivemagnus/ardent',e=>e.packages[0].version='latest',e=>e.profiles.assistant.plugins=['@example/other'],e=>e.profiles.assistant.plugins=['@example/extension/../other'],e=>e.profiles.assistant.files[0].target='.extensions/example/../../config.yaml',e=>e.profiles.assistant.files[0].source='/opt/../etc/shadow',e=>e.profiles.assistant.files.push(e.profiles.assistant.files[0]),e=>e.profiles.assistant.unreviewed=true]){const e=fixture();mutate(e);assert.throws(()=>validateExtensions(e,c));}
+ assert.throws(()=>validateExtensions(fixture(),config()));
+ const text='profile: assistant\n# owner policy\nchannels:\n  chattermost:\n    enabled: true\n';const target=translatedProfileConfig(text,fixture().profiles.assistant);assert.equal(target,text.replace('chattermost:','mattermost:')+'plugins: ["@example/extension"]\n');assert.throws(()=>translatedProfileConfig('plugins: ["existing"]\n',fixture().profiles.assistant));
+ const jobs=' {"revision":4,"jobs":[{"id":"other-owner","owner":"hermes","enabled":false}]}\n';assert.equal(preservedJobs(jobs,'3.1.0'),jobs);assert.equal(JSON.parse(preservedJobs(jobs,'3.0.3')).revision,5);
+});
+
+test('extension dependency locks pin all local archives and reject nested host runtimes',async()=>{
+ const {validateDependencyLock}=await import('./migrate-legacy-ardent.mjs');const c={...config(),version:'3.1.0',extensions:{packages:[{name:'@example/extension',version:'1.0.0',integrity:config().integrity}]}};
+ const fixture=()=>({lockfileVersion:3,packages:{'':{},'node_modules/@hivemagnus/ardent':{version:c.version,integrity:c.integrity,resolved:'file:core-package.tgz'},'node_modules/@example/extension':{version:'1.0.0',integrity:c.integrity,resolved:'file:extension-0.tgz'}}});validateDependencyLock(fixture(),c);
+ for(const mutate of [l=>delete l.packages['node_modules/@example/extension'],l=>l.packages['node_modules/@example/extension'].resolved='file:/other.tgz',l=>l.packages['node_modules/@example/extension'].integrity='sha512-different',l=>l.packages['node_modules/@example/extension/node_modules/@hivemagnus/ardent']={version:'3.0.0',integrity:c.integrity,resolved:'https://registry.npmjs.org/ardent.tgz'},l=>l.packages['node_modules/@example/extension'].link=true]){const l=fixture();mutate(l);assert.throws(()=>validateDependencyLock(l,c));}
+});
+
+test('large recovery hashes stream without changing digest or accepting symlink aliases',async()=>{
+ const fs=await import('node:fs'),os=await import('node:os'),path=await import('node:path'),crypto=await import('node:crypto');const {fileHash}=await import('./migrate-legacy-ardent.mjs');const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ardent-digest-'));
+ try{const file=path.join(dir,'archive'),bytes=Buffer.alloc(3*1024*1024+37,42);fs.writeFileSync(file,bytes);assert.equal(fileHash(file),crypto.createHash('sha256').update(bytes).digest('hex'));fs.symlinkSync(file,path.join(dir,'alias'));assert.throws(()=>fileHash(path.join(dir,'alias')));}finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('streamed journal proofs retain binary, unknown state and stable key order and detect every original-column mutation',async()=>{
+ const {DatabaseSync}=await import('node:sqlite');const {journalSnapshot}=await import('./migrate-legacy-ardent.mjs');const db=new DatabaseSync(':memory:');
+ try{db.exec('CREATE TABLE journal(id TEXT PRIMARY KEY,state TEXT,bytes BLOB); CREATE TABLE keyed(a TEXT,b INTEGER,PRIMARY KEY(a,b)) WITHOUT ROWID');db.prepare('INSERT INTO journal VALUES(?,?,?)').run('retained','unknown',Buffer.from([0,255,3]));db.exec("INSERT INTO keyed VALUES('b',2),('a',1)");
+ const original=journalSnapshot(db);assert.equal(original.journal.count,1);assert.equal(original.keyed.count,2);
+ db.exec('ALTER TABLE journal ADD COLUMN additive TEXT; CREATE TABLE extension(id TEXT)');assert.deepEqual(journalSnapshot(db,original).journal,original.journal);assert.deepEqual(journalSnapshot(db,original).keyed,original.keyed);
+ db.prepare('UPDATE journal SET bytes=?').run(Buffer.from([0,255,4]));assert.notEqual(journalSnapshot(db,original).journal.sha256,original.journal.sha256);db.prepare('UPDATE journal SET bytes=?').run(Buffer.from([0,255,3]));db.exec("UPDATE journal SET state='completed'");assert.notEqual(journalSnapshot(db,original).journal.sha256,original.journal.sha256);db.exec('DELETE FROM keyed');assert.equal(journalSnapshot(db,original).keyed.count,0);
+ }finally{db.close();}
+});
