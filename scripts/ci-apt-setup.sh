@@ -30,3 +30,25 @@ if [[ -f "$mirrors" ]]; then
   # Retain priority attributes, other mirrors and all distribution signing-key settings.
   sed -E -i 's#^http://azure\.archive\.ubuntu\.com/ubuntu(/?)([[:space:]].*)?$#https://archive.ubuntu.com/ubuntu\1\2#' "$mirrors"
 fi
+
+if [[ -f "$mirrors" ]] && grep -Eq '^https?://(azure\.archive|archive|security)\.ubuntu\.com/ubuntu/?([[:space:]]|$)' "$mirrors"; then
+  # Independent HTTPS mirror listed by Ubuntu: https://packages.ubuntu.com/noble/all/lsb-base/download
+  # APT still verifies Ubuntu's signed indexes and package hashes using its existing keyring.
+  # Lower mirror priorities are tried first; retain the runner's entries as fallbacks.
+  fallback=$'https://mirrors.kernel.org/ubuntu\tpriority:0'
+  if ! grep -qxF "$fallback" "$mirrors"; then printf '\n%s\n' "$fallback" >> "$mirrors"; fi
+fi
+
+# ARM runners use Ubuntu's ports archive directly instead of the amd64 mirror list.
+sources="$apt/sources.list.d/ubuntu.sources"
+ports="$apt/hive-ci-ports-mirrors.txt"
+if [[ -e "$sources" || -L "$sources" ]]; then
+  [[ -f "$sources" && ! -L "$sources" ]] || die 'Refusing a non-regular Ubuntu source file'
+  if grep -Eq 'https?://ports\.ubuntu\.com/ubuntu-ports/?([[:space:]]|$)|mirror\+file:/etc/apt/hive-ci-ports-mirrors\.txt([[:space:]]|$)' "$sources"; then
+    [[ ! -L "$ports" && ( ! -e "$ports" || -f "$ports" ) ]] || die 'Refusing a non-regular ports mirror list'
+    # MIT documents this HTTPS mirror at https://mirrors.mit.edu/ . Ubuntu's keyring remains authoritative.
+    printf 'https://mirrors.mit.edu/ubuntu-ports\tpriority:0\nhttps://ports.ubuntu.com/ubuntu-ports\tpriority:1\n' > "$ports"
+    chmod 0644 "$ports"
+    sed -E -i 's#https?://ports\.ubuntu\.com/ubuntu-ports/?([[:space:]]|$)#mirror+file:/etc/apt/hive-ci-ports-mirrors.txt\1#g' "$sources"
+  fi
+fi

@@ -84,4 +84,44 @@ diff <(jq 'del(.components.ardentstudio)' "$temporary/studio.json") <(jq . "$tem
 jq '.products["unreviewed-product"]=.products.ardentstudio' "$temporary/studio-inputs.json" > "$temporary/bad-inputs.json"
 jq '.["unreviewed-product"]=.ardentstudio' "$temporary/studio-pinned.json" > "$temporary/bad-pinned.json"
 if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/bad-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An unknown product image passed' >&2; exit 1; fi
+# Explicit hardened datastore selection preserves historical defaults and declares each
+# collation transition. Test input failures before any network or host mutation.
+jq '.datastoreProfile="runtime-2026-11"' "$temporary/inputs.json" > "$temporary/runtime-inputs.json"
+jq --arg redis "ghcr.io/cheftaco/hive-redis@$(digest 8)" --arg qdrant "ghcr.io/cheftaco/hive-qdrant@$(digest 9)" \
+  --arg pg17 "ghcr.io/cheftaco/hive-postgres@$(digest 10)" --arg pg18 "ghcr.io/cheftaco/hive-postgres@$(digest 11)" \
+  '.+{"datastore:redis":$redis,"datastore:qdrant":$qdrant,"datastore:postgres17":$pg17,"datastore:postgres18":$pg18}' \
+  "$temporary/pinned.json" > "$temporary/runtime-pinned.json"
+node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/runtime-inputs.json" --pinned "$temporary/runtime-pinned.json" --output "$temporary/runtime.json" >/dev/null
+jq -e --slurpfile old "$temporary/original.json" --slurpfile pinned "$temporary/runtime-pinned.json" '
+  (.components as $components | all(["magnus-postgres","chattermost-postgres","cindertrace-postgres"][]; . as $name |
+    $components[$name].storageFormat==($old[0].components[$name].storageFormat+"-runtime2") and
+    $components[$name].readableFormats==[$components[$name].storageFormat] and
+    $components[$name].migration=={from:$old[0].components[$name].storageFormat,command:["hive-pg-reconcile"]} and
+    (($old[0].components[$name].readableFormats // [])|index($components[$name].storageFormat))==null)) and
+  .components["magnus-postgres"].image==$pinned[0]["datastore:postgres17"] and
+  .components["chattermost-postgres"].image==$pinned[0]["datastore:postgres17"] and
+  .components["cindertrace-postgres"].image==$pinned[0]["datastore:postgres18"] and
+  all(.components|to_entries[]|select(.key|endswith("-redis")); .value.image==$pinned[0]["datastore:redis"] and .value.storageFormat=="redis-aof-v1") and
+  .components["hivemem-qdrant"].image==$pinned[0]["datastore:qdrant"] and
+  .components["hivemem-qdrant"].storageFormat=="qdrant-v1.18.1" and
+  .components["magnus-postgres"].version=="17.11" and .components["cindertrace-postgres"].version=="18.6"
+' "$temporary/runtime.json" >/dev/null || { echo 'The hardened datastore migration contract is incomplete' >&2; exit 1; }
+node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --check --inputs "$temporary/runtime-inputs.json" --output "$temporary/runtime.json" >/dev/null
+for profile in unknown legacy null; do
+  jq --arg profile "$profile" '.datastoreProfile=(if $profile=="null" then null else $profile end)' "$temporary/runtime-inputs.json" > "$temporary/bad-inputs.json"
+  if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/runtime-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An unknown datastore profile passed' >&2; exit 1; fi
+done
+for mutation in 'del(.["datastore:postgres17"])' '.["datastore:redis"]="ghcr.io/example/other@sha256:"+("a"*64)'; do
+  jq "$mutation" "$temporary/runtime-pinned.json" > "$temporary/bad-pinned.json"
+  if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/runtime-inputs.json" --pinned "$temporary/bad-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An incomplete or foreign datastore pin passed' >&2; exit 1; fi
+done
+# Embermend requires an explicit reviewed bridge declaration, not a version guess.
+jq '.products.embermend={image:"ghcr.io/example/embermend:0.1.0",version:"0.1.0",platforms:["linux/amd64","linux/arm64"]} | .products.magnus.version="2.4.2" | .products.magnus.embermendProtocol=1' "$temporary/inputs.json" > "$temporary/embermend-inputs.json"
+jq --arg digest "$(digest 95)" '.+{embermend:("ghcr.io/example/embermend@"+$digest)}' "$temporary/pinned.json" > "$temporary/embermend-pinned.json"
+node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/embermend-inputs.json" --pinned "$temporary/embermend-pinned.json" --output "$temporary/embermend.json" >/dev/null
+jq -e '.components.magnus.embermendProtocol==1 and .components.embermend.image==.components["embermend-worker"].image and .components["embermend-worker"].version=="0.1.0"' "$temporary/embermend.json" >/dev/null
+for change in 'del(.products.magnus.embermendProtocol)' '.products.magnus.embermendProtocol=2' '.products.magnus.version="2.3.7"'; do
+  jq "$change" "$temporary/embermend-inputs.json" > "$temporary/embermend-bad.json"
+  if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/embermend-bad.json" --pinned "$temporary/embermend-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An undeclared/incompatible Magnus bridge passed' >&2; exit 1; fi
+done
 echo 'build-suite-manifest: ok'

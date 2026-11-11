@@ -62,6 +62,17 @@ case "$command" in
   exec)
     [[ "$1" != -i ]] || shift
     target=$1; shift
+    routing=()
+    if [[ "$1" == env ]]; then
+      shift
+      while [[ "${1:-}" == -u ]]; do routing+=("$2"); shift 2; done
+    fi
+    if [[ "$1" == pg_basebackup || "$1" == psql ]]; then
+      [[ "${routing[*]}" == 'PGHOST PGHOSTADDR PGSERVICE PGSERVICEFILE' ]] || { echo 'PostgreSQL routing overrides were not cleared' >&2; exit 1; }
+      for argument in "$@"; do
+        [[ "$argument" != -h && "$argument" != --host && "$argument" != --host=* ]] || { echo 'The snapshot must use the image native Unix socket' >&2; exit 1; }
+      done
+    fi
     request=${!#}
     if [[ "$1" == node ]]; then
       phase=$(jq -r .command <<< "$request")

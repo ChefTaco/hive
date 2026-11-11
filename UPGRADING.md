@@ -5,6 +5,62 @@ Skills. The launcher and servers share the release version; each bundle records 
 pins, tested SDK versions, Node engines, configuration changes, migration impact and compatibility
 in `package.json.hiveRelease`. Consumer applications keep control of their SDK dependencies.
 
+## Suite 3.0: patched datastore runtime
+
+The container suite selects maintained system libraries and patched embedded SQLite.
+Product database schemas and PostgreSQL majors are retained. PostgreSQL's glibc/ICU
+change requires an explicit maintenance window to rebuild indexes before recording
+new collation versions. The PostgreSQL images omit LLVM JIT; workloads relying on
+JIT acceleration need separate performance validation.
+
+For an existing full installation, use the published release controller:
+
+```bash
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.0.3 --allow-migrations
+```
+
+The installer verifies a pre-change backup, rehearses the new runtime and migration
+on a disposable copy, then migrates the stopped live stores. Credentials, ownership,
+PostgreSQL majors, application records and component selection are retained. A
+core installation without PostgreSQL does not need this storage transition.
+Individual product selections remain supported.
+
+A failed or uncertain live migration holds the transaction for recovery; never
+repeat it blindly. PostgreSQL startup requires its successful runtime receipt.
+Code-only rollback to the former collation runtime is refused. Recovery requires
+write reconciliation and a verified rehearsal of the original-state backup using
+the retained original controller and images; it must not discard later writes.
+
+Ardent 3.0 changes its low-level SQLite handle; integrations using driver-specific
+methods must adapt. HTTP/CLI contracts remain compatible. The new driver packages
+Linux x64/arm64 Node-API binaries, so native installs need no database compiler,
+postinstall download or manual rebuild.
+
+When upgrading from 3.0.2 to 3.0.3, omit `--allow-migrations`: the PostgreSQL
+runtime and storage formats are unchanged. For an existing native Magnus node,
+run the signed release's `hive.sh magnus-agent enroll` with the same installation
+configuration. This upgrades the agent and stages the verified Ardent package
+while retaining the node identity. In **Magnus → Ardent → Installations**, stop
+running profiles, choose **Update package**, then start the profiles again.
+Magnus 2.3.7 retains verified older package checkpoints automatically. Preserve
+any checkpoint it refuses to verify and use the recovery guidance rather than
+removing it by hand.
+
+### Retrying a failed 3.0.0 full-stack rehearsal
+
+Use 3.0.2 or later for an existing full installation. Version 3.0.0 could reconcile
+only the first PostgreSQL store when a migration subprocess consumed the controller's
+component list. The remaining stores refused startup, and the isolated rehearsal
+held activation before live migration. Fresh installations do not use that transition.
+
+Run the same upgrade command above with `--allow-migrations`. A subsequent signed
+upgrade can continue only after verifying that stopped live data, configuration,
+storage formats, active definition, receipt, ownership and permissions still match
+the original verified backup and that no native agent was staged. It retains the
+failed transaction, backup and rehearsal, and records an archive-bound handoff.
+Changed data or an uncertain live migration remains held for explicit recovery.
+Do not edit transaction or runtime receipts, or refresh collation metadata manually.
+
 ## Managed npm installations
 
 Requirements: Linux, supported Node.js (`^24.22.1 || ^26.13.0`), npm, `flock`, and working backup access to

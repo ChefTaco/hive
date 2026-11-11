@@ -23,7 +23,11 @@ when run from any other controller source, so install from a checkout of the rel
 
 1. **Release the products.** Each product repository publishes its own multi-architecture image
    from its own version tag. Record the exact tags in `releases/X.Y.Z.inputs.json`. The input file
-   lists the platforms each image must provide.
+   lists the platforms each image must provide. Releases that adopt the patched datastore
+   runtime set `"datastoreProfile": "runtime-2026-11"`. This selects the reviewed Redis,
+   Qdrant and PostgreSQL tags in `release-contracts.mjs`; older inputs retain their
+   historical pins. PostgreSQL receives a new storage format and the explicit offline
+   collation migration, so adoption requires the normal backup and rehearsal workflow.
    Optional products (`OPTIONAL_PRODUCTS` in `scripts/suite/release-contracts.mjs`) are offered
    only when the inputs name their image and no profile selects them. Ardent Project Studio is
    one: after its first image is published, add
@@ -34,7 +38,7 @@ when run from any other controller source, so install from a checkout of the rel
    from this repository; `deployment/images.json` gives each one's version and base.
    Merge the release candidate to `main`, then run *Actions > Suite release > Run workflow* on
    `main` with `image` set to `all` (or one `NAME:VERSION`) and `dry_run` off. It builds and executes
-   both architectures, then publishes each image with provenance, an SBOM and an attestation. An
+   both architectures on matching native runners, reuses the validated build caches, then publishes each image with provenance, an SBOM and an attestation. An
    existing tag is never rebuilt: a changed image takes a new version in `deployment/images.json`.
    The registry and ingress tags named in the inputs file, and the datastore digests in
    `scripts/suite/release-contracts.mjs`, must match what was published.
@@ -61,10 +65,11 @@ when run from any other controller source, so install from a checkout of the rel
    This verifies the signature, rebuilds the manifest from its pinned digests and compares the bytes,
    runs `hive.sh plan` (the controller's own `hive_manifest` checks) for the core and full
    profiles, and with `--registry` resolves every pinned digest.
-   Then run the image gate, `scripts/release/scan-suite-images.sh releases/X.Y.Z.json`. It requires
-   that no pinned image, on either architecture, has a CRITICAL or HIGH finding with a fix
-   available. Exceptions go in `deployment/trivy/IMAGE.trivyignore.yaml`, one advisory per entry
-   with its justification. List the unfixed findings it prints in the release notes.
+   Then run the image gate, `HIVE_IMAGE_SECURITY_MODE=all scripts/release/scan-suite-images.sh releases/X.Y.Z.json`. It requires
+   that no pinned image, on either architecture, has a CRITICAL or HIGH finding, including
+   unfixed findings, when `HIVE_IMAGE_SECURITY_MODE=all` is set. New tagged releases enforce
+   this full policy automatically. Exceptions go in `deployment/trivy/IMAGE.trivyignore.yaml`, one advisory per entry
+   with its justification. Keep the unfiltered reports and document every accepted scoped exception.
 6. **Commit and tag.** Commit the manifest, the signature and any documentation, and let CI pass
    on `main`. Then push the tag `vX.Y.Z`. The *Suite release* workflow checks the tagged tree again
    and checks every pinned digest against the published tag named in the inputs file. Then it publishes the GitHub

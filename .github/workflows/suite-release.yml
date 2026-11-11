@@ -219,7 +219,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Verify the signed manifest against this controller
-        run: bash scripts/release/check-suite-release.sh "${GITHUB_REF_NAME#v}"
+        run: bash scripts/release/check-suite-release.sh "${GITHUB_REF_NAME#v}" --registry
       - name: Require every published image tag the manifest was built from
         run: |
           version="${GITHUB_REF_NAME#v}"

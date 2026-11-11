@@ -3,8 +3,19 @@
 Embermend is an optional product in a future signed release that explicitly
 includes its runtime image. Existing release profiles do not select it. The
 API and durable worker use the same exact image; PostgreSQL 18 is private.
-Selecting it requires compatible Magnus 2.4+ and co-located Oathweave, HiveXUI,
+Selecting it requires a reviewed Magnus release declaring `embermendProtocol: 1`
+in the signed manifest, version 2.4 or newer, and co-located Oathweave, HiveXUI,
 worker and datastore components. The API is available through `/api/embermend`.
+
+When a future signed release includes the product and compatible Magnus,
+`./hive.sh --release latest` offers Embermend after selecting local Magnus.
+The default is no, including the full profile. Selecting yes adds the API,
+worker and private PostgreSQL with their local dependencies. Unattended setup
+selects the same components in a custom installation configuration. Selection
+does not grant target access or enable mutation. A version number alone, including
+existing Magnus 2.4 releases without the bridge, is insufficient. Published
+signed manifests stay unchanged; release inputs must explicitly declare the
+reviewed protocol after prerequisite capability acceptance.
 
 Fresh initialization creates the browser audience/client and distinct machine
 clients for the coordinator and verifier. Their permission ceilings omit approval,

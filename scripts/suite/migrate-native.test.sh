@@ -376,13 +376,15 @@ cat > "$temporary/bin/ssh" <<STUB
 #!/usr/bin/env bash
 printf '%s\n' "\$*" > "$temporary/ssh.args"
 IFS= read -r first; printf '%s\n' "\$first" > "$temporary/ssh.first"
+IFS= read -r program; printf '%s' "\$program" | base64 -d > "$temporary/ssh.program" || exit 1
 cat > "$temporary/ssh.rest"
 exit 0
 STUB
 chmod 700 "$temporary/bin/ssh"
 hive status "$temporary/remote.json" > /dev/null 2>&1 || true
 [[ $(cat "$temporary/ssh.first") == fake-sudo-password ]] || fail 'sudo reads its password first'
-jq -e '.installation=="primary"' "$temporary/ssh.rest" >/dev/null || fail 'The payload follows the password'
+[[ -s "$temporary/ssh.program" ]] || fail 'The verified program follows the password'
+jq -e '.installation=="primary"' "$temporary/ssh.rest" >/dev/null || fail 'The JSON payload follows the program frame'
 grep -q "sudo -k -S -p ''" "$temporary/ssh.args" || fail 'The remote command must read the password from standard input'
 ! grep -q fake-sudo-password "$temporary/ssh.args" || fail 'The sudo password reached a command line'
 chmod 644 "$temporary/sudo"

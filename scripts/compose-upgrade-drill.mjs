@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { parseEnv } from 'node:util';
 import { stopFixtureProcess } from './fixture-process.mjs';
+import { pollCoordinatorStatus } from './coordinator-poll.mjs';
 
 /** Called only with a disposable synthetic installation from check-upgrade-install. */
 export async function composeDrill({
@@ -210,20 +211,9 @@ export async function composeDrill({
     await run('docker', [...command, 'pull']);
     await run('docker', [...command, 'up', '-d']);
     // A previous failure for this same version must not satisfy the new attempt.
-    for (let n = 0; n < 600; n++) {
-      const state = await runtime.coordinatorRequest(home, 'status');
-      if (
-        !state.busy &&
-        state.result?.version === goodVersion &&
-        state.result.state === 'completed'
-      )
-        break;
-      if (n === 599)
-        throw new Error(
-          `Healthy Compose upgrade did not complete: ${JSON.stringify(state.result)}`,
-        );
-      await new Promise((r) => setTimeout(r, 500));
-    }
+    // Only status is retried after a transient socket disconnect; upgrade dispatch stays single-shot.
+    await pollCoordinatorStatus(() => runtime.coordinatorRequest(home, 'status'), state =>
+      !state.busy && state.result?.version === goodVersion && state.result.state === 'completed');
     assert.equal(
       runtime.installedPackage(runtime.activeDirectory(home), '@hivemagnus/hive').version,
       goodVersion,

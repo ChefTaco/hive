@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Release gate: every image a suite manifest pins (components and initialization images),
-# on linux/amd64 and linux/arm64, must have no CRITICAL or HIGH finding with a fix available.
+# on linux/amd64 and linux/arm64, must satisfy the selected HIGH/CRITICAL policy.
+# The all policy includes unfixed findings; fixable retains the historical default.
 # Accepted exceptions live in deployment/trivy/<image>.trivyignore.yaml, one file per image
 # repository, each entry scoped to one advisory and package with its justification.
 # Usage: scripts/release/scan-suite-images.sh releases/X.Y.Z.json [REPORT_DIR]

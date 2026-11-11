@@ -167,7 +167,7 @@ hive_configure() {
   local inference='[]' agents='[]' temporary config selected_json runtime version agent_id agent_profile agent_environment agent_service authorized
   local external_ca enrollment_endpoint enrollment_prefix enrollment_credential enrollment_ca provider_slug provider_aliases
   local product product_host product_origin product_bind product_certificate product_key product_inference trust_bundle ssh_config magnus_console
-  local gateway_deploy='' gateway_username='' gateway_key='' gateway_grant=no agent_port='' external_magnus=''
+  local gateway_deploy='' gateway_username='' gateway_key='' gateway_grant=no agent_port='' external_magnus='' embermend_deploy=''
   if [[ -z "$HIVE_VERSION" ]]; then hive_prompt HIVE_VERSION 'Exact suite release version'; fi
   if [[ -z "$HIVE_MANIFEST" ]]; then
     HIVE_MANIFEST="$HIVE_ROOT/releases/$HIVE_VERSION.json"
@@ -260,6 +260,17 @@ hive_configure() {
       else hive_prompt studio_deploy 'Deploy Ardent Project Studio, team projects for Ardent agents (yes/no)' "$([[ "$profile" == full ]] && printf yes || printf no)"; fi
       if [[ "$studio_deploy" == yes ]]; then selected_json=$(jq -nc --argjson selected "$selected_json" '$selected+["ardentstudio"]|unique')
       elif [[ "$studio_deploy" != no ]]; then hive_die 'Answer yes or no'; fi
+    fi
+    # A signed protocol declaration is required: a Magnus version alone does not
+    # establish the optional managed remediation bridge. New installs opt in.
+    if jq -e '.components.embermend!=null and .components.magnus.embermendProtocol==1' "$HIVE_MANIFEST" >/dev/null && jq -ne --argjson selected "$selected_json" '$selected|index("magnus")!=null' >/dev/null; then
+      if jq -ne --argjson selected "$selected_json" '$selected|index("embermend")!=null' >/dev/null; then embermend_deploy=yes
+      else hive_prompt embermend_deploy 'Deploy Embermend security assessment and remediation (yes/no)' no; fi
+      if [[ "$embermend_deploy" == yes ]]; then
+        selected_json=$(jq -nc --argjson selected "$selected_json" --slurpfile release "$HIVE_MANIFEST" '
+          def dependencies: . as $before | ((. + [ .[] as $name|$release[0].components[$name].requiresLocal[]? ])|unique) as $after | if $after==$before then . else $after|dependencies end;
+          ($selected+["embermend"])|dependencies')
+      elif [[ "$embermend_deploy" != no ]]; then hive_die 'Answer yes or no'; fi
     fi
     # Host agents reach Magnus on its own published port; a distributed Magnus has its endpoint.
     if [[ "$mode" == fresh ]] && jq -ne --argjson selected "$selected_json" '$selected|index("magnus")!=null' >/dev/null; then
@@ -484,7 +495,7 @@ hive_manifest() {
     ((.networks // {})|type=="object" and all(.[]; .driver=="bridge" and (has("external")|not) and (keys-["driver","internal"]|length==0)))
   ' "$HIVE_MANIFEST" >/dev/null || hive_die 'Invalid release manifest or unpinned image'
   if jq -e '.components.embermend!=null' "$HIVE_CONFIG" >/dev/null; then
-    jq -e '.components.magnus.version as $v | ($v|type=="string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and (($v|split(".")|map(tonumber)) >= [2,4,0]) and .components.embermend.image==.components["embermend-worker"].image' "$HIVE_MANIFEST" >/dev/null || hive_die 'Embermend needs a compatible Magnus 2.4+ release and matching API/worker images'
+    jq -e '.components.magnus.version as $v | ($v|type=="string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and (($v|split(".")|map(tonumber)) >= [2,4,0]) and .components.magnus.embermendProtocol==1 and .components.embermend.image==.components["embermend-worker"].image' "$HIVE_MANIFEST" >/dev/null || hive_die 'Embermend needs a compatible Magnus release declaring embermendProtocol 1 and matching API/worker images'
   fi
   # Reject hidden privileged mounts and unsupported release/config mismatches.
   jq -e --slurpfile config "$HIVE_CONFIG" '
@@ -550,25 +561,30 @@ hive_host() {
     payload=$(jq -c --slurpfile secret "$HIVE_HOST_SECRET_FILE" '.secret=$secret[0]' <<< "$payload") || hive_die 'The secret could not be prepared'
   fi
   sudo_file=$(hive_sudo_file "$host")
+  # Frame the trusted program separately from its JSON input. Neither belongs
+  # in argv: Linux limits a single argument even when total ARG_MAX is larger.
+  local encoded launcher='set -euo pipefail
+IFS= read -r hive_program
+hive_program=$(printf "%s" "$hive_program" | base64 -d)
+source <(printf "%s\n" "$hive_program")'
+  encoded=$(printf '%s' "$script" | base64 -w0)
   if [[ "$target" == local && "${HIVE_HOST_LOCAL_SUDO:-false}" == true ]]; then
     # Root on this host, as the sudo password prompt allows; the payload follows on stdin.
     if [[ -n "$sudo_file" ]]; then
-      { cat -- "$sudo_file"; printf '%s\n' "$payload"; } | sudo -k -S -p '' bash -c "$script"
+      { cat -- "$sudo_file"; printf '%s\n%s\n' "$encoded" "$payload"; } | sudo -k -S -p '' bash -c "$launcher"
     else
       sudo -v || hive_die 'This step needs root through sudo; use --sudo-password-file for unattended agent commands'
-      printf '%s\n' "$payload" | sudo -n bash -c "$script"
+      printf '%s\n%s\n' "$encoded" "$payload" | sudo -n bash -c "$launcher"
     fi
   elif [[ "$target" == local ]]; then
-    printf '%s\n' "$payload" | bash -c "$script"
+    printf '%s\n%s\n' "$encoded" "$payload" | bash -c "$launcher"
   else
-    # The remote command is fixed. Dynamic data is base64 stdin, never shell code.
-    local encoded
-    encoded=$(printf '%s' "$script" | base64 -w0)
+    # The remote command is fixed; the program and JSON travel only on stdin.
     if [[ -n "$sudo_file" ]]; then
       # sudo reads exactly its password line from standard input; the payload follows it.
-      { cat -- "$sudo_file"; printf '%s\n' "$payload"; } | ssh "${ssh_options[@]}" -- "$target" "sudo -k -S -p '' bash -c \"\$(printf '%s' '$encoded' | base64 -d)\""
+      { cat -- "$sudo_file"; printf '%s\n%s\n' "$encoded" "$payload"; } | ssh "${ssh_options[@]}" -- "$target" "sudo -k -S -p '' bash -c '$launcher'"
     else
-      printf '%s\n' "$payload" | ssh "${ssh_options[@]}" -- "$target" "bash -c \"\$(printf '%s' '$encoded' | base64 -d)\""
+      printf '%s\n%s\n' "$encoded" "$payload" | ssh "${ssh_options[@]}" -- "$target" "bash -c '$launcher'"
     fi
   fi
 }

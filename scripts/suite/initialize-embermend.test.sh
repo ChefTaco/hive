@@ -9,7 +9,7 @@ chmod 600 "$temporary/server.key"
 openssl genpkey -algorithm ED25519 -out "$temporary/publisher.key" >/dev/null 2>&1
 openssl pkey -in "$temporary/publisher.key" -pubout -out "$temporary/publisher.pub" >/dev/null 2>&1
 node --input-type=module - "$ROOT" "$temporary/release.json" <<'JS'
-import{writeFileSync}from'node:fs';import{pathToFileURL}from'node:url';const root=process.argv[2];const{coreRelease,addFullComponents,CORE_PRODUCTS,FULL_PRODUCTS}=await import(pathToFileURL(root+'/scripts/suite/release-contracts.mjs'));const{applySuiteCatalog}=await import(pathToFileURL(root+'/scripts/suite/suite-catalog.mjs'));const images=Object.fromEntries([...CORE_PRODUCTS,...FULL_PRODUCTS,'embermend'].map(name=>[name,'example.com/'+name+'@sha256:'+'a'.repeat(64)]));const manifest=applySuiteCatalog(addFullComponents(coreRelease({version:'2.4.0',images,user:process.getuid()+':'+process.getgid()}),{images,user:process.getuid()+':'+process.getgid()}));manifest.components.magnus.version='2.4.0';writeFileSync(process.argv[3],JSON.stringify(manifest));
+import{writeFileSync}from'node:fs';import{pathToFileURL}from'node:url';const root=process.argv[2];const{coreRelease,addFullComponents,CORE_PRODUCTS,FULL_PRODUCTS}=await import(pathToFileURL(root+'/scripts/suite/release-contracts.mjs'));const{applySuiteCatalog}=await import(pathToFileURL(root+'/scripts/suite/suite-catalog.mjs'));const images=Object.fromEntries([...CORE_PRODUCTS,...FULL_PRODUCTS,'embermend'].map(name=>[name,'example.com/'+name+'@sha256:'+'a'.repeat(64)]));const manifest=applySuiteCatalog(addFullComponents(coreRelease({version:'2.4.0',images,user:process.getuid()+':'+process.getgid()}),{images,user:process.getuid()+':'+process.getgid()}));manifest.components.magnus.version='2.4.0';manifest.components.magnus.embermendProtocol=1;writeFileSync(process.argv[3],JSON.stringify(manifest));
 JS
 openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/release.json" -out "$temporary/release.json.sig"
 mkdir "$temporary/bin"
@@ -41,4 +41,11 @@ jq '.components.magnus.version="2.3.4"' "$temporary/release.json" > "$temporary/
 openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/old.json" -out "$temporary/old.json.sig"
 if "$ROOT/hive.sh" plan --config "$temporary/config.json" --manifest "$temporary/old.json" --trust-key "$temporary/publisher.pub" > "$temporary/rejection.log" 2>&1; then fail 'Incompatible Magnus was accepted'; fi
 grep -q 'compatible Magnus' "$temporary/rejection.log" || fail 'Older Magnus did not fail at the compatibility boundary'
+# A published version number without the bridge declaration is insufficient.
+for change in 'del(.components.magnus.embermendProtocol) | .components.magnus.version="2.4.2"' '.components.magnus.embermendProtocol=2'; do
+  jq "$change" "$temporary/release.json" > "$temporary/no-bridge.json"
+  openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/no-bridge.json" -out "$temporary/no-bridge.json.sig"
+  if "$ROOT/hive.sh" plan --config "$temporary/config.json" --manifest "$temporary/no-bridge.json" --trust-key "$temporary/publisher.pub" > "$temporary/no-bridge.log" 2>&1; then fail 'Missing/unsupported bridge declaration passed'; fi
+  grep -q 'compatible Magnus' "$temporary/no-bridge.log" || fail 'Bridge mismatch did not fail at compatibility admission'
+done
 printf 'Embermend initialization, idempotence and compatibility checks passed.\n'

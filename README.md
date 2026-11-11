@@ -53,21 +53,21 @@ certificate renewal, firewalls and managing the host from another machine.
 
 `--release latest` resolves GitHub’s latest published, non-prerelease suite release once, prints
 the exact version, and runs its tagged controller. To choose a version, use `./hive.sh --release
-2.4.2` instead. The launcher retains release checkouts under
+3.1.1` instead. The launcher retains release checkouts under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`; keep them for later commands and certificate
 renewal timers. It leaves the original checkout and current working directory unchanged. After
 setup, change to the printed release checkout for the lifecycle commands below; return to the
 original launcher checkout when selecting a new release with `--release latest`.
 
-For example, release 2.4.2 verifies `releases/2.4.2.json` against `releases/2.4.2.json.sig` with the publisher key
+For example, release 3.1.1 verifies `releases/3.1.1.json` against `releases/3.1.1.json.sig` with the publisher key
 in `trust/publisher.pub` before installing product resources, and refuses a manifest pinned to a different
 controller. The setup writes a protected installation file that the same commands accept
 unattended. Use the exact version setup reported for repeatable planning and applying
-(the following is an example for 2.4.2):
+(the following is an example for 3.1.1):
 
 ```bash
-./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 2.4.2
-./hive.sh install --config ~/.config/hive/ID/installation.json --release 2.4.2 --non-interactive --yes
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.1.1
+./hive.sh install --config ~/.config/hive/ID/installation.json --release 3.1.1 --non-interactive --yes
 ./hive.sh status  --config ~/.config/hive/ID/installation.json
 ./hive.sh doctor  --config ~/.config/hive/ID/installation.json
 ```
@@ -232,8 +232,12 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 ## Upgrading
 
 A suite installation upgrades to a newer signed release with `./hive.sh upgrade --config FILE
---release X.Y.Z` from that release's checkout, and returns with `./hive.sh rollback`; see
-[deployment/README.md](deployment/README.md). The rest of this section covers the legacy npm
+--release X.Y.Z`; the launcher selects its verified controller. Upgrades from 2.x to 3.1.1 with existing
+PostgreSQL stores also require `--allow-migrations`: the installer takes a verified backup,
+rehearses on a copy and rebuilds indexes before activation. Code-only rollback across that
+collation change is refused; recovery uses the original-state backup and write reconciliation.
+See [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade) and
+[deployment/README.md](deployment/README.md). The rest of this section covers legacy npm
 installations.
 
 Existing systemd installations using public npm packages can use the environment-configured

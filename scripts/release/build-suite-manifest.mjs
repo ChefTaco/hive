@@ -19,11 +19,11 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { addFullComponents, coreRelease, CORE_PRODUCTS, DATASTORE_IMAGES, DATASTORE_VERSIONS, FULL_PRODUCTS, OPTIONAL_PRODUCTS } from '../suite/release-contracts.mjs';
+import { addFullComponents, coreRelease, CORE_PRODUCTS, DATASTORE_IMAGES, DATASTORE_VERSIONS, FULL_PRODUCTS, OPTIONAL_PRODUCTS, datastoreProfileReferences, datastoreProfileComponent, applyDatastoreProfile } from '../suite/release-contracts.mjs';
 import { applySuiteCatalog } from '../suite/suite-catalog.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
-const { values: args } = parseArgs({ options: { version: { type: 'string' }, check: { type: 'boolean', default: false }, inputs: { type: 'string' }, output: { type: 'string' }, pinned: { type: 'string' } } });
+const { values: args } = parseArgs({ options: { version: { type: 'string' }, check: { type: 'boolean', default: false }, 'resolve-tags': { type: 'boolean', default: false }, inputs: { type: 'string' }, output: { type: 'string' }, pinned: { type: 'string' } } });
 assert(/^\d+\.\d+\.\d+$/.test(args.version ?? ''), '--version X.Y.Z is required');
 const version = args.version;
 const inputsFile = args.inputs ? resolve(args.inputs) : join(root, 'releases', version + '.inputs.json');
@@ -39,10 +39,13 @@ for (const [name, product] of Object.entries(products)) {
   assert(product.version === undefined || /^\d+\.\d+\.\d+$/.test(product.version), name + ': invalid product version');
   assert(Array.isArray(product.platforms) && product.platforms.includes('linux/amd64'), name + ': platforms must include linux/amd64');
 }
+const datastoreReferences = datastoreProfileReferences(inputs.datastoreProfile);
+const references = { ...products, ...datastoreReferences };
 const repository = (reference) => reference.replace(/[:@].*$/, '');
 if (products.embermend) {
   const parts = (products.magnus.version ?? '').split('.').map(Number);
   assert(parts.length === 3 && (parts[0] > 2 || parts[0] === 2 && parts[1] >= 4), 'Embermend requires the Magnus 2.4 managed remediation bridge or newer');
+  assert.equal(products.magnus.embermendProtocol, 1, 'Embermend requires an explicitly reviewed Magnus embermendProtocol 1 release');
 }
 // The Magnus agent package hive.sh magnus-agent installs: Magnus's own version, with the npm
 // tarball integrity reviewed into the inputs. Publishing checks it against the registry.
@@ -72,19 +75,23 @@ let pinned;
 if (args.check) {
   assert(existsSync(manifestFile), 'Nothing to check: ' + manifestFile);
   const current = JSON.parse(readFileSync(manifestFile, 'utf8'));
-  pinned = Object.fromEntries(Object.entries(products).map(([name, product]) => {
-    const component = name === 'chat-migrator' ? current.components.chattermost?.initialization : current.components[name];
+  pinned = Object.fromEntries(Object.entries(references).map(([name, product]) => {
+    const component = name === 'chat-migrator' ? current.components.chattermost?.initialization : current.components[name.startsWith('datastore:') ? datastoreProfileComponent(name) : name];
     assert(component?.image, name + ': missing from the manifest');
     assert.equal(repository(component.image), repository(product.image), name + ': image repository differs from the inputs');
     return [name, component.image];
   }));
 } else if (args.pinned) {
   pinned = JSON.parse(readFileSync(resolve(args.pinned), 'utf8'));
-  for (const [name, product] of Object.entries(products)) assert.equal(repository(pinned[name] ?? ''), repository(product.image), name + ': pinned image differs from the inputs');
+  for (const [name, product] of Object.entries(references)) assert.equal(repository(pinned[name] ?? ''), repository(product.image), name + ': pinned image differs from the inputs');
 } else {
-  pinned = Object.fromEntries(Object.entries(products).map(([name, product]) => [name, resolveTag(name, product)]));
+  pinned = Object.fromEntries(Object.entries(references).map(([name, product]) => [name, resolveTag(name, product)]));
 }
 for (const [name, image] of Object.entries(pinned)) assert.match(image, /^[a-z0-9./-]+@sha256:[a-f0-9]{64}$/, name + ': not pinned by digest');
+
+if (args['resolve-tags']) {
+  for (const [name, reference] of Object.entries(references)) assert.equal(pinned[name], resolveTag(name, reference), name + ': published tag differs from the signed digest');
+}
 
 // The controller that installs this release. A different controller cannot use it.
 const runtimeFiles = execFileSync('bash', ['-c', 'source scripts/suite/controller.sh; hive_runtime_files'], { cwd: root, encoding: 'utf8' }).trim().split('\n');
@@ -95,11 +102,14 @@ assert.match(controllerSHA256, /^[a-f0-9]{64}$/);
 
 const manifest = coreRelease({ version, images: pinned, user: inputs.user, registryVersion: products['hive-registry'].version });
 addFullComponents(manifest, { images: pinned, user: inputs.user });
+applyDatastoreProfile(manifest, inputs.datastoreProfile, pinned);
 manifest.controllerSHA256 = controllerSHA256;
 // Each component records the version of what it runs; applySuiteCatalog falls back to the suite version.
 for (const [name, product] of Object.entries(products)) if (product.version && manifest.components[name]) manifest.components[name].version = product.version;
 if (products.embermend?.version) manifest.components['embermend-worker'].version = products.embermend.version;
+if (products.embermend) manifest.components.magnus.embermendProtocol = products.magnus.embermendProtocol;
 const datastoreVersion = { [DATASTORE_IMAGES.redis]: DATASTORE_VERSIONS.redis, [DATASTORE_IMAGES.qdrant]: DATASTORE_VERSIONS.qdrant, [DATASTORE_IMAGES.postgres17]: DATASTORE_VERSIONS.postgres17, [DATASTORE_IMAGES.postgres18]: DATASTORE_VERSIONS.postgres18 };
+for (const [name, spec] of Object.entries(datastoreReferences)) datastoreVersion[pinned[name]] = spec.version;
 for (const component of Object.values(manifest.components)) if (component.kind === 'datastore') component.version = datastoreVersion[component.image] ?? assert.fail('Unreviewed datastore image ' + component.image);
 if (magnusAgent) {
   if (!args.check && !args.pinned) {

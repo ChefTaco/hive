@@ -6,16 +6,101 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
-- Add optional Embermend catalog, ingress, identity initialization and shared API/worker contracts for a future compatible Magnus release. Existing profiles and mutation authority remain unchanged; combined acceptance is required before adoption.
+### Added
 
-- Validate suite images on native amd64 and arm64 runners before publication, reuse their build caches, and require the full advisory scan before publishing a signed release. Run the Registry on the patched Node runtime.
+- Add optional Embermend catalog, ingress, identity initialization and shared API/worker contracts for a compatible Magnus release. Existing profiles and mutation authority remain unchanged; combined acceptance is required before production adoption.
 
-- Reconcile PostgreSQL template catalogs as well as ordinary databases so later database creation and restores inherit current ICU metadata. Restore the template connection-admission setting before finishing or recovering a failed migration.
+## [3.1.1] - 2026-11-11
 
-- Build PostgreSQL 17.11 and 18.6 against patched XML and locale libraries. Require explicit offline collation reconciliation for existing data, with authenticated private-socket execution, reindex-before-refresh and a durable runtime receipt. Publish only after ownership, failure, backup and restore checks on both architectures; installer adoption requires a separate declared storage-format migration.
+### Fixed
 
-- Add a patched glibc Node runtime and reduce Qdrant and Redis userspace while preserving their upstream service binaries and datastore formats.
-- Retain complete image advisory reports, add an all-findings gate for new suite image publication, and exercise runtime locking and persisted datastore restarts. PostgreSQL base changes remain gated on locale, extension and recovery compatibility proof; see `docs/ADVISORY_REMEDIATION.md`.
+- Update HiveXUI to 0.2.7 and Magnus to 2.4.2. Command status and selected output follow read-only updates without a manual refresh; transient reads retry without redispatching commands.
+- Use the registered `/usr/bin/uptime` diagnostic with its exact 60-second completion budget. Explain custom-command outcome review and the stop/update/start sequence for Ardent package changes.
+- Preserve Ardent 3.1.1, optional extension packages, existing datastore formats and other product pins.
+
+## [3.1.0] - 2026-11-11
+
+### Changed
+
+- Update Magnus to 2.4.1 and its pinned Ardent 3.1.1 runtime. Reviewed plugins preserve owner-bound workflows, permissions, scheduling, channels and recovery through managed native updates. Bounded plugin ingress supports large image batches without widening authentication. Private extensions and protected bindings remain optional and installation-specific.
+- Retain existing datastore formats and all other product pins. Custom runtimes require an explicit compatibility and recovery transaction that preserves adoption records.
+
+- Supply explicit preparation and stopped-restore context to installation-specific migration checkers. A long recovery rehearsal can verify matching conservative scheduling refusals while live admission keeps its freshness requirements.
+
+- Preserve pinned private extension packages and protected profile bindings through explicit legacy migration and future managed updates. Keep modern schedule bytes and revisions unchanged, repeat compatibility checks on the restored stopped backup, and validate every current task/session before code rollback. Stream archive and journal digests to bound recovery memory use.
+
+- Add an explicit host-local legacy Ardent migration with verified package pins, journal and rollback rehearsals, host-bound recovery archives, off-host acknowledgement, preserved adoption checkpoints and service-user ownership.
+
+## [3.0.3] - 2026-11-10
+
+### Fixed
+
+- Update Magnus to 2.3.7 so successive managed Ardent package updates retain verified older checkpoints instead of blocking at an existing `ardent.previous` directory. The agent refuses unsafe or uncertain state and restores the prior package paths on a failed promotion.
+- Preserve the 3.0.2 migration controller, datastore formats and other product pins. An existing 3.0.2 installation does not repeat the PostgreSQL runtime migration when upgrading to 3.0.3.
+
+## [3.0.2] - 2026-11-10
+
+### Security
+
+- Update HiveXUI to 0.2.6 with Alpine libxslt 1.1.43-r4 or newer, addressing CVE-2026-9947 and CVE-2026-87636. Both native image architectures now execute and pass an all-findings HIGH/CRITICAL scan before version publication. Keep package inventory and raw reports intact.
+
+### Upgrades
+
+- Include the corrected 3.0.1 controller: every storage migration receives isolated input, large SSH host programs stream separately from JSON, and a subsequent signed upgrade can recover an unchanged failed isolated rehearsal while preserving its evidence. Live schema journals and uncertain migration outcomes remain held.
+- Use 3.0.2 for full-stack upgrades. Version 3.0.0 could stop safely at its multi-PostgreSQL rehearsal; the 3.0.1 tag did not publish because its final image scan identified the libxslt findings. These earlier tags and signed bytes are retained unchanged.
+- Existing PostgreSQL stores still require `--allow-migrations`, a verified backup and an isolated rehearsal before reindexing and collation refresh. Code-only downgrade across the runtime transition is refused; see [upgrade and recovery guidance](UPGRADING.md).
+
+## [3.0.1] - 2026-11-10
+
+### Fixed
+
+- Stream the verified host program separately from its JSON input over local and SSH stdin, including protected and cached sudo. Large full-stack controllers no longer exceed the operating system's per-argument size limit; script and secret bytes remain out of process arguments.
+- Isolate storage migration subprocess input from the controller's component enumeration. A full-stack upgrade now reconciles every PostgreSQL store in both the isolated rehearsal and live migration, even when a subprocess reads stdin. Unknown migration outcomes remain held and are never replayed.
+- Allow a newer signed upgrade to recover an earlier failed isolated rehearsal only when every live data/configuration byte, storage format, active definition, receipt, ownership and mode still matches its verified pre-upgrade archive, all live containers are stopped, and no native agent was staged. Preserve the original transaction, backup, failed rehearsal and a bound recovery handoff receipt. A live schema-migration journal, changed state or an uncertain live migration still requires explicit recovery.
+
+## [3.0.0] - 2026-11-10
+
+### Security
+
+- Replace affected Debian runtime libraries with maintained, inventoried runtimes. Container services and recovery verification use the pinned Node 26.13.0 image; Redis and Qdrant retain their service versions and tested data formats.
+- Replace affected embedded SQLite with `@photostructure/sqlite` 3.3.1 (SQLite 3.54.1), including application and packaged recovery handles. Native Linux x64/arm64 installs use bundled Node-API binaries without a compiler or dependency install scripts. See [the advisory remediation review](docs/ADVISORY_REMEDIATION.md).
+- Require full HIGH/CRITICAL image checks, including findings without a fix, on both architectures before publishing a signed suite release. Retain unfiltered reports and existing narrowly scoped upstream-SBOM exceptions.
+
+### Breaking changes
+
+- Existing PostgreSQL stores need `--allow-migrations` to enter the new collation runtime. The installer takes a verified pre-change backup, rehearses migration on a copy, then rebuilds indexes offline before refreshing metadata. Authentication and ownership remain intact. Code-only rollback across this boundary is refused; recovery requires the rehearsed original-state backup and write reconciliation.
+- PostgreSQL remains on versions 17.11 and 18.6, rebuilt against libxml2 2.15.4 and ICU 79.1. LLVM JIT is omitted; workloads relying on it need separate performance validation. Legacy Perl/Python/Tcl procedural-language extensions require a separately reviewed migration and are refused.
+- Ardent 3.0 and Studio 0.2 change their low-level database handles. Driver-specific integrations must adapt; HTTP/CLI contracts and application schemas remain compatible.
+
+### Changed
+
+- Select the patched datastore tags through an explicit reviewed profile while retaining historical release defaults and individual product selections. Verify every product and datastore tag against its signed digest before publication.
+- Reconcile PostgreSQL template catalogs as well as ordinary databases, restoring the original template connection setting on success and failure. Later database creation inherits current ICU metadata.
+- Build and validate suite images on matching native amd64/arm64 runners, preserving recovery checks and reusing their validated caches for publication with provenance and an SBOM.
+- Keep ChatterMost HTTPS/WebSocket and Magnus terminal gateway readiness working for IP product endpoints on Node 26, with full certificate identity verification.
+- Use each PostgreSQL image's native Unix socket for online capture and isolated recovery verification, clearing libpq host/service overrides so backup stays local.
+- Wait for disposable registry readiness and clean up resources created by failed rehearsal setup.
+
+### Product versions
+
+| Product | Version |
+|---|---|
+| Ardent | 3.0.0 |
+| Ardent Project Studio | 0.2.0 |
+| Magnus packages and images | 2.3.6 |
+| Oathweave | 2.1.1 |
+| Emberpath | 2.0.4 |
+| HiveMem | 1.4.1 |
+| HiveSkills | 1.3.3 |
+| Cindertrace | 0.2.2 |
+| ChatterMost | 0.4.4 |
+| Emberfold | 0.2.2 |
+| Hive Registry image | 2.0.4 (application 1.1.0) |
+| PostgreSQL runtime images | 17.11-3 and 18.6-3 |
+| Redis runtime image | 8.2.10-2 |
+| Qdrant runtime image | 1.18.3-3 |
+
+HiveXUI 0.2.5, ingress 2.0.5 and the previously published document engine/codec remain compatible. Existing installations retain their product selection, credentials, agent enrollment and execution history.
 
 ## [2.4.2] - 2026-11-10
 

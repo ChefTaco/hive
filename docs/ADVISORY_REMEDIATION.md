@@ -7,6 +7,32 @@ Independent checks additionally found affected SQLite embedded inside Node 24
 and the latest better-sqlite3 package. Neither npm audit nor the image scanner
 reported those bundled copies. A clean scan alone is insufficient acceptance.
 
+## Hive 3.0.3 disposition
+
+The [signed release manifest](../releases/3.0.3.json) pins 18 distinct images.
+All were checked on linux/amd64 and linux/arm64 with the full HIGH/CRITICAL policy,
+including findings without a published fix. None of the original 27 advisory
+identifiers, nor either newly reported libxslt identifier below, remains in the unfiltered reports. The gated reports contain zero
+HIGH/CRITICAL findings; the two existing Qdrant workspace-SBOM exceptions below
+remain scoped and were not expanded. Application SQLite was executed separately
+because image and npm scanners did not identify the affected embedded copies.
+
+The 3.0.1 controller corrects multi-store migration enumeration, large SSH program
+transport and guarded retry after an unchanged failed isolated rehearsal. Its tag
+did not publish a release: the final scan identified CVE-2026-9947 and
+CVE-2026-87636 in the unchanged HiveXUI 0.2.5 image's libxslt 1.1.43-r3.
+Alpine's [security database](https://secdb.alpinelinux.org/v3.24/main.json) and
+[package source](https://gitlab.alpinelinux.org/alpine/aports/-/raw/3.24-stable/main/libxslt/APKBUILD)
+record the backports in 1.1.43-r4. Hive 3.0.2 retains the corrected controller and
+other reviewed product pins and selects HiveXUI 0.2.6 with that minimum revision.
+Existing full installations should use 3.0.2 or later; see
+[upgrade and recovery guidance](../UPGRADING.md).
+
+Hive 3.0.3 retains the patched datastore runtime and migration controller. It
+updates Magnus to 2.3.7 so managed Ardent can apply the patched whole package
+while preserving an earlier verified package checkpoint. No additional
+storage format or dependency exception is introduced.
+
 ## Runtime replacements
 
 Use a minimal glibc runtime with patched, inventoried distribution packages for
@@ -33,6 +59,41 @@ vulnerable crates. Redis uses the same upstream Redis version on official Alpine
 with the unused root-only gosu helper removed. Preserve non-root ownership and
 prove old-image data can be opened by the candidate before rollout.
 
+## Embedded SQLite: replace the npm driver
+
+Updating better-sqlite3 to its latest reviewed release, 13.0.3, still carried
+SQLite 3.53.4. The application packages instead pin
+[`@photostructure/sqlite` 3.3.1](https://github.com/photostructure/node-sqlite),
+which embeds SQLite 3.54.1 and supplies Node-API binaries. Its amalgamation source
+hash was compared with the [upstream SQLite release](https://www.sqlite.org/changes.html),
+and registry signatures and available publisher attestations were verified.
+Startup checks the actual embedded version rather than trusting package metadata.
+
+Ardent 3.0 and Studio 0.2 expose a new low-level database boundary; integrations
+using driver-specific methods must update. Their HTTP/CLI contracts and database
+schemas remain compatible. Emberpath and Oathweave use an attributed Apache-2.0
+Prisma adapter for the replacement driver, preserving query conversion, constraint
+errors and transaction ownership. Active application and recovery connections use
+the same SQLite engine within a process. HiveSkills retains released migration
+bytes and adapts only the connection boundary; HiveMem's packaged recovery engine
+also uses the patched driver.
+
+Acceptance executes native FTS5, failed transaction admission, rollback, prior-file
+retention, read-only and required-existing-file refusal, committed WAL backup,
+integrity checks, owner-only backup modes and overwrite refusal. Supported Linux
+x64/arm64 installations work with dependency scripts disabled and need no database
+compiler or binary download. Magnus's context bundle includes both native binaries
+inside the protected candidate tree, within existing payload limits; its real
+old-runtime adoption and rollback checks remain offline.
+
+The shared Node 26 image separately requires embedded SQLite 3.54.0 or newer and
+ships only the supported 64-bit amd64/arm64 platforms. Application driver guards
+require 3.54.1 regardless of the supported host Node version.
+
+ChatterMost 0.4.4 and Magnus 2.3.6 adapt local HTTPS/WebSocket and terminal gateway
+readiness probes to Node 26: IP certificate identities are verified without sending an IP address as
+TLS SNI. Trusted CA and wrong-name refusal tests cover both transports.
+
 ## PostgreSQL needs a separate migration proof
 
 Do not point an existing PostgreSQL data directory at an untested replacement OS.
@@ -54,11 +115,12 @@ checks every connectable database and then writes a durable runtime receipt.
 Ordinary startup refuses existing data without the matching receipt. Failure
 leaves no receipt, does not weaken authentication and stops the temporary server.
 
-Publishing these images does not authorize replacing an existing data directory.
-A new installer release must declare a new storage format and the explicit
-migration from the prior format, require `--allow-migrations`, rehearse on a copy,
-and take its pre-change backup. The old controller must refuse code-only rollback
-to the old collation runtime; recovery uses the rehearsed original-state restore.
+Hive 3.0.0 selects these pinned datastores through the reviewed `runtime-2026-11`
+profile. Each affected component declares its new storage format and explicit
+migration from the prior format. Existing stores require `--allow-migrations`;
+the installer rehearses on a copy and takes its verified pre-change backup.
+Code-only rollback to the old collation runtime is refused; recovery uses the
+rehearsed original-state restore. Individual product selections remain supported.
 
 The acceptable paths are either a compatible, maintained PostgreSQL runtime with
 explicit collation reconciliation before admission, or a staged logical migration
@@ -81,6 +143,7 @@ package names and scanner silence are insufficient.
 
 | Family | Advisory identifiers | Remediation |
 |---|---|---|
+| libxslt | CVE-2026-9947, CVE-2026-87636 | Require Alpine 1.1.43-r4 or newer in HiveXUI 0.2.6; verify vendor backports and execute/scan both native images before publication. |
 | OpenLDAP | CVE-2023-2953 | Replace old client libraries with maintained compatible libraries; execute database backup clients. |
 | zlib | CVE-2023-45853, CVE-2026-76844, CVE-2026-85091 | Use patched runtime libraries. Debian notes the first finding concerns MiniZip code absent from older zlib binary packages; retain that distinction in evidence. |
 | ncurses | CVE-2025-69720 | Remove unused terminal utilities; use patched libraries for tools that need them. |
