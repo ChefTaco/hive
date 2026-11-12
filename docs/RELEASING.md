@@ -44,6 +44,10 @@ release's bytes only from the controller source of that release's tag.
    pinning that version or newer, so the upgrade requires `--allow-migrations` and the
    controller rehearses and runs the migration. Emberpath 2.2.0 and HiveSkills 1.5.0 are the
    first such versions.
+   A product with a signed `initialization` (Magnus, Cindertrace, Embermend) needs no entry for a
+   new database migration: the upgrade runs its exact verifier on the restored copy and, when
+   that finds the migration pending, requires `--allow-migrations` and runs the product's
+   `migrate` command. Embermend 0.3.0 in suite 3.6.0 is the first such migration.
    Optional products (`OPTIONAL_PRODUCTS` in `scripts/suite/release-contracts.mjs`) are offered
    only when the inputs name their image and no profile selects them. Ardent Project Studio is
    one: after its first image is published, add

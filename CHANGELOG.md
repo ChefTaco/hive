@@ -6,6 +6,14 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.6.0] - 2026-11-12
+
+### Changed
+
+- Product update with a new controller: Magnus and its fleet gateway and agent 2.9.0, HiveXUI 0.7.0, HiveMem 1.6.0, HiveSkills 1.7.0, Cindertrace 0.6.0, Emberfold 0.3.0, Ardent Project Studio 0.4.0, Embermend 0.3.0 and the Hive Registry 1.3.0 (image 2.0.7), which together bring the setup checklist and the HiveXUI record search. Oathweave, Emberpath, Chattermost, the ingress image, the datastore profile and the storage recovery profile are unchanged. The controller changes (the setup checklist and suite audit collection below), so an installation upgrades with the 3.6.0 controller, which `./hive.sh upgrade --release 3.6.0` selects. Every pinned image passes the full HIGH/CRITICAL policy on both architectures.
+- HiveMem 1.6.0, HiveSkills 1.7.0, Ardent Project Studio 0.4.0 and Embermend 0.3.0 serve the suite audit export, and Cindertrace 0.6.0 can collect it. Suite audit collection stays off in this release: `hive_audit_collection_releases` names no version yet, so `install` and `upgrade` configure no audit clients, product settings or collector.
+- Embermend 0.3.0 adds the database migration `20261112000000_audit_export` (a nullable `Audit.actorKind` column and an `Audit (createdAt, id)` index). Embermend runs its migrations only through the suite's signed `migrate` initialization command, so an upgrade from 3.5.0 of an installation that includes Embermend needs `--allow-migrations`: the controller rehearses the migration on the restored copy, then runs it on the stopped live store, and Embermend's exact-history verifier must pass before activation. No other product changes its data format or adds a migration: HiveMem, HiveSkills, Ardent Project Studio, Magnus, Cindertrace and Emberfold keep their stores, and an installation without Embermend upgrades from 3.5.0 without the flag.
+
 ### Added
 
 - The first-run setup checklist. After an install or upgrade, the controller records the steps that still need a person in the Hive Registry as an optional `setup` object on `GET /v1/installation`, with fixed item ids: `magnus-agent-enrolled`, `oathweave-console-clients`, `ardent-packages-updated`, `certificate-renewal` and `first-admin`, each with its status (`pending`, `done` or `skipped`), a `./hive.sh` command, a docs anchor and, where HiveXUI can confirm it, a readiness `check`. The list depends on the installation file and the selected products. `hive.sh post-upgrade` marks each item it completes as done, `hive.sh status` lists the pending ones, and the new `hive.sh setup [list]`, `setup done ID` and `setup skip ID` settle one by hand. See the [setup checklist](deployment/FULL.md#setup-checklist).

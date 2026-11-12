@@ -10,7 +10,8 @@ The launcher checks out and verifies the tagged controller of that release. The 
 plan, takes a verified pre-change backup and rehearses data changes on a copy before activation.
 Moving from 2.x to 3.x with existing PostgreSQL stores also needs `--allow-migrations`, described
 below, and so does moving an installation with Emberpath or HiveSkills from a release before
-3.4.0 to 3.4.0 or later. A failed or uncertain step holds its transaction for recovery, as described in
+3.4.0 to 3.4.0 or later, and an installation with Embermend from a release before 3.6.0 to 3.6.0 or
+later. A failed or uncertain step holds its transaction for recovery, as described in
 [when a command stops](deployment/README.md#when-a-command-stops-transactions-and-recovery); never
 delete transaction or runtime receipts to force another attempt. See also
 [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
@@ -41,6 +42,31 @@ An older Cindertrace does not know the new sources and refuses to start with the
 credential. Before rolling back to a release whose Cindertrace predates them, run
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
+
+## Suite 3.6: the setup checklist and an Embermend migration
+
+Suite 3.6.0 changes one product's database: Embermend 0.3.0 adds the migration
+`20261112000000_audit_export`, a nullable `Audit.actorKind` column and an `Audit (createdAt, id)`
+index. Embermend applies its migrations only through the suite's signed `migrate` command and
+refuses older history in its exact verifier, so an installation on 3.5.0 that includes Embermend
+upgrades with explicit approval; the controller rehearses the migration on the restored copy, runs
+it once on the stopped live store and checks the verifier before activation:
+
+```bash
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.6.0 --allow-migrations
+```
+
+No other product changes its data format or adds a migration, so an installation on 3.5.0 without
+Embermend upgrades without `--allow-migrations`. An installation on a release before 3.4.0 that
+includes Emberpath or HiveSkills still needs it, for the 3.4.0 transitions described below.
+
+This release has its own controller again: it records the [setup checklist](#the-setup-checklist)
+and carries [suite audit collection](#suite-audit-collection). The launcher selects the 3.6.0
+controller for `--release 3.6.0`; the 3.5.0 controller refuses the 3.6.0 manifest. The upgrade
+replaces the Hive Registry with 1.3.0 (image 2.0.7), which records the checklist, and HiveXUI 0.7.0
+shows it to administrators. HiveMem 1.6.0, HiveSkills 1.7.0, Ardent Project Studio 0.4.0 and
+Embermend 0.3.0 serve the suite audit export and Cindertrace 0.6.0 can collect it, but 3.6.0 does
+not configure collection yet: the upgrade adds no audit clients or collector settings.
 
 ## Suite 3.5: event feeds and a new controller
 
