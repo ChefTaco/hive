@@ -1,4 +1,4 @@
-import type { Connection } from './schema.js';
+import type { Capabilities, Connection } from './schema.js';
 import { emptyConnection, type HistoryRow, type InstallationRow, type InstalledRow, type ProductRow, type RegistryStore, type VersionRow } from './store.js';
 
 // Field exposure lives here and only here. These are explicit allowlists: a new column
@@ -8,6 +8,12 @@ import { emptyConnection, type HistoryRow, type InstallationRow, type InstalledR
 // endpoints and timestamps need a registry credential.
 const connectionOf = (row: InstalledRow | undefined): Connection => (row ? (JSON.parse(row.connection_json) as Connection) : emptyConnection);
 const dependenciesOf = (row: ProductRow): string[] => JSON.parse(row.dependencies_json) as string[];
+// Products that offer no capability omit the field. A connection stored before capabilities
+// existed has none.
+const capabilitiesOf = (connection: Connection): { capabilities?: Capabilities } =>
+  connection.capabilities && Object.keys(connection.capabilities).length
+    ? { capabilities: Object.fromEntries(Object.entries(connection.capabilities).map(([name, capability]) => [name, { path: capability.path }])) }
+    : {};
 
 export function publicProductVisible(row: ProductRow): boolean {
   return row.public === 1;
@@ -22,6 +28,7 @@ function productDetails(row: ProductRow, installed: InstalledRow | undefined) {
     consoleSection: row.console_section,
     required: row.required === 1,
     installed: installed?.status === 'installed' || installed?.status === 'external',
+    ...capabilitiesOf(connectionOf(installed)),
   };
 }
 
@@ -53,7 +60,7 @@ export function privateProduct(row: ProductRow, installed: InstalledRow | undefi
 }
 
 function connectionDetails(row: ProductRow, connection: Connection) {
-  return { id: row.id, consolePath: connection.consolePath, browserPrefix: connection.browserPrefix, nativeApis: connection.nativeApis, documentation: row.documentation_url };
+  return { id: row.id, consolePath: connection.consolePath, browserPrefix: connection.browserPrefix, nativeApis: connection.nativeApis, documentation: row.documentation_url, ...capabilitiesOf(connection) };
 }
 
 export function publicConnection(row: ProductRow, installed: InstalledRow | undefined) {

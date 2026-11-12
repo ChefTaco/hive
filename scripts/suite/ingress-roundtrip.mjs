@@ -327,6 +327,10 @@ gateway.listen(4310,'0.0.0.0');
     ['/api/magnus/health', '/api/v1/health'],
     ['/api/magnus/console/session', '/api/v1/console/session'],
     ['/api/magnus/nodes/node-1/gpu', '/api/v1/nodes/node-1/gpu'],
+    ['/api/magnus/agents/identity?actorId=actor-1', '/api/v1/agents/identity?actorId=actor-1'],
+    ['/api/magnus/agents/node-1~main/identity', '/api/v1/agents/node-1~main/identity'],
+    ['/api/magnus/hive/events?after=cursor-1&limit=50', '/api/v1/hive/events?after=cursor-1&limit=50'],
+    ['/api/magnus/ardent/installations/node-1/profiles/main/tasks/task-1/stream', '/api/v1/ardent/installations/node-1/profiles/main/tasks/task-1/stream'],
     ['/api/magnus/files/read?path=%2Fetc%2Fhosts', '/api/v1/files/read?path=%2Fetc%2Fhosts'],
     ['/api/magnus/ardent/installations/node-1/profiles/main/sessions/one', '/api/v1/ardent/installations/node-1/profiles/main/sessions/one'],
     ['/api/magnus/ardent/agents/operations/op-1', '/api/v1/ardent/agents/operations/op-1'],
@@ -374,6 +378,11 @@ gateway.listen(4310,'0.0.0.0');
     ['/api/magnus/nodes/compare'],
     ['/api/magnus/nodes/tags'],
     ['/api/magnus/agents/upgrade/runs/latest'],
+    ['/api/magnus/agents/identity', 'POST'],
+    ['/api/magnus/agents/node-1~main/identity/extra'],
+    ['/api/magnus/hive/events', 'POST'],
+    ['/api/magnus/hive/events/extra'],
+    ['/api/magnus/hive'],
     ['/api/magnus/ardent/installations/node-1/profiles/main/context-release'],
     ['/api/magnus/ardent/installations/node-1/profiles/main/context-adoptions/release-1'],
     ['/api/magnus/nodes', 'DELETE'],
@@ -614,9 +623,10 @@ gateway.listen(4310,'0.0.0.0');
         assert.equal(JSON.parse((await request('/api/magnus/docs/openapi.json')).body).path, '/api/docs/openapi.json');
         counts.browser++;
       }
-      const row = line.match(/^\| (GET|POST|PUT|PATCH|DELETE|ALL) \| `(\/api\/v1\/[^`]*)` \|/);
+      const row = line.match(/^\| (GET|POST|PUT|PATCH|DELETE|ALL) \| `(\/api\/v1\/[^`]*)` \| ([^|]*?) \|/);
       if (!row || section === 'Explicit denies') continue;
-      const allowed = section === 'Browser-facing';
+      // The class column decides, wherever a row is listed: a machine row may sit beside the browser table.
+      const allowed = section === 'Browser-facing' && row[3] === 'browser';
       const path = '/api/magnus' + row[2].slice('/api/v1'.length).replace(/:[A-Za-z]+/g, 'probe').replace(/\/\*$/, '/probe/deep');
       if (allowed) assert(!/\*/.test(path), 'Browser inventory row is not a concrete path: ' + row[2]);
       const concrete = path.replace(/\*/g, 'probe');

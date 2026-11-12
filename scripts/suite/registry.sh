@@ -66,8 +66,12 @@ hive_registry_release() {
     def nullable_url: .==null or url;
     def local_path: .==null or (type=="string" and test("^/[A-Za-z0-9._~/-]*$"));
     def map_of(check): type=="object" and all(to_entries[]; (.key|test("^[a-z][a-z0-9-]{0,47}$")) and (.value|check));
+    # Optional, version-gated in the suite catalog: {"events.v1":{"path":"/hive/events"}}, relative to browserPrefix.
+    def capabilities: type=="object" and length>0 and length<=32 and all(to_entries[]; (.key|test("^[a-z0-9.-]{1,64}$")) and
+      (.value|type=="object" and (keys==["path"]) and (.path|type=="string" and length<=256 and test("^/[A-Za-z0-9._~/-]*$") and (split("/")|index("..")|not))));
     all(.components|to_entries[]; .value.catalog as $meta |
-      ($meta|type=="object" and (keys-["displayName","description","repository","documentation","license","licenseSpdx","consoleSection","required","dependencies","connection"]|length==0)) and
+      ($meta|type=="object" and (keys-["displayName","description","repository","documentation","license","licenseSpdx","consoleSection","required","dependencies","connection","capabilities"]|length==0)) and
+      ($meta.capabilities==null or (($meta.capabilities|capabilities) and ($meta.connection.browserPrefix|type=="string"))) and
       ($meta.displayName|type=="string" and length>0 and length<=120) and ($meta.description|type=="string" and length<=500) and
       ($meta.repository|nullable_url) and ($meta.documentation|nullable_url) and ($meta.license|nullable_url) and
       ($meta.required|type=="boolean") and ($meta.dependencies|type=="array" and all(.[];type=="string")) and
@@ -112,6 +116,8 @@ hive_registry_body() {
     $config[0] as $c | $release[0] as $r |
     def identity: split("@")[1];
     def product_version($name): $r.components[$name].version // $r.version;
+    # Capabilities travel with the connection, so the registry keeps them with the installed product.
+    def capabilities($meta): if ($meta.capabilities // {})|length>0 then {capabilities:$meta.capabilities} else {} end;
     {schema:1,phase:$phase,operation:$operation,actor:"hive.sh",
      installation:{id:$c.installation,origin:$c.origin,profile:$c.profile},
      release:{version:$version,manifestDigest:$digest,planDigest:$plan},
@@ -123,15 +129,15 @@ hive_registry_body() {
        version:{version:product_version($name),image:$component.image,imageDigest:($component.image|identity),storageFormat:($component.storageFormat // null)}})),
      installed:($c.components|to_entries|map(.key as $name|.value as $placement|$r.components[$name] as $component|$component.catalog.connection as $connection|($c.bootstrap.productEndpoints[$name] // {}) as $endpoint|{
        id:$name,inventoryHost:$placement.host,version:product_version($name),image:$component.image,imageDigest:($component.image|identity),status:$status,
-       connection:{consolePath:$connection.consolePath,browserPrefix:$connection.browserPrefix,
+       connection:({consolePath:$connection.consolePath,browserPrefix:$connection.browserPrefix,
          nativeApis:($connection.nativeApis|map_values($c.origin+.)),
-         internalEndpoints:($connection.internalEndpoints|with_entries(if .key=="model" and $endpoint.inferenceOrigin then .value=$endpoint.inferenceOrigin elif $endpoint.origin and (.key=="api" or .key=="admin") then .value=$endpoint.origin else . end))}}) +
+         internalEndpoints:($connection.internalEndpoints|with_entries(if .key=="model" and $endpoint.inferenceOrigin then .value=$endpoint.inferenceOrigin elif $endpoint.origin and (.key=="api" or .key=="admin") then .value=$endpoint.origin else . end))}+capabilities($component.catalog))}) +
        # A release product this installation uses but does not run, such as an external Magnus:
        # recorded as external, with its own URL and no host or image.
        (($c.external // {})|to_entries|map(.key as $name|$r.components[$name].catalog.connection as $connection|{
          id:$name,status:"external",
-         connection:{consolePath:$connection.consolePath,browserPrefix:$connection.browserPrefix,
-           nativeApis:($connection.nativeApis|map_values($c.origin+.)),internalEndpoints:{api:.value.url}}})))}'
+         connection:({consolePath:$connection.consolePath,browserPrefix:$connection.browserPrefix,
+           nativeApis:($connection.nativeApis|map_values($c.origin+.)),internalEndpoints:{api:.value.url}}+capabilities($r.components[$name].catalog))})))}'
 }
 
 hive_registry_write() {

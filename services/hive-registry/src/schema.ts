@@ -31,12 +31,23 @@ const links = z.strictObject({
   licenseSpdx: z.string().regex(/^[A-Za-z0-9.+-]{1,64}$/).nullable().default(null),
 });
 
+// Optional product capabilities, such as {"events.v1": {"path": "/hive/events"}}. Each path is
+// relative to the connection's browserPrefix as the browser sees it, before the ingress mapping.
+// Readers ignore names they do not know.
+export const capabilityName = z.string().regex(/^[a-z0-9.-]{1,64}$/);
+export const capabilities = z.record(capabilityName, z.strictObject({ path: localPath }))
+  .refine((value) => Object.keys(value).length <= 32, 'At most 32 capabilities');
+export type Capabilities = z.infer<typeof capabilities>;
+
+// `capabilities` is optional and has no default, so a connection recorded before it existed
+// reads back unchanged and is stored byte for byte as before.
 export const connection = z.strictObject({
   consolePath: localPath.nullable().default(null),
   browserPrefix: localPath.nullable().default(null),
   nativeApis: z.record(productId, publicUrl).default({}),
   internalEndpoints: z.record(productId, internalUrl).default({}),
-});
+  capabilities: capabilities.optional(),
+}).refine((value) => !value.capabilities || value.browserPrefix !== null, { message: 'Capabilities need a browserPrefix', path: ['capabilities'] });
 export type Connection = z.infer<typeof connection>;
 
 export const releaseKinds = ['application', 'datastore', 'static-ui', 'ingress'] as const;

@@ -46,6 +46,16 @@ for patch in 'del(.components.emberpath.catalog)' '.components.emberpath.catalog
   jq "$patch" "$temporary/release.json" > "$temporary/bad-release.json"; sign "$temporary/bad-release.json"
   refused 'valid catalog metadata' hive plan "$temporary/config.json" "$temporary/bad-release.json"
 done
+# Optional capabilities: a name and a path under the product's browser prefix, nothing else.
+for patch in '.components.emberpath.catalog.capabilities={}' '.components.emberpath.catalog.capabilities={"Events":{path:"/v1/hive/events"}}' \
+  '.components.emberpath.catalog.capabilities={"events.v1":{path:"v1/hive/events"}}' '.components.emberpath.catalog.capabilities={"events.v1":{path:"/a/../b"}}' \
+  '.components.emberpath.catalog.capabilities={"events.v1":{path:"/v1/hive/events",since:"1.0.0"}}' '.components.emberpath.catalog.capabilities={"events.v1":"/v1/hive/events"}' \
+  '.components.hivexui.catalog.capabilities={"events.v1":{path:"/v1/hive/events"}}'; do
+  jq "$patch" "$temporary/release.json" > "$temporary/bad-release.json"; sign "$temporary/bad-release.json"
+  refused 'valid catalog metadata' hive plan "$temporary/config.json" "$temporary/bad-release.json"
+done
+jq '.components.emberpath.catalog.capabilities={"events.v1":{path:"/v1/hive/events"},"future-thing.v2":{path:"/v2/x"}}' "$temporary/release.json" > "$temporary/capabilities-release.json"; sign "$temporary/capabilities-release.json"
+hive plan "$temporary/config.json" "$temporary/capabilities-release.json" > /dev/null 2>&1 || fail 'A release with valid capabilities was refused'
 
 # Upgrading a configuration from before the registry adds it without rewriting the file.
 legacy_before=$(sha256sum "$temporary/legacy.json")
@@ -83,6 +93,15 @@ jq -e --arg origin "$(jq -r .origin "$temporary/config.json")" '
 if jq -r '[paths|map(tostring)|join(".")]|join("\n")' "$temporary/body.json" | grep -Eiq 'password|secret|token|private'; then fail 'Registry record has a credential field'; fi
 jq --arg base "$directory" '.bootstrap.productEndpoints={emberpath:{origin:"https://models.example.com:9443",inferenceOrigin:"https://models.example.com:4020",bindAddress:"127.0.0.1",certificateFile:"/opt/x",privateKeyFile:"/opt/y"}}' "$temporary/config.json" > "$temporary/distributed.json"
 HIVE_CONFIG=$temporary/distributed.json hive_registry_body complete installed | jq -e '.installed|map(select(.id=="emberpath"))[0].connection.internalEndpoints=={admin:"https://models.example.com:9443",model:"https://models.example.com:4020"}' >/dev/null || fail 'Distributed endpoints are not recorded'
+# Capabilities are recorded with the connection of the product that offers them, and only there.
+HIVE_MANIFEST=$temporary/capabilities-release.json hive_registry_body complete installed | jq -e '
+  (.installed|map(select(.id=="emberpath"))[0].connection.capabilities=={"events.v1":{path:"/v1/hive/events"},"future-thing.v2":{path:"/v2/x"}}) and
+  ([.installed[]|select(.id!="emberpath")|.connection|has("capabilities")]|all|not) and ([.catalog[]|has("capabilities")]|any|not)' >/dev/null || fail 'Capabilities are not recorded with the connection'
+jq -e '[.installed[].connection|has("capabilities")]|any|not' "$temporary/body.json" >/dev/null || fail 'A release without capabilities recorded some'
+jq '.components.magnus=(.components.emberpath|.catalog.connection.browserPrefix="/api/magnus"|.catalog.capabilities={"events.v1":{path:"/hive/events"}})' "$temporary/release.json" > "$temporary/magnus-release.json"
+jq '.external={magnus:{url:"https://magnus.example.com:4000"}}' "$temporary/config.json" > "$temporary/external-capabilities.json"
+HIVE_CONFIG=$temporary/external-capabilities.json HIVE_MANIFEST=$temporary/magnus-release.json hive_registry_body complete installed | jq -e '
+  .installed|map(select(.id=="magnus"))[0]|.status=="external" and .connection.capabilities=={"events.v1":{path:"/hive/events"}} and .connection.internalEndpoints=={api:"https://magnus.example.com:4000"}' >/dev/null || fail 'An external product lost its capabilities'
 
 # Credentials are generated once, protected, and stable across retries.
 provision() { HIVE_OPERATION=$1 hive_registry_provision; }

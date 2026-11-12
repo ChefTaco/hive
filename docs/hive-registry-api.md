@@ -25,8 +25,8 @@ already publishes: product names, same-origin paths and public links.
 | --- | --- |
 | Installation ID and installed product IDs | Origin, profile, release version and digests, revision, inventory hosts |
 | Product ID, display name, description, repository, documentation and license links | Product version, image reference and digest, storage format, version history |
-| Console section, required flag, dependencies, `installed` | Kind, source, status, install and update times, release |
-| Console path, browser prefix, native API URLs on the console origin, documentation | Inventory host, internal endpoints |
+| Console section, required flag, dependencies, `installed`, capabilities | Kind, source, status, install and update times, release |
+| Console path, browser prefix, native API URLs on the console origin, documentation, capabilities | Inventory host, internal endpoints |
 
 Datastores and externally managed products without `"public": true` do not appear in the
 public view at all. `installed` is true only after activation is recorded, not while a
@@ -43,7 +43,7 @@ Every response is JSON with `Cache-Control: no-store`. Paths are native; add the
 | `GET /v1/installation` | Installation summary |
 | `GET /v1/products` | Catalog. `?installed=true` or `?installed=false` filters it |
 | `GET /v1/products/{id}` | One product |
-| `GET /v1/products/{id}/connection` | Console path, browser prefix, native API URLs and documentation; with a credential also the inventory host and internal endpoints |
+| `GET /v1/products/{id}/connection` | Console path, browser prefix, native API URLs, documentation and [capabilities](#capabilities); with a credential also the inventory host and internal endpoints |
 | `GET /v1/history?after=N&limit=M` | Append-only change history. Credential required; not served by the ingress |
 
 ```json
@@ -62,6 +62,55 @@ Every response is JSON with `Cache-Control: no-store`. Paths are native; add the
 ```json
 { "id": "emberpath", "consolePath": null, "browserPrefix": "/api/emberpath", "nativeApis": { "model": "https://hive.example.com/v1" }, "documentation": "https://github.com/ChefTaco/Emberpath/blob/HEAD/README.md" }
 ```
+
+## Capabilities
+
+A product, and its connection, may carry an optional `capabilities` object that announces what
+the installed product version serves to the browser. A product that offers none omits the field.
+
+```json
+{ "id": "magnus", "consolePath": "/fleet", "browserPrefix": "/api/magnus", "nativeApis": {}, "documentation": "https://github.com/ChefTaco/magnus/blob/HEAD/README.md", "capabilities": { "events.v1": { "path": "/hive/events" } } }
+```
+
+- `path` is relative to `browserPrefix` as the browser sees it, after the ingress mapping. It is
+  not the product's native path. The browser fetches `browserPrefix + path`, here
+  `/api/magnus/hive/events`, and the ingress maps that to the product's own route, here Magnus's
+  `/api/v1/hive/events`. Each product's ingress mapping differs:
+
+  | Product | `browserPrefix` | `events.v1` path | Browser URL | Ingress mapping | Native route |
+  | --- | --- | --- | --- | --- | --- |
+  | Magnus | `/api/magnus` | `/hive/events` | `/api/magnus/hive/events` | prefix replaced by `/api/v1` | `/api/v1/hive/events` |
+  | Cindertrace | `/api/cindertrace` | `/hive/events` | `/api/cindertrace/hive/events` | prefix replaced by `/api/v1` | `/api/v1/hive/events` |
+  | HiveSkills | `/api/hiveskills` | `/v1/hive/events` | `/api/hiveskills/v1/hive/events` | prefix stripped | `/v1/hive/events` |
+  | Embermend | `/api/embermend` | `/api/v1/hive/events` | `/api/embermend/api/v1/hive/events` | prefix stripped | `/api/v1/hive/events` |
+
+- A capability needs a `browserPrefix`.
+- Names match `[a-z0-9.-]{1,64}`, with at most 32 per product. Each value holds only `path`.
+  Readers ignore names they do not know.
+- `events.v1` is the only capability so far: the product serves a HiveEvent v1 feed,
+  `GET browserPrefix + path?after=CURSOR&limit=N`, with its normal user authentication.
+
+The suite catalog (`scripts/suite/suite-catalog.json`) declares a capability per product with the
+first product version that serves it, as `{"path": "...", "since": "X.Y.Z"}`; `"since": null`
+declares a path whose product version is not released yet. `scripts/suite/suite-catalog.test.mjs`
+checks every declared path against the ingress mappings in `deployment/Caddyfile`. A release
+manifest carries `catalog.capabilities` (paths only) only for a component pinned at `since` or
+newer, and `hive.sh`
+records it with that product's connection, including an [external Magnus](../deployment/FULL.md#external-magnus).
+An externally managed product may declare its own in `connection.capabilities`, beside its
+`browserPrefix`.
+
+The registry keeps capabilities in the stored connection, so no migration is involved: a
+connection recorded before they existed reads back without the field and is not rewritten, and a
+registry image from before them ignores a stored capability.
+
+## Browser contract
+
+[`services/hive-registry/src/browser-contract.ts`](../services/hive-registry/src/browser-contract.ts)
+describes, with zod and nothing else, what an unauthenticated browser may read through
+`/api/registry`. HiveXUI vendors it unchanged with its checksum; `registryBrowserContractVersion`
+changes whenever its shape does. Its objects are not strict, so a field it does not name never
+reaches the browser. The service's own tests parse every public response with it.
 
 ## Ingress
 

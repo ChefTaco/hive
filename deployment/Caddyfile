@@ -334,7 +334,9 @@
 		}
 		@magnus_browser expression <<CEL
 			({method} == "GET" && (
-				{path} == "/api/v1/agents/upgrade/eligibility"
+				{path}.matches("^/api/v1/agents/[^/]+/identity$")
+				|| {path} == "/api/v1/agents/identity"
+				|| {path} == "/api/v1/agents/upgrade/eligibility"
 				|| {path}.matches("^/api/v1/agents/upgrade/runs/[^/]+$")
 				|| {path} == "/api/v1/anomalies"
 				|| {path}.matches("^/api/v1/anomalies/event/[^/]+/correlation$")
@@ -345,6 +347,7 @@
 				|| {path}.matches("^/api/v1/ardent/installations/[^/]+$")
 				|| {path}.matches("^/api/v1/ardent/installations/[^/]+/profiles/[^/]+/.+$")
 				|| {path}.matches("^/api/v1/ardent/installations/[^/]+/profiles/[^/]+/artifacts/[^/]+$")
+				|| {path}.matches("^/api/v1/ardent/installations/[^/]+/profiles/[^/]+/tasks/[^/]+/stream$")
 				|| {path} == "/api/v1/ardent/profiles"
 				|| {path} == "/api/v1/assistant/conversations"
 				|| {path} == "/api/v1/assistant/insights"
@@ -369,6 +372,7 @@
 				|| {path} == "/api/v1/hermes/installations"
 				|| {path}.matches("^/api/v1/hermes/installations/[^/]+/profiles$")
 				|| {path} == "/api/v1/hermes/profiles"
+				|| {path} == "/api/v1/hive/events"
 				|| {path} == "/api/v1/library/categories"
 				|| {path} == "/api/v1/library/files"
 				|| {path}.matches("^/api/v1/library/files/[^/]+$")
