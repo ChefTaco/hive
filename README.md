@@ -19,6 +19,7 @@ openssl and Docker Compose on the controller; no Node.js runtime.
 | [**HiveSkills**](https://github.com/ChefTaco/HiveSkills) | Registry of versioned, checksummed skills for agents |
 | [**HiveXUI**](https://github.com/ChefTaco/HiveXUI) | The web console for the whole suite, Magnus included |
 | [**Magnus**](https://github.com/ChefTaco/magnus) | Fleet management for agent hosts, with an optional web terminal gateway |
+| [**Embermend**](https://github.com/ChefTaco/Embermend) | Optional security assessment, recommendations and authorized remediation through compatible Magnus; [setup](deployment/EMBERMEND.md) |
 | [**Cindertrace**](https://github.com/ChefTaco/cindertrace) | Security event collection and response |
 | [**ChatterMost**](https://github.com/ChefTaco/ChatterMost) | Mattermost-compatible team chat for people and agents |
 | [**Emberfold**](https://github.com/ChefTaco/emberfold) | Context engine HTTP service |
@@ -54,21 +55,21 @@ certificate renewal, firewalls and managing the host from another machine.
 
 `--release latest` resolves GitHub’s latest published, non-prerelease suite release once, prints
 the exact version, and runs its tagged controller. To choose a version, use `./hive.sh --release
-3.2.1` instead. The launcher retains release checkouts under
+3.2.2` instead. The launcher retains release checkouts under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`; keep them for later commands and certificate
 renewal timers. It leaves the original checkout and current working directory unchanged. After
 setup, change to the printed release checkout for the lifecycle commands below; return to the
 original launcher checkout when selecting a new release with `--release latest`.
 
-For example, release 3.2.1 verifies `releases/3.2.1.json` against `releases/3.2.1.json.sig` with the publisher key
+For example, release 3.2.2 verifies `releases/3.2.2.json` against `releases/3.2.2.json.sig` with the publisher key
 in `trust/publisher.pub` before installing product resources, and refuses a manifest pinned to a different
 controller. The setup writes a protected installation file that the same commands accept
 unattended. Use the exact version setup reported for repeatable planning and applying
-(the following is an example for 3.2.1):
+(the following is an example for 3.2.2):
 
 ```bash
-./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.2.1
-./hive.sh install --config ~/.config/hive/ID/installation.json --release 3.2.1 --non-interactive --yes
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.2.2
+./hive.sh install --config ~/.config/hive/ID/installation.json --release 3.2.2 --non-interactive --yes
 ./hive.sh status  --config ~/.config/hive/ID/installation.json
 ./hive.sh doctor  --config ~/.config/hive/ID/installation.json
 ```
@@ -121,7 +122,7 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 ## Upgrading
 
 A suite installation upgrades to a newer signed release with `./hive.sh upgrade --config FILE
---release X.Y.Z`; the launcher selects its verified controller. Upgrades from 2.x to 3.2.1 with existing
+--release X.Y.Z`; the launcher selects its verified controller. Upgrades from 2.x to 3.2.2 with existing
 PostgreSQL stores also require `--allow-migrations`: the installer takes a verified backup,
 rehearses on a copy and rebuilds indexes before activation. Code-only rollback across that
 collation change is refused; recovery uses the original-state backup and write reconciliation.

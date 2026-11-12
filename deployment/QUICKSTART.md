@@ -29,7 +29,7 @@ cd hive
 ```
 
 Run the preparation commands from this checkout. `--release latest` resolves the published
-release once and runs its matching tagged controller; an exact `--release 3.2.1` selects that
+release once and runs its matching tagged controller; an exact `--release 3.2.2` selects that
 version instead. The launcher prints the version and retained checkout path, under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`. The signed release still pins the exact
 controller source. After setup, switch to the retained release checkout printed by the launcher
@@ -147,7 +147,7 @@ questions. Press Enter to accept the default shown in brackets.
 | Deploy the Magnus web terminal gateway | `no`. For `yes`, first create the restricted account and key in [preparing nodes](FULL.md#preparing-nodes-and-the-gateway-key) |
 | Port for Magnus host agents | blank for none. Give a port, such as `4000`, to let hosts join the Magnus fleet; see [Magnus host agents](FULL.md#magnus-host-agents) |
 | Existing external inference HTTPS endpoint | blank to skip; see [external inference](INFERENCE.md) |
-| Native agent runtime | Release 3.2.1 skips this question because it pins no native runtime artifacts; the guided local setup offers a Magnus host agent after installation, as in [Magnus host agents](FULL.md#magnus-host-agents) |
+| Native agent runtime | Release 3.2.2 skips this question because it pins no native runtime artifacts; the guided local setup offers a Magnus host agent after installation, as in [Magnus host agents](FULL.md#magnus-host-agents) |
 | Write protected installation configuration to | the default, `~/.config/hive/hive/installation.json` |
 
 `hive.sh` then prints the plan: every product, image digest and host path. Answer `y` to apply
@@ -156,10 +156,10 @@ it. The first install pulls the images and takes a few minutes; later commands t
 If it stops after writing the configuration file, fix the cause and run `./hive.sh --release
 X.Y.Z` again, replacing `X.Y.Z` with the exact version it reported: after the installation name
 it offers to continue with the saved file instead of asking everything again. Use that exact version for retries and for planning then applying,
-so a new release cannot change the plan between commands. Unattended, for example with 3.2.1:
+so a new release cannot change the plan between commands. Unattended, for example with 3.2.2:
 
 ```bash
-./hive.sh install --config ~/.config/hive/hive/installation.json --release 3.2.1
+./hive.sh install --config ~/.config/hive/hive/installation.json --release 3.2.2
 ```
 
 After setup, change to the retained release checkout path printed by the launcher before
@@ -216,11 +216,11 @@ controller for you; older tagged controllers may not support `latest`:
 ```
 
 Use an exact version instead of `latest` to review and apply a specific release. Existing
-PostgreSQL stores need explicit migration approval when moving from 2.x to 3.2.1:
+PostgreSQL stores need explicit migration approval when moving from 2.x to 3.2.2:
 
 ```bash
-./hive.sh plan --config ~/.config/hive/hive/installation.json --release 3.2.1 --allow-migrations
-./hive.sh upgrade --config ~/.config/hive/hive/installation.json --release 3.2.1 --allow-migrations
+./hive.sh plan --config ~/.config/hive/hive/installation.json --release 3.2.2 --allow-migrations
+./hive.sh upgrade --config ~/.config/hive/hive/installation.json --release 3.2.2 --allow-migrations
 ```
 
 The upgrade prints its plan, takes a verified pre-change backup and rehearses data changes on a
@@ -243,16 +243,16 @@ existing local Hive certificate-renewal service to its verified controller check
 
 When two releases share the same controller source, the checkout retains the compatible release
 named in the installation file. Pass the new exact version to later commands to keep using its
-product pins, for example `./hive.sh doctor --config FILE --release 3.2.1`. Certificate renewal
+product pins, for example `./hive.sh doctor --config FILE --release 3.2.2`. Certificate renewal
 uses a unique matching release tag in this case, so its receipt follows that checkout.
 
 Then finish maintenance from the retained release checkout with the individual commands:
 
 ```bash
-./hive.sh magnus-agent status --config ~/.config/hive/hive/installation.json --release 3.2.1
-./hive.sh magnus-agent install --config ~/.config/hive/hive/installation.json --release 3.2.1
-./hive.sh console-clients add --config ~/.config/hive/hive/installation.json --release 3.2.1
-./hive.sh doctor --config ~/.config/hive/hive/installation.json --release 3.2.1
+./hive.sh magnus-agent status --config ~/.config/hive/hive/installation.json --release 3.2.2
+./hive.sh magnus-agent install --config ~/.config/hive/hive/installation.json --release 3.2.2
+./hive.sh console-clients add --config ~/.config/hive/hive/installation.json --release 3.2.2
+./hive.sh doctor --config ~/.config/hive/hive/installation.json --release 3.2.2
 ```
 
 Run the Magnus commands only when this installation hosts Magnus and has a host agent to update;
@@ -269,7 +269,7 @@ and check certificate renewal when nothing renews the certificate.
 **Published controller compatibility:** releases 3.2.0 and 3.2.1 include `post-upgrade`, but on a
 single-host installation that command can request full-node enrollment. Use the individual
 commands above when maintaining a limited or Ardent-only node. The scope-preserving
-`post-upgrade` fix in the next signed controller release uses `magnus-agent install` for all
+`post-upgrade` fix in 3.2.2 and later uses `magnus-agent install` for all
 package updates and `console-clients add` for missing clients. Each change asks for confirmation;
 `--yes` confirms these maintenance steps and does not authorize full-node enrollment.
 
