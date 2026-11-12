@@ -71,7 +71,8 @@ The script shows what it will change and asks before it changes anything. It:
   control Docker, which is equivalent to root on the host;
 - creates the empty installation directory `/opt/hive`, owned by you.
 
-**Log out and back in** so your shell picks up the `docker` group, then confirm:
+**Log out and back in** so your shell picks up the `docker` group (guided setup does this for you
+in a child shell), then confirm:
 
 ```bash
 ./scripts/install-prerequisites.sh --check     # prints "Ready" when everything is in place
@@ -363,7 +364,7 @@ installation directory is owned by root:
 |---|---|
 | `... must be a canonical absolute path that ... can create or write` | Create the directory for your account, as the message shows, or with `sudo ./scripts/install-prerequisites.sh --directory /opt/hive` |
 | `Installation ... already has a configuration` | Answer `yes` to continue with it, or choose another installation name |
-| `permission denied while trying to connect to the docker API` | Log out and back in after joining the `docker` group, then run `./scripts/install-prerequisites.sh --check` |
+| `permission denied while trying to connect to the docker API` | After manual preparation, your shell does not have the new `docker` group yet: log out and back in, then run `./scripts/install-prerequisites.sh --check`. Guided setup continues in a shell with the new membership by itself |
 | `Required tool missing on this host: ...` | Run `sudo ./scripts/install-prerequisites.sh` on that host, then `./scripts/install-prerequisites.sh --check` |
 | `incomplete-transaction` from `doctor`, or `A different transaction requires recovery` | A command stopped part-way. Repeat exactly the same command; see [when a command stops](README.md#when-a-command-stops-transactions-and-recovery) |
 | `Requested HTTPS port is already occupied` | Something else listens on the port: `sudo ss -lntp 'sport = :443'`. Stop it or choose another port |

@@ -60,27 +60,29 @@ change.
 
 | Path | Contents |
 |---|---|
-| `services/hive-router` | OpenAI-compatible model gateway, admin API, and the unified console (React/Vite in `ui/`). `src/contracts` holds the Zod schemas the Router and console share with IAM and HiveMem |
-| `services/hive-iam` | IAM Core (`apps/iam-core`) and `@hivemagnus/hive-iam-sdk` (`packages/iam-sdk`, published to npm) |
-| `services/hive-mem` | HiveMem TypeScript core (`ts-core`), SDKs (`sdks/typescript` is `@hivemagnus/hivemem-sdk`), and the Python Hermes plugin |
-| `services/hive-skills` | Skills registry for Hermes Agent |
+| `hive.sh` | The suite controller's entry point |
+| `scripts/suite` | The controller (`controller.sh`, `lifecycle.sh`, the host scripts it runs over SSH), the release contracts and catalog, and their tests and round trips |
+| `scripts/release` | Suite manifest build, release checks and image scans |
+| `scripts/` | Host preparation (`install-prerequisites.sh`, `console-certificate.sh`, `prepare-terminal.sh`) and repository checks (secret and private-data scans, CI helpers) |
+| `releases/`, `trust/` | Signed suite release manifests, their signatures and inputs, and the publisher key |
+| `deployment/` | The ingress and datastore images, the Caddyfile, `images.json`, and the deployment guides |
 | `services/hive-registry` | Hive Registry: the mandatory install catalog and lookup API of one installation, written by `hive.sh`. Not the Skills registry |
-| `packages/hive` | `@hivemagnus/hive`, the `hive` launcher CLI that installs, configures and runs the three servers (published to npm, no runtime dependencies) |
-| `scripts/` | Deploy, backup, audit, and repository check tooling. `scripts/lib/service-manifest.ts` describes the deployed services |
-| `docs/` | Architecture, runbooks, and OpenAPI snapshots |
+| `examples/` | Installation JSON example and schemas |
+| `docs/` | Architecture, release process, Registry API and runbooks |
 
-Each workspace has its own `package-lock.json`. Install them all with `npm run bootstrap`.
+The products (Oathweave, Emberpath, HiveMem, HiveSkills, HiveXUI, Magnus and the others) live in
+their own repositories. The retired npm 1.x packages remain at the `v1.2.2` tag. Install the
+Registry's dependencies and the git hooks with `npm run bootstrap`.
 
 ## Engineering conventions
 
-- TypeScript is strict everywhere. Match the style of the file you are editing.
-- Use Zod 4 for runtime validation. Request and response shapes the Router and console share with
-  IAM and HiveMem belong in `services/hive-router/src/contracts`.
+- Match the style of the file you are editing. Controller code is strict Bash (`set -Eeuo pipefail`)
+  and the Hive Registry is strict TypeScript.
 - Add or update tests with every behaviour change. Security-relevant fixes need a regression test.
-- After changing routes or schemas, run `npm run generate:openapi`. After changing IAM request
-  schemas, run `npm --prefix services/hive-router run contracts:generate`.
-- Published packages follow semver. Note user-facing changes in `CHANGELOG.md`.
-- Use Conventional Commits (`feat:`, `fix(router):`, `docs:` and so on).
+- Changing a file listed in `hive_runtime_files` (`scripts/suite/controller.sh`) changes the
+  controller digest that the next signed release pins.
+- Note user-facing changes in `CHANGELOG.md`.
+- Use Conventional Commits (`feat:`, `fix(suite):`, `docs:` and so on).
 
 ## Gates
 
@@ -89,7 +91,6 @@ Run these before every commit or pull request:
 ```bash
 npm run typecheck
 npm test
-npm run check:openapi
 npm run scan:secrets
 npm run check:private
 ```
