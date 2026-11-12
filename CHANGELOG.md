@@ -6,6 +6,15 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.6.1] - 2026-11-12
+
+### Changed
+
+- Magnus, its fleet gateway and agent 2.9.1: an assistant model route whose primary provider is not
+  Ollama sends its own model to that provider. No migrations and no new settings. Every other pin,
+  the datastore profile and the storage recovery profile are unchanged from 3.6.0. The controller
+  changes (the fixes below), so an installation upgrades with the 3.6.1 controller.
+
 ### Fixed
 
 - `hive.sh console-clients add` now marks the `oathweave-console-clients` setup checklist item done,
