@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.3.0] - 2026-11-12
+
+### Changed
+
+- Publish the signed product update on the 3.2.2 controller: HiveSkills 1.4.0, Chattermost and its migrator 0.5.1, Cindertrace 0.3.0, Ardent Project Studio 0.3.0, Emberpath 2.1.0, HiveMem 1.5.0 and HiveXUI 0.4.0. Magnus 2.5.0 and its agent, Oathweave, Emberfold, Embermend, the Hive Registry, the ingress, the datastore profile and the storage recovery profile are unchanged. Every pinned image passes the full HIGH/CRITICAL policy on both architectures.
+
 ## [3.2.2] - 2026-11-12
 
 ### Changed
