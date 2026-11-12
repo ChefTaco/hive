@@ -23,10 +23,12 @@ already publishes: product names, same-origin paths and public links.
 
 | Public | Needs a credential |
 | --- | --- |
-| Installation ID and installed product IDs | Origin, profile, release version and digests, revision, inventory hosts |
+| Installation ID, installed product IDs and the [setup checklist](#setup-checklist) | Origin, profile, release version and digests, revision, inventory hosts |
 | Product ID, display name, description, repository, documentation and license links | Product version, image reference and digest, storage format, version history |
 | Console section, required flag, dependencies, `installed`, capabilities | Kind, source, status, install and update times, release |
 | Console path, browser prefix, native API URLs on the console origin, documentation, capabilities | Inventory host, internal endpoints |
+
+The setup checklist's `updatedAt` is the one timestamp the public view carries.
 
 Datastores and externally managed products without `"public": true` do not appear in the
 public view at all. `installed` is true only after activation is recorded, not while a
@@ -40,7 +42,7 @@ Every response is JSON with `Cache-Control: no-store`. Paths are native; add the
 | Request | Returns |
 | --- | --- |
 | `GET /health/ready` | `{"status":"ready","readOnly":false}` |
-| `GET /v1/installation` | Installation summary |
+| `GET /v1/installation` | Installation summary, with the [setup checklist](#setup-checklist) once one is recorded |
 | `GET /v1/products` | Catalog. `?installed=true` or `?installed=false` filters it |
 | `GET /v1/products/{id}` | One product |
 | `GET /v1/products/{id}/connection` | Console path, browser prefix, native API URLs, documentation and [capabilities](#capabilities); with a credential also the inventory host and internal endpoints |
@@ -104,6 +106,60 @@ The registry keeps capabilities in the stored connection, so no migration is inv
 connection recorded before they existed reads back without the field and is not rewritten, and a
 registry image from before them ignores a stored capability.
 
+## Setup checklist
+
+The installation summary carries an optional `setup` object: the steps after an install or
+upgrade that still need a person, such as installing the Magnus host agent or scheduling the
+certificate renewal. HiveXUI shows it to administrators. A registry that never received a
+checklist (from a controller or registry before 1.3.0) omits the field.
+
+```json
+{
+  "schema": 1,
+  "id": "example-suite",
+  "products": ["hive-registry", "hivexui", "magnus", "oathweave"],
+  "setup": {
+    "items": [
+      {
+        "id": "magnus-agent-enrolled",
+        "title": "Install the Magnus agent on the Magnus host",
+        "status": "pending",
+        "command": "./hive.sh magnus-agent install",
+        "docs": "deployment/FULL.md#installing-the-agent",
+        "product": "magnus",
+        "check": "magnus.agent"
+      }
+    ],
+    "updatedAt": "2026-11-12T18:00:00.000Z"
+  }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `id` | From the controller's fixed list (see [the setup checklist](../deployment/FULL.md#setup-checklist)), `[a-z][a-z0-9-]{0,63}`. Readers show an id they do not know generically |
+| `title` | One line, at most 160 characters |
+| `status` | `pending`, `done` or `skipped` |
+| `command` | A `./hive.sh` line, or one of its scripts, to show and copy: plain words and options only, so no hostname, path, username or secret fits |
+| `docs` | A repository-relative Markdown file with an optional anchor |
+| `product` | Optional. The product the step belongs to |
+| `check` | Optional. A readiness probe the browser can run itself: `magnus.agent`, `oathweave.console-client` or `iam.first-admin`. Readers ignore one they do not know |
+| `updatedAt` | When the list last changed, RFC 3339 UTC. Set by the registry |
+
+`hive.sh` sends the whole list with the install and upgrade sync (`"setup": {"items": [...]}`; the
+registry sets `updatedAt`). A sync without `setup` keeps the recorded list, so every other
+operation, and every controller from before the checklist, leaves it unchanged. `hive.sh` sends it
+only to a registry from 1.3.0, which the release manifest pins; an earlier registry refuses
+unknown fields. An operator, or `hive.sh post-upgrade`, settles one recorded item with
+`PUT /v1/setup/items/{id}` and `{"status": "done"}` (or `skipped`, or `pending` again); an id that
+is not recorded gets `404`. The browser never writes the checklist.
+
+The registry keeps the checklist in its append-only history: each change records the whole list
+as `{"before": [...], "after": {"items": [...]}}` under the subject `setup`, and the latest such
+entry is the current list, its time the `updatedAt`. No table or column holds it, so the storage
+format (`hive-registry-v1`) and the migrations are unchanged, an older registry image ignores it
+after a rollback, and an installation recorded before it reads back unchanged.
+
 ## Browser contract
 
 [`services/hive-registry/src/browser-contract.ts`](../services/hive-registry/src/browser-contract.ts)
@@ -111,6 +167,11 @@ describes, with zod and nothing else, what an unauthenticated browser may read t
 `/api/registry`. HiveXUI vendors it unchanged with its checksum; `registryBrowserContractVersion`
 changes whenever its shape does. Its objects are not strict, so a field it does not name never
 reaches the browser. The service's own tests parse every public response with it.
+
+| Version | Registry | Adds |
+| --- | --- | --- |
+| 3 | 1.3.0 | The optional [setup checklist](#setup-checklist) on `GET /v1/installation` |
+| 2 | 1.2.0 | Product [capabilities](#capabilities) |
 
 ## Ingress
 
@@ -129,6 +190,7 @@ Private network only, with the write credential. `hive.sh` calls them over SSH t
 | `POST /v1/sync` | Reconciles the release catalog and this installation's state in one transaction. Installer only |
 | `PUT /v1/products/{id}` | Adds or updates an externally managed product |
 | `DELETE /v1/products/{id}` | Removes an externally managed product |
+| `PUT /v1/setup/items/{id}` | Records one [setup checklist](#setup-checklist) item's status: `{"status":"done"}`, `"skipped"` or `"pending"` |
 
 A sync's `installed` entries are the products this installation runs, each with its inventory
 host, version, image and `activating` or `installed`, and the release products it uses but does

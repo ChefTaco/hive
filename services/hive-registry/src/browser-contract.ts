@@ -7,7 +7,7 @@
 // carried one. Capability names the contract does not know are dropped the same way.
 import { z } from 'zod';
 
-export const registryBrowserContractVersion = 2;
+export const registryBrowserContractVersion = 3;
 
 const productId = z.string().regex(/^[a-z][a-z0-9-]{0,47}$/);
 const localPath = z
@@ -33,11 +33,38 @@ export const registryHealthSchema = z.object({
   readOnly: z.boolean(),
 });
 
+/**
+ * One step of the first-run setup checklist (version 3). `id` comes from the controller's fixed
+ * list, but readers show an id they do not know generically. `command` is a hive.sh line to show
+ * and copy, never to run; `docs` is a repository-relative Markdown file with an optional anchor.
+ * `check`, when present, names a readiness probe the browser may run itself, such as
+ * `magnus.agent`, `oathweave.console-client` or `iam.first-admin`; readers ignore one they do not
+ * know. The browser never writes the checklist: `hive.sh post-upgrade` and `hive.sh setup` do.
+ */
+export const registrySetupItemSchema = z.object({
+  id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  title: z.string().min(1).max(160),
+  status: z.enum(['pending', 'done', 'skipped']),
+  command: z.string().max(200),
+  docs: z.string().max(200).regex(/^(?:[A-Za-z0-9_-]+\/){0,4}[A-Za-z0-9_-]+\.md(?:#[a-z0-9-]{1,96})?$/),
+  product: productId.optional(),
+  check: z.string().regex(/^[a-z][a-z0-9.-]{0,63}$/).optional(),
+});
+export type RegistrySetupItem = z.infer<typeof registrySetupItemSchema>;
+
+/** The setup checklist on the installation. Absent when the controller never recorded one. */
+export const registrySetupSchema = z.object({
+  items: z.array(registrySetupItemSchema).max(32),
+  updatedAt: z.iso.datetime(),
+});
+export type RegistrySetup = z.infer<typeof registrySetupSchema>;
+
 /** GET /v1/installation */
 export const registryInstallationSchema = z.object({
   schema: z.literal(1),
   id: productId,
   products: z.array(productId).max(512),
+  setup: registrySetupSchema.optional(),
 });
 export type RegistryInstallation = z.infer<typeof registryInstallationSchema>;
 

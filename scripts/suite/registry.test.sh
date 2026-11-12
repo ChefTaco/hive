@@ -72,7 +72,7 @@ jq -e '.components|has("hive-registry")|not' "$temporary/rollback.plan" >/dev/nu
 
 # The registry starts first on its host. Datastores and other hosts are not tied to it.
 export HIVE_ROOT=$ROOT
-source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/registry.sh"; source "$ROOT/scripts/suite/lifecycle.sh"
+source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/registry.sh"; source "$ROOT/scripts/suite/lifecycle.sh"; source "$ROOT/scripts/suite/setup-checklist.sh"
 HIVE_CONFIG=$temporary/config.json HIVE_MANIFEST=$temporary/release.json HIVE_SIGNATURE=$temporary/release.json.sig HIVE_TRUST_KEY=$temporary/publisher.pub HIVE_VERSION=0.1.0 HIVE_OPERATION=install HIVE_ID=example-suite
 hive_validate; hive_manifest
 hive_render control > "$temporary/compose.json"
@@ -218,6 +218,17 @@ expect_drift() { # CODE
 }
 reset_fixture
 [[ $(status | jq -r .state) == in-sync ]] || { status >&2; fail 'A matching registry reported drift'; }
+# Status lists the pending setup checklist items for the operator on stderr, and in the JSON.
+"$ROOT/hive.sh" status --config "$temporary/config.json" 2> "$temporary/status.err" | jq -e '.registry|has("setup")|not' >/dev/null || fail 'A registry without a checklist reported one'
+! grep -q 'Setup checklist' "$temporary/status.err" || fail 'Status listed a checklist the registry does not have'
+jq '.setup={items:[{id:"first-admin",title:"Create your own administrator account",status:"pending",command:"./hive.sh setup done first-admin",docs:"deployment/QUICKSTART.md#6-sign-in"},
+  {id:"certificate-renewal",title:"Schedule the HTTPS certificate renewal",status:"skipped",command:"sudo ./scripts/console-certificate.sh schedule --config FILE",docs:"README.md"}],updatedAt:"2026-11-01T00:00:00.000Z"}' \
+  "$HIVE_FIXTURE/installation.json" > "$HIVE_FIXTURE/next"; mv "$HIVE_FIXTURE/next" "$HIVE_FIXTURE/installation.json"
+"$ROOT/hive.sh" status --config "$temporary/config.json" 2> "$temporary/status.err" > "$temporary/status.json"
+jq -se '.[0].registry|.state=="in-sync" and .setup.pending==["first-admin"] and (.setup.items|length)==2' "$temporary/status.json" >/dev/null || fail 'Status JSON lacks the checklist'
+grep -q 'Setup checklist: 1 pending' "$temporary/status.err" && grep -q '  - first-admin: Create your own administrator account' "$temporary/status.err" &&
+  grep -qF './hive.sh setup done first-admin' "$temporary/status.err" && ! grep -q 'certificate-renewal' "$temporary/status.err" || { cat "$temporary/status.err" >&2; fail 'Status did not list the pending items'; }
+reset_fixture
 # Each difference is reported by name.
 jq '.emberpath|="exited||"+(.|split("|")[2])+"|id-same"' "$HIVE_FIXTURE/containers.json" > "$HIVE_FIXTURE/next"; mv "$HIVE_FIXTURE/next" "$HIVE_FIXTURE/containers.json"; expect_drift not-running; reset_fixture
 jq '.emberpath|="running|unhealthy|"+(.|split("|")[2])+"|id-same"' "$HIVE_FIXTURE/containers.json" > "$HIVE_FIXTURE/next"; mv "$HIVE_FIXTURE/next" "$HIVE_FIXTURE/containers.json"; expect_drift unhealthy; reset_fixture

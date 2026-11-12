@@ -106,6 +106,7 @@ hive_lifecycle() {
       hive_registry_complete || hive_registry_failed "$operation"
       hive_all complete || hive_hold
       if [[ "$operation" == install ]]; then hive_install_summary; fi
+      hive_checklist_report
       ;;
     backup)
       HIVE_ARCHIVE=${HIVE_ARCHIVE:-"backup-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 4)"}

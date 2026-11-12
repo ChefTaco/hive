@@ -85,6 +85,30 @@ export const installedEntry = z.union([deployedEntry, externalEntry]);
 export type InstalledEntry = z.infer<typeof installedEntry>;
 export type DeployedEntry = z.infer<typeof deployedEntry>;
 
+// The first-run setup checklist: steps after an install or upgrade that still need a person. The
+// controller decides the items and their statuses; the registry keeps the latest list and
+// publishes it with the installation. Every field is public, so none may carry a secret, a
+// hostname or a path: a command is a hive.sh line (or one of its scripts) with plain words only,
+// and docs is a repository-relative Markdown file with an optional anchor.
+export const setupItemId = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+export const setupStatuses = ['pending', 'done', 'skipped'] as const;
+export const setupStatus = z.enum(setupStatuses);
+export const setupItem = z.strictObject({
+  id: setupItemId,
+  title: z.string().min(1).max(160).regex(/^[^\u0000-\u001f\u007f]+$/),
+  status: setupStatus,
+  command: z.string().max(200).regex(/^(?:sudo )?(?:\.\/)?(?:hive\.sh|scripts\/[a-z][a-z0-9-]*\.sh)(?: [A-Za-z0-9_=:-]{1,64}){0,12}$/),
+  docs: z.string().max(200).regex(/^(?:[A-Za-z0-9_-]+\/){0,4}[A-Za-z0-9_-]+\.md(?:#[a-z0-9-]{1,96})?$/),
+  product: productId.optional(),
+  check: z.string().regex(/^[a-z][a-z0-9.-]{0,63}$/).optional(),
+});
+export type SetupItem = z.infer<typeof setupItem>;
+export const setup = z.strictObject({ items: z.array(setupItem).max(32) })
+  .refine((value) => new Set(value.items.map((item) => item.id)).size === value.items.length, 'Duplicate setup item');
+export type Setup = z.infer<typeof setup>;
+/** PUT /v1/setup/items/{id}: an operator settles one recorded item. */
+export const setupItemUpdate = z.strictObject({ status: setupStatus });
+
 export const syncRequest = z.strictObject({
   schema: z.literal(1),
   phase: z.enum(['begin', 'complete']),
@@ -94,6 +118,8 @@ export const syncRequest = z.strictObject({
   release: z.strictObject({ version, manifestDigest: hex64, planDigest: hex64 }),
   catalog: z.array(catalogEntry).min(1).max(256),
   installed: z.array(installedEntry).max(256),
+  // Optional: the full checklist, replacing the recorded one. Omitted, the recorded one is kept.
+  setup: setup.optional(),
 }).superRefine((value, context) => {
   const offered = new Set(value.catalog.map((entry) => entry.id));
   if (offered.size !== value.catalog.length) context.addIssue({ code: 'custom', message: 'Duplicate catalog product' });
