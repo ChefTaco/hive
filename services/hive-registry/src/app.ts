@@ -1,9 +1,9 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import { z } from 'zod';
-import { externalProduct, productId, syncRequest } from './schema.js';
+import { externalProduct, productId, setupItemId, setupItemUpdate, syncRequest } from './schema.js';
 import { findSecret } from './secrets.js';
-import { Conflict, type RegistryStore } from './store.js';
+import { Conflict, Missing, type RegistryStore } from './store.js';
 import { historyView, privateConnection, privateInstallation, privateProduct, publicConnection, publicInstallation, publicProduct, publicProductVisible } from './views.js';
 
 export type AppOptions = { store: RegistryStore; installation: string; readToken: string; writeToken: string; readOnly: boolean; log?: (line: string) => void };
@@ -96,6 +96,10 @@ export function createApp(options: AppOptions): RequestListener {
       const result = store.sync(validated(syncRequest, await readBody(request)));
       return { status: 200, body: { schema: 1, ...result } };
     }
+    if (route.length === 3 && route[0] === 'setup' && route[1] === 'items' && method === 'PUT' && setupItemId.safeParse(route[2]).success) {
+      const update = validated(setupItemUpdate, await readBody(request));
+      return { status: 200, body: { schema: 1, ...store.updateSetupItem(route[2]!, update.status, 'hive.sh setup') } };
+    }
     const id = route[1];
     if (route.length === 2 && route[0] === 'products' && id && productId.safeParse(id).success) {
       if (method === 'PUT') return { status: 200, body: { schema: 1, ...store.putExternal(id, validated(externalProduct, await readBody(request)), 'hive.sh registry') } };
@@ -129,6 +133,7 @@ export function createApp(options: AppOptions): RequestListener {
       .catch((error: unknown): Reply => {
         if (error instanceof HttpFailure) return error.reply;
         if (error instanceof Conflict) return failure(409, 'conflict', error.message);
+        if (error instanceof Missing) return failure(404, 'not_found', error.message);
         options.log?.(JSON.stringify({ level: 'error', message: error instanceof Error ? error.message : 'unknown' }));
         return failure(500, 'internal', 'Registry request failed');
       })

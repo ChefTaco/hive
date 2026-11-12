@@ -3,9 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { migrate } from './migrations.js';
-import type { CatalogEntry, Connection, ExternalProduct, InstalledEntry, SyncRequest } from './schema.js';
+import type { CatalogEntry, Connection, ExternalProduct, InstalledEntry, SetupItem, SyncRequest } from './schema.js';
 
 export class Conflict extends Error {}
+export class Missing extends Error {}
 
 export type InstallationRow = { id: string; origin: string; profile: string; release_version: string; manifest_digest: string; plan_digest: string; phase: 'activating' | 'complete'; revision: number; updated_at: string };
 export type ProductRow = { id: string; source: 'release' | 'external'; kind: string; display_name: string; description: string; repository_url: string | null; documentation_url: string | null; license_url: string | null; license_spdx: string | null; console_section: string | null; required: number; dependencies_json: string; public: number; offered: number; updated_at: string };
@@ -13,6 +14,7 @@ export type InstalledRow = { product_id: string; inventory_host: string | null; 
 export type VersionRow = { product_id: string; version: string; image: string; image_digest: string; storage_format: string | null; release_version: string; recorded_at: string };
 export type HistoryRow = { sequence: number; recorded_at: string; actor: string; operation: string; subject: string; change_json: string };
 export type WriteResult = { changes: number; revision: number };
+export type SetupState = { items: SetupItem[]; updatedAt: string };
 
 const databaseFile = 'registry.sqlite';
 const emptyConnection: Connection = { consolePath: null, browserPrefix: null, nativeApis: {}, internalEndpoints: {} };
@@ -87,6 +89,27 @@ export class RegistryStore {
     return this.db.prepare('SELECT * FROM catalog_versions WHERE product_id = ? ORDER BY recorded_at, version').all(id) as VersionRow[];
   }
 
+  /**
+   * The setup checklist is kept as history: each change records the whole list as `after`, so
+   * the latest `setup` entry is the current list and its time is `updatedAt`. No table or column
+   * holds it, so the storage format is unchanged, an older image ignores it, and a registry that
+   * never received one has none.
+   */
+  setup(): SetupState | undefined {
+    const row = this.db.prepare("SELECT recorded_at, change_json FROM history WHERE subject = 'setup' ORDER BY sequence DESC LIMIT 1").get() as { recorded_at: string; change_json: string } | undefined;
+    if (!row) return undefined;
+    return { items: (JSON.parse(row.change_json) as { after: { items: SetupItem[] } }).after.items, updatedAt: row.recorded_at };
+  }
+
+  /** An operator settles one recorded item: done, skipped, or pending again. */
+  updateSetupItem(id: string, status: SetupItem['status'], actor: string): WriteResult {
+    return this.transaction(actor, 'setup', (record) => {
+      const current = this.setup();
+      if (!current?.items.some((item) => item.id === id)) throw new Missing(`No setup item ${id} is recorded`);
+      this.writeSetup(current.items.map((item) => (item.id === id ? { ...item, status } : item)), record);
+    });
+  }
+
   history(after: number, limit: number): HistoryRow[] {
     return this.db.prepare('SELECT * FROM history WHERE sequence > ? ORDER BY sequence LIMIT ?').all(after, limit) as HistoryRow[];
   }
@@ -120,6 +143,7 @@ export class RegistryStore {
         }
       }
       for (const entry of request.installed) this.upsertInstalled(entry, request.release.version, timestamp, record);
+      if (request.setup) this.writeSetup(request.setup.items, record);
       if (request.phase === 'complete') {
         const present = new Set(request.installed.map((entry) => entry.id));
         for (const row of this.installed()) {
@@ -171,6 +195,14 @@ export class RegistryStore {
       this.db.prepare('DELETE FROM catalog_products WHERE id = ?').run(id);
       record(`catalog:${id}`, { removed: true });
     });
+  }
+
+  /** Records the list only when it differs, so a retried sync adds no history. */
+  private writeSetup(items: SetupItem[], record: (subject: string, change: unknown) => void): void {
+    const next = items.map(canonicalSetupItem);
+    const current = this.setup();
+    if (current && JSON.stringify(current.items.map(canonicalSetupItem)) === JSON.stringify(next)) return;
+    record('setup', { before: current ? current.items : null, after: { items: next } });
   }
 
   private publicInstallationFields(row: InstallationRow) {
@@ -254,6 +286,14 @@ export class RegistryStore {
     }
     return { changes, revision: this.installation()?.revision ?? 0 };
   }
+}
+
+/** Fixed field order, and optional fields only when set. */
+export function canonicalSetupItem(item: SetupItem): SetupItem {
+  return {
+    id: item.id, title: item.title, status: item.status, command: item.command, docs: item.docs,
+    ...(item.product ? { product: item.product } : {}), ...(item.check ? { check: item.check } : {}),
+  };
 }
 
 export { emptyConnection };

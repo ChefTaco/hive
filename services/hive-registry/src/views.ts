@@ -1,5 +1,5 @@
 import type { Capabilities, Connection } from './schema.js';
-import { emptyConnection, type HistoryRow, type InstallationRow, type InstalledRow, type ProductRow, type RegistryStore, type VersionRow } from './store.js';
+import { canonicalSetupItem, emptyConnection, type HistoryRow, type InstallationRow, type InstalledRow, type ProductRow, type RegistryStore, type VersionRow } from './store.js';
 
 // Field exposure lives here and only here. These are explicit allowlists: a new column
 // reaches a response only by being named below. The public view carries no more than the
@@ -72,6 +72,15 @@ export function privateConnection(row: ProductRow, installed: InstalledRow | und
   return { ...connectionDetails(row, connection), inventoryHost: installed?.inventory_host ?? null, internalEndpoints: connection.internalEndpoints };
 }
 
+// The setup checklist is public: HiveXUI shows it to administrators. Its items carry titles,
+// hive.sh command lines and repository doc anchors only, which the schema enforces, and its
+// `updatedAt` is the one timestamp the public view carries. A registry that never received a
+// checklist omits the field.
+function setupOf(store: RegistryStore) {
+  const setup = store.setup();
+  return setup ? { setup: { items: setup.items.map(canonicalSetupItem), updatedAt: setup.updatedAt } } : {};
+}
+
 export function publicInstallation(installation: InstallationRow | undefined, configured: string, store: RegistryStore) {
   return {
     schema: 1,
@@ -80,6 +89,7 @@ export function publicInstallation(installation: InstallationRow | undefined, co
       const product = store.product(row.product_id);
       return product !== undefined && publicProductVisible(product) && row.status !== 'activating';
     }).map((row) => row.product_id),
+    ...setupOf(store),
   };
 }
 
