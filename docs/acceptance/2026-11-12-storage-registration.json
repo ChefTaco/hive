@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "date": "2026-11-12",
+  "scope": "Isolated checksum-enabled PostgreSQL 18 fixture using the signed candidate datastore image; no fleet or provider access",
+  "image": "ghcr.io/cheftaco/hive-postgres@sha256:e3a07752c24c9b5aebd6e1d3dd508add407ecdc3d26d945ed62a8219606a2bdb",
+  "cases": [
+    {
+      "case": "valid",
+      "accepted": true,
+      "expected": true,
+      "storeUnchanged": true,
+      "storeSHA256": "9fb988fe23ca81d081a8cd388ba24eba84802f7429fa6af8080d13056d47126a"
+    },
+    {
+      "case": "wrong-major",
+      "accepted": false,
+      "expected": false,
+      "storeUnchanged": true,
+      "storeSHA256": "142a4016c6fc34e811edd3017d6e2d85a29c2c9ce88cbadf622c6484eab47c60"
+    },
+    {
+      "case": "wrong-runtime",
+      "accepted": false,
+      "expected": false,
+      "storeUnchanged": true,
+      "storeSHA256": "d07d18ecc0eac4eae0c1dd7c4e6ed210aecd4c140d4d699ab2e815698c414460"
+    },
+    {
+      "case": "bad-checksum",
+      "accepted": false,
+      "expected": false,
+      "storeUnchanged": true,
+      "storeSHA256": "b64b16c16a49aaf8c134b6dcc750bbd04e14c691f15d569b31d195d45578482d"
+    }
+  ],
+  "verifierOnlyReadsStore": true
+}
