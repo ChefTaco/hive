@@ -6,6 +6,29 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 temporary=$(mktemp -d)
 trap 'rm -rf -- "$temporary"' EXIT
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+# Group shared stores transitively; identity stays last and stores appear once.
+mkdir "$temporary/grouping"
+jq -n '{services:{
+ alpha:{depends_on:{"first-store":{}},volumes:[{target:"/data"}]},
+ beta:{depends_on:{"second-store":{}},volumes:[{target:"/data"}]},
+ gamma:{depends_on:{"first-store":{},"second-store":{}},volumes:[]},
+ oathweave:{depends_on:{"identity-store":{}},volumes:[{target:"/data"}]},
+ "identity-worker":{depends_on:{"identity-store":{}},volumes:[]},
+ "first-store":{},"second-store":{},"identity-store":{},"alone-store":{},
+ edge:{volumes:[{target:"/data"}]}, independent:{volumes:[]}}}' > "$temporary/grouping/compose.json"
+jq '{components:(.services|with_entries(.value={kind:(if (.key|endswith("-store")) then "datastore" elif .key=="edge" then "ingress" else "application" end)}))}' "$temporary/grouping/compose.json" > "$temporary/grouping/release.json"
+(
+ source "$ROOT/scripts/suite/snapshot-host.sh"
+ directory="$temporary/grouping" snapshot_manifest="$temporary/grouping/release.json"
+ snapshot_groups
+) | jq -s -e '
+ length==5 and
+ ([.[]|select(.pause|index("alpha"))][0]=={pause:["alpha","beta","gamma"],files:["alpha","beta"],stores:["first-store","second-store"]}) and
+ (last.pause==["identity-worker","oathweave"]) and
+ ([.[].stores[]]|sort==["alone-store","first-store","identity-store","second-store"]) and
+ ([.[].pause[]]|sort==["alpha","beta","gamma","identity-worker","independent","oathweave"])
+' >/dev/null || fail 'Shared writer groups were split, duplicated or misplaced'
+
 user="$(id -u):$(id -g)"
 image() { printf 'example.com/%s@sha256:%064d' "$1" 0; }
 

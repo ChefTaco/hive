@@ -50,12 +50,20 @@ snapshot_groups() {
     def data($n): any($s[$n].volumes[]?; .target=="/data");
     def stores($n): [($s[$n].depends_on // {}) | if type=="array" then .[] else keys[] end | select(kind(.)=="datastore")];
     [$s|keys[]|select(kind(.)=="application")|{pause:[.],files:(if data(.) then [.] else [] end),stores:stores(.)}] as $owned |
-    ([$owned[].stores[]]|group_by(.)|map(select(length>1))|length) as $shared |
-    if $shared>0 then error("A datastore shared by two applications needs the stopped backup") else . end |
+    # Every writer of a shared store pauses in the same group. Merging existing
+    # groups also handles a writer that bridges two otherwise disjoint stores.
+    (reduce $owned[] as $next ([];
+      [.[] | select(any(.stores[]; . as $store | $next.stores | index($store)!=null))] as $joined |
+      [.[] | select(all(.stores[]; . as $store | $next.stores | index($store)==null))] +
+      [(reduce $joined[] as $group ($next; {
+        pause:((.pause+$group.pause)|unique),
+        files:((.files+$group.files)|unique),
+        stores:((.stores+$group.stores)|unique)
+      }))])) as $groups |
     ([$s|keys[]|select(kind(.)=="datastore")] - [$owned[].stores[]]) as $alone |
     [$s|keys[]|select(kind(.)!="application" and kind(.)!="datastore" and data(.))] as $edge |
     ([$edge[]|{pause:[],files:[.],stores:[]}] + [$alone[]|{pause:[],files:[],stores:[.]}] +
-      ($owned|map(select(.pause[0]!="oathweave"))) + ($owned|map(select(.pause[0]=="oathweave"))))[]' "$directory/compose.json"
+      ($groups|map(select((.pause|index("oathweave"))==null))) + ($groups|map(select((.pause|index("oathweave"))!=null))))[]' "$directory/compose.json"
 }
 snapshot_tool() {
   # snapshot_tool USER REQUEST [docker run options]. The pinned recovery image runs the helper.
