@@ -6,6 +6,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Fixed
+
+- Preserve existing Magnus enrollment scopes during post-upgrade agent updates, including unattended `--yes` runs. Package maintenance uses `magnus-agent install`; full-node enrollment remains a separate explicit action. Document scope-preserving maintenance for already published controllers.
+
 ## [3.2.1] - 2026-11-12
 
 ### Fixed
