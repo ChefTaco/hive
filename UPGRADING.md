@@ -43,6 +43,18 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Suite 3.6.1: model API at /v1 on migrated hosts
+
+Suite 3.6.1 changes no data format and needs no flag from 3.6.0. It pins Magnus 2.9.1 and a new
+controller. On an installation migrated with `hive.sh migrate-native`, the console port's ingress
+overlay sent all of `/v1/*` to HiveMem, so the Emberpath model API answered only on its native
+listener. After upgrading, regenerate the overlay so `/v1/models`, `/v1/chat/completions` and the
+rest reach Emberpath on the console port:
+
+```sh
+./hive.sh migrate-native tls-refresh --config ~/.config/hive/ID/installation.json --release 3.6.1
+```
+
 ## Suite 3.6: the setup checklist and an Embermend migration
 
 Suite 3.6.0 changes one product's database: Embermend 0.3.0 adds the migration

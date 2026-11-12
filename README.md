@@ -55,21 +55,21 @@ certificate renewal, firewalls and managing the host from another machine.
 
 `--release latest` resolves GitHub’s latest published, non-prerelease suite release once, prints
 the exact version, and runs its tagged controller. To choose a version, use `./hive.sh --release
-3.6.0` instead. The launcher retains release checkouts under
+3.6.1` instead. The launcher retains release checkouts under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`; keep them for later commands and certificate
 renewal timers. It leaves the original checkout and current working directory unchanged. After
 setup, change to the printed release checkout for the lifecycle commands below; return to the
 original launcher checkout when selecting a new release with `--release latest`.
 
-For example, release 3.6.0 verifies `releases/3.6.0.json` against `releases/3.6.0.json.sig` with the publisher key
+For example, release 3.6.1 verifies `releases/3.6.1.json` against `releases/3.6.1.json.sig` with the publisher key
 in `trust/publisher.pub` before installing product resources, and refuses a manifest pinned to a different
 controller. The setup writes a protected installation file that the same commands accept
 unattended. Use the exact version setup reported for repeatable planning and applying
-(the following is an example for 3.6.0):
+(the following is an example for 3.6.1):
 
 ```bash
-./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.6.0
-./hive.sh install --config ~/.config/hive/ID/installation.json --release 3.6.0 --non-interactive --yes
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.6.1
+./hive.sh install --config ~/.config/hive/ID/installation.json --release 3.6.1 --non-interactive --yes
 ./hive.sh status  --config ~/.config/hive/ID/installation.json
 ./hive.sh doctor  --config ~/.config/hive/ID/installation.json
 ```
