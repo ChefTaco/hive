@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Allow explicit Embermend selection with an existing external Magnus; retain the bridge requirement and prepare an empty scoped grant fragment without deploying another Magnus or replacing its existing grants.
+
 - Require Magnus 2.5.0 or newer with the explicit managed bridge declaration when selecting Embermend; published 2.4 releases do not supply those actions.
 - Build clean Embermend runtime and isolated scanner candidates alongside the other suite products; API and worker use the same runtime target.
 

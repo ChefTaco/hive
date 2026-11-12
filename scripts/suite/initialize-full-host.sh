@@ -133,7 +133,7 @@ hive_full_configuration() {
     {
       common_environment; resource_identity
       line DATABASE_URL "postgresql://embermend:$(secret embermend-db)@embermend-postgres:5432/embermend"
-      line MAGNUS_URL "$(product_endpoint magnus https://magnus:4000)"; line MAGNUS_EMBERMEND_TOKEN "$(secret embermend-magnus)"
+      line MAGNUS_URL "${external_magnus:-$(product_endpoint magnus https://magnus:4000)}"; line MAGNUS_EMBERMEND_TOKEN "$(secret embermend-magnus)"
       line EMBERMEND_BIND 0.0.0.0; line EMBERMEND_PORT 4180
       line EMBERMEND_IDENTITY_GRANTS "$(jq -nc --arg subject "$subject" --arg installation "$installation" '[{subject:$subject,kind:"operator",permissions:["read","evidence","assess","prepare","propose","publish-explanation","ingest","policy"],scope:{installationId:$installation,applicationIds:[],targetIds:[]}},{subject:"embermend-coordinator",kind:"coordinator",permissions:["read","evidence","assess","prepare","propose","publish-explanation"],scope:{installationId:$installation,applicationIds:[],targetIds:[]}},{subject:"embermend-verifier",kind:"integration",permissions:["read","evidence","ingest"],scope:{installationId:$installation,applicationIds:[],targetIds:[]}}]')"
     } | publish_file embermend "$directory/config/embermend.env"
@@ -172,6 +172,12 @@ hive_full_configuration() {
       line OATHWEAVE_JWKS_URL "$origin/api/oathweave/oauth/jwks"
       line OATHWEAVE_USERINFO_URL "$origin/api/oathweave/oauth/userinfo"
       line MAGNUS_OATHWEAVE_IDENTITIES_JSON "'$magnus_identities'"
+      if selected embermend; then
+        printf '# Embermend requires the external Magnus 2.5+ bridge. Merge this named grant with existing\n'
+        printf '# MAGNUS_EMBERMEND_GRANTS_JSON entries; never replace unrelated grants. Target and application\n'
+        printf '# access remain empty until reviewed setup; this fragment grants no fleet action.\n'
+        line MAGNUS_EMBERMEND_GRANTS_JSON "'$(jq -nc --arg name "embermend-$installation" --arg token "$(printf '%s' "$(secret embermend-magnus)" | sha256sum | cut -d ' ' -f1)" --arg installation "$installation" '{($name):{tokenSha256:$token,installationId:$installation,productInstallationId:$installation,applicationIds:[],targets:{}}}')'"
+      fi
     } > "$pending"
     chmod 600 "$pending"
     if [[ -e "$external_file" || -L "$external_file" ]]; then
