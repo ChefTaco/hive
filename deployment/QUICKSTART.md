@@ -174,6 +174,12 @@ following steps 5–10. Keep that directory: certificate renewal timers refer to
 `status` lists each container with its state and health, and `doctor` ends with
 `Hive Registry: in sync with this installation`.
 
+`--config` is optional for every command except `install`, `init` and `plan`, which set up or
+preview an installation. When `~/.config/hive` holds
+a single installation, the controller uses it and says so (`Hive: using ...`). With several
+installations it asks which one in a terminal, and refuses unattended. `HIVE_INSTALLATION=FILE`
+chooses one without passing `--config` each time.
+
 ## 6. Sign in
 
 The initial operator's password is generated once, into a file only you can read:
@@ -239,15 +245,29 @@ named in the installation file. Pass the new exact version to later commands to 
 product pins, for example `./hive.sh doctor --config FILE --release 3.1.2`. Certificate renewal
 uses a unique matching release tag in this case, so its receipt follows that checkout.
 
-If this host has a fully enrolled Magnus agent, update it through the installer as well. Its
-enrollment command retains full node capabilities, profiles and completed history while selecting
-the new signed agent package:
+Then finish the upgrade from the new checkout:
 
 ```bash
-./hive.sh magnus-agent enroll --config ~/.config/hive/hive/installation.json --release 3.1.2 --yes
+./hive.sh post-upgrade --config ~/.config/hive/hive/installation.json --release 3.1.2
 ```
 
-Review the displayed enrollment evidence before accepting it; omit `--yes` to approve interactively.
+`post-upgrade` does the follow-up steps in one command:
+
+- When the Magnus agent on the Magnus host runs an older version than the release pins, it upgrades
+  that agent. A fully enrolled installer node goes through `magnus-agent enroll`, which keeps full
+  node capabilities, profiles and completed history. Other Magnus hosts go through
+  `magnus-agent install`.
+- It adds any HiveXUI browser clients that are missing from Oathweave (`console-clients add`).
+- It lists what is left for you: updating Ardent packages in HiveXUI, agents on other fleet hosts,
+  and certificate renewal when nothing renews the certificate.
+
+Each change shows its evidence and asks before it is applied; `--yes` accepts them unattended.
+The individual commands remain available, for example:
+
+```bash
+./hive.sh magnus-agent enroll --config ~/.config/hive/hive/installation.json --release 3.1.2
+```
+
 For a deliberately limited node, use `magnus-agent install` to update its package without full
 enrollment. See [Magnus host agents](FULL.md#magnus-host-agents) for enrollment review and other hosts.
 

@@ -185,3 +185,28 @@ external_config '{"magnus":{"url":"https://magnus.example.com:4000"}}'
 (HIVE_CONFIG=$temporary/external.json; hive_validate; hive_manifest) > "$temporary/result" 2>&1 && fail 'An external Magnus was accepted by a release without Magnus'
 grep -q 'needs a release that offers Magnus' "$temporary/result" || fail 'A release without Magnus lacks a clear refusal'
 printf 'Passed: planning, unattended guards, input injection, signature tampering, pinned rendering, privileged-mount rejection and digest-bound relaxed authentication limits and checkout release lookup.\n'
+
+# Commands other than install, init and plan find the installation file themselves.
+discover() { env -u HIVE_INSTALLATION XDG_CONFIG_HOME="$temporary/xdg" "$@"; }
+mkdir -p "$temporary/xdg"
+if discover "$ROOT/hive.sh" status --non-interactive > "$temporary/result" 2>&1; then fail 'status ran without any installation file'; fi
+grep -q 'No installation configuration under' "$temporary/result" || fail 'A missing installation file was not explained'
+install -d -m 700 "$temporary/xdg/hive/first"
+cp "$temporary/installation.json" "$temporary/xdg/hive/first/installation.json"
+# An unknown registry subcommand stops after the installation file was chosen, before any host is contacted.
+discover "$ROOT/hive.sh" registry not-a-subcommand --non-interactive > /dev/null 2> "$temporary/result" || true
+grep -q "using $temporary/xdg/hive/first/installation.json" "$temporary/result" || { cat "$temporary/result" >&2; fail 'The only installation file was not found and reported'; }
+for command in install init plan; do
+  if discover "$ROOT/hive.sh" "$command" --non-interactive > "$temporary/result" 2>&1; then fail "$command used a discovered installation file"; fi
+  grep -q -- '--config is required' "$temporary/result" || fail "$command without --config did not require it"
+done
+install -d -m 700 "$temporary/xdg/hive/second"
+cp "$temporary/installation.json" "$temporary/xdg/hive/second/installation.json"
+if discover "$ROOT/hive.sh" status --non-interactive > "$temporary/result" 2>&1; then fail 'status chose between several installations by itself'; fi
+grep -q 'Several installations' "$temporary/result" || fail 'Several installation files were not listed'
+HIVE_INSTALLATION=$temporary/xdg/hive/second/installation.json XDG_CONFIG_HOME=$temporary/xdg "$ROOT/hive.sh" registry not-a-subcommand --non-interactive > /dev/null 2> "$temporary/result" || true
+grep -q "using $temporary/xdg/hive/second/installation.json" "$temporary/result" || fail 'HIVE_INSTALLATION did not select an installation'
+if HIVE_INSTALLATION=$temporary/missing.json "$ROOT/hive.sh" status --non-interactive > "$temporary/result" 2>&1; then fail 'A missing HIVE_INSTALLATION file was accepted'; fi
+grep -q 'not a regular file' "$temporary/result" || fail 'A missing HIVE_INSTALLATION file was not explained' 
+"$ROOT/hive.sh" --help | grep -q 'agents-accept|skills-prepare' || fail 'Usage omits agents-accept'
+"$ROOT/hive.sh" --help | grep -q 'post-upgrade \[--yes\]' || fail 'Usage omits post-upgrade'
