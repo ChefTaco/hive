@@ -19,6 +19,8 @@ images=(
   'magnus-server|Magnus|services/control-api/Dockerfile|'
   'magnus-agent|Magnus|packages/agent/Dockerfile|'
   'magnus-gateway|Magnus|services/fleet-gateway/Dockerfile|'
+  'embermend|Embermend|Dockerfile|runtime'
+  'embermend-scanner|Embermend|Dockerfile|'
   'hive-ingress|Hive/deployment|ingress.Dockerfile|'
   'hive-registry|Hive/services/hive-registry|Dockerfile|'
 )
