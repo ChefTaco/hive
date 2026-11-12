@@ -4,8 +4,9 @@ import { readFileSync } from 'node:fs';
 
 export const suiteCatalog = JSON.parse(readFileSync(new URL('./suite-catalog.json', import.meta.url), 'utf8'));
 
-// Optional product capabilities, such as {"events.v1": {"path": "/api/v1/hive/events", "since": "2.8.0"}}.
-// `path` is relative to the product's browserPrefix. A capability reaches a manifest only when the
+// Optional product capabilities, such as {"events.v1": {"path": "/hive/events", "since": "2.8.0"}}.
+// `path` is relative to the product's browserPrefix as the browser sees it, before the ingress maps
+// the prefix to the product's native path (see suite-catalog.test.mjs). A capability reaches a manifest only when the
 // pinned product version is at least `since`; `"since": null` declares the path for a product
 // version that is not released yet, and is never emitted. Manifests carry only `path`.
 const capabilityName = /^[a-z0-9.-]{1,64}$/;

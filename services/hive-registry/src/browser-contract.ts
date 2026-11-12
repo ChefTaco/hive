@@ -43,7 +43,8 @@ export type RegistryInstallation = z.infer<typeof registryInstallationSchema>;
 
 /**
  * A product's optional capabilities. Each `path` is relative to the product's `browserPrefix`
- * (GET /v1/products/{id}/connection): the browser fetches `browserPrefix + path`. A product
+ * (GET /v1/products/{id}/connection) as the browser sees it: the browser fetches
+ * `browserPrefix + path`, and the ingress maps that to the product's own route. A product
  * without any capability omits the field.
  *
  * `events.v1`: the product serves a HiveEvent v1 feed, `GET browserPrefix + path?after=&limit=`.

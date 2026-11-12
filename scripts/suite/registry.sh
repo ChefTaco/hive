@@ -66,7 +66,7 @@ hive_registry_release() {
     def nullable_url: .==null or url;
     def local_path: .==null or (type=="string" and test("^/[A-Za-z0-9._~/-]*$"));
     def map_of(check): type=="object" and all(to_entries[]; (.key|test("^[a-z][a-z0-9-]{0,47}$")) and (.value|check));
-    # Optional, version-gated in the suite catalog: {"events.v1":{"path":"/api/v1/hive/events"}}, relative to browserPrefix.
+    # Optional, version-gated in the suite catalog: {"events.v1":{"path":"/hive/events"}}, relative to browserPrefix.
     def capabilities: type=="object" and length>0 and length<=32 and all(to_entries[]; (.key|test("^[a-z0-9.-]{1,64}$")) and
       (.value|type=="object" and (keys==["path"]) and (.path|type=="string" and length<=256 and test("^/[A-Za-z0-9._~/-]*$") and (split("/")|index("..")|not))));
     all(.components|to_entries[]; .value.catalog as $meta |

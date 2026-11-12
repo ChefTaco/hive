@@ -69,12 +69,22 @@ A product, and its connection, may carry an optional `capabilities` object that 
 the installed product version serves to the browser. A product that offers none omits the field.
 
 ```json
-{ "id": "magnus", "consolePath": "/fleet", "browserPrefix": "/api/magnus", "nativeApis": {}, "documentation": "https://github.com/ChefTaco/magnus/blob/HEAD/README.md", "capabilities": { "events.v1": { "path": "/api/v1/hive/events" } } }
+{ "id": "magnus", "consolePath": "/fleet", "browserPrefix": "/api/magnus", "nativeApis": {}, "documentation": "https://github.com/ChefTaco/magnus/blob/HEAD/README.md", "capabilities": { "events.v1": { "path": "/hive/events" } } }
 ```
 
-- Each `path` is relative to the product's `browserPrefix`: a browser fetches
-  `browserPrefix + path`, here `/api/magnus/api/v1/hive/events`. A capability needs a
-  `browserPrefix`.
+- `path` is relative to `browserPrefix` as the browser sees it, after the ingress mapping. It is
+  not the product's native path. The browser fetches `browserPrefix + path`, here
+  `/api/magnus/hive/events`, and the ingress maps that to the product's own route, here Magnus's
+  `/api/v1/hive/events`. Each product's ingress mapping differs:
+
+  | Product | `browserPrefix` | `events.v1` path | Browser URL | Ingress mapping | Native route |
+  | --- | --- | --- | --- | --- | --- |
+  | Magnus | `/api/magnus` | `/hive/events` | `/api/magnus/hive/events` | prefix replaced by `/api/v1` | `/api/v1/hive/events` |
+  | Cindertrace | `/api/cindertrace` | `/hive/events` | `/api/cindertrace/hive/events` | prefix replaced by `/api/v1` | `/api/v1/hive/events` |
+  | HiveSkills | `/api/hiveskills` | `/v1/hive/events` | `/api/hiveskills/v1/hive/events` | prefix stripped | `/v1/hive/events` |
+  | Embermend | `/api/embermend` | `/api/v1/hive/events` | `/api/embermend/api/v1/hive/events` | prefix stripped | `/api/v1/hive/events` |
+
+- A capability needs a `browserPrefix`.
 - Names match `[a-z0-9.-]{1,64}`, with at most 32 per product. Each value holds only `path`.
   Readers ignore names they do not know.
 - `events.v1` is the only capability so far: the product serves a HiveEvent v1 feed,
@@ -82,8 +92,10 @@ the installed product version serves to the browser. A product that offers none 
 
 The suite catalog (`scripts/suite/suite-catalog.json`) declares a capability per product with the
 first product version that serves it, as `{"path": "...", "since": "X.Y.Z"}`; `"since": null`
-declares a path whose product version is not released yet. A release manifest carries
-`catalog.capabilities` (paths only) only for a component pinned at `since` or newer, and `hive.sh`
+declares a path whose product version is not released yet. `scripts/suite/suite-catalog.test.mjs`
+checks every declared path against the ingress mappings in `deployment/Caddyfile`. A release
+manifest carries `catalog.capabilities` (paths only) only for a component pinned at `since` or
+newer, and `hive.sh`
 records it with that product's connection, including an [external Magnus](../deployment/FULL.md#external-magnus).
 An externally managed product may declare its own in `connection.capabilities`, beside its
 `browserPrefix`.

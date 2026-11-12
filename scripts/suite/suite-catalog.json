@@ -210,7 +210,7 @@
     },
     "capabilities": {
       "events.v1": {
-        "path": "/api/v1/hive/events",
+        "path": "/hive/events",
         "since": null
       }
     }
@@ -296,7 +296,7 @@
     },
     "capabilities": {
       "events.v1": {
-        "path": "/api/v1/hive/events",
+        "path": "/hive/events",
         "since": null
       }
     }
@@ -440,6 +440,12 @@
       "nativeApis": {},
       "internalEndpoints": {
         "api": "http://embermend:4180"
+      }
+    },
+    "capabilities": {
+      "events.v1": {
+        "path": "/api/v1/hive/events",
+        "since": null
       }
     }
   },

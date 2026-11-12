@@ -31,8 +31,9 @@ const links = z.strictObject({
   licenseSpdx: z.string().regex(/^[A-Za-z0-9.+-]{1,64}$/).nullable().default(null),
 });
 
-// Optional product capabilities, such as {"events.v1": {"path": "/api/v1/hive/events"}}. Each path is
-// relative to the connection's browserPrefix. Readers ignore names they do not know.
+// Optional product capabilities, such as {"events.v1": {"path": "/hive/events"}}. Each path is
+// relative to the connection's browserPrefix as the browser sees it, before the ingress mapping.
+// Readers ignore names they do not know.
 export const capabilityName = z.string().regex(/^[a-z0-9.-]{1,64}$/);
 export const capabilities = z.record(capabilityName, z.strictObject({ path: localPath }))
   .refine((value) => Object.keys(value).length <= 32, 'At most 32 capabilities');

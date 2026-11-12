@@ -297,7 +297,7 @@ describe('Hive Registry API', () => {
   });
 
   describe('capabilities', () => {
-    const events = { 'events.v1': { path: '/api/v1/hive/events' } };
+    const events = { 'events.v1': { path: '/hive/events' } };
     const offering = (capabilities: unknown = events, phase: 'begin' | 'complete' = 'complete') => {
       const body = syncBody(phase, phase === 'begin' ? 'activating' : 'installed') as any;
       body.installed.find((item: any) => item.id === 'emberpath').connection.capabilities = capabilities;
@@ -364,7 +364,7 @@ describe('Hive Registry API', () => {
       assert.equal(list.products.find((item) => item.id === 'hive-registry')?.capabilities, undefined);
       assert.deepEqual(registryProductSchema.parse((await call('GET', '/v1/products/emberpath')).body).capabilities, events);
       const connection = registryConnectionSchema.parse((await call('GET', '/v1/products/emberpath/connection')).body);
-      assert.equal(connection.browserPrefix + connection.capabilities!['events.v1']!.path, '/api/emberpath/api/v1/hive/events');
+      assert.equal(connection.browserPrefix + connection.capabilities!['events.v1']!.path, '/api/emberpath/hive/events');
     });
   });
 

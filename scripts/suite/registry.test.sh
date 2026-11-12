@@ -98,10 +98,10 @@ HIVE_MANIFEST=$temporary/capabilities-release.json hive_registry_body complete i
   (.installed|map(select(.id=="emberpath"))[0].connection.capabilities=={"events.v1":{path:"/v1/hive/events"},"future-thing.v2":{path:"/v2/x"}}) and
   ([.installed[]|select(.id!="emberpath")|.connection|has("capabilities")]|all|not) and ([.catalog[]|has("capabilities")]|any|not)' >/dev/null || fail 'Capabilities are not recorded with the connection'
 jq -e '[.installed[].connection|has("capabilities")]|any|not' "$temporary/body.json" >/dev/null || fail 'A release without capabilities recorded some'
-jq '.components.magnus=(.components.emberpath|.catalog.connection.browserPrefix="/api/magnus"|.catalog.capabilities={"events.v1":{path:"/api/v1/hive/events"}})' "$temporary/release.json" > "$temporary/magnus-release.json"
+jq '.components.magnus=(.components.emberpath|.catalog.connection.browserPrefix="/api/magnus"|.catalog.capabilities={"events.v1":{path:"/hive/events"}})' "$temporary/release.json" > "$temporary/magnus-release.json"
 jq '.external={magnus:{url:"https://magnus.example.com:4000"}}' "$temporary/config.json" > "$temporary/external-capabilities.json"
 HIVE_CONFIG=$temporary/external-capabilities.json HIVE_MANIFEST=$temporary/magnus-release.json hive_registry_body complete installed | jq -e '
-  .installed|map(select(.id=="magnus"))[0]|.status=="external" and .connection.capabilities=={"events.v1":{path:"/api/v1/hive/events"}} and .connection.internalEndpoints=={api:"https://magnus.example.com:4000"}' >/dev/null || fail 'An external product lost its capabilities'
+  .installed|map(select(.id=="magnus"))[0]|.status=="external" and .connection.capabilities=={"events.v1":{path:"/hive/events"}} and .connection.internalEndpoints=={api:"https://magnus.example.com:4000"}' >/dev/null || fail 'An external product lost its capabilities'
 
 # Credentials are generated once, protected, and stable across retries.
 provision() { HIVE_OPERATION=$1 hive_registry_provision; }
