@@ -6,7 +6,11 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.2.0] - 2026-11-12
+
 ### Added
+
+- Publish the signed Embermend-compatible suite: Magnus 2.5.0, Oathweave 2.2.0, HiveXUI 0.3.0, optional Embermend 0.1.0 and the exact published native agent integrity. Existing profiles keep Embermend disabled until selected.
 
 - Capture API and worker services sharing a datastore in one online-backup pause group, including transitive shared dependencies; retain each store exactly once.
 
