@@ -90,3 +90,17 @@ openssl pkey -pubin -in trust/publisher.pub -outform DER | sha256sum
 
 A rotated key is published as a new `trust/publisher.pub` in a new release. Older manifests remain
 verifiable with the key in their own tag.
+
+## First Embermend datastore registration recovery
+
+Suite 3.2.0 can initialize a newly selected Embermend PostgreSQL store before
+recording its storage format. Later configuration changes correctly refuse that
+unversioned data. Suite 3.2.1 explicitly selects
+`storageRecovery: "embermend-postgres-runtime2-unversioned"` in its signed inputs.
+The ordinary backed-up, rehearsed upgrade with `--allow-migrations` verifies the
+existing PostgreSQL 18 major, exact runtime collation receipt and offline data
+checksums before recording its format. It never creates a database, changes
+credentials or marks arbitrary existing data as new. Failed verifiers retain the
+held upgrade for reviewed recovery. Existing correctly registered stores need no
+storage transition. New additions record their proven format before initialization.
+Historical signed release bytes remain unchanged.

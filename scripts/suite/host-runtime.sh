@@ -389,7 +389,13 @@ case "$action" in
     while IFS= read -r component; do
       format=$(jq -r --arg component "$component" '.components[$component].storageFormat // "unversioned"' "$manifest")
       current=$(jq -r --arg component "$component" '.[$component] // "unversioned"' "$directory/data-formats.json" 2>/dev/null || printf 'unversioned\n')
-      if [[ "$current" != "$format" ]] && ! registry_is_new "$component" "$current" && ! component_is_new "$component" "$current"; then
+      # Record a proven empty addition before schema initialization starts its datastore.
+      # Once initialization writes data it is no longer "new" at activation time.
+      if component_is_new "$component" "$current"; then
+        jq -n --arg name "$component" --arg format "$format" --slurpfile previous "$directory/data-formats.json" '$previous[0]+{($name):$format}' | atomic_json "$directory/data-formats.json"
+        continue
+      fi
+      if [[ "$current" != "$format" ]] && ! registry_is_new "$component" "$current"; then
         jq -e --arg name "$component" --arg from "$current" '.components[$name].migration | .from==$from and (.command|type=="array" and length>0 and all(.[];type=="string"))' "$manifest" >/dev/null || die 'An explicit migration is required'
         [[ $(jq -r .allowMigrations <<< "$input") == true ]] || die 'Migration execution requires --allow-migrations'
         record migration-started

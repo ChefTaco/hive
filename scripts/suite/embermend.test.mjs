@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addFullComponents, applyDatastoreProfile, coreRelease, CORE_PRODUCTS, FULL_PRODUCTS } from './release-contracts.mjs';
+import { addFullComponents, applyDatastoreProfile, applyStorageRecovery, coreRelease, CORE_PRODUCTS, FULL_PRODUCTS } from './release-contracts.mjs';
 import { applySuiteCatalog } from './suite-catalog.mjs';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -50,4 +50,24 @@ test('candidate builds select the shared runtime and isolated scanner from a cle
     assert(!builds[1]?.includes('--target runtime'));
     assert(builds.every(call => call.endsWith(join(root, 'Embermend')) && call.includes('org.opencontainers.image.revision=' + 'a'.repeat(40))));
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('unversioned Embermend recovery is explicit, checks the exact existing runtime and leaves other stores unchanged', () => {
+  const manifest = release(true);
+  applyDatastoreProfile(manifest, 'runtime-2026-11', Object.fromEntries(['redis', 'qdrant', 'postgres17', 'postgres18'].map(name => ['datastore:' + name, image(name)])));
+  const original = structuredClone(manifest);
+  applyStorageRecovery(manifest, undefined);
+  assert.deepEqual(manifest, original);
+  assert.throws(() => applyStorageRecovery(manifest, 'unreviewed'));
+  assert.throws(() => applyStorageRecovery(release(false), 'embermend-postgres-runtime2-unversioned'));
+  assert.throws(() => applyStorageRecovery(release(true), 'embermend-postgres-runtime2-unversioned'));
+  applyStorageRecovery(manifest, 'embermend-postgres-runtime2-unversioned');
+  const recovery = manifest.components['embermend-postgres'].migration;
+  assert.equal(recovery.from, 'unversioned');
+  assert.deepEqual(recovery.command.slice(0, 2), ['bash', '-euc']);
+  assert.match(recovery.command[2], /PG_VERSION.*== 18/);
+  assert.match(recovery.command[2], /hive-runtime-collation/);
+  assert.match(recovery.command[2], /exec pg_checksums --check/);
+  manifest.components['embermend-postgres'].migration = original.components['embermend-postgres'].migration;
+  assert.deepEqual(manifest, original);
 });

@@ -69,6 +69,22 @@ export function applyDatastoreProfile(manifest, profile, pinned) {
   }
 }
 
+// Explicit recovery for the first compatible Embermend release's omitted datastore
+// registration. This is a read-only verifier of an already initialized, checksum-enabled
+// PostgreSQL 18 store with this exact runtime's collation receipt. It cannot initialize,
+// migrate an unknown major/runtime, or admit a directory just because it contains data.
+export function applyStorageRecovery(manifest, recovery) {
+  if (recovery === undefined) return;
+  const target = manifest.components['embermend-postgres'];
+  if (recovery !== 'embermend-postgres-runtime2-unversioned' || !target
+      || target.storageFormat !== 'embermend-postgres-18-runtime2') {
+    throw new Error('Unknown or inapplicable reviewed storage recovery');
+  }
+  target.migration = { from: 'unversioned', command: ['bash', '-euc',
+    '[[ $(id -u) != 0 && "$PGDATA" == /data/pgdata && ! -L "$PGDATA" && ! -L "$PGDATA/PG_VERSION" && $(cat "$PGDATA/PG_VERSION") == 18 && ! -L "$PGDATA/.hive-runtime-collation" && $(cat "$PGDATA/.hive-runtime-collation") == "$(cat /usr/share/hive/postgres-runtime-id)" ]]; exec pg_checksums --check -D "$PGDATA"',
+  ] };
+}
+
 // Product images each profile needs. chat-migrator is ChatterMost's initialization image.
 export const CORE_PRODUCTS = Object.freeze(['hive-registry', 'oathweave', 'emberpath', 'hivemem', 'hiveskills', 'hivexui', 'ingress']);
 export const FULL_PRODUCTS = Object.freeze(['magnus', 'cindertrace', 'chattermost', 'chat-migrator', 'emberfold', 'magnus-gateway']);

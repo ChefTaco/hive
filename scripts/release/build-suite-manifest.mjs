@@ -19,7 +19,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { addFullComponents, coreRelease, CORE_PRODUCTS, DATASTORE_IMAGES, DATASTORE_VERSIONS, FULL_PRODUCTS, OPTIONAL_PRODUCTS, datastoreProfileReferences, datastoreProfileComponent, applyDatastoreProfile } from '../suite/release-contracts.mjs';
+import { addFullComponents, coreRelease, CORE_PRODUCTS, DATASTORE_IMAGES, DATASTORE_VERSIONS, FULL_PRODUCTS, OPTIONAL_PRODUCTS, datastoreProfileReferences, datastoreProfileComponent, applyDatastoreProfile, applyStorageRecovery } from '../suite/release-contracts.mjs';
 import { applySuiteCatalog } from '../suite/suite-catalog.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -103,6 +103,7 @@ assert.match(controllerSHA256, /^[a-f0-9]{64}$/);
 const manifest = coreRelease({ version, images: pinned, user: inputs.user, registryVersion: products['hive-registry'].version });
 addFullComponents(manifest, { images: pinned, user: inputs.user });
 applyDatastoreProfile(manifest, inputs.datastoreProfile, pinned);
+applyStorageRecovery(manifest, inputs.storageRecovery);
 manifest.controllerSHA256 = controllerSHA256;
 // Each component records the version of what it runs; applySuiteCatalog falls back to the suite version.
 for (const [name, product] of Object.entries(products)) if (product.version && manifest.components[name]) manifest.components[name].version = product.version;
