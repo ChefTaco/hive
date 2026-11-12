@@ -6,15 +6,22 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Added
+
+- Add optional Embermend catalog, ingress, identity initialization and shared API/worker contracts for a compatible Magnus release. Existing profiles and mutation authority remain unchanged; combined acceptance is required before production adoption.
+
+## [3.1.2] - 2026-11-11
+
 ### Security
 
 - Build the shared Node runtime from digest-pinned Node.js 26.13.1 on the hardened glibc base. Verify the exact runtime version, embedded SQLite, non-root startup and real TLS/HTTP2 exchanges on both architectures before publication.
 - Require Node.js 24.22.3 or 26.13.1 across supported native installations, build tooling and recovery helpers. Reject earlier vulnerable patch versions during enrollment and diagnosis. Native source deployments check install-shell and service runtimes before remote writes or credential refresh.
 - Upgrade legacy Router, IAM and Skills Hono dependencies to 4.13.18 to bound memory for request bodies delivered in tiny chunks.
 
-### Added
+### Changed
 
-- Add optional Embermend catalog, ingress, identity initialization and shared API/worker contracts for a compatible Magnus release. Existing profiles and mutation authority remain unchanged; combined acceptance is required before production adoption.
+- Pin the patched product images: Emberpath 2.0.5, Oathweave 2.1.2, HiveMem 1.4.2, HiveSkills 1.3.4, HiveXUI 0.2.8, Magnus 2.4.3, Cindertrace 0.2.3, ChatterMost 0.4.5, Emberfold 0.2.3 and Ardent Project Studio 0.2.1. Include the exact published Magnus agent 2.4.3 package integrity and Hive Registry image 2.0.5.
+- Retain existing datastore formats, authentication requirements, installation-specific extension packages and protected profile configuration. Upgrades take host-bound backups and rehearse the candidate before activation.
 
 ## [3.1.1] - 2026-11-11
 
