@@ -16,6 +16,8 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     ignore:
+      # The reviewed compiler is pinned exactly; change it through an explicit compatibility review.
+      - dependency-name: "typescript"
       # @types/node tracks the Node.js runtime major (see .nvmrc); bump it with the runtime.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
