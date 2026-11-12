@@ -3,9 +3,14 @@ title = "Repository secret scanning"
 [extend]
 useDefault = true
 
+# Global allowlists that list paths must also set targetRules. Without it, a matching path
+# skips the whole file regardless of `condition`, which would hide any other secret in it.
+# With targetRules, only the exact reviewed value in that file is excused.
+
 [[allowlists]]
 description = "RFC 6455 sample WebSocket nonce, not a credential."
 condition = "AND"
+targetRules = ["generic-api-key"]
 regexTarget = "secret"
 paths = ['''^scripts/suite/ingress\-roundtrip\.mjs$''']
 regexes = ['''^dGhlIHNhbXBsZSBub25jZQ==$''']
@@ -13,6 +18,7 @@ regexes = ['''^dGhlIHNhbXBsZSBub25jZQ==$''']
 [[allowlists]]
 description = "Documentation placeholder or public environment setting, not a credential."
 condition = "AND"
+targetRules = ["generic-api-key"]
 regexTarget = "secret"
 paths = ['''^services/hive\-mem/CONTRIBUTING\.md$''']
 regexes = ['''^HIVEMEM_TS_PERSISTENCE=qdrant$''']
@@ -20,6 +26,7 @@ regexes = ['''^HIVEMEM_TS_PERSISTENCE=qdrant$''']
 [[allowlists]]
 description = "Documentation placeholder or public environment setting, not a credential."
 condition = "AND"
+targetRules = ["generic-api-key"]
 regexTarget = "secret"
 paths = ['''^services/hive\-mem/README\.md$''']
 regexes = ['''^HIVEMEM_TS_PERSISTENCE=qdrant$''']
@@ -27,6 +34,7 @@ regexes = ['''^HIVEMEM_TS_PERSISTENCE=qdrant$''']
 [[allowlists]]
 description = "Reviewed synthetic test value; exact value and file only."
 condition = "AND"
+targetRules = ["generic-api-key"]
 regexTarget = "secret"
 paths = ['''^services/hive\-mem/ts\-core/tests/auth\-hardening\.test\.ts$''']
 regexes = ['''^dummy\-signing\-secret\-at\-least\-32\-bytes$''']
@@ -34,6 +42,7 @@ regexes = ['''^dummy\-signing\-secret\-at\-least\-32\-bytes$''']
 [[allowlists]]
 description = "Reviewed synthetic test value; exact value and file only."
 condition = "AND"
+targetRules = ["generic-api-key"]
 regexTarget = "secret"
 paths = ['''^services/hive\-mem/ts\-core/tests/error\-privacy\.test\.ts$''']
 regexes = ['''^synthetic\-test\-signing\-key\-at\-least\-32\-bytes$''']
@@ -41,6 +50,7 @@ regexes = ['''^synthetic\-test\-signing\-key\-at\-least\-32\-bytes$''']
 [[allowlists]]
 description = "Reviewed synthetic test value; exact value and file only."
 condition = "AND"
+targetRules = ["jwt"]
 regexTarget = "secret"
 paths = ['''^services/hive\-registry/src/app\.test\.ts$''']
 regexes = ['''^eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJmYWtlIn0\.c2lnbmF0dXJlLWZha2U$''']
@@ -48,6 +58,7 @@ regexes = ['''^eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJmYWtlIn0\.c2lnbmF0dXJlLWZha2U$''
 [[allowlists]]
 description = "Documentation placeholder or public environment setting, not a credential."
 condition = "AND"
+targetRules = ["generic-api-key"]
 regexTarget = "secret"
 paths = ['''^services/hive\-router/\.env\.example$''']
 regexes = ['''^replace\-with\-a\-long\-secret\-at\-least\-32\-characters$''']
@@ -55,6 +66,7 @@ regexes = ['''^replace\-with\-a\-long\-secret\-at\-least\-32\-characters$''']
 [[allowlists]]
 description = "Reviewed synthetic test value; exact value and file only."
 condition = "AND"
+targetRules = ["generic-api-key"]
 regexTarget = "secret"
 paths = ['''^services/hive\-router/tests/config/cli\.test\.ts$''']
 regexes = ['''^test\-secret\-0123456789abcdef0123456789$''']
@@ -62,6 +74,7 @@ regexes = ['''^test\-secret\-0123456789abcdef0123456789$''']
 [[allowlists]]
 description = "Reviewed synthetic test value; exact value and file only."
 condition = "AND"
+targetRules = ["generic-api-key"]
 regexTarget = "secret"
 paths = ['''^services/hive\-router/tests/config/env\-defaults\.test\.ts$''']
 regexes = ['''^test\-secret\-0123456789abcdef0123456789$''']
