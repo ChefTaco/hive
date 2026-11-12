@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, beforeEach, describe, it } from 'node:test';
 import { createApp } from './app.js';
+import { registryConnectionSchema, registryHealthSchema, registryInstallationSchema, registryProductListSchema, registryProductSchema } from './browser-contract.js';
 import { loadConfig } from './config.js';
 import { checksum, migrate, migrations, PendingMigrations } from './migrations.js';
 import { findSecret } from './secrets.js';
@@ -292,6 +293,78 @@ describe('Hive Registry API', () => {
       assert.throws(() => db.exec('UPDATE history SET actor = 1'), /append-only/);
       assert.throws(() => db.exec('DELETE FROM history'), /append-only/);
       db.close();
+    });
+  });
+
+  describe('capabilities', () => {
+    const events = { 'events.v1': { path: '/api/v1/hive/events' } };
+    const offering = (capabilities: unknown = events, phase: 'begin' | 'complete' = 'complete') => {
+      const body = syncBody(phase, phase === 'begin' ? 'activating' : 'installed') as any;
+      body.installed.find((item: any) => item.id === 'emberpath').connection.capabilities = capabilities;
+      return body;
+    };
+    const connectionJson = (data: string, id: string): string => {
+      const db = new DatabaseSync(join(data, 'registry.sqlite'));
+      try { return (db.prepare('SELECT connection_json FROM installed_products WHERE product_id = ?').get(id) as { connection_json: string }).connection_json; } finally { db.close(); }
+    };
+
+    it('publishes a product capability with its product and connection, and omits it elsewhere', async () => {
+      assert.equal((await sync(offering())).status, 200);
+      assert.deepEqual((await call('GET', '/v1/products/emberpath')).body.capabilities, events);
+      assert.deepEqual((await call('GET', '/v1/products/emberpath/connection')).body.capabilities, events);
+      assert.deepEqual((await call('GET', '/v1/products/emberpath', { token: readToken })).body.capabilities, events);
+      assert.deepEqual((await call('GET', '/v1/products/emberpath/connection', { token: readToken })).body.capabilities, events);
+      const listed = (await call('GET', '/v1/products?installed=true')).body.products;
+      assert.deepEqual(listed.map((item: any) => [item.id, 'capabilities' in item]), [['emberpath', true], ['hive-registry', false]]);
+      assert.equal('capabilities' in (await call('GET', '/v1/products/hive-registry/connection')).body, false);
+      assert.equal((await sync(offering())).body.changes, 0, 'A retried sync with capabilities changed rows');
+    });
+    it('reads and keeps connections recorded without capabilities unchanged', async () => {
+      const data = await start();
+      await sync();
+      const before = connectionJson(data, 'emberpath');
+      assert.doesNotMatch(before, /capabilities/);
+      assert.equal('capabilities' in (await call('GET', '/v1/products/emberpath')).body, false);
+      assert.equal('capabilities' in (await call('GET', '/v1/products/emberpath/connection')).body, false);
+      assert.equal((await sync()).body.changes, 0);
+      // A product release that starts serving a feed is one recorded change; dropping it is another.
+      assert.equal((await sync(offering())).body.changes, 1);
+      assert.match(connectionJson(data, 'emberpath'), /"capabilities":\{"events\.v1"/);
+      assert.equal((await sync()).body.changes, 1);
+      await stop();
+      assert.equal(connectionJson(data, 'emberpath'), before);
+    });
+    it('refuses malformed capabilities', async () => {
+      const refusals: unknown[] = [
+        { 'Events.V1': { path: '/x' } }, { ['e'.repeat(65)]: { path: '/x' } }, { 'events.v1': { path: 'relative' } }, { 'events.v1': { path: '/a/../b' } },
+        { 'events.v1': { path: '/x', since: '1.0.0' } }, { 'events.v1': '/x' }, [], Object.fromEntries(Array.from({ length: 33 }, (_, index) => [`c${index}`, { path: '/x' }])),
+      ];
+      for (const capabilities of refusals) assert.equal((await sync(offering(capabilities))).status, 422, JSON.stringify(capabilities));
+      const unprefixed = offering() as any;
+      unprefixed.installed.find((item: any) => item.id === 'emberpath').connection.browserPrefix = null;
+      assert.equal((await sync(unprefixed)).status, 422, 'A capability without a browser prefix');
+      assert.equal((await call('GET', '/v1/history', { token: readToken })).body.entries.length, 0);
+    });
+    it('carries capabilities for external uses and externally managed products', async () => {
+      const body = offering() as any;
+      body.installed.push({ id: 'not-selected', status: 'external', connection: { consolePath: '/fleet', browserPrefix: '/api/magnus', nativeApis: {}, internalEndpoints: { api: 'https://magnus.example.com:4000' }, capabilities: events } });
+      assert.equal((await sync(body)).status, 200);
+      assert.deepEqual((await call('GET', '/v1/products/not-selected/connection')).body.capabilities, events);
+      const put = await call('PUT', '/v1/products/shared-api', { token: writeToken, body: { displayName: 'Shared', public: true, connection: { browserPrefix: '/api/shared', capabilities: { 'events.v1': { path: '/v1/hive/events' } } } } });
+      assert.equal(put.status, 200);
+      assert.deepEqual((await call('GET', '/v1/products/shared-api')).body.capabilities, { 'events.v1': { path: '/v1/hive/events' } });
+      assert.equal((await call('PUT', '/v1/products/other-api', { token: writeToken, body: { displayName: 'Other', connection: { capabilities: events } } })).status, 422);
+    });
+    it('answers in the shape the published browser contract describes', async () => {
+      await sync(offering({ ...events, 'future-thing.v2': { path: '/v2/x' } }));
+      assert.deepEqual(registryHealthSchema.parse((await call('GET', '/health/ready')).body), { status: 'ready', readOnly: false });
+      registryInstallationSchema.parse((await call('GET', '/v1/installation')).body);
+      const list = registryProductListSchema.parse((await call('GET', '/v1/products')).body);
+      assert.deepEqual(list.products.find((item) => item.id === 'emberpath')?.capabilities, events, 'Unknown capability names are dropped by readers');
+      assert.equal(list.products.find((item) => item.id === 'hive-registry')?.capabilities, undefined);
+      assert.deepEqual(registryProductSchema.parse((await call('GET', '/v1/products/emberpath')).body).capabilities, events);
+      const connection = registryConnectionSchema.parse((await call('GET', '/v1/products/emberpath/connection')).body);
+      assert.equal(connection.browserPrefix + connection.capabilities!['events.v1']!.path, '/api/emberpath/api/v1/hive/events');
     });
   });
 

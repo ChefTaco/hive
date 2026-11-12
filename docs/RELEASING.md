@@ -14,7 +14,9 @@ suite release publishes nothing to npm.
 | `trust/publisher.pub` | The publisher's public key |
 
 The service contracts come from `scripts/suite/release-contracts.mjs` and the catalog from
-`scripts/suite/suite-catalog.json`. The developer proofs build their manifests from the same code,
+`scripts/suite/suite-catalog.json`. A catalog entry's `capabilities` name the first product version
+that serves each one (`since`); a manifest carries a capability only for a component pinned at that
+version or newer, so set `since` when the product release that serves it is published. The developer proofs build their manifests from the same code,
 so a release ships the contracts they exercised. `controllerSHA256` is the digest of the controller
 runtime files (`hive_runtime_files` in `scripts/suite/controller.sh`); `hive.sh` refuses the manifest
 when run from any other controller source, so install from a checkout of the release tag.

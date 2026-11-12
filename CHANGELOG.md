@@ -6,6 +6,11 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Added
+
+- Product capabilities in the Hive Registry. A product and its connection may announce `capabilities`, such as `{"events.v1": {"path": "/api/v1/hive/events"}}`, a path relative to the product's browser prefix; products without any omit the field. The suite catalog declares each capability with the first product version that serves it, and a release manifest carries it only for a component pinned at that version or newer. Magnus, Cindertrace and HiveSkills declare their `events.v1` feed paths; no released version serves them yet, so no manifest carries them. `hive.sh` records capabilities with the product's connection, so the registry needs no migration and connections recorded earlier read back unchanged. External uses and externally managed products can carry them too. See the [Registry API](docs/hive-registry-api.md#capabilities).
+- The Hive Registry publishes its browser contract, `services/hive-registry/src/browser-contract.ts` (version 2), for HiveXUI to vendor in place of its hand-written pin.
+
 ## [3.4.0] - 2026-11-12
 
 ### Changed
