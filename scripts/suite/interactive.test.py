@@ -233,7 +233,7 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     print('Passed: interactive Ardent Project Studio, suggested by the full profile and left out when declined.')
 
     # Optional Embermend is offered by hive.sh only with a declared local bridge.
-    manifest['components']['magnus']['version'] = '2.4.2'
+    manifest['components']['magnus']['version'] = '2.5.0'
     manifest['components']['magnus']['embermendProtocol'] = 1
     for name in ['embermend', 'embermend-worker', 'embermend-postgres']:
         manifest['components'][name] = {'image': 'example.com/synthetic@sha256:' + '4' * 64,

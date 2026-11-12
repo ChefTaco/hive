@@ -8,6 +8,9 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Require Magnus 2.5.0 or newer with the explicit managed bridge declaration when selecting Embermend; published 2.4 releases do not supply those actions.
+- Build clean Embermend runtime and isolated scanner candidates alongside the other suite products; API and worker use the same runtime target.
+
 - `hive.sh post-upgrade` finishes an upgrade in one command. It upgrades an outdated Magnus agent on the Magnus host through the existing enrollment or install paths, adds missing HiveXUI browser clients to Oathweave, and lists the remaining manual steps. Every change is confirmed first.
 - Commands other than `install`, `init` and `plan` find the installation file themselves when there is exactly one under the configuration directory, or when `HIVE_INSTALLATION` names it. With several, they ask in a terminal and refuse unattended. `status`, `doctor` and the other lifecycle commands no longer start the setup questions when `--config` is missing.
 - Add optional Embermend catalog, ingress, identity initialization and shared API/worker contracts for a compatible Magnus release. Existing profiles and mutation authority remain unchanged; combined acceptance is required before production adoption.

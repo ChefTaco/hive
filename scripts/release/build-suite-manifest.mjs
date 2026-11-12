@@ -44,7 +44,7 @@ const references = { ...products, ...datastoreReferences };
 const repository = (reference) => reference.replace(/[:@].*$/, '');
 if (products.embermend) {
   const parts = (products.magnus.version ?? '').split('.').map(Number);
-  assert(parts.length === 3 && (parts[0] > 2 || parts[0] === 2 && parts[1] >= 4), 'Embermend requires the Magnus 2.4 managed remediation bridge or newer');
+  assert(parts.length === 3 && (parts[0] > 2 || parts[0] === 2 && parts[1] >= 5), 'Embermend requires the Magnus 2.5 managed remediation bridge or newer');
   assert.equal(products.magnus.embermendProtocol, 1, 'Embermend requires an explicitly reviewed Magnus embermendProtocol 1 release');
 }
 // The Magnus agent package hive.sh magnus-agent installs: Magnus's own version, with the npm
