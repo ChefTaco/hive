@@ -19,7 +19,7 @@ key `trust/publisher.pub`; the same three files are attached to its
 [GitHub release](https://github.com/ChefTaco/hive/releases). The manifest pins every product,
 datastore and initialization image by multi-architecture digest (linux/amd64 and linux/arm64),
 lists the `core` and `full` profiles, the mandatory Hive Registry and the optional
-`magnus-gateway`, and pins the controller source with `controllerSHA256`, so install it from a
+`magnus-gateway`, Ardent Project Studio and [Embermend](EMBERMEND.md), and pins the controller source with `controllerSHA256`, so install it from a
 checkout of the same tag. The launcher downloads that checkout for you:
 
 ```bash

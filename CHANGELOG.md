@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.2.2] - 2026-11-12
+
 ### Changed
 
 - Keep the reviewed Registry compiler pinned to TypeScript 6.0.3 with strict checks and explicit Node types; dependency automation leaves compiler selection to compatibility review.
@@ -19,6 +21,8 @@ All notable changes to this project are documented in this file. The format is b
 - Preserve existing Magnus enrollment scopes during post-upgrade agent updates, including unattended `--yes` runs. Package maintenance uses `magnus-agent install`; full-node enrollment remains a separate explicit action. Document scope-preserving maintenance for already published controllers.
 
 ## [3.2.1] - 2026-11-12
+
+Publication was blocked by the fresh image gate; the immutable tag and failed evidence are retained. The subsequent 3.2.2 release includes the fixes with patched PostgreSQL images.
 
 ### Fixed
 

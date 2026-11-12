@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "date": "2026-11-12",
+  "result": "passed",
+  "advisory": "CVE-2026-125350",
+  "vendorAdvisory": "https://images.chainguard.dev/security/CGA-xgrv-hr7h-93gv",
+  "fixedLibrary": "libxslt 1.1.45-r6",
+  "imageSourceRevision": "c17190fa8b3ccda91e75208059738a0cb900a5a1",
+  "nativeBuildAndAcceptanceWorkflow": "https://github.com/ChefTaco/hive/actions/runs/43197561374",
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "images": {
+    "17.11-4": "ghcr.io/cheftaco/hive-postgres@sha256:8775ff748a5a1eb0f371df58e8ff1b0326a539f10cebd2733644df3318c816e4",
+    "18.6-4": "ghcr.io/cheftaco/hive-postgres@sha256:e7cc832429b7b477009408bcaf88c9877f33ed953b01b1f3fb58b208a1068e60"
+  },
+  "nativeCases": [
+    "fresh non-root initialization",
+    "installed fixed library version",
+    "real xml2 XSLT transform",
+    "missing runtime receipt refusal",
+    "authentication failure leaves no server or receipt",
+    "failed reindex restores template admission and leaves no server or receipt",
+    "retained and new records",
+    "quoted database name",
+    "collation reconciliation and repeat",
+    "pg_trgm and XML",
+    "logical dump",
+    "physical restore"
+  ],
+  "fullHighCriticalPolicyIncludesUnfixed": true,
+  "newAdvisoryExceptionAdded": false,
+  "historicalTagsAndSignaturesUnchanged": true,
+  "postgresMajorsAndCollationIdentityUnchanged": true,
+  "explicitUnversionedStorageRecoveryRemainsSeparate": true,
+  "signedRelease": "3.2.2",
+  "signedManifestSHA256": "63be4c5b8ce5360651a6962b8291c4f47a45eca92474b77a72d3c35c5024fa30",
+  "fullPinnedReleaseImagePolicy": "passed with zero HIGH/CRITICAL on both platforms"
+}

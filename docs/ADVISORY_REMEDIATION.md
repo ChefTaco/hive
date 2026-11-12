@@ -223,3 +223,7 @@ XSLT transform as well as recovery, collation, checksum and backup checks.
 The PostgreSQL majors and collation-runtime identities remain unchanged.
 Existing signed release bytes are not rewritten. A subsequent signed suite
 selects the newly verified images after both architectures pass the full gate.
+
+The [native acceptance record](acceptance/2026-11-12-postgres-xslt.json) retains
+the four successful architecture/major checks, exact published image digests and
+the signed 3.2.2 full-policy result. The failed 3.2.1 tag remains unchanged.
