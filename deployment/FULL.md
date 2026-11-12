@@ -263,6 +263,16 @@ README and `docs/OATHWEAVE.md` list its variables.
 
 ## External Magnus
 
+Embermend can use this external control API when the signed suite offers the
+Magnus 2.5 managed bridge. Select its API, worker and PostgreSQL components with
+Oathweave, HiveXUI, ingress and Registry. Fresh initialization sets its verified
+Magnus endpoint and adds a named, hashed bridge grant to the protected
+`external-magnus.env` setup fragment. Merge that entry with existing Magnus
+grants. Its initial application and target scopes are empty; a missing bridge or
+unadmitted target remains an explicit Embermend readiness blocker. No second
+Magnus service, existing-grant replacement or production mutation policy is
+created by this selection.
+
 An external Magnus is a Magnus control API that runs outside this installation: on another host,
 managed and upgraded separately, with a publicly trusted certificate (for example from Let's
 Encrypt, or a Tailscale certificate). The console's Magnus pages (fleet, Ardent, New Agent) use it

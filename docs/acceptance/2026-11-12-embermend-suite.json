@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "release": "3.2.0",
+  "result": "passed",
+  "signedManifestSHA256": "273bed319f50a0c7c638872eb4a88445e4de33f33655b6fa0ae9aa745760a278",
+  "components": [
+    "hive-registry",
+    "oathweave",
+    "oathweave-redis",
+    "hivexui",
+    "ingress",
+    "magnus",
+    "magnus-postgres",
+    "magnus-redis",
+    "embermend",
+    "embermend-worker",
+    "embermend-postgres"
+  ],
+  "emptyScopeMagnusCompatible": true,
+  "noAssessmentTargetInvented": true,
+  "unauthenticatedDenied": true,
+  "scopedFixtureIngested": true,
+  "mutationPoliciesEnabled": 0,
+  "sharedApiWorkerSnapshotGroup": true,
+  "isolatedRehearsalPassed": true,
+  "sameHostRestorePassed": true,
+  "apiEntitiesEqual": true,
+  "existingInitializedMachineCredentialsPreserved": true,
+  "longestPauseSeconds": 0.771,
+  "date": "2026-11-12",
+  "scope": "Disposable signed-release installation, authenticated API fixture and same-host backup/restore; no production remediation authority.",
+  "imageSecurity": {
+    "policy": "all",
+    "architectures": [
+      "linux/amd64",
+      "linux/arm64"
+    ],
+    "highOrCritical": 0
+  },
+  "recoveryFailure": {
+    "cause": "Docker address pool exhaustion",
+    "retainedOriginalInstallation": true,
+    "retainedFailedAttemptEvidence": true,
+    "retryReusedOriginalArchive": true,
+    "stoppedPriorTestCopiesRetired": true,
+    "retainedTheirDataAndArchives": true
+  }
+}

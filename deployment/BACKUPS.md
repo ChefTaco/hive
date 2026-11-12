@@ -11,12 +11,14 @@ migration that follows needs the suite stopped anyway.
 
 ## What is captured, and how
 
-Services are captured in groups: one application together with the datastores it depends on.
+Services are captured in groups: applications together with the datastores they depend on.
+Applications sharing a datastore, including the Embermend API and worker, pause together;
+transitively shared dependencies form one group and each datastore is captured once.
 For each group, the controller:
 
 1. while it serves, snapshots every Qdrant collection of the group and records each collection's
    version, then copies the application's files and SQLite databases and records their versions;
-2. pauses the application (the cgroup freezer, `docker pause`), so nothing in the group changes;
+2. pauses every application in the group (the cgroup freezer, `docker pause`), so nothing in the group changes;
 3. proves each copy still current or brings it up to date, snapshots again only the collections
    written since, and has Redis fork its snapshot;
 4. resumes the application, and records how long it was paused, each step of the pause, and the
@@ -143,15 +145,17 @@ data is on another filesystem, the data side needs room for one store snapshot.
   them. For PostgreSQL it is still the whole base backup, which grows with the store. The
   receipt records each pause with its steps (`steps`) and the work done before it while serving
   (`staged`); the command output reports the longest pause.
-- A datastore shared by two applications, or a datastore format the controller does not know,
-  is refused before anything starts; use `--stopped` for it.
+- A datastore format the controller does not know is refused before anything starts; use
+  `--stopped` for it. Every writer must declare its datastore dependency so the controller can
+  pause the complete group. Out-of-suite writers require their own coordinated stopped backup.
 - An online backup needs every service running and healthy. A stopped or unhealthy suite is
   backed up with `--stopped`.
 
 ## Proof
 
 `npm run test:suite:online-backup` runs real Redis, Qdrant and PostgreSQL images, and writers
-that write every store in a fixed order every 20 ms. It checks that no container restarts, that
+that write every store in a fixed order every 20 ms, plus two independent writers sharing
+PostgreSQL. It checks that no container restarts, that
 every client request is answered, that every pause stays within a budget (5 s by default,
 `--pause-budget`) on a data set of a real installation's size (`--seed-scale`: 80 Qdrant
 collections with 30,000 vectors, a large SQLite database that keeps being written and one that is

@@ -233,7 +233,7 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     print('Passed: interactive Ardent Project Studio, suggested by the full profile and left out when declined.')
 
     # Optional Embermend is offered by hive.sh only with a declared local bridge.
-    manifest['components']['magnus']['version'] = '2.4.2'
+    manifest['components']['magnus']['version'] = '2.5.0'
     manifest['components']['magnus']['embermendProtocol'] = 1
     for name in ['embermend', 'embermend-worker', 'embermend-postgres']:
         manifest['components'][name] = {'image': 'example.com/synthetic@sha256:' + '4' * 64,
@@ -310,6 +310,40 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     release.write_text(json.dumps(with_catalog(manifest)))
     openssl('pkeyutl', '-sign', '-inkey', base / 'publisher.key', '-rawin', '-in', release, '-out', str(release) + '.sig')
     print('Passed: interactive external Magnus in place of the magnus component, with Ardent Project Studio offered beside it.')
+
+    # Embermend retains its required bridge while reusing an explicit external controller.
+    manifest['components']['magnus']['version'] = '2.5.0'
+    manifest['components']['magnus']['embermendProtocol'] = 1
+    for name in ['embermend', 'embermend-worker', 'embermend-postgres']:
+        manifest['components'][name] = {'image': 'example.com/synthetic@sha256:' + '4' * 64,
+                                       'kind': 'datastore' if name.endswith('-postgres') else 'application',
+                                       'service': {'user': f'{os.getuid()}:{os.getgid()}', 'healthcheck': {'test': ['CMD', 'true']}}}
+    manifest['components']['embermend']['requiresLocal'] = ['magnus', 'oathweave', 'hivexui', 'embermend-worker', 'embermend-postgres']
+    manifest['components']['embermend']['initialization'] = {'image': manifest['components']['embermend']['image'], 'command': ['migrate'], 'verificationCommand': ['verify-initialization']}
+    release.write_text(json.dumps(with_catalog(manifest)))
+    openssl('pkeyutl', '-sign', '-inkey', base / 'publisher.key', '-rawin', '-in', release, '-out', str(release) + '.sig')
+    external_product_output = base / 'inventory' / 'external-embermend.json'
+    external_product_questions = []
+    for label, answer in custom_questions:
+        if label == 'External Magnus HTTPS URL': answer = 'https://magnus.example.com:4000'
+        if label == 'Write protected installation configuration to': answer = str(external_product_output)
+        external_product_questions.append((label, answer))
+        if label == 'External Magnus HTTPS URL':
+            external_product_questions.append(('Deploy Embermend security assessment and remediation', 'yes'))
+    review.write_text(json.dumps({'command': arguments, 'questions': external_product_questions,
+                                 'transcriptFile': str(base / 'external-embermend-transcript.log'), 'timeoutSeconds': 30}))
+    subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
+    external_product = json.loads(external_product_output.read_text())
+    assert all(name in external_product['components'] for name in ['embermend', 'embermend-worker', 'embermend-postgres'])
+    assert not any(name in external_product['components'] for name in ['magnus', 'magnus-postgres', 'magnus-redis'])
+    assert external_product['external'] == {'magnus': {'url': 'https://magnus.example.com:4000'}}
+    subprocess.run([*arguments[:2], '--config', str(external_product_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
+    for name in ['embermend', 'embermend-worker', 'embermend-postgres']:
+        del manifest['components'][name]
+    del manifest['components']['magnus']['embermendProtocol']
+    release.write_text(json.dumps(with_catalog(manifest)))
+    openssl('pkeyutl', '-sign', '-inkey', base / 'publisher.key', '-rawin', '-in', release, '-out', str(release) + '.sig')
+    print('Passed: interactive Embermend selection reuses the required external Magnus without creating a second controller.')
 
     # New-user guidance: an unwritable directory is asked for again before anything else, an SSH
     # target asks for its SSH configuration, and a repeated setup continues with its saved file.

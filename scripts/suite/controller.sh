@@ -268,12 +268,12 @@ hive_configure() {
     fi
     # A signed protocol declaration is required: a Magnus version alone does not
     # establish the optional managed remediation bridge. New installs opt in.
-    if jq -e '.components.embermend!=null and .components.magnus.embermendProtocol==1' "$HIVE_MANIFEST" >/dev/null && jq -ne --argjson selected "$selected_json" '$selected|index("magnus")!=null' >/dev/null; then
+    if jq -e '.components.embermend!=null and .components.magnus.embermendProtocol==1' "$HIVE_MANIFEST" >/dev/null && jq -ne --argjson selected "$selected_json" --arg external "$external_magnus" '($selected|index("magnus")!=null) or $external!=""' >/dev/null; then
       if jq -ne --argjson selected "$selected_json" '$selected|index("embermend")!=null' >/dev/null; then embermend_deploy=yes
       else hive_prompt embermend_deploy 'Deploy Embermend security assessment and remediation (yes/no)' no; fi
       if [[ "$embermend_deploy" == yes ]]; then
-        selected_json=$(jq -nc --argjson selected "$selected_json" --slurpfile release "$HIVE_MANIFEST" '
-          def dependencies: . as $before | ((. + [ .[] as $name|$release[0].components[$name].requiresLocal[]? ])|unique) as $after | if $after==$before then . else $after|dependencies end;
+        selected_json=$(jq -nc --argjson selected "$selected_json" --arg external "$external_magnus" --slurpfile release "$HIVE_MANIFEST" '
+          def dependencies: . as $before | ((. + [ .[] as $name|$release[0].components[$name].requiresLocal[]? | select(.!="magnus" or $external=="") ])|unique) as $after | if $after==$before then . else $after|dependencies end;
           ($selected+["embermend"])|dependencies')
       elif [[ "$embermend_deploy" != no ]]; then hive_die 'Answer yes or no'; fi
     fi
@@ -500,7 +500,7 @@ hive_manifest() {
     ((.networks // {})|type=="object" and all(.[]; .driver=="bridge" and (has("external")|not) and (keys-["driver","internal"]|length==0)))
   ' "$HIVE_MANIFEST" >/dev/null || hive_die 'Invalid release manifest or unpinned image'
   if jq -e '.components.embermend!=null' "$HIVE_CONFIG" >/dev/null; then
-    jq -e '.components.magnus.version as $v | ($v|type=="string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and (($v|split(".")|map(tonumber)) >= [2,4,0]) and .components.magnus.embermendProtocol==1 and .components.embermend.image==.components["embermend-worker"].image' "$HIVE_MANIFEST" >/dev/null || hive_die 'Embermend needs a compatible Magnus release declaring embermendProtocol 1 and matching API/worker images'
+    jq -e '.components.magnus.version as $v | ($v|type=="string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and (($v|split(".")|map(tonumber)) >= [2,5,0]) and .components.magnus.embermendProtocol==1 and .components.embermend.image==.components["embermend-worker"].image' "$HIVE_MANIFEST" >/dev/null || hive_die 'Embermend needs a compatible Magnus release declaring embermendProtocol 1 and matching API/worker images'
   fi
   # Reject hidden privileged mounts and unsupported release/config mismatches.
   jq -e --slurpfile config "$HIVE_CONFIG" '
@@ -508,7 +508,9 @@ hive_manifest() {
     ($c.components|keys) as $selected |
     (if $c.console then $r.components.hivexui.kind=="static-ui" and $r.components.ingress.kind=="ingress" else all($selected[]; ($r.components[.].kind // "application")|IN("application","datastore")) end) and
     all($selected[]; $r.components[.] != null) and
-    all($selected[]; . as $name | all(($r.components[$name].requiresLocal // [])[]; . as $dependency | $c.components[$dependency].host==$c.components[$name].host)) and
+    all($selected[]; . as $name | all(($r.components[$name].requiresLocal // [])[]; . as $dependency |
+      if $name=="embermend" and $dependency=="magnus" and $c.external.magnus!=null then true
+      else $c.components[$dependency].host==$c.components[$name].host end)) and
     (if $c.profile=="custom" then true else all($r.profiles[$c.profile][]; . as $name | $selected|index($name)!=null) end)
   ' "$HIVE_MANIFEST" >/dev/null || hive_die 'Selected components do not match the release/profile'
   # The registry records an external Magnus against the release catalog, and the console uses

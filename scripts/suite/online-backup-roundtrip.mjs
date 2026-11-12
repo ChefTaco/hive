@@ -146,7 +146,7 @@ try {
   target = sudoHost ? await startSudoTarget(join(temp, 'sudo-target')) : null;
   const hostEntry = target ? { target: target.target, sshConfig: target.sshConfig, sudoPasswordFile: target.sudoPasswordFile } : { target: 'local' };
   registryImage = await startRegistryImage(id);
-  for (const name of ['probe', 'probe-redis', 'probe-qdrant', 'ledger', 'ledger-postgres', 'hive-registry']) mkdirSync(join(owned, 'config', name), { recursive: true, mode: 0o700 });
+  for (const name of ['probe', 'probe-redis', 'probe-qdrant', 'ledger', 'ledger-worker', 'ledger-postgres', 'hive-registry']) mkdirSync(join(owned, 'config', name), { recursive: true, mode: 0o700 });
   put(join(owned, 'config', 'probe', 'service.mjs'), probe);
   put(join(owned, 'config', 'probe.env'), `REDIS_PASSWORD=${secrets.redis}\nQDRANT_KEY=${secrets.qdrant}\nSEED_SCALE=${seedScale}\n`);
   put(join(owned, 'config', 'probe-redis', 'redis.conf'), `bind 0.0.0.0\nprotected-mode yes\ndir /data\nappendonly yes\nappendfsync everysec\nrequirepass ${secrets.redis}\n`);
@@ -154,6 +154,9 @@ try {
   put(join(owned, 'config', 'ledger', 'ledger.sh'), ledger);
   put(join(owned, 'config', 'ledger', 'password'), secrets.postgres);
   put(join(owned, 'config', 'ledger.env'), 'LEDGER=fixture\n');
+  put(join(owned, 'config', 'ledger-worker', 'ledger.sh'), ledger.replaceAll('ticks', 'worker_ticks').replaceAll('ledger.log', 'worker.log'));
+  put(join(owned, 'config', 'ledger-worker', 'password'), secrets.postgres);
+  put(join(owned, 'config', 'ledger-worker.env'), 'LEDGER=worker-fixture\n');
   put(join(owned, 'config', 'ledger-postgres', 'password'), secrets.postgres);
   put(join(owned, 'config', 'probe-redis.env'), 'FIXTURE=redis\n'); put(join(owned, 'config', 'probe-qdrant.env'), 'FIXTURE=qdrant\n'); put(join(owned, 'config', 'ledger-postgres.env'), 'FIXTURE=postgres\n');
   // The fixture's own service configuration belongs to the service account, as an operator would
@@ -164,7 +167,7 @@ try {
   const datastore = (name, format) => ({ ...release.components[name], kind: 'datastore', storageFormat: format, readableFormats: [format], catalog: fixtureCatalog(name), service: { ...release.components[name].service, user, networks: ['default'] } });
   const manifest = {
     schema: 1, version: '0.1.0',
-    profiles: { core: ['hive-registry', 'probe', 'probe-redis', 'probe-qdrant', 'ledger', 'ledger-postgres'], full: ['hive-registry', 'probe', 'probe-redis', 'probe-qdrant', 'ledger', 'ledger-postgres'] },
+    profiles: { core: ['hive-registry', 'probe', 'probe-redis', 'probe-qdrant', 'ledger', 'ledger-worker', 'ledger-postgres'], full: ['hive-registry', 'probe', 'probe-redis', 'probe-qdrant', 'ledger', 'ledger-worker', 'ledger-postgres'] },
     components: {
       'hive-registry': hiveRegistryComponent(registryImage.image, user),
       'probe-redis': datastore('oathweave-redis', 'redis-aof-v1'),
@@ -174,12 +177,13 @@ try {
       ledger: { image: images.postgres, kind: 'application', storageFormat: 'ledger-v1', readableFormats: ['ledger-v1'], catalog: fixtureCatalog('ledger'), service: { user, command: ['bash', '/config/ledger.sh'], depends_on: { 'ledger-postgres': { condition: 'service_healthy' } }, healthcheck: { test: ['CMD', 'bash', '-c', 'test -s /data/ledger.log'], interval: '1s', timeout: '3s', retries: 60 } } },
     },
   };
+  manifest.components['ledger-worker'] = { ...manifest.components.ledger, storageFormat: 'ledger-worker-v1', readableFormats: ['ledger-worker-v1'], catalog: fixtureCatalog('ledger-worker'), service: { ...manifest.components.ledger.service, healthcheck: { ...manifest.components.ledger.service.healthcheck, test: ['CMD', 'bash', '-c', 'test -s /data/worker.log'] } } };
   const manifestFile = join(temp, '0.1.0.json');
   put(manifestFile, manifest);
   execute('openssl', ['pkeyutl', '-sign', '-inkey', join(temp, 'publisher.key'), '-rawin', '-in', manifestFile, '-out', manifestFile + '.sig']);
   const component = (name, env = true) => ({ host: 'control', configDirectory: join(owned, 'config', name), ...(env ? { envFile: join(owned, 'config', name + '.env') } : {}) });
   const config = { schema: 1, installation: id, release: '0.1.0', profile: 'custom', origin: 'https://console.example.com', hosts: { control: { ...hostEntry, directory: owned } },
-    components: { 'hive-registry': { host: 'control', envFile: join(owned, 'config', 'hive-registry.env'), configDirectory: join(owned, 'config', 'hive-registry') }, probe: component('probe'), 'probe-redis': component('probe-redis'), 'probe-qdrant': component('probe-qdrant'), ledger: component('ledger'), 'ledger-postgres': component('ledger-postgres') },
+    components: { 'hive-registry': { host: 'control', envFile: join(owned, 'config', 'hive-registry.env'), configDirectory: join(owned, 'config', 'hive-registry') }, probe: component('probe'), 'probe-redis': component('probe-redis'), 'probe-qdrant': component('probe-qdrant'), ledger: component('ledger'), 'ledger-worker': component('ledger-worker'), 'ledger-postgres': component('ledger-postgres') },
     agents: [], inference: [] };
   const configPath = join(temp, 'installation.json');
   put(configPath, config);
@@ -235,6 +239,9 @@ try {
   };
   // A pause that grows with the data, or with the number of collections, fails here.
   const withinBudget = (receipt) => {
+    const shared = receipt.snapshot.pauses.filter(item => item.stores.includes('ledger-postgres'));
+    assert.equal(shared.length, 1, 'Shared PostgreSQL captured once');
+    assert.deepEqual(shared[0].pause, ['ledger', 'ledger-worker'], 'Both database writers pause together');
     for (const item of receipt.snapshot.pauses) assert(item.pausedSeconds < pauseBudget, `The ${[...item.pause, ...item.stores].join(', ')} pause took ${item.pausedSeconds} s, over the ${pauseBudget} s budget`);
   };
   const backup = async (archive, extra = []) => {
@@ -286,6 +293,7 @@ try {
     assert.equal(result.blob, expectedBlob, 'Immutable blob bytes survive backup');
     const ledgerLines = readFileSync(join(data, 'ledger', 'ledger.log'), 'utf8').trim().split('\n').filter(Boolean).map(Number);
     result.ledgerLog = ledgerLines.at(-1) ?? 0;
+    result.workerLog = readFileSync(join(data, 'ledger-worker', 'worker.log'), 'utf8').trim().split('\n').filter(Boolean).map(Number).at(-1) ?? 0;
     const run = (name, args) => docker('run', '-d', '--name', name, '--network', 'none', '--user', user, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--tmpfs', '/tmp:mode=1777', ...args);
     const name = id + '-inspect-' + archive;
     try {
@@ -301,6 +309,8 @@ try {
       let rows;
       for (let attempt = 0; attempt < 120 && !rows; attempt++) { try { rows = docker('exec', name + '-postgres', 'psql', '-h', '/var/run/postgresql', '-U', 'ledger', '-d', 'ledger', '-At', '-c', 'SELECT count(*), coalesce(max(n),0) FROM ticks').split('|').map(Number); } catch { execute('sleep', ['0.5']); } }
       result.postgres = { rows: rows[0], n: rows[1] };
+      const workerRows = docker('exec', name + '-postgres', 'psql', '-h', '/var/run/postgresql', '-U', 'ledger', '-d', 'ledger', '-At', '-c', 'SELECT count(*), coalesce(max(n),0) FROM worker_ticks').split('|').map(Number);
+      result.postgresWorker = { rows: workerRows[0], n: workerRows[1] };
     } finally { for (const suffix of ['-redis', '-qdrant', '-postgres']) spawnSync('docker', ['rm', '-f', name + suffix], { stdio: 'ignore' }); }
     return result;
   };
@@ -314,6 +324,8 @@ try {
     if (contiguous) { assert.equal(state.wal.rows, state.wal.n); assert.equal(state.journal.rows, state.journal.n); assert(state.log.contiguous); assert.equal(state.qdrant.count, state.qdrant.n); }
     assert(state.postgres.n === state.ledgerLog || state.postgres.n === state.ledgerLog + 1, 'Ledger file and PostgreSQL hold the same instant: ' + state.postgres.n + ' ' + state.ledgerLog);
     if (contiguous) assert.equal(state.postgres.rows, state.postgres.n);
+    assert(state.postgresWorker.n === state.workerLog || state.postgresWorker.n === state.workerLog + 1, 'Worker file and shared PostgreSQL hold the same instant');
+    if (contiguous) assert.equal(state.postgresWorker.rows, state.postgresWorker.n);
     // The stopped format copies a stopped store's files as they are, sidecars included.
     if (online) assert.deepEqual(state.sidecars, [], 'No SQLite sidecar is archived');
     assert.equal(state.wal.journal, 'wal'); assert.equal(state.journal.journal, 'delete');
@@ -340,7 +352,7 @@ try {
 
   if (oldController) {
     phase('earlier-controller', 'an archive written by the earlier controller');
-    const old = cli('backup', ['--archive', 'earlier-a'], true, oldController);
+    const old = cli('backup', ['--archive', 'earlier-a', '--stopped'], true, oldController);
     report.earlierController = { seconds: old.seconds, receiptMode: JSON.parse(readFileSync(join(owned, 'backups', 'earlier-a', 'receipt.json'), 'utf8')).mode ?? 'stopped (original format)' };
     consistent(inspect('earlier-a'), false);
     rehearse('earlier-a');

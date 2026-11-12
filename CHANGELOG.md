@@ -6,7 +6,25 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.2.1] - 2026-11-12
+
+### Fixed
+
+- Register the proven storage format of a newly added component before schema initialization populates its database, so subsequent configuration changes remain compatible. Existing unversioned data still requires an explicit signed migration.
+- Provide an explicit signed recovery profile for the first Embermend PostgreSQL store registration, requiring the existing major, exact runtime receipt and offline checksums before acceptance.
+
+## [3.2.0] - 2026-11-12
+
 ### Added
+
+- Publish the signed Embermend-compatible suite: Magnus 2.5.0, Oathweave 2.2.0, HiveXUI 0.3.0, optional Embermend 0.1.0 and the exact published native agent integrity. Existing profiles keep Embermend disabled until selected.
+
+- Capture API and worker services sharing a datastore in one online-backup pause group, including transitive shared dependencies; retain each store exactly once.
+
+- Allow explicit Embermend selection with an existing external Magnus; retain the bridge requirement and prepare an empty scoped grant fragment without deploying another Magnus or replacing its existing grants.
+
+- Require Magnus 2.5.0 or newer with the explicit managed bridge declaration when selecting Embermend; published 2.4 releases do not supply those actions.
+- Build clean Embermend runtime and isolated scanner candidates alongside the other suite products; API and worker use the same runtime target.
 
 - `hive.sh post-upgrade` finishes an upgrade in one command. It upgrades an outdated Magnus agent on the Magnus host through the existing enrollment or install paths, adds missing HiveXUI browser clients to Oathweave, and lists the remaining manual steps. Every change is confirmed first.
 - Commands other than `install`, `init` and `plan` find the installation file themselves when there is exactly one under the configuration directory, or when `HIVE_INSTALLATION` names it. With several, they ask in a terminal and refuse unattended. `status`, `doctor` and the other lifecycle commands no longer start the setup questions when `--config` is missing.
