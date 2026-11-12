@@ -1,6 +1,6 @@
 # Embermend integration
 
-Embermend 0.2.0 is an optional product in the signed 3.5.0 combination.
+Embermend 0.3.0 is an optional product in the signed 3.6.0 combination.
 Existing release profiles do not select it. The
 API and durable worker use the same exact image; PostgreSQL 18 is private.
 Selecting it requires a reviewed Magnus release declaring `embermendProtocol: 1`
@@ -30,7 +30,9 @@ initialization/upgrade journal runs those signed image commands before activatio
 its generic stopped-store backup and restore path covers the private datastore.
 The reference acceptance ledger retains the combined-store and signed-installation
 restore demonstrations. Existing installations still require their own verified
-backup and isolated rehearsal before upgrade.
+backup and isolated rehearsal before upgrade. Embermend 0.3.0 adds the migration
+`20261112000000_audit_export`, so the upgrade to suite 3.6.0 of an installation with
+Embermend needs `--allow-migrations`.
 
 Ardent loads the Embermend-owned plugin with a scoped resource-token provider.
 Its coordinator client can read evidence, request assessment and isolated
