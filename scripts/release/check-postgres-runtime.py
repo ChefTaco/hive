@@ -74,6 +74,9 @@ try:
  assert sql(new,'SELECT id,value FROM proof')=='1|retained synthetic value'
  assert sql(new,"SELECT count(*) FROM pg_database WHERE datallowconn AND datcollversion IS DISTINCT FROM pg_database_collation_actual_version(oid)")=='0'
  assert sql(new,"SELECT xpath('/proof/text()', xmlparse(document '<proof>retained</proof>'))::text")=='{retained}'
+ assert cmd('exec',new,'apk','info','-v','-e','libxslt')=='libxslt-1.1.45-r6'
+ assert sql(new,"CREATE EXTENSION IF NOT EXISTS xml2")=='CREATE EXTENSION'
+ assert sql(new,"SELECT xslt_process('<doc>retained</doc>', '<xsl:stylesheet version=\"1.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\"><xsl:output method=\"text\"/><xsl:template match=\"/\"><xsl:value-of select=\"/doc\"/></xsl:template></xsl:stylesheet>')")=='retained'
  assert sql(new,"SELECT count(*) FROM proof WHERE value % 'retained synthetic value'")=='1'
  # Restores and operators can create new databases from template0; its catalog
  # collation metadata must be reconciled too, without changing its admission flag.

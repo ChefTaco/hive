@@ -24,7 +24,7 @@
     },
     {
       "image": "hive-postgres",
-      "version": "17.11-3",
+      "version": "17.11-4",
       "context": "deployment/datastores",
       "file": "deployment/datastores/postgres.Dockerfile",
       "check": [
@@ -40,7 +40,7 @@
     },
     {
       "image": "hive-postgres",
-      "version": "18.6-3",
+      "version": "18.6-4",
       "context": "deployment/datastores",
       "file": "deployment/datastores/postgres.Dockerfile",
       "check": [

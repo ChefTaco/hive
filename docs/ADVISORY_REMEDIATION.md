@@ -210,3 +210,16 @@ copies with one-byte chunks, exact-limit and over-limit bodies.
 
 Sources: [Node security release](https://github.com/nodejs/node/releases/tag/v26.13.1),
 [Hono advisory](https://github.com/honojs/hono/security/advisories/GHSA-39q9-qp46-w8xg).
+
+## PostgreSQL libxslt release gate, 2026-11-12
+
+A fresh full-policy scan blocked the signed 3.2.1 release: both PostgreSQL
+architectures carried libxslt 1.1.45-r5 and reported CVE-2026-125350. Earlier
+clean reports and the failed immutable tag remain retained; the gate is not
+relaxed. The [vendor advisory](https://images.chainguard.dev/security/CGA-xgrv-hr7h-93gv)
+identifies 1.1.45-r6 as fixed. New 17.11-4 and 18.6-4 image tags pin matching
+patched runtime/development packages. Native image checks execute a real xml2
+XSLT transform as well as recovery, collation, checksum and backup checks.
+The PostgreSQL majors and collation-runtime identities remain unchanged.
+Existing signed release bytes are not rewritten. A subsequent signed suite
+selects the newly verified images after both architectures pass the full gate.
