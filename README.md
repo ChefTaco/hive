@@ -55,21 +55,21 @@ certificate renewal, firewalls and managing the host from another machine.
 
 `--release latest` resolves GitHub’s latest published, non-prerelease suite release once, prints
 the exact version, and runs its tagged controller. To choose a version, use `./hive.sh --release
-3.3.0` instead. The launcher retains release checkouts under
+3.4.0` instead. The launcher retains release checkouts under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`; keep them for later commands and certificate
 renewal timers. It leaves the original checkout and current working directory unchanged. After
 setup, change to the printed release checkout for the lifecycle commands below; return to the
 original launcher checkout when selecting a new release with `--release latest`.
 
-For example, release 3.3.0 verifies `releases/3.3.0.json` against `releases/3.3.0.json.sig` with the publisher key
+For example, release 3.4.0 verifies `releases/3.4.0.json` against `releases/3.4.0.json.sig` with the publisher key
 in `trust/publisher.pub` before installing product resources, and refuses a manifest pinned to a different
 controller. The setup writes a protected installation file that the same commands accept
 unattended. Use the exact version setup reported for repeatable planning and applying
-(the following is an example for 3.3.0):
+(the following is an example for 3.4.0):
 
 ```bash
-./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.3.0
-./hive.sh install --config ~/.config/hive/ID/installation.json --release 3.3.0 --non-interactive --yes
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.4.0
+./hive.sh install --config ~/.config/hive/ID/installation.json --release 3.4.0 --non-interactive --yes
 ./hive.sh status  --config ~/.config/hive/ID/installation.json
 ./hive.sh doctor  --config ~/.config/hive/ID/installation.json
 ```
@@ -122,9 +122,12 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 ## Upgrading
 
 A suite installation upgrades to a newer signed release with `./hive.sh upgrade --config FILE
---release X.Y.Z`; the launcher selects its verified controller. Upgrades from 2.x to 3.3.0 with existing
+--release X.Y.Z`; the launcher selects its verified controller. Upgrades from 2.x to 3.4.0 with existing
 PostgreSQL stores also require `--allow-migrations`: the installer takes a verified backup,
-rehearses on a copy and rebuilds indexes before activation. Code-only rollback across that
+rehearses on a copy and rebuilds indexes before activation. Upgrades to 3.4.0 of an installation
+with Emberpath or HiveSkills require `--allow-migrations` too: both products change their data
+format, and the installer runs each product's own migration on the rehearsal copy and then on the
+stopped live store. Code-only rollback across that
 collation change is refused; recovery uses the original-state backup and write reconciliation.
 See [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade),
 [deployment/README.md](deployment/README.md) and [UPGRADING.md](UPGRADING.md). Existing native

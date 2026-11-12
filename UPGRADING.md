@@ -9,10 +9,38 @@ A suite installation upgrades to a newer signed release with the release's own c
 The launcher checks out and verifies the tagged controller of that release. The upgrade prints its
 plan, takes a verified pre-change backup and rehearses data changes on a copy before activation.
 Moving from 2.x to 3.x with existing PostgreSQL stores also needs `--allow-migrations`, described
-below. A failed or uncertain step holds its transaction for recovery, as described in
+below, and so does moving an installation with Emberpath or HiveSkills to 3.4.0. A failed or uncertain step holds its transaction for recovery, as described in
 [when a command stops](deployment/README.md#when-a-command-stops-transactions-and-recovery); never
 delete transaction or runtime receipts to force another attempt. See also
 [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
+
+## Suite 3.4: Emberpath and HiveSkills data formats
+
+Emberpath 2.2.0 adds its router data format `managed-format-2`: a nullable `Trace.actorId`
+column with actor and client-key time indexes. HiveSkills 1.5.0 adds `managed-format-3`: a side
+table binding deployment targets to Magnus nodes and agents. Both changes are additive and
+existing rows are kept. The suite runs the products with automatic migration off, so neither
+starts on data in its older format until its own `migrate` command has run.
+
+Suite 3.4.0 therefore declares a storage transition for each (`emberpath-v1` to
+`emberpath-managed-format-2`, `hiveskills-v1` to `hiveskills-managed-format-3`), and an
+installation that includes either product upgrades with explicit approval:
+
+```bash
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.4.0 --allow-migrations
+```
+
+Without `--allow-migrations` the upgrade stops before any service is stopped. With it, the
+installer takes and verifies the pre-change backup, runs each product's `migrate` on the
+restored copy and starts the rehearsal, then runs `migrate` once on the stopped live store and
+records the new format before activation. Each `migrate` also keeps the product's own verified
+copy of its store under `migration-backups/` in that product's data directory; it stays until you
+remove it. Repeating the upgrade does not migrate again. Fresh 3.4.0 installs create the new
+formats directly and need no flag.
+
+Code-only rollback from 3.4.0 to an earlier release is refused for these two products, because
+the earlier release does not declare the new formats readable. Recovery uses the verified
+pre-upgrade backup, as for any other storage transition.
 
 ## Suite 3.0: patched datastore runtime
 

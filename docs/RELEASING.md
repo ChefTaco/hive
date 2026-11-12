@@ -28,6 +28,12 @@ when run from any other controller source, so install from a checkout of the rel
    Qdrant and PostgreSQL tags in `release-contracts.mjs`; older inputs retain their
    historical pins. PostgreSQL receives a new storage format and the explicit offline
    collation migration, so adoption requires the normal backup and rehearsal workflow.
+   A product version that changes its own data format needs an entry in `PRODUCT_FORMATS` in
+   `scripts/suite/release-contracts.mjs` before its first suite release. The builder then
+   declares the storage transition and the product's `migrate` command for every release
+   pinning that version or newer, so the upgrade requires `--allow-migrations` and the
+   controller rehearses and runs the migration. Emberpath 2.2.0 and HiveSkills 1.5.0 are the
+   first such versions.
    Optional products (`OPTIONAL_PRODUCTS` in `scripts/suite/release-contracts.mjs`) are offered
    only when the inputs name their image and no profile selects them. Ardent Project Studio is
    one: after its first image is published, add

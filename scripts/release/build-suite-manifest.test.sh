@@ -132,6 +132,26 @@ for mutation in 'del(.["datastore:postgres17"])' '.["datastore:redis"]="ghcr.io/
   jq "$mutation" "$temporary/runtime-pinned.json" > "$temporary/bad-pinned.json"
   if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/runtime-inputs.json" --pinned "$temporary/bad-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An incomplete or foreign datastore pin passed' >&2; exit 1; fi
 done
+# Emberpath 2.2.0 and HiveSkills 1.5.0 change their product data formats. Their upgrade is an
+# explicit storage transition running each product's own migrate; older pins stay unchanged.
+jq -e '.components.emberpath.storageFormat=="emberpath-v1" and .components.hiveskills.storageFormat=="hiveskills-v1" and
+  (.components.emberpath|has("migration") or has("readableFormats")|not) and (.components.hiveskills|has("migration") or has("readableFormats")|not)' \
+  "$temporary/original.json" >/dev/null || { echo 'Older product pins gained a data format transition' >&2; exit 1; }
+for versions in '2.1.0 1.4.0 emberpath-v1 hiveskills-v1' '2.2.0 1.4.0 emberpath-managed-format-2 hiveskills-v1' '2.1.0 1.5.0 emberpath-v1 hiveskills-managed-format-3' '2.3.1 1.5.0 emberpath-managed-format-2 hiveskills-managed-format-3'; do
+  read -r router skills router_format skills_format <<< "$versions"
+  jq --arg router "$router" --arg skills "$skills" '.products.emberpath.version=$router | .products.hiveskills.version=$skills' "$temporary/inputs.json" > "$temporary/format-inputs.json"
+  node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/format-inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/format.json" >/dev/null
+  jq -e --arg router "$router_format" --arg skills "$skills_format" '
+    def transition($name; $format; $from):
+      .components[$name] as $c | $c.storageFormat==$format and
+      (if $format==$from then ($c|has("migration") or has("readableFormats")|not)
+       else $c.readableFormats==[$format] and $c.migration=={from:$from,command:["migrate","--backup-dir","/data/migration-backups"]} end);
+    transition("emberpath"; $router; "emberpath-v1") and transition("hiveskills"; $skills; "hiveskills-v1")
+  ' "$temporary/format.json" >/dev/null || { echo "The product data format contract is wrong for $versions" >&2; exit 1; }
+  diff <(jq 'del(.components.emberpath, .components.hiveskills)' "$temporary/format.json") <(jq 'del(.components.emberpath, .components.hiveskills)' "$temporary/original.json") >/dev/null || { echo 'A product data format changed another component' >&2; exit 1; }
+done
+jq 'del(.products.emberpath.version)' "$temporary/inputs.json" > "$temporary/bad-inputs.json"
+if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'A product without an exact version skipped its data format review' >&2; exit 1; fi
 # Embermend requires an explicit reviewed bridge declaration, not a version guess.
 jq '.products.embermend={image:"ghcr.io/example/embermend:0.1.0",version:"0.1.0",platforms:["linux/amd64","linux/arm64"]} | .products.magnus.version="2.5.0" | .products.magnus.embermendProtocol=1' "$temporary/inputs.json" > "$temporary/embermend-inputs.json"
 jq --arg digest "$(digest 95)" '.+{embermend:("ghcr.io/example/embermend@"+$digest)}' "$temporary/pinned.json" > "$temporary/embermend-pinned.json"

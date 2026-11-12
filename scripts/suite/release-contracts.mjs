@@ -91,6 +91,39 @@ export function applyStorageRecovery(manifest, recovery) {
   ] };
 }
 
+// Product-owned SQLite data formats that change in a reviewed product version. The suite
+// runs Emberpath and HiveSkills with HIVE_AUTO_MIGRATE=false, and both refuse to start on
+// data their own `migrate` has not brought to the current format. An upgrade therefore
+// declares the storage transition, approved with --allow-migrations: the controller
+// rehearses `migrate` on the restored backup, then runs it once on the stopped live store
+// before activation. `migrate` takes the product's own verified pre-migration copy (kept
+// beside the store, as the native migration does) and is a no-op on current data. Fresh
+// installs initialize with automatic migration and record the new format directly.
+// Releases pinning older product versions keep their original formats byte for byte.
+const PRODUCT_FORMATS = Object.freeze({
+  emberpath: Object.freeze([{ since: '2.2.0', storageFormat: 'emberpath-managed-format-2', from: 'emberpath-v1' }]),
+  hiveskills: Object.freeze([{ since: '1.5.0', storageFormat: 'hiveskills-managed-format-3', from: 'hiveskills-v1' }]),
+});
+const PRODUCT_MIGRATION = Object.freeze(['migrate', '--backup-dir', '/data/migration-backups']);
+const atLeast = (version, since) => {
+  const [a, b] = [version, since].map((value) => value.split('.').map(Number));
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return true;
+};
+export function applyProductFormats(manifest, products) {
+  for (const [name, formats] of Object.entries(PRODUCT_FORMATS)) {
+    const target = manifest.components[name];
+    if (!target) continue;
+    const version = products[name]?.version;
+    if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) throw new Error(name + ': the product data format needs its exact version');
+    const format = formats.filter((entry) => atLeast(version, entry.since)).at(-1);
+    if (!format) continue;
+    target.storageFormat = format.storageFormat;
+    target.readableFormats = [format.storageFormat];
+    target.migration = { from: format.from, command: [...PRODUCT_MIGRATION] };
+  }
+}
+
 // Product images each profile needs. chat-migrator is ChatterMost's initialization image.
 export const CORE_PRODUCTS = Object.freeze(['hive-registry', 'oathweave', 'emberpath', 'hivemem', 'hiveskills', 'hivexui', 'ingress']);
 export const FULL_PRODUCTS = Object.freeze(['magnus', 'cindertrace', 'chattermost', 'chat-migrator', 'emberfold', 'magnus-gateway']);

@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.4.0] - 2026-11-12
+
+### Changed
+
+- Product update on the 3.2.2 controller: Magnus and its fleet gateway and agent 2.7.0, HiveXUI 0.5.0, Emberpath 2.2.0, HiveSkills 1.5.0 and Cindertrace 0.4.0, which together bring Agent 360. Oathweave, HiveMem, Chattermost, Emberfold, Ardent Project Studio, Embermend, the Hive Registry, the ingress, the datastore profile and the storage recovery profile are unchanged. Every pinned image passes the full HIGH/CRITICAL policy on both architectures.
+- Emberpath 2.2.0 and HiveSkills 1.5.0 change their product data formats (`emberpath-managed-format-2`, `hiveskills-managed-format-3`). The release declares an explicit storage transition that runs each product's own `migrate` on the rehearsal copy and then on the stopped live store, so upgrading an installation with either product needs `--allow-migrations`. Fresh installs create the new formats directly. Release manifests that pin earlier product versions are unchanged. See [UPGRADING](UPGRADING.md#suite-34-emberpath-and-hiveskills-data-formats).
+
 ## [3.3.0] - 2026-11-12
 
 ### Changed
