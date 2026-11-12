@@ -500,7 +500,7 @@ hive_manifest() {
     ((.networks // {})|type=="object" and all(.[]; .driver=="bridge" and (has("external")|not) and (keys-["driver","internal"]|length==0)))
   ' "$HIVE_MANIFEST" >/dev/null || hive_die 'Invalid release manifest or unpinned image'
   if jq -e '.components.embermend!=null' "$HIVE_CONFIG" >/dev/null; then
-    jq -e '.components.magnus.version as $v | ($v|type=="string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and (($v|split(".")|map(tonumber)) >= [2,4,0]) and .components.magnus.embermendProtocol==1 and .components.embermend.image==.components["embermend-worker"].image' "$HIVE_MANIFEST" >/dev/null || hive_die 'Embermend needs a compatible Magnus release declaring embermendProtocol 1 and matching API/worker images'
+    jq -e '.components.magnus.version as $v | ($v|type=="string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and (($v|split(".")|map(tonumber)) >= [2,5,0]) and .components.magnus.embermendProtocol==1 and .components.embermend.image==.components["embermend-worker"].image' "$HIVE_MANIFEST" >/dev/null || hive_die 'Embermend needs a compatible Magnus release declaring embermendProtocol 1 and matching API/worker images'
   fi
   # Reject hidden privileged mounts and unsupported release/config mismatches.
   jq -e --slurpfile config "$HIVE_CONFIG" '
