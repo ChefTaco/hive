@@ -26,13 +26,35 @@ run() { # CONFIG-PATCH
   hive_post_upgrade > "$temporary/output"
 }
 
-# A single-host installer node with an older agent is enrolled; the browser clients are checked.
+# A single-host installer node gets a package update without enrollment; clients are checked.
 agent_version=2.4.2
 run '.components={magnus:{host:"control"},oathweave:{host:"control"},ingress:{host:"control"}} | .console={host:"control"} | .bootstrap={} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
-grep -qx 'magnus-agent enroll' "$calls" || fail 'An older agent on the installer node was not enrolled'
+grep -qx 'magnus-agent install' "$calls" || fail 'An older installer agent was not updated without enrollment'
+! grep -qx 'magnus-agent enroll' "$calls" || fail 'A package update requested full-node enrollment'
 grep -qx 'console-clients add' "$calls" || fail 'Missing browser clients were not checked'
 grep -q 'this release pins 2.4.3' "$temporary/output" || fail 'The pinned agent version was not reported'
 grep -q 'Update package' "$temporary/output" || fail 'The Ardent package step was not listed'
+
+# --yes confirms a package update, never a scope expansion. The same single-host config
+# can describe an intentionally LIMITED node, an Ardent-only node, or a fully enrolled node.
+# Do not infer enrollment authority from topology, even when the status includes that evidence.
+for scope in limited ardent-only enrolled; do
+  HIVE_CONFIRMED=true
+  hive_post_upgrade_run() {
+    printf '%s\n' "$*" >> "$calls"
+    if [[ "$*" == 'magnus-agent status' ]]; then
+      jq -n --arg scope "$scope" '{installedVersion:"2.4.2",node:{enrollment:{state:$scope}}}'
+    fi
+  }
+  run '.components={magnus:{host:"control"}} | .console={host:"control"} | .bootstrap={} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
+  grep -qx 'magnus-agent install' "$calls" || fail "$scope node did not get a package update with --yes"
+  ! grep -Eq 'enroll|prepare-ardent|--trust' "$calls" || fail "$scope node received new authority with --yes"
+done
+unset HIVE_CONFIRMED
+hive_post_upgrade_run() {
+  printf '%s\n' "$*" >> "$calls"
+  if [[ "$*" == 'magnus-agent status' ]]; then jq -n --arg version "$agent_version" '{installedVersion:(if $version=="" then null else $version end)}'; fi
+}
 
 # The pinned agent needs nothing, and a distributed Magnus host is upgraded with install.
 agent_version=2.4.3

@@ -57,7 +57,7 @@ mkdir -p "$temporary/ardent-fixture/package"
 printf '{"name":"@hivemagnus/ardent","version":"1.0.0"}\n' > "$temporary/ardent-fixture/package/package.json"
 tar -czf "$temporary/fixtures/ardent-1.0.0.tgz" -C "$temporary/ardent-fixture" package
 ardent_integrity="sha512-$(openssl dgst -sha512 -binary "$temporary/fixtures/ardent-1.0.0.tgz" | base64 -w0)"
-for version in 2.1.1 2.1.2; do
+for version in 2.1.1 2.1.2 2.1.3; do
   mkdir -p "$temporary/fixture/package/dist"
   jq -n --arg version "$version" '{name:"@hivemagnus/magnus-agent",version:$version,dependencies:{"fixture-dependency":"1.0.0","@hivemagnus/ardent":"1.0.0"}}' > "$temporary/fixture/package/package.json"
   jq -n --arg ardentIntegrity "$ardent_integrity" --slurpfile package "$temporary/fixture/package/package.json" '{name:$package[0].name,version:$package[0].version,lockfileVersion:3,packages:{"":$package[0],"node_modules/fixture-dependency":{version:"1.0.0",resolved:"https://registry.npmjs.org/fixture-dependency/-/fixture-dependency-1.0.0.tgz",integrity:("sha512-"+("A"*86)+"==")},"node_modules/@hivemagnus/ardent":{version:"1.0.0",resolved:"https://registry.npmjs.org/@hivemagnus/ardent/-/ardent-1.0.0.tgz",integrity:$ardentIntegrity}}}' > "$temporary/fixture/package/npm-shrinkwrap.json"
@@ -178,6 +178,31 @@ grep -q 'npm EINTEGRITY' "$temporary/err" || fail 'The dependency error code was
 ! grep -q 'private diagnostic' "$temporary/err" || fail 'Raw npm diagnostics were exposed'
 [[ $(readlink "$agent/current") == versions/2.1.1 ]] || fail 'A failed locked install switched the active agent'
 rm "$temporary/fail-ci"
+# Exercise the post-upgrade selector with the real host installer, including --yes.
+# Only package/network/systemd transports use the existing fixture; enrollment is forbidden.
+post_upgrade_host() (
+  source "$ROOT/scripts/suite/post-upgrade.sh"
+  local fixture_target_version=$1
+  jq -n '{components:{magnus:{host:"control"}},console:{host:"control"},bootstrap:{},hosts:{control:{target:"local"}}}' > "$temporary/post-upgrade.json"
+  HIVE_CONFIG=$temporary/post-upgrade.json HIVE_CONFIRMED=true
+  hive_magnus_agent_release() { jq -nc --arg version "$fixture_target_version" '{version:$version}'; }
+  hive_post_upgrade_run() {
+    [[ "$HIVE_CONFIRMED" == true ]] || fail 'The fixture lost --yes'
+    case "$*" in
+      'magnus-agent status') jq -nc --arg version "$(jq -r .version "$agent/node_modules/@hivemagnus/magnus-agent/package.json")" '{installedVersion:$version}';;
+      'magnus-agent install') host magnus-agent-install "$(request "$fixture_target_version")";;
+      *) touch "$temporary/unexpected-enrollment"; fail "Package maintenance requested enrollment authority: $*";;
+    esac
+  }
+  hive_post_upgrade_agent
+)
+# A deliberately LIMITED existing agent keeps disabled supervision during an actual upgrade.
+printf 'MAGNUS_EXECUTION_SUPERVISOR_ENABLED=false\nMAGNUS_CRON_ENABLED=false\n' >> "$agent/.env"
+post_upgrade_host 2.1.2 || { cat "$temporary/err" >&2; fail 'Limited post-upgrade failed'; }
+[[ ! -e "$temporary/unexpected-enrollment" && $(readlink "$agent/current") == versions/2.1.2 ]] || fail 'Limited update attempted enrollment or failed to upgrade'
+grep -qx 'MAGNUS_EXECUTION_SUPERVISOR_ENABLED=false' "$agent/.env" || fail 'Post-upgrade elevated a LIMITED node'
+grep -qx 'MAGNUS_CRON_ENABLED=false' "$agent/.env" || fail 'Post-upgrade enabled LIMITED node cron'
+! grep -q '^MAGNUS_AGENT_MANAGED_TERMINAL_USER=' "$agent/.env" || fail 'Post-upgrade enabled a LIMITED node terminal'
 host magnus-agent-install "$(request 2.1.2)" || { cat "$temporary/err" >&2; fail 'upgrade failed'; }
 [[ $(readlink "$agent/current") == versions/2.1.2 && $(jq -r .version "$temporary/out") == 2.1.2 ]] || fail 'The upgrade did not switch versions'
 rm -f "$temporary/active"; : > "$log"
@@ -195,6 +220,16 @@ grep -qx 'MAGNUS_EXECUTION_SUPERVISOR_ENABLED=true' "$agent/.env" || fail 'Full 
 grep -qx 'MAGNUS_AGENT_MANAGED_TERMINAL_USER=terminal-fixture' "$agent/.env" || fail 'Full enrollment did not configure its terminal identity'
 host magnus-agent-install "$(request 2.1.2)" || fail 'Managed terminal repair failed'
 grep -qx 'MAGNUS_AGENT_MANAGED_TERMINAL_USER=terminal-fixture' "$agent/.env" || fail 'A repair discarded the managed terminal identity'
+# A fully enrolled agent also uses package maintenance. Its supervisor and terminal identity
+# remain enabled; existing cron service configuration is never reinstalled or reconfigured.
+sed -i 's/^MAGNUS_CRON_ENABLED=false$/MAGNUS_CRON_ENABLED=true/' "$agent/.env"
+: > "$log"
+post_upgrade_host 2.1.3 || { cat "$temporary/err" >&2; fail 'Full-node post-upgrade failed'; }
+[[ $(readlink "$agent/current") == versions/2.1.3 ]] || fail 'Full-node package was not upgraded'
+grep -qx 'MAGNUS_EXECUTION_SUPERVISOR_ENABLED=true' "$agent/.env" || fail 'Full-node post-upgrade disabled supervision'
+grep -qx 'MAGNUS_CRON_ENABLED=true' "$agent/.env" || fail 'Full-node post-upgrade disabled cron'
+grep -qx 'MAGNUS_AGENT_MANAGED_TERMINAL_USER=terminal-fixture' "$agent/.env" || fail 'Full-node post-upgrade lost the terminal identity'
+! grep -Eq '^(apt-get|crontab) |^systemctl (enable|start|restart).*cron|^docker .*trust add ' "$log" || fail 'Package maintenance changed full-node policy'
 
 # Credentials for another host arrive in the request, never as an argument.
 host magnus-agent-install "$(request 2.1.2 | jq -c 'del(.magnusEnvironment)')" && fail 'Installed without credentials' || true

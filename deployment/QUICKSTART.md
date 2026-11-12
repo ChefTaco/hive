@@ -246,31 +246,32 @@ named in the installation file. Pass the new exact version to later commands to 
 product pins, for example `./hive.sh doctor --config FILE --release 3.2.1`. Certificate renewal
 uses a unique matching release tag in this case, so its receipt follows that checkout.
 
-Then finish the upgrade from the new checkout:
+Then finish maintenance from the retained release checkout with the individual commands:
 
 ```bash
-./hive.sh post-upgrade --config ~/.config/hive/hive/installation.json --release 3.2.1
+./hive.sh magnus-agent status --config ~/.config/hive/hive/installation.json --release 3.2.1
+./hive.sh magnus-agent install --config ~/.config/hive/hive/installation.json --release 3.2.1
+./hive.sh console-clients add --config ~/.config/hive/hive/installation.json --release 3.2.1
+./hive.sh doctor --config ~/.config/hive/hive/installation.json --release 3.2.1
 ```
 
-`post-upgrade` does the follow-up steps in one command:
+Run the Magnus commands only when this installation hosts Magnus and has a host agent to update;
+run `console-clients add` when it hosts Oathweave and needs missing HiveXUI browser clients.
+`magnus-agent install` updates the package while preserving the node's existing enrollment scope.
+Full-node enrollment is a separate authorization through `magnus-agent enroll`; a package update
+must not enable commands, cron or web terminals on an intentionally limited node. See
+[Magnus host agents](FULL.md#magnus-host-agents) for enrollment review and other hosts.
 
-- When the Magnus agent on the Magnus host runs an older version than the release pins, it upgrades
-  that agent. A fully enrolled installer node goes through `magnus-agent enroll`, which keeps full
-  node capabilities, profiles and completed history. Other Magnus hosts go through
-  `magnus-agent install`.
-- It adds any HiveXUI browser clients that are missing from Oathweave (`console-clients add`).
-- It lists what is left for you: updating Ardent packages in HiveXUI, agents on other fleet hosts,
-  and certificate renewal when nothing renews the certificate.
+Update Ardent packages in HiveXUI under Magnus > Ardent > Installations: stop running profiles,
+choose Update package, then start them again. Update agents on other fleet hosts separately,
+and check certificate renewal when nothing renews the certificate.
 
-Each change shows its evidence and asks before it is applied; `--yes` accepts them unattended.
-The individual commands remain available, for example:
-
-```bash
-./hive.sh magnus-agent enroll --config ~/.config/hive/hive/installation.json --release 3.2.1
-```
-
-For a deliberately limited node, use `magnus-agent install` to update its package without full
-enrollment. See [Magnus host agents](FULL.md#magnus-host-agents) for enrollment review and other hosts.
+**Published controller compatibility:** releases 3.2.0 and 3.2.1 include `post-upgrade`, but on a
+single-host installation that command can request full-node enrollment. Use the individual
+commands above when maintaining a limited or Ardent-only node. The scope-preserving
+`post-upgrade` fix in the next signed controller release uses `magnus-agent install` for all
+package updates and `console-clients add` for missing clients. Each change asks for confirmation;
+`--yes` confirms these maintenance steps and does not authorize full-node enrollment.
 
 ## 9. Keep the certificate current
 
