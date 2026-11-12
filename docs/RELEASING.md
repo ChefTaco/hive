@@ -16,10 +16,13 @@ suite release publishes nothing to npm.
 The service contracts come from `scripts/suite/release-contracts.mjs` and the catalog from
 `scripts/suite/suite-catalog.json`. A catalog entry's `capabilities` name the first product version
 that serves each one (`since`); a manifest carries a capability only for a component pinned at that
-version or newer, so set `since` when the product release that serves it is published. The developer proofs build their manifests from the same code,
+version or newer, so set `since` when the product release that serves it is published. Suite 3.5.0 is the first release to
+carry one (`events.v1` from Magnus 2.8.0, Cindertrace 0.5.0, HiveSkills 1.6.0 and Embermend 0.2.0). The developer proofs build their manifests from the same code,
 so a release ships the contracts they exercised. `controllerSHA256` is the digest of the controller
 runtime files (`hive_runtime_files` in `scripts/suite/controller.sh`); `hive.sh` refuses the manifest
 when run from any other controller source, so install from a checkout of the release tag.
+For the same reason `build-suite-manifest.mjs --version X.Y.Z --check` reproduces an older
+release's bytes only from the controller source of that release's tag.
 
 ## Steps
 
