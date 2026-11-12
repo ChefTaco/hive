@@ -768,6 +768,57 @@ event, marks the collector's *Cursor health* as `ERROR` under **Cindertrace > So
 mark records only that last refusal: the collector's next accepted batch sets it back to
 `HEALTHY`.
 
+### Suite audit collection
+
+Cindertrace's collector can pull the suite audit export (HiveAuditRecord v1) of HiveMem,
+HiveSkills, Ardent Project Studio and Embermend, under the sources of the same names. When an
+installation includes Cindertrace and one or more of these products, `install` and every
+`upgrade` configure it, before the pre-change backup:
+
+| Where | What |
+|---|---|
+| Oathweave host, `config/.credentials/cindertrace-audit-PRODUCT` | One generated client secret per product (mode 0600), created once and never rotated by a later run |
+| `config/oathweave.env` | `IAM_MACHINE_CLIENT_POLICIES` and `IAM_MACHINE_CLIENT_SECRETS` gain the machine client `cindertrace-audit-PRODUCT`: audience `PRODUCT`, only `PRODUCT:audit:read`, 300-second tokens on Oathweave's native issuer. An Oathweave client has one audience, so each product has its own |
+| `config/hivemem.env` | `HIVEMEM_OATHWEAVE_SERVICES_JSON` links that client on the native issuer with only the `audit:read` scope |
+| `config/hiveskills.env`, `config/ardentstudio.env` | `OATHWEAVE_NATIVE_ISSUERS` gains Oathweave's native issuer (its `JWT_ISSUER`) |
+| `config/embermend.env`, `config/embermend-worker.env` | `OATHWEAVE_NATIVE_ISSUERS`, and an `EMBERMEND_IDENTITY_GRANTS` integration grant for the client with only `audit:read` in this installation |
+| `config/cindertrace/audit-clients/` | A read-only copy of each client secret for the collector, as `/config/audit-clients/cindertrace-audit-PRODUCT` |
+| `config/.credentials/cindertrace-collectors/suite-audit` | The collector credential `suite-audit`, allowed exactly the collected sources, kept with the collectors `cindertrace-collector` manages |
+| `config/cindertrace.env` | `SECURITY_COLLECTOR_AUDIT_SOURCES_JSON` (each product's internal HTTPS export URL, audience, scope, client and secret file), `SECURITY_COLLECTOR_AUDIT_OATHWEAVE_URL`, `CINDERTRACE_API_URL`, `SECURITY_FUSION_COLLECTOR_ID=suite-audit`, and the collector registry with ingestion on |
+
+Product URLs are the internal endpoints the release catalog names, such as
+`https://hivemem:18790/v1/audit/export`, or a product's HTTPS endpoint in a
+[distributed installation](DISTRIBUTED.md). Existing settings, links, grants, clients and
+collectors are kept, a repeated run changes nothing, and no secret is printed. A product is
+configured only when the release pins a version that serves the export, and nothing is
+configured until it pins a Cindertrace whose collector reads it.
+
+Limits:
+
+- The client secrets stay on the Oathweave host, so Cindertrace must run there. Otherwise the
+  run prints a note and configures nothing.
+- The collector reads only HTTPS exports. Ardent Project Studio and Embermend serve plain HTTP on
+  the console host's private network, so the run prints a note and skips them; their audit
+  reaches Cindertrace once they serve HTTPS inside the installation.
+- A product on another host is reached only on its distributed HTTPS endpoint.
+- The suite does not run the collector process yet. Start it from the Cindertrace service on the
+  Cindertrace host, which gives it these settings and the collector credential through the
+  environment rather than an argument:
+
+  ```bash
+  SECURITY_FUSION_INGEST_SECRET=$(cat /opt/hive/config/.credentials/cindertrace-collectors/suite-audit) \
+    docker compose -f /opt/hive/compose.json run -d --no-deps --name hive-audit-collector \
+    -e SECURITY_FUSION_INGEST_SECRET cindertrace node services/security-collector/dist/index.js
+  ```
+
+  `hive.sh` does not manage this container: remove it (`docker rm -f hive-audit-collector`)
+  before an upgrade, rollback, restore or stopped backup, and start it again afterwards, so it
+  runs the Cindertrace image the release pins. Its checkpoints are stored by the Cindertrace
+  API, so it resumes where it stopped.
+- `cindertrace-collector remove suite-audit` revokes the credential until the next install or
+  upgrade adds it again. A product removed from the installation keeps its Oathweave client
+  until you remove it from `config/oathweave.env`.
+
 ## Developer rehearsal
 
 `npm run test:suite:full -- --output NEW_PRIVATE_DIRECTORY --template-release
