@@ -36,6 +36,23 @@ find "$config" -type f -exec sha256sum {} + | sort > "$temporary/before"
 run_init > "$temporary/repeat.log"
 find "$config" -type f -exec sha256sum {} + | sort > "$temporary/after"
 cmp "$temporary/before" "$temporary/after" || fail 'Repeated initialization changed product authority'
+# Reuse an external Magnus without creating a competing controller or granting targets.
+jq --arg root "$temporary/external" '
+ .external={magnus:{url:"https://magnus.example.com:4000"}} |
+ del(.components.magnus,.components["magnus-postgres"],.components["magnus-redis"]) |
+ .hosts.control.directory=$root | .console.runtimeFile=($root+"/config/runtime.json") |
+ .components|=with_entries(.key as $name|if $name!="hivexui" then .value.configDirectory=($root+"/config/"+$name)|.value.envFile=($root+"/config/"+$name+".env") else . end)
+' "$temporary/config.json" > "$temporary/external.json"
+"$ROOT/hive.sh" init --config "$temporary/external.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/external.log"
+node --input-type=module - "$temporary/external/config" "$temporary/external.log" <<'JS'
+import{readFileSync,existsSync,statSync}from'node:fs';import{parseEnv}from'node:util';import{createHash}from'node:crypto';import assert from'node:assert/strict';const root=process.argv[2],env=parseEnv(readFileSync(root+'/embermend.env','utf8'));assert.equal(env.MAGNUS_URL,'https://magnus.example.com:4000');const text=readFileSync(root+'/.initializer/external-magnus.env','utf8'),fragment=parseEnv(text),grants=JSON.parse(fragment.MAGNUS_EMBERMEND_GRANTS_JSON.replace(/^'|'$/g,''));assert.deepEqual(Object.keys(grants),['embermend-embermend-proof']);const grant=Object.values(grants)[0];assert.deepEqual(grant.applicationIds,[]);assert.deepEqual(grant.targets,{});assert.equal(grant.tokenSha256,createHash('sha256').update(env.MAGNUS_EMBERMEND_TOKEN).digest('hex'));assert(!text.includes(env.MAGNUS_EMBERMEND_TOKEN));assert(!readFileSync(process.argv[3],'utf8').includes(env.MAGNUS_EMBERMEND_TOKEN));assert.equal(statSync(root+'/.initializer/external-magnus.env').mode&0o777,0o600);for(const file of['magnus.env','magnus','magnus-postgres','magnus-redis'])assert(!existsSync(root+'/'+file));
+JS
+find "$temporary/external/config" -type f -exec sha256sum {} + | sort > "$temporary/external-before"
+"$ROOT/hive.sh" init --config "$temporary/external.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/external-repeat.log"
+find "$temporary/external/config" -type f -exec sha256sum {} + | sort > "$temporary/external-after"
+cmp "$temporary/external-before" "$temporary/external-after" || fail 'Repeated external setup changed bridge authority'
+jq 'del(.external)' "$temporary/external.json" > "$temporary/missing-magnus.json"
+if "$ROOT/hive.sh" plan --config "$temporary/missing-magnus.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive > "$temporary/missing.log" 2>&1; then fail 'Missing required Magnus was accepted'; fi
 # A signed older Magnus still cannot be selected for Embermend.
 jq '.components.magnus.version="2.3.4"' "$temporary/release.json" > "$temporary/old.json"
 openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/old.json" -out "$temporary/old.json.sig"

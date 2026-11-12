@@ -47,7 +47,7 @@ hive_initialize() {
       (if $c.bootstrap.productEndpoints then $c.bootstrap.productEndpoints[$name]!=null else true end)
      else $c.components[$name+"-postgres"]==null and $c.components[$name+"-redis"]==null end)) and
     (if .components.emberfold then .components.emberfold.host==.console.host else true end) and
-    (if .components.embermend then .components.embermend.host==.console.host and .components.embermend.host==.components.oathweave.host and .components.embermend.host==.components.magnus.host and .components.embermend.host==.components["embermend-postgres"].host and .components.embermend.host==.components["embermend-worker"].host and $release[0].components.embermend.initialization!=null else .components["embermend-worker"]==null and .components["embermend-postgres"]==null end) and
+    (if .components.embermend then .components.embermend.host==.console.host and .components.embermend.host==.components.oathweave.host and (.external.magnus!=null or .components.embermend.host==.components.magnus.host) and .components.embermend.host==.components["embermend-postgres"].host and .components.embermend.host==.components["embermend-worker"].host and $release[0].components.embermend.initialization!=null else .components["embermend-worker"]==null and .components["embermend-postgres"]==null end) and
     (if .components.ardentstudio then .components.ardentstudio.host==.console.host and .components.ardentstudio.host==.components.oathweave.host and
       (.components.magnus!=null or .external.magnus!=null) and .components.hivemem!=null else true end) and
     (if .components["magnus-gateway"] then .components.magnus!=null and .components["magnus-gateway"].host==.components.magnus.host else true end) and

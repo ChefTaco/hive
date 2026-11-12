@@ -268,12 +268,12 @@ hive_configure() {
     fi
     # A signed protocol declaration is required: a Magnus version alone does not
     # establish the optional managed remediation bridge. New installs opt in.
-    if jq -e '.components.embermend!=null and .components.magnus.embermendProtocol==1' "$HIVE_MANIFEST" >/dev/null && jq -ne --argjson selected "$selected_json" '$selected|index("magnus")!=null' >/dev/null; then
+    if jq -e '.components.embermend!=null and .components.magnus.embermendProtocol==1' "$HIVE_MANIFEST" >/dev/null && jq -ne --argjson selected "$selected_json" --arg external "$external_magnus" '($selected|index("magnus")!=null) or $external!=""' >/dev/null; then
       if jq -ne --argjson selected "$selected_json" '$selected|index("embermend")!=null' >/dev/null; then embermend_deploy=yes
       else hive_prompt embermend_deploy 'Deploy Embermend security assessment and remediation (yes/no)' no; fi
       if [[ "$embermend_deploy" == yes ]]; then
-        selected_json=$(jq -nc --argjson selected "$selected_json" --slurpfile release "$HIVE_MANIFEST" '
-          def dependencies: . as $before | ((. + [ .[] as $name|$release[0].components[$name].requiresLocal[]? ])|unique) as $after | if $after==$before then . else $after|dependencies end;
+        selected_json=$(jq -nc --argjson selected "$selected_json" --arg external "$external_magnus" --slurpfile release "$HIVE_MANIFEST" '
+          def dependencies: . as $before | ((. + [ .[] as $name|$release[0].components[$name].requiresLocal[]? | select(.!="magnus" or $external=="") ])|unique) as $after | if $after==$before then . else $after|dependencies end;
           ($selected+["embermend"])|dependencies')
       elif [[ "$embermend_deploy" != no ]]; then hive_die 'Answer yes or no'; fi
     fi
@@ -508,7 +508,9 @@ hive_manifest() {
     ($c.components|keys) as $selected |
     (if $c.console then $r.components.hivexui.kind=="static-ui" and $r.components.ingress.kind=="ingress" else all($selected[]; ($r.components[.].kind // "application")|IN("application","datastore")) end) and
     all($selected[]; $r.components[.] != null) and
-    all($selected[]; . as $name | all(($r.components[$name].requiresLocal // [])[]; . as $dependency | $c.components[$dependency].host==$c.components[$name].host)) and
+    all($selected[]; . as $name | all(($r.components[$name].requiresLocal // [])[]; . as $dependency |
+      if $name=="embermend" and $dependency=="magnus" and $c.external.magnus!=null then true
+      else $c.components[$dependency].host==$c.components[$name].host end)) and
     (if $c.profile=="custom" then true else all($r.profiles[$c.profile][]; . as $name | $selected|index($name)!=null) end)
   ' "$HIVE_MANIFEST" >/dev/null || hive_die 'Selected components do not match the release/profile'
   # The registry records an external Magnus against the release catalog, and the console uses
