@@ -1,5 +1,0 @@
-*
-!server.Dockerfile
-!entrypoint.mjs
-!health.mjs
-!*.tgz
