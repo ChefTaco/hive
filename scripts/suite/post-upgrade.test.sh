@@ -11,7 +11,13 @@ source "$ROOT/scripts/suite/controller.sh"
 source "$ROOT/scripts/suite/magnus-agent.sh"
 source "$ROOT/scripts/suite/console-clients.sh"
 source "$ROOT/scripts/suite/post-upgrade.sh"
+source "$ROOT/scripts/suite/setup-checklist.sh"
 calls=$temporary/calls
+# No registry here: no checklist is recorded unless a test sets one, and marks are recorded.
+recorded_checklist=''
+hive_checklist_recorded() { [[ -n "$recorded_checklist" ]] && printf '%s\n' "$recorded_checklist"; }
+hive_registry_write() { printf 'registry %s %s %s\n' "$1" "$2" "$3" >> "$calls"; }
+hive_checklist_certificate_unit=$temporary/no-such-unit
 HIVE_VERSION=9.9.9 HIVE_MANIFEST=$temporary/release.json HIVE_SIGNATURE=$temporary/release.json.sig HIVE_TRUST_KEY=$temporary/publisher.pub
 jq -n '{components:{magnus:{agentPackage:{name:"@hivemagnus/magnus-agent",version:"2.4.3",integrity:("sha512-"+("A"*86)+"==")}}}}' > "$HIVE_MANIFEST"
 agent_version=''
@@ -74,6 +80,42 @@ run '.components={hivemem:{host:"control"}} | .hosts={control:{target:"local",di
 [[ ! -s "$calls" ]] || fail 'An installation without Magnus or Oathweave ran a step'
 ! grep -q 'Ardent' "$temporary/output" || fail 'Ardent was listed without Magnus'
 printf 'Passed: post-upgrade agent upgrade paths, browser clients and the remaining-steps list.\n'
+
+# The setup checklist: each step post-upgrade finds done is marked done at once, and only items
+# the registry recorded with another status. Manual items stay pending and are listed.
+checklist_item() { jq -nc --arg id "$1" --arg status "$2" '{id:$id,title:("Item "+$id),status:$status,command:"./hive.sh post-upgrade",docs:"deployment/FULL.md#setup-checklist"}'; }
+recorded_checklist=$(jq -sc . <(checklist_item magnus-agent-enrolled pending) <(checklist_item oathweave-console-clients pending) <(checklist_item ardent-packages-updated pending) <(checklist_item certificate-renewal pending))
+touch "$temporary/unit"; hive_checklist_certificate_unit=$temporary/unit
+agent_version=2.4.2
+run '.components={magnus:{host:"control"},oathweave:{host:"control"},ingress:{host:"control"}} | .console={host:"control",nativeListeners:[{component:"magnus",port:4100}]} | .bootstrap={} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
+for id in magnus-agent-enrolled oathweave-console-clients certificate-renewal; do
+  grep -qx "registry PUT /v1/setup/items/$id {\"status\":\"done\"}" "$calls" || { cat "$calls" >&2; fail "post-upgrade did not mark $id done"; }
+done
+[[ $(grep -c '^registry ' "$calls") == 3 ]] || fail 'post-upgrade marked an item it did not complete'
+# The agent install is marked only after it ran.
+[[ $(grep -n 'magnus-agent install' "$calls" | cut -d: -f1) -lt $(grep -n 'setup/items/magnus-agent-enrolled' "$calls" | cut -d: -f1) ]] || fail 'The agent was marked before its install'
+grep -q 'Setup checklist: 1 pending' "$temporary/output" || { cat "$temporary/output" >&2; fail 'The remaining checklist item was not listed'; }
+grep -q 'ardent-packages-updated' "$temporary/output" || fail 'The Ardent item was not listed as pending'
+# A failed step is not marked; an item already done or skipped by hand is not rewritten as done twice.
+hive_post_upgrade_run() {
+  printf '%s\n' "$*" >> "$calls"
+  if [[ "$*" == 'magnus-agent status' ]]; then jq -n '{installedVersion:"2.4.2"}'; fi
+  [[ "$*" != 'magnus-agent install' && "$*" != 'console-clients add' ]]
+}
+recorded_checklist=$(jq -sc . <(checklist_item magnus-agent-enrolled pending) <(checklist_item oathweave-console-clients pending) <(checklist_item certificate-renewal done))
+run '.components={magnus:{host:"control"},oathweave:{host:"control"},ingress:{host:"control"}} | .console={host:"control"} | .bootstrap={} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
+! grep -q '^registry ' "$calls" || { cat "$calls" >&2; fail 'A failed step or a done item was marked'; }
+grep -q 'Setup checklist: 2 pending' "$temporary/output" || fail 'The failed steps were not listed as pending'
+# A registry without a checklist: nothing is written, and the output is as before.
+recorded_checklist=''
+run '.components={magnus:{host:"control"}} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
+! grep -q '^registry ' "$calls" || fail 'post-upgrade wrote to a registry without a checklist'
+! grep -q 'Setup checklist' "$temporary/output" || fail 'A checklist was listed without one recorded'
+printf 'Passed: post-upgrade marks the checklist items it completes, and only those.\n'
+hive_post_upgrade_run() {
+  printf '%s\n' "$*" >> "$calls"
+  if [[ "$*" == 'magnus-agent status' ]]; then jq -n --arg version "$agent_version" '{installedVersion:(if $version=="" then null else $version end)}'; fi
+}
 
 # The real runner passes the installation, release and confirmation to its own controller process.
 unset -f hive_post_upgrade_run

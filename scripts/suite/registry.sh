@@ -112,7 +112,7 @@ hive_registry_refresh_ingress() {
 hive_registry_body() {
   local phase=$1 status=$2
   jq -n --slurpfile config "$HIVE_CONFIG" --slurpfile release "$HIVE_MANIFEST" --arg phase "$phase" --arg status "$status" --arg operation "${HIVE_OPERATION:-install}" \
-    --arg version "$HIVE_VERSION" --arg digest "$HIVE_MANIFEST_DIGEST" --arg plan "$HIVE_PLAN_DIGEST" '
+    --arg version "$HIVE_VERSION" --arg digest "$HIVE_MANIFEST_DIGEST" --arg plan "$HIVE_PLAN_DIGEST" --argjson setup "${HIVE_CHECKLIST:-null}" '
     $config[0] as $c | $release[0] as $r |
     def identity: split("@")[1];
     def product_version($name): $r.components[$name].version // $r.version;
@@ -137,7 +137,9 @@ hive_registry_body() {
        (($c.external // {})|to_entries|map(.key as $name|$r.components[$name].catalog.connection as $connection|{
          id:$name,status:"external",
          connection:({consolePath:$connection.consolePath,browserPrefix:$connection.browserPrefix,
-           nativeApis:($connection.nativeApis|map_values($c.origin+.)),internalEndpoints:{api:.value.url}}+capabilities($r.components[$name].catalog))})))}'
+           nativeApis:($connection.nativeApis|map_values($c.origin+.)),internalEndpoints:{api:.value.url}}+capabilities($r.components[$name].catalog))})))} +
+    # The setup checklist, only when hive_checklist_prepare decided one for this install or upgrade.
+    (if $setup then {setup:{items:$setup}} else {} end)'
 }
 
 hive_registry_write() {
@@ -154,6 +156,8 @@ hive_registry_begin() {
   host=$(hive_registry_host)
   user=$(jq -er '.components["hive-registry"].service.user' "$HIVE_MANIFEST")
   hive_registry_action "$host" registry-start "$(jq -nc --arg user "$user" '{serviceUser:$user}')" || return 1
+  # Read before this sync records the new release, so release items can tell an upgrade apart.
+  hive_checklist_prepare
   hive_registry_write POST /v1/sync "$(hive_registry_body begin activating)" >/dev/null
 }
 
@@ -226,7 +230,8 @@ hive_registry_report() {
        [$used[]|select(. as $name|$external|index($name)|not)|drift("external-not-configured";.+" is recorded as external but the configuration does not name it")] +
        [$active[]|select(.catalog!=null)|.catalog[]|. as $signed|($catalog|map(select(.id==$signed.id))|first) as $entry|
           select(($entry|not) or ($entry.offered!=true) or (($entry.versions|any(.image==$signed.image and .storageFormat==$signed.storageFormat))|not))|drift("catalog-mismatch";$signed.id+" differs from the signed release catalog")]) as $drift |
-      {state:(if ($drift|length)==0 then "in-sync" else "drift" end),release:$summary.release.version,products:($recorded|length),externallyManaged:($recorded|map(select(.source=="external" or .installation.status=="external")|.id)),drift:($drift|unique)}
+      {state:(if ($drift|length)==0 then "in-sync" else "drift" end),release:$summary.release.version,products:($recorded|length),externallyManaged:($recorded|map(select(.source=="external" or .installation.status=="external")|.id)),drift:($drift|unique)} +
+      (if $summary.setup then {setup:{items:$summary.setup.items,pending:($summary.setup.items|map(select(.status=="pending")|.id))}} else {} end)
     end'
 }
 

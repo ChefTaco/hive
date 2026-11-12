@@ -76,6 +76,45 @@ A durable journal binds each migration to its exact signed product specification
 or uncertain attempt is reconciled by that product's verifier; it is never blindly replayed.
 Automatic migrations on ordinary application startup remain disabled.
 
+## Setup checklist
+
+Some steps after an install or upgrade still need a person. The controller records them in the
+[Hive Registry](../docs/hive-registry-api.md#setup-checklist) with the install or upgrade, from the
+installation file and the selected products, and HiveXUI shows them to administrators with a
+nudge while any is pending. `./hive.sh status` lists the pending items after its JSON, on standard
+error, and in `.registry.setup` of the registry host's JSON:
+
+```text
+Setup checklist: 2 pending (settle one by hand with ./hive.sh setup done ID or ./hive.sh setup skip ID):
+  - magnus-agent-enrolled: Install the Magnus agent on the Magnus host
+      ./hive.sh magnus-agent install
+      See deployment/FULL.md#installing-the-agent
+```
+
+| Item | Listed when | Recorded by | Done when |
+| --- | --- | --- | --- |
+| `magnus-agent-enrolled` | Install and upgrade, with Magnus and a [host agent port](#magnus-host-agents) | Install, upgrade | `post-upgrade` finds the agent at the release's pinned version, or installs it (`./hive.sh magnus-agent install`). HiveXUI's check `magnus.agent` |
+| `oathweave-console-clients` | Upgrade, with Oathweave, the console and Magnus (or an external Magnus), Embermend or Ardent Project Studio | Upgrade | `post-upgrade` runs `./hive.sh console-clients add`. Check `oathweave.console-client` |
+| `ardent-packages-updated` | Upgrade, with Magnus or an external Magnus | Upgrade | You update the Ardent packages in HiveXUI (Magnus > Ardent > Installations), then `./hive.sh setup done ardent-packages-updated` |
+| `certificate-renewal` | Install and upgrade, on a fresh installation whose console host is this machine | Install, upgrade | A renewal timer exists (`sudo ./scripts/console-certificate.sh schedule --config FILE`, see [QUICKSTART](QUICKSTART.md#9-keep-the-certificate-current)); found at the next upgrade or `post-upgrade`. Skip it when you renew another way |
+| `first-admin` | Fresh install with Oathweave | Install | You sign in with the initial operator, create your own administrator account and use it from then on, then `./hive.sh setup done first-admin`. Check `iam.first-admin` |
+
+The Magnus agent, browser client and Ardent items belong to a release: after an upgrade to
+another release, one that was done is pending again. The certificate and first administrator are
+settled once. A skipped item stays skipped. Settle any item by hand:
+
+```bash
+./hive.sh setup                  # every recorded item: status, ID, title and command
+./hive.sh setup done first-admin
+./hive.sh setup skip certificate-renewal
+```
+
+`./hive.sh post-upgrade` marks each item it completes as done at once, and lists the items still
+pending at its end. A step HiveXUI finds done while the registry still says pending shows as
+"looks done"; run `post-upgrade` or `setup done ID` to record it. The checklist needs the Hive
+Registry 1.3.0 or later, which the release pins; with an earlier registry, nothing is recorded and
+the commands above say so.
+
 ## Magnus web terminal
 
 The browser terminal gives a person a shell on a fleet node, so it is off in every

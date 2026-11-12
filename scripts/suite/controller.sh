@@ -18,7 +18,7 @@ hive_runtime_files() {
     scripts/suite/migrate-native.sh scripts/suite/migrate-native-host.sh scripts/suite/migrate-native-data.mjs scripts/suite/set-admin-password.sh \
     scripts/suite/cindertrace.sh scripts/suite/cindertrace-host.sh scripts/suite/ownership-host.sh \
     scripts/suite/magnus-agent.sh scripts/suite/magnus-agent-host.sh scripts/suite/ardent-enrollment.mjs scripts/suite/node-enrollment.mjs scripts/suite/terminal-authority.mjs \
-    scripts/suite/console-clients.sh scripts/suite/console-clients-host.sh scripts/suite/post-upgrade.sh
+    scripts/suite/console-clients.sh scripts/suite/console-clients-host.sh scripts/suite/post-upgrade.sh scripts/suite/setup-checklist.sh
 }
 hive_controller_digest() {
   local file
@@ -87,7 +87,7 @@ hive_setup_hosts_ready() {
 
 hive_usage() {
   cat <<'EOF'
-Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|console-clients]
+Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|console-clients]
   --config FILE          Installation JSON. Commands other than install, init and plan find
                          it themselves when there is exactly one under ~/.config/hive (or
                          $XDG_CONFIG_HOME/hive), or when HIVE_INSTALLATION names it
@@ -143,7 +143,11 @@ act only when named. --hold-on-failure keeps a failed cutover running for inspec
 See deployment/MIGRATE_NATIVE.md.
 post-upgrade [--yes] finishes an upgrade: it upgrades Magnus host agents that run an older version
 than the release, adds missing HiveXUI browser clients to Oathweave, and lists the remaining
-steps, such as updating Ardent packages in HiveXUI. Each change is shown and confirmed first.
+steps, such as updating Ardent packages in HiveXUI. Each change is shown and confirmed first. It
+marks the setup checklist items it finishes as done.
+setup [list] | setup done ID | setup skip ID shows and settles the setup checklist: the steps after an
+install or upgrade that still need a person, recorded in the Hive Registry (1.3.0 and later) and shown
+in HiveXUI. status lists the pending ones. See deployment/FULL.md#setup-checklist.
 No arguments starts interactive configuration. Planning does not contact hosts.
 Secrets belong in protected environment/configuration files, never CLI arguments.
 EOF
@@ -715,7 +719,7 @@ hive_main() {
   HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_ALLOW_MIGRATIONS=false HIVE_RELAX_AUTH_LIMITS=false HIVE_BACKUP_STOPPED=false
   HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY='' HIVE_CINDERTRACE_SOURCES='' HIVE_AGENT_TARGET='' HIVE_AGENT_SSH_CONFIG='' HIVE_AGENT_SUDO_FILE='' HIVE_AGENT_INSTALL_NODE=false HIVE_AGENT_TRUST=false
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
-  HIVE_RELEASE_SUMMARY='' HIVE_REGISTRY_FILE='' HIVE_REGISTRY_ORIGINAL_CONFIG='' HIVE_REGISTRY_TEMPORARY='' HIVE_OPERATION=''
+  HIVE_RELEASE_SUMMARY='' HIVE_REGISTRY_FILE='' HIVE_REGISTRY_ORIGINAL_CONFIG='' HIVE_REGISTRY_TEMPORARY='' HIVE_OPERATION='' HIVE_CHECKLIST=''
   local -a registry_arguments=() trust_arguments=()
   if (($#)) && [[ "$1" != --* ]]; then command=$1; shift; fi
   while (($#)); do
@@ -761,14 +765,14 @@ hive_main() {
       *)
         [[ "$1" != --* ]] || hive_die 'Unknown option'
         case "$command" in
-          registry|migrate-native|cindertrace-collector|magnus-agent|console-clients) registry_arguments+=("$1");;
+          registry|migrate-native|cindertrace-collector|magnus-agent|console-clients|setup) registry_arguments+=("$1");;
           magnus-trust) trust_arguments=("$1" "${trust_arguments[@]}");;
           *) hive_die 'Unknown option';;
         esac
         shift;;
     esac
   done
-  case "$command" in init|plan|install|status|doctor|upgrade|post-upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|console-clients) ;; *) hive_die 'Unknown command';; esac
+  case "$command" in init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|console-clients) ;; *) hive_die 'Unknown command';; esac
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
     case "$command" in plan|install|upgrade) ;; *) hive_die '--relax-auth-limits applies only to plan, install and upgrade';; esac
   fi
@@ -826,7 +830,10 @@ hive_main() {
           if [[ -f "$directory/compose.json" ]]; then authLimits=$(jq -c "[.services|to_entries[]|select(.value.environment.RELAX_AUTH_LIMITS==\"true\")|.key]|sort|{relaxed:(length>0),products:.}" "$directory/compose.json"); fi;
           jq -n --arg host "$(jq -r .host <<< "$input")" --argjson containers "$containers" --argjson agents "$agents" --argjson authLimits "$authLimits" "{schema:1,host:\$host,authLimits:\$authLimits,containers:\$containers,nativeAgents:\$agents}"'; } |
           if [[ "$host" == "$registry_host" ]]; then jq --argjson registry "$registry_report" '.registry=$registry'; else cat; fi
-      done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG"); return;;
+      done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
+      # The JSON above stays machine-readable; the pending setup items are for the operator.
+      hive_checklist_print_pending "$(jq -c '.setup.items // []' <<< "$registry_report")" >&2
+      return;;
     doctor)
       hive_registry_preflight; hive_registry_doctor; return;;
     registry) hive_registry_command "${registry_arguments[@]}"; return;;
@@ -836,6 +843,7 @@ hive_main() {
     cindertrace-collector) hive_need openssl; hive_need sha256sum; hive_manifest; hive_cindertrace_collector "${registry_arguments[@]}"; return;;
     magnus-agent) hive_need openssl; hive_need sha256sum; hive_manifest; HIVE_CONFIRMED=$confirmed hive_magnus_agent "${registry_arguments[@]}"; return;;
     console-clients) HIVE_CONFIRMED=$confirmed hive_console_clients "${registry_arguments[@]}"; return;;
+    setup) hive_checklist_command "${registry_arguments[@]}"; return;;
     post-upgrade) hive_need openssl; hive_need sha256sum; hive_manifest; HIVE_CONFIRMED=$confirmed hive_post_upgrade; return;;
   esac
   hive_need openssl; hive_need sha256sum; hive_manifest

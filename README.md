@@ -74,6 +74,12 @@ unattended. Use the exact version setup reported for repeatable planning and app
 ./hive.sh doctor  --config ~/.config/hive/ID/installation.json
 ```
 
+Install and upgrade end with the steps that still need a person, such as the Magnus host agent or
+the certificate renewal timer. The Hive Registry records them as the
+[setup checklist](deployment/FULL.md#setup-checklist), HiveXUI shows them to administrators,
+`status` lists the pending ones, `post-upgrade` marks those it completes, and
+`./hive.sh setup done ID` or `./hive.sh setup skip ID` settles one by hand.
+
 See the [deployment guide](deployment/README.md) for fresh setup, the [full profile](deployment/FULL.md),
 [distributed](deployment/DISTRIBUTED.md) and [custom](deployment/CUSTOM.md) placements, existing
 installations ([`hive.sh migrate-native`](deployment/MIGRATE_NATIVE.md)) and native agents. Suite

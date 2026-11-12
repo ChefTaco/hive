@@ -173,7 +173,10 @@ following steps 5–10. Keep that directory: certificate renewal timers refer to
 ```
 
 `status` lists each container with its state and health, and `doctor` ends with
-`Hive Registry: in sync with this installation`.
+`Hive Registry: in sync with this installation`. After its JSON, `status` lists the
+[setup checklist](FULL.md#setup-checklist) items still pending, such as the certificate renewal
+below; `install` and `upgrade` end with the same list, and HiveXUI shows it to administrators.
+`./hive.sh setup done ID` or `./hive.sh setup skip ID` settles one by hand.
 
 `--config` is optional for every command except `install`, `init` and `plan`, which set up or
 preview an installation. When `~/.config/hive` holds
@@ -194,6 +197,10 @@ a section for each installed product. Add a second factor, a passkey or an authe
 under **Oathweave > Account security**. Keep the file owner-only and leave it where it is: never
 edit or remove files under `/opt/hive/config`, because the installer checks their digests when a
 command is repeated.
+
+Then create your own administrator account and use it from then on, keeping the initial operator
+for recovery. HiveXUI's setup checklist confirms this item once such an account exists; record it
+with `./hive.sh setup done first-admin`.
 
 ## 7. Back up
 
@@ -265,8 +272,13 @@ must not enable commands, cron or web terminals on an intentionally limited node
 [Magnus host agents](FULL.md#magnus-host-agents) for enrollment review and other hosts.
 
 Update Ardent packages in HiveXUI under Magnus > Ardent > Installations: stop running profiles,
-choose Update package, then start them again. Update agents on other fleet hosts separately,
+choose Update package, then start them again, and record it with
+`./hive.sh setup done ardent-packages-updated`. Update agents on other fleet hosts separately,
 and check certificate renewal when nothing renews the certificate.
+
+From the Hive Registry 1.3.0, the upgrade records these steps in the
+[setup checklist](FULL.md#setup-checklist), and `./hive.sh post-upgrade` marks each one it
+completes as done; `./hive.sh status` lists what is still pending.
 
 **Published controller compatibility:** releases 3.2.0 and 3.2.1 include `post-upgrade`, but on a
 single-host installation that command can request full-node enrollment. Use the individual

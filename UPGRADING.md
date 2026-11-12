@@ -15,6 +15,17 @@ below, and so does moving an installation with Emberpath or HiveSkills from a re
 delete transaction or runtime receipts to force another attempt. See also
 [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
 
+## The setup checklist
+
+From the Hive Registry 1.3.0, an upgrade records the steps that follow it, such as the Magnus host
+agent, the HiveXUI browser clients and the Ardent packages, in the registry's
+[setup checklist](deployment/FULL.md#setup-checklist). After the upgrade, run
+`./hive.sh post-upgrade`: it marks each step it completes as done and lists the rest, which
+`./hive.sh status` and HiveXUI show too. Settle a step you finished another way with
+`./hive.sh setup done ID`, or one that does not apply with `./hive.sh setup skip ID`. An
+installation upgraded from a registry before 1.3.0 gets its first checklist with that upgrade.
+The registry keeps it without a migration, so the upgrade needs no `--allow-migrations` for it.
+
 ## Suite 3.5: event feeds and a new controller
 
 Suite 3.5.0 changes no product data format. Emberpath 2.3.0 and HiveSkills 1.6.0 keep the formats
