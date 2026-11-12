@@ -212,7 +212,30 @@ grep -q '^:4200 {' "$config/native-listeners.caddy" && grep -q 'reverse_proxy ht
 grep -q 'reverse_proxy https://hivemem:18790' "$config/native-listeners.caddy" || fail 'Memory listener'
 grep -q '^:4030 {' "$config/native-listeners.caddy" || fail 'Skills listener'
 ! grep -qE '^:(4100|9090) ' "$config/native-listeners.caddy" || fail 'Ports owned by other services are never taken'
-grep -q 'handle /v1/\*' "$config/native-routes.caddy" && grep -A1 'handle /v1/\*' "$config/native-routes.caddy" | grep -q HIVEMEM_ENDPOINT || fail '/v1 on the console port is the memory API on a migrated installation'
+# The console port keeps HiveMem's own /v1 routes; the rest of /v1 is the model API, as on a fresh install.
+! grep -q 'handle /v1/\*' "$config/native-routes.caddy" || fail 'The overlay must not shadow the model API at /v1'
+grep -A1 'handle @native_memory' "$config/native-routes.caddy" | grep -q HIVEMEM_ENDPOINT || fail 'HiveMem /v1 routes on the console port reach HiveMem'
+grep -A1 'handle /v1/\* {' "$ROOT/deployment/Caddyfile" | grep -q EMBERPATH_API_ENDPOINT || fail 'The base Caddyfile serves the model API at /v1'
+# Caddy path patterns here are exact or end in /*, which matches the prefix and anything under it.
+memory_route() {
+  local line pattern patterns
+  while IFS= read -r line; do
+    read -r -a patterns <<< "$line"
+    for pattern in "${patterns[@]}"; do
+      [[ "$1" == "$pattern" || ( "$pattern" == */\* && "$1" == "${pattern%\*}"* ) ]] && return 0
+    done
+  done < <(sed -n '/^@native_memory {/,/^}/s/^\tpath //p' "$config/native-routes.caddy")
+  return 1
+}
+for path in /v1/memories /v1/memories/search /v1/memories/abc/graph /v1/health/ready /v1/stats /v1/chat /v1/context /v1/embed \
+  /v1/sessions/abc/chat /v1/auth/login /v1/agents/register /v1/workspaces/w1/members /v1/peers/p1/card /v1/queue/status \
+  /v1/actor-credentials /v1/webhooks/deliveries /v1/admin/audit /v1/episodes/e1/messages; do
+  memory_route "$path" || fail "HiveMem route $path on the console port must reach HiveMem"
+done
+for path in /v1/models /v1/chat/completions /v1/completions /v1/embeddings /v1/responses /v1/traits/fast/responses \
+  /v1/traits/fast/chat/completions /v1/audio/transcriptions /v1/images/generations /v1/moderations /v1/unknown; do
+  ! memory_route "$path" || fail "Model API route $path on the console port must fall through to Emberpath"
+done
 grep -q 'import /config/native-routes\*.caddy' "$ROOT/deployment/Caddyfile" && grep -q 'import /config/native-listeners\*.caddy' "$ROOT/deployment/Caddyfile" || fail 'Fresh installs import nothing extra; migrated ones import these'
 [[ $(stat -c %a "$config/native/4200.key") == 600 ]] || fail 'Private keys stay owner-only'
 source "$ROOT/scripts/suite/controller.sh"

@@ -10,6 +10,15 @@ All notable changes to this project are documented in this file. The format is b
 
 - `hive.sh console-clients add` now marks the `oathweave-console-clients` setup checklist item done,
   as `post-upgrade` already did.
+- On an installation migrated with `hive.sh migrate-native`, the generated ingress overlay
+  `native-routes.caddy` sent all of `/v1/*` on the console port to HiveMem, as the native Router's
+  admin plane did, which hid the base Caddyfile's `/v1` route to Emberpath's OpenAI-compatible API
+  (`/v1/models`, `/v1/chat/completions`, `/v1/embeddings` and the rest). The overlay now sends only
+  HiveMem's own `/v1` routes there (its top-level API paths, with `/v1/chat` matched exactly), so
+  existing HiveMem clients on the console port keep working and the model API answers at `/v1` as on
+  a fresh install. `migrate-native prepare` and `migrate-native tls-refresh` write the overlay, so an
+  installation migrated earlier picks this up at its next `tls-refresh` with the new controller. This
+  changes the controller, so it ships with the next suite release.
 
 ## [3.6.0] - 2026-11-12
 

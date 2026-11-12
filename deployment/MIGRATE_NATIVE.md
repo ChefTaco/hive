@@ -53,7 +53,8 @@ On port 443 a migrated installation keeps what the native Router served:
 
 | Path | Reaches |
 | --- | --- |
-| `/v1/*`, `/dashboard` | **HiveMem**, as the native Router proxied them. A fresh suite sends `/v1/*` to the model API; a migrated one must not |
+| HiveMem's own `/v1` routes (`/v1/memories`, `/v1/sessions`, `/v1/auth`, `/v1/health`, `POST /v1/chat` and the rest of its API), `/dashboard` | **HiveMem**, as the native Router proxied them |
+| Every other `/v1/*` path (`/v1/models`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/responses` and the rest of the OpenAI-compatible API) | Emberpath's model API, as on a fresh suite. The native Router answered these from HiveMem, which has no such routes; port 4020 serves them as before |
 | `/health`, `/health/*`, `/api/*` not owned by a suite product | Emberpath's admin plane, including `/api/security/events` |
 
 Ports owned by other services on the host are left alone. `plan` lists what it found. Add a
