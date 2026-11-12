@@ -3,9 +3,9 @@ import { test } from 'node:test';
 import { classifyEvent, parseRawDiff, recoveryScope } from './ci-recovery-scope.mjs';
 const change = (path, extra = {}) => ({ path, status: 'M', oldMode: '100644', newMode: '100644', ...extra });
 
-test('only presentation-only PR changes select the small corpus', () => {
-  assert.equal(recoveryScope([change('services/hive-router/ui/src/App.tsx'), change('README.md')]).full, false);
-  for (const path of ['hive.sh', 'scripts/suite/snapshot-data.mjs', 'deployment/Caddyfile', 'releases/2.4.0.json', '.github/workflows/hive-ci.yml', 'package.json', 'services/hive-router/ui/package-lock.json', 'services/hive-router/src/contracts/iam.ts', 'services/hive-router/prisma/schema.prisma', 'services/hive-mem/ts-core/src/index.ts', 'unknown/file', 'services/hive-router/ui/src/../src/App.tsx']) {
+test('only prose-only PR changes select the small corpus', () => {
+  assert.equal(recoveryScope([change('CONTRIBUTING.md'), change('README.md')]).full, false);
+  for (const path of ['hive.sh', 'scripts/suite/snapshot-data.mjs', 'deployment/Caddyfile', 'releases/2.4.0.json', '.github/workflows/hive-ci.yml', 'package.json', 'services/hive-registry/src/app.ts', 'docs/RELEASING.md', 'unknown/file', 'docs/../README.md']) {
     assert.equal(recoveryScope([change(path)]).full, true, path);
     assert.equal(recoveryScope([change('README.md'), change(path)]).full, true, path);
   }
