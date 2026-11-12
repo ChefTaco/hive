@@ -182,7 +182,7 @@
     "capabilities": {
       "events.v1": {
         "path": "/v1/hive/events",
-        "since": null
+        "since": "1.6.0"
       }
     }
   },
@@ -211,7 +211,7 @@
     "capabilities": {
       "events.v1": {
         "path": "/hive/events",
-        "since": null
+        "since": "2.8.0"
       }
     }
   },
@@ -297,7 +297,7 @@
     "capabilities": {
       "events.v1": {
         "path": "/hive/events",
-        "since": null
+        "since": "0.5.0"
       }
     }
   },
@@ -445,7 +445,7 @@
     "capabilities": {
       "events.v1": {
         "path": "/api/v1/hive/events",
-        "since": null
+        "since": "0.2.0"
       }
     }
   },

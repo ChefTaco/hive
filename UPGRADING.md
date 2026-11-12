@@ -9,12 +9,33 @@ A suite installation upgrades to a newer signed release with the release's own c
 The launcher checks out and verifies the tagged controller of that release. The upgrade prints its
 plan, takes a verified pre-change backup and rehearses data changes on a copy before activation.
 Moving from 2.x to 3.x with existing PostgreSQL stores also needs `--allow-migrations`, described
-below, and so does moving an installation with Emberpath or HiveSkills to 3.4.0. A failed or uncertain step holds its transaction for recovery, as described in
+below, and so does moving an installation with Emberpath or HiveSkills from a release before
+3.4.0 to 3.4.0 or later. A failed or uncertain step holds its transaction for recovery, as described in
 [when a command stops](deployment/README.md#when-a-command-stops-transactions-and-recovery); never
 delete transaction or runtime receipts to force another attempt. See also
 [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
 
-## Suite 3.4: Emberpath and HiveSkills data formats
+## Suite 3.5: event feeds and a new controller
+
+Suite 3.5.0 changes no product data format. Emberpath 2.3.0 and HiveSkills 1.6.0 keep the formats
+3.4.0 introduced, and Magnus 2.8.0, Cindertrace 0.5.0 and Embermend 0.2.0 add no database
+migration, so an installation on 3.4.0 upgrades without `--allow-migrations`:
+
+```bash
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.5.0
+```
+
+An installation on a release before 3.4.0 that includes Emberpath or HiveSkills still needs
+`--allow-migrations`, for the 3.4.0 transitions described below.
+
+Unlike 3.3.0 and 3.4.0, this release has its own controller: the ingress allows the new Magnus
+browser routes, and the registry sync records product capabilities. The launcher selects the 3.5.0
+controller for `--release 3.5.0`; the 3.4.0 controller refuses the 3.5.0 manifest. The upgrade
+replaces the Hive Registry with 1.2.0 (image 2.0.6), which records the `events.v1` capability that
+Magnus, Cindertrace, HiveSkills and Embermend now declare, and HiveXUI 0.6.0 reads it to build its
+inbox. Emberpath 2.3.0 and HiveSkills 1.6.0 no longer serve their own web UIs; their APIs are
+unchanged.
+
 
 Emberpath 2.2.0 adds its router data format `managed-format-2`: a nullable `Trace.actorId`
 column with actor and client-key time indexes. HiveSkills 1.5.0 adds `managed-format-3`: a side
