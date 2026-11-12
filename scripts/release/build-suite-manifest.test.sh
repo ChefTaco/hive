@@ -107,6 +107,23 @@ jq -e --slurpfile old "$temporary/original.json" --slurpfile pinned "$temporary/
   .components["magnus-postgres"].version=="17.11" and .components["cindertrace-postgres"].version=="18.6"
 ' "$temporary/runtime.json" >/dev/null || { echo 'The hardened datastore migration contract is incomplete' >&2; exit 1; }
 node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --check --inputs "$temporary/runtime-inputs.json" --output "$temporary/runtime.json" >/dev/null
+# A patched library selects new immutable images without rewriting historical tags or
+# changing the already reviewed collation/storage transition.
+node --input-type=module - "$root/scripts/suite/release-contracts.mjs" <<'NODE'
+import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
+const { datastoreProfileReferences: references } = await import(pathToFileURL(process.argv[2]));
+const old = references('runtime-2026-11'), patched = references('runtime-2026-11-xslt');
+assert.equal(old['datastore:postgres17'].image, 'ghcr.io/cheftaco/hive-postgres:17.11-3');
+assert.equal(old['datastore:postgres18'].image, 'ghcr.io/cheftaco/hive-postgres:18.6-3');
+assert.equal(patched['datastore:postgres17'].image, 'ghcr.io/cheftaco/hive-postgres:17.11-4');
+assert.equal(patched['datastore:postgres18'].image, 'ghcr.io/cheftaco/hive-postgres:18.6-4');
+assert.deepEqual(patched['datastore:redis'], old['datastore:redis']);
+assert.deepEqual(patched['datastore:qdrant'], old['datastore:qdrant']);
+NODE
+jq '.datastoreProfile="runtime-2026-11-xslt"' "$temporary/runtime-inputs.json" > "$temporary/patched-inputs.json"
+node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/patched-inputs.json" --pinned "$temporary/runtime-pinned.json" --output "$temporary/patched.json" >/dev/null
+cmp "$temporary/runtime.json" "$temporary/patched.json" || { echo 'The library patch changed the storage or product contract' >&2; exit 1; }
 for profile in unknown legacy null; do
   jq --arg profile "$profile" '.datastoreProfile=(if $profile=="null" then null else $profile end)' "$temporary/runtime-inputs.json" > "$temporary/bad-inputs.json"
   if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/runtime-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An unknown datastore profile passed' >&2; exit 1; fi

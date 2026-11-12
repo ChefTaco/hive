@@ -24,7 +24,7 @@ when run from any other controller source, so install from a checkout of the rel
 1. **Release the products.** Each product repository publishes its own multi-architecture image
    from its own version tag. Record the exact tags in `releases/X.Y.Z.inputs.json`. The input file
    lists the platforms each image must provide. Releases that adopt the patched datastore
-   runtime set `"datastoreProfile": "runtime-2026-11"`. This selects the reviewed Redis,
+   runtime set `"datastoreProfile": "runtime-2026-11-xslt"`. This selects the reviewed Redis,
    Qdrant and PostgreSQL tags in `release-contracts.mjs`; older inputs retain their
    historical pins. PostgreSQL receives a new storage format and the explicit offline
    collation migration, so adoption requires the normal backup and rehearsal workflow.
@@ -95,7 +95,7 @@ verifiable with the key in their own tag.
 
 Suite 3.2.0 can initialize a newly selected Embermend PostgreSQL store before
 recording its storage format. Later configuration changes correctly refuse that
-unversioned data. Suite 3.2.1 explicitly selects
+unversioned data. Suite 3.2.2 explicitly selects
 `storageRecovery: "embermend-postgres-runtime2-unversioned"` in its signed inputs.
 The ordinary backed-up, rehearsed upgrade with `--allow-migrations` verifies the
 existing PostgreSQL 18 major, exact runtime collation receipt and offline data
@@ -104,3 +104,9 @@ credentials or marks arbitrary existing data as new. Failed verifiers retain the
 held upgrade for reviewed recovery. Existing correctly registered stores need no
 storage transition. New additions record their proven format before initialization.
 Historical signed release bytes remain unchanged.
+
+Suite 3.2.1 remains a retained failed release tag: a fresh security scan rejected
+its PostgreSQL libxslt dependency before publication. Suite 3.2.2 selects the new
+`runtime-2026-11-xslt` image profile. The earlier profile and signed manifests keep
+their original pins. This library patch preserves the major, collation identity and
+storage format; the explicit unversioned-store recovery remains separately verified.

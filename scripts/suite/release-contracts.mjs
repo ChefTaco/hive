@@ -25,6 +25,12 @@ export const DATASTORE_RELEASE_PROFILES = Object.freeze({
     postgres17: { image: 'ghcr.io/cheftaco/hive-postgres:17.11-3', version: '17.11' },
     postgres18: { image: 'ghcr.io/cheftaco/hive-postgres:18.6-3', version: '18.6' },
   }),
+  'runtime-2026-11-xslt': Object.freeze({
+    redis: { image: 'ghcr.io/cheftaco/hive-redis:8.2.10-2', version: '8.2.10' },
+    qdrant: { image: 'ghcr.io/cheftaco/hive-qdrant:1.18.3-3', version: '1.18.3' },
+    postgres17: { image: 'ghcr.io/cheftaco/hive-postgres:17.11-4', version: '17.11' },
+    postgres18: { image: 'ghcr.io/cheftaco/hive-postgres:18.6-4', version: '18.6' },
+  }),
 });
 const DATASTORE_COMPONENTS = Object.freeze({
   redis: ['oathweave-redis', 'magnus-redis', 'cindertrace-redis'],
