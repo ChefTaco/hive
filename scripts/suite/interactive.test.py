@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     catalog = json.loads((root / 'scripts/suite/suite-catalog.json').read_text())
     def with_catalog(document):
         for name, component in document['components'].items():
-            component['catalog'] = catalog[name]
+            component['catalog'] = {key: value for key, value in catalog[name].items() if key != 'capabilities'}
         document['components']['hive-registry']['storageFormat'] = 'hive-registry-v1'
         return document
     release = base / 'release.json'

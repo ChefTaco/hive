@@ -178,6 +178,12 @@
       "internalEndpoints": {
         "api": "https://hiveskills:4030"
       }
+    },
+    "capabilities": {
+      "events.v1": {
+        "path": "/v1/hive/events",
+        "since": null
+      }
     }
   },
   "magnus": {
@@ -200,6 +206,12 @@
       "nativeApis": {},
       "internalEndpoints": {
         "api": "https://magnus:4000"
+      }
+    },
+    "capabilities": {
+      "events.v1": {
+        "path": "/api/v1/hive/events",
+        "since": null
       }
     }
   },
@@ -280,6 +292,12 @@
       },
       "internalEndpoints": {
         "api": "https://cindertrace:4101"
+      }
+    },
+    "capabilities": {
+      "events.v1": {
+        "path": "/api/v1/hive/events",
+        "since": null
       }
     }
   },
