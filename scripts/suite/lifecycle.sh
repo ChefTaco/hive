@@ -80,6 +80,8 @@ hive_lifecycle() {
   case "$operation" in install|upgrade|rollback|adopt|rehearse) hive_registry_provision;; esac
   # Before the pre-change backup and the staged input pins, like the registry credentials.
   case "$operation" in install|upgrade) hive_memory_credential_provision;; esac
+  # Cindertrace collects the suite audit exports with Oathweave clients declared the same way.
+  case "$operation" in install|upgrade) hive_audit_collection_provision;; esac
   case "$operation" in upgrade|rollback) hive_registry_refresh_ingress;; esac
   case "$operation" in install|upgrade|rollback|adopt|rehearse) hive_doctor;; *) hive_registry_preflight;; esac
   case "$operation" in

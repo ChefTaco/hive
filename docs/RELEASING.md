@@ -17,7 +17,12 @@ The service contracts come from `scripts/suite/release-contracts.mjs` and the ca
 `scripts/suite/suite-catalog.json`. A catalog entry's `capabilities` name the first product version
 that serves each one (`since`); a manifest carries a capability only for a component pinned at that
 version or newer, so set `since` when the product release that serves it is published. Suite 3.5.0 is the first release to
-carry one (`events.v1` from Magnus 2.8.0, Cindertrace 0.5.0, HiveSkills 1.6.0 and Embermend 0.2.0). The developer proofs build their manifests from the same code,
+carry one (`events.v1` from Magnus 2.8.0, Cindertrace 0.5.0, HiveSkills 1.6.0 and Embermend 0.2.0).
+In the same way, `hive_audit_collection_releases` in `scripts/suite/audit-collection.sh` names the
+first version of Cindertrace, HiveMem, HiveSkills, Ardent Project Studio and Embermend that collects
+or serves the suite audit export; `null` configures nothing for that product. Set each one in the
+release that first pins it. That file is a controller runtime file, so this changes the controller
+digest. The developer proofs build their manifests from the same code,
 so a release ships the contracts they exercised. `controllerSHA256` is the digest of the controller
 runtime files (`hive_runtime_files` in `scripts/suite/controller.sh`); `hive.sh` refuses the manifest
 when run from any other controller source, so install from a checkout of the release tag.

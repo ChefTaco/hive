@@ -26,6 +26,22 @@ agent, the HiveXUI browser clients and the Ardent packages, in the registry's
 installation upgraded from a registry before 1.3.0 gets its first checklist with that upgrade.
 The registry keeps it without a migration, so the upgrade needs no `--allow-migrations` for it.
 
+## Suite audit collection
+
+From the release that pins a Cindertrace whose collector reads the suite audit export, an upgrade
+of an installation with Cindertrace configures [suite audit collection](deployment/FULL.md#suite-audit-collection)
+for each included product whose pinned version serves the export: an Oathweave machine client
+per product with a generated secret, the product setting that accepts it, and Cindertrace's
+collector settings with the `suite-audit` collector credential. It adds settings only, keeps every
+existing client, link, grant and collector, and needs no `--allow-migrations`. Repeating it, or a
+later upgrade, never rotates the secrets. The suite does not run the collector process itself;
+start it as that section describes.
+
+An older Cindertrace does not know the new sources and refuses to start with the `suite-audit`
+credential. Before rolling back to a release whose Cindertrace predates them, run
+`./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
+products.
+
 ## Suite 3.5: event feeds and a new controller
 
 Suite 3.5.0 changes no product data format. Emberpath 2.3.0 and HiveSkills 1.6.0 keep the formats
