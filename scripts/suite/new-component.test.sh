@@ -50,6 +50,19 @@ jq -e '.=={"emberpath":"emberpath-v1","ardentstudio":"ardentstudio-v1"}' "$direc
 [[ -d "$directory/data/ardentstudio" && $(stat -c '%a %u:%g' "$directory/data/ardentstudio") == "700 $user" ]] || fail 'The new store was not created owned by its service'
 jq -e '.services|has("ardentstudio")' "$directory/compose.json" >/dev/null || fail 'The new component was not activated'
 
+# Product schema initialization may populate a newly added store between migrate and
+# activate. Its proven format must already be durable, so activation and the next
+# configuration change do not reinterpret the initialized database as unknown data.
+reset
+host compatibility || fail 'New store preflight failed'
+host migrate || { cat "$temporary/host.log" >&2; fail 'New store format registration failed'; }
+jq -e '.ardentstudio=="ardentstudio-v1"' "$directory/data-formats.json" >/dev/null || fail 'New store format was not recorded before initialization'
+mkdir -p "$directory/data/ardentstudio"
+printf 'schema-initialized-data' > "$directory/data/ardentstudio/studio.sqlite"
+host activate || { cat "$temporary/host.log" >&2; fail 'Initialized new store activation failed'; }
+host compatibility || { cat "$temporary/host.log" >&2; fail 'A subsequent configuration change rejected the initialized addition'; }
+[[ $(cat "$directory/data/ardentstudio/studio.sqlite") == schema-initialized-data ]] || fail 'Initialized product data changed'
+
 # An empty store left from an earlier attempt is still nothing to migrate.
 reset; mkdir -p "$directory/data/ardentstudio"
 host compatibility || { cat "$temporary/host.log" >&2; fail 'An empty store was treated as a storage transition'; }

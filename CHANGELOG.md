@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.2.1] - 2026-11-12
+
+### Fixed
+
+- Register the proven storage format of a newly added component before schema initialization populates its database, so subsequent configuration changes remain compatible. Existing unversioned data still requires an explicit signed migration.
+- Provide an explicit signed recovery profile for the first Embermend PostgreSQL store registration, requiring the existing major, exact runtime receipt and offline checksums before acceptance.
+
 ## [3.2.0] - 2026-11-12
 
 ### Added
