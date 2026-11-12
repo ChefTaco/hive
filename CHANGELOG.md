@@ -6,6 +6,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Security
+
+- Update both PostgreSQL runtime images to the fixed libxslt 1.1.45-r6 package for CVE-2026-125350. Keep the full image policy and existing database majors, collation runtime identities and data formats.
+
 ## [3.2.1] - 2026-11-12
 
 ### Fixed

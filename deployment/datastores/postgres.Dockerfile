@@ -5,7 +5,7 @@ ARG POSTGRES_MAJOR=17
 ARG POSTGRES_VERSION=17.11
 ARG POSTGRES_SHA256=dd27f2b3c59e73ed14aa3324901242bf69a032a6347805f274e6260322d42979
 # Compilers, headers and Perl are confined to this stage.
-RUN apk add --no-cache build-base curl ca-certificates bison flex pkgconf icu-dev=79.1-r2 libxml2-dev=2.15.4-r2 libxslt-dev openssl-4.0-dev krb5-dev openldap-2.6-dev linux-pam-dev libedit-dev util-linux-dev lz4-dev zstd-dev zlib-dev perl
+RUN apk add --no-cache build-base curl ca-certificates bison flex pkgconf icu-dev=79.1-r2 libxml2-dev=2.15.4-r2 libxslt-dev=1.1.45-r6 openssl-4.0-dev krb5-dev openldap-2.6-dev linux-pam-dev libedit-dev util-linux-dev lz4-dev zstd-dev zlib-dev perl
 WORKDIR /src
 RUN curl -fsSLo pg.tar.bz2 https://ftp.postgresql.org/pub/source/v${POSTGRES_VERSION}/postgresql-${POSTGRES_VERSION}.tar.bz2 && echo "${POSTGRES_SHA256}  pg.tar.bz2" | sha256sum -c - && tar -xf pg.tar.bz2 --strip-components=1
 # Keep setup failures from falling through to a later build step.
@@ -13,7 +13,7 @@ RUN set -e; ./configure --prefix=/usr --bindir=/usr/lib/postgresql/${POSTGRES_MA
 FROM cgr.dev/chainguard/wolfi-base@sha256:b7787f1d3f29dcfb48730372d3515391ac3b218723201a765c94949922676099
 ARG POSTGRES_MAJOR=17
 ARG POSTGRES_VERSION=17.11
-RUN apk add --no-cache bash ca-certificates tzdata glibc-locale-en openssl libssl3 libcrypto3 libxml2-16=2.15.4-r2 libxslt libldap-2.6 liblz4-1 libzstd1 krb5-libs linux-pam libstdc++ libedit libuuid libicu79=79.1-r2 icu79-data-full=79.1-r2 && addgroup -g 999 postgres && adduser -D -u 999 -G postgres postgres
+RUN apk add --no-cache bash ca-certificates tzdata glibc-locale-en openssl libssl3 libcrypto3 libxml2-16=2.15.4-r2 libxslt=1.1.45-r6 libldap-2.6 liblz4-1 libzstd1 krb5-libs linux-pam libstdc++ libedit libuuid libicu79=79.1-r2 icu79-data-full=79.1-r2 && addgroup -g 999 postgres && adduser -D -u 999 -G postgres postgres
 COPY --from=build /stage/usr/ /usr/
 COPY --from=build /src/COPYRIGHT /usr/share/licenses/hive-postgres/postgresql
 COPY --from=upstream /usr/lib/*-linux-gnu/libnss_wrapper.so /usr/lib/libnss_wrapper.so
