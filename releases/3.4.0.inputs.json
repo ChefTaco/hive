@@ -52,16 +52,16 @@
       ]
     },
     "hivexui": {
-      "image": "ghcr.io/cheftaco/hivexui:0.4.0",
-      "version": "0.4.0",
+      "image": "ghcr.io/cheftaco/hivexui:0.5.0",
+      "version": "0.5.0",
       "platforms": [
         "linux/amd64",
         "linux/arm64"
       ]
     },
     "magnus": {
-      "image": "ghcr.io/cheftaco/magnus-server:2.6.0",
-      "version": "2.6.0",
+      "image": "ghcr.io/cheftaco/magnus-server:2.7.0",
+      "version": "2.7.0",
       "platforms": [
         "linux/amd64",
         "linux/arm64"
@@ -69,8 +69,8 @@
       "embermendProtocol": 1
     },
     "magnus-gateway": {
-      "image": "ghcr.io/cheftaco/magnus-fleet-gateway:2.6.0",
-      "version": "2.6.0",
+      "image": "ghcr.io/cheftaco/magnus-fleet-gateway:2.7.0",
+      "version": "2.7.0",
       "platforms": [
         "linux/amd64",
         "linux/arm64"
@@ -127,8 +127,8 @@
   },
   "magnusAgent": {
     "name": "@hivemagnus/magnus-agent",
-    "version": "2.6.0",
-    "integrity": "sha512-RKtEtFKTE0O0bmdSl58DbDfVgsvamaExyHLGupSNl1Ef2F0eL6pKX7WXZi9VZO+ysechHdxqCQNr3yupmqOCWg=="
+    "version": "2.7.0",
+    "integrity": "sha512-j7tMuSbXFgVXwC6nROmWIn5ODwCx2fYa+0fF1E3g6UrbsN1nupa9VC5ae5701VCmZ+o+CIHETpMYqbAeVIN6kg=="
   },
   "datastoreProfile": "runtime-2026-11-xslt",
   "storageRecovery": "embermend-postgres-runtime2-unversioned"

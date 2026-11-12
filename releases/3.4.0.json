@@ -327,7 +327,7 @@
       }
     },
     "hivexui": {
-      "image": "ghcr.io/cheftaco/hivexui@sha256:1fc3f0fadfb180f93351552addc3abc7111a9b831f88557c12b8813554dbaa86",
+      "image": "ghcr.io/cheftaco/hivexui@sha256:cd512406fdd5ea43170709cd79feab1e2dd4f66fc0b5a3f4f44c267e9a4f918e",
       "kind": "static-ui",
       "service": {
         "user": "101:101",
@@ -345,7 +345,7 @@
           "retries": 20
         }
       },
-      "version": "0.4.0",
+      "version": "0.5.0",
       "catalog": {
         "displayName": "HiveXUI",
         "description": "The browser console for every installed Hive:Magnus product.",
@@ -619,7 +619,7 @@
       }
     },
     "magnus": {
-      "image": "ghcr.io/cheftaco/magnus-server@sha256:262a5b62b5260b662957742cf774b90d6409e6927c736a39de432aa36e5d70eb",
+      "image": "ghcr.io/cheftaco/magnus-server@sha256:3570ac3cab345bde0f44f2617323aabf10362c95deecc0367416b649183b07bc",
       "kind": "application",
       "storageFormat": "magnus-v1",
       "requiresLocal": [
@@ -654,7 +654,7 @@
         }
       },
       "initialization": {
-        "image": "ghcr.io/cheftaco/magnus-server@sha256:262a5b62b5260b662957742cf774b90d6409e6927c736a39de432aa36e5d70eb",
+        "image": "ghcr.io/cheftaco/magnus-server@sha256:3570ac3cab345bde0f44f2617323aabf10362c95deecc0367416b649183b07bc",
         "command": [
           "migrate"
         ],
@@ -662,12 +662,12 @@
           "verify-initialization"
         ]
       },
-      "version": "2.6.0",
+      "version": "2.7.0",
       "embermendProtocol": 1,
       "agentPackage": {
         "name": "@hivemagnus/magnus-agent",
-        "version": "2.6.0",
-        "integrity": "sha512-RKtEtFKTE0O0bmdSl58DbDfVgsvamaExyHLGupSNl1Ef2F0eL6pKX7WXZi9VZO+ysechHdxqCQNr3yupmqOCWg=="
+        "version": "2.7.0",
+        "integrity": "sha512-j7tMuSbXFgVXwC6nROmWIn5ODwCx2fYa+0fF1E3g6UrbsN1nupa9VC5ae5701VCmZ+o+CIHETpMYqbAeVIN6kg=="
       },
       "catalog": {
         "displayName": "Magnus",
@@ -1049,7 +1049,7 @@
       }
     },
     "magnus-gateway": {
-      "image": "ghcr.io/cheftaco/magnus-fleet-gateway@sha256:25f26791b11b5a1217c1a341e8049fab301e71348593ecc1fa1f6eb64819fbac",
+      "image": "ghcr.io/cheftaco/magnus-fleet-gateway@sha256:5c3862df82c682ec714ccf3e1919e6a31fa15c4f3b4eed67c1bd1e9545ed8c3e",
       "kind": "application",
       "storageFormat": "magnus-gateway-known-hosts-v1",
       "requiresLocal": [
@@ -1074,7 +1074,7 @@
           "start_period": "5s"
         }
       },
-      "version": "2.6.0",
+      "version": "2.7.0",
       "catalog": {
         "displayName": "Magnus Fleet Gateway",
         "description": "Optional web terminal for the Magnus console. Holds the restricted SSH key. Off unless selected.",
