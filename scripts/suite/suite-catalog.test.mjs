@@ -15,25 +15,27 @@ test('declares the events feed path per product, relative to its browser prefix'
   assert.equal(suiteCatalog.cindertrace.capabilities['events.v1'].path, '/hive/events');
   assert.equal(suiteCatalog.hiveskills.capabilities['events.v1'].path, '/v1/hive/events');
   assert.equal(suiteCatalog.embermend.capabilities['events.v1'].path, '/api/v1/hive/events');
-  for (const name of ['magnus', 'cindertrace', 'hiveskills', 'embermend']) assert.equal(suiteCatalog[name].capabilities['events.v1'].since, null, name + ' has no released feed yet');
+  // The first released version serving each feed.
+  const since = { magnus: '2.8.0', cindertrace: '0.5.0', hiveskills: '1.6.0', embermend: '0.2.0' };
+  for (const [name, version] of Object.entries(since)) assert.equal(suiteCatalog[name].capabilities['events.v1'].since, version, name);
   for (const [name, entry] of Object.entries(suiteCatalog)) if (entry.capabilities) assert.ok(entry.connection.browserPrefix, name);
 });
 
 test('emits a capability only from its since version, and only its path', () => {
-  assert.equal(catalogFor('magnus', '99.0.0').capabilities, undefined, 'since null is never emitted');
+  withSince('magnus', null, () => assert.equal(catalogFor('magnus', '99.0.0').capabilities, undefined, 'since null is never emitted'));
   withSince('magnus', '2.8.0', () => {
     assert.equal(catalogFor('magnus', '2.7.9').capabilities, undefined);
     assert.equal('capabilities' in catalogFor('magnus', '2.7.9'), false);
     assert.deepEqual(catalogFor('magnus', '2.8.0').capabilities, { 'events.v1': { path: '/hive/events' } });
     assert.deepEqual(catalogFor('magnus', '2.10.0').capabilities, { 'events.v1': { path: '/hive/events' } });
     assert.deepEqual(Object.keys(catalogFor('magnus', '3.0.0')).slice(-2), ['connection', 'capabilities']);
-    const manifest = applySuiteCatalog({ version: '9.9.9', components: { magnus: { version: '2.8.1' }, cindertrace: {}, emberpath: {} } });
+    const manifest = applySuiteCatalog({ version: '9.9.9', components: { magnus: { version: '2.8.1' }, cindertrace: { version: '0.4.0' }, emberpath: {} } });
     assert.deepEqual(manifest.components.magnus.catalog.capabilities, { 'events.v1': { path: '/hive/events' } });
     assert.equal(manifest.components.cindertrace.catalog.capabilities, undefined);
     assert.equal(manifest.components.emberpath.catalog.capabilities, undefined);
-    assert.equal(manifest.components.cindertrace.version, '9.9.9');
+    assert.equal(manifest.components.emberpath.version, '9.9.9');
   });
-  assert.equal(suiteCatalog.magnus.capabilities['events.v1'].since, null, 'the source catalog is not changed');
+  assert.equal(suiteCatalog.magnus.capabilities['events.v1'].since, '2.8.0', 'the source catalog is not changed');
 });
 
 test('refuses malformed capability declarations', () => {
