@@ -18,7 +18,7 @@ hive_runtime_files() {
     scripts/suite/migrate-native.sh scripts/suite/migrate-native-host.sh scripts/suite/migrate-native-data.mjs scripts/suite/set-admin-password.sh \
     scripts/suite/cindertrace.sh scripts/suite/cindertrace-host.sh scripts/suite/ownership-host.sh \
     scripts/suite/magnus-agent.sh scripts/suite/magnus-agent-host.sh scripts/suite/ardent-enrollment.mjs scripts/suite/node-enrollment.mjs scripts/suite/terminal-authority.mjs \
-    scripts/suite/console-clients.sh scripts/suite/console-clients-host.sh
+    scripts/suite/console-clients.sh scripts/suite/console-clients-host.sh scripts/suite/post-upgrade.sh
 }
 hive_controller_digest() {
   local file
@@ -87,8 +87,10 @@ hive_setup_hosts_ready() {
 
 hive_usage() {
   cat <<'EOF'
-Usage: hive.sh [init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|console-clients]
-  --config FILE          Installation JSON (required for unattended use)
+Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|console-clients]
+  --config FILE          Installation JSON. Commands other than install, init and plan find
+                         it themselves when there is exactly one under ~/.config/hive (or
+                         $XDG_CONFIG_HOME/hive), or when HIVE_INSTALLATION names it
   --release VERSION      Exact release version, or latest for setup, plan and upgrade
   --manifest FILE        Signed release manifest (default releases/VERSION.json)
   --signature FILE       Detached manifest signature (default MANIFEST.sig)
@@ -139,6 +141,9 @@ ports: migrate-native plan|prepare|cutover|verify|rollback|status|issue-admin-to
 set-admin-password|tls-refresh. plan reads only, prepare stops nothing, and cutover and rollback
 act only when named. --hold-on-failure keeps a failed cutover running for inspection.
 See deployment/MIGRATE_NATIVE.md.
+post-upgrade [--yes] finishes an upgrade: it upgrades Magnus host agents that run an older version
+than the release, adds missing HiveXUI browser clients to Oathweave, and lists the remaining
+steps, such as updating Ardent packages in HiveXUI. Each change is shown and confirmed first.
 No arguments starts interactive configuration. Planning does not contact hosts.
 Secrets belong in protected environment/configuration files, never CLI arguments.
 EOF
@@ -669,6 +674,40 @@ hive_transfer() {
 }
 
 
+# The installation file of a command that acts on an existing installation, when --config is not
+# given: HIVE_INSTALLATION names it, or the only one under the configuration directory is used.
+# Several prompt for a choice in a terminal. Setup commands (install, init and plan) ask their
+# setup questions instead, as before.
+hive_discover_config() {
+  local interactive=$1 base choice index=1 candidate
+  local -a found=()
+  if [[ -n "${HIVE_INSTALLATION:-}" ]]; then
+    [[ -f "$HIVE_INSTALLATION" && ! -L "$HIVE_INSTALLATION" ]] || hive_die "HIVE_INSTALLATION names $HIVE_INSTALLATION, which is not a regular file"
+    HIVE_CONFIG=$HIVE_INSTALLATION
+    printf 'Hive: using %s from HIVE_INSTALLATION\n' "$HIVE_CONFIG" >&2
+    return 0
+  fi
+  base="${XDG_CONFIG_HOME:-${HOME:-$PWD}/.config}/hive"
+  for candidate in "$base"/*/installation.json; do
+    [[ -f "$candidate" && ! -L "$candidate" ]] && found+=("$candidate")
+  done
+  case ${#found[@]} in
+    0)
+      hive_die "No installation configuration under $base. Pass --config FILE, or run ./hive.sh to set up an installation";;
+    1) HIVE_CONFIG=${found[0]};;
+    *)
+      if [[ "$interactive" != true || ! -t 0 ]]; then
+        hive_die "Several installations under $base; choose one with --config: $(printf '%s ' "${found[@]}")"
+      fi
+      printf 'Installations under %s:\n' "$base" >&2
+      for candidate in "${found[@]}"; do printf '  %d) %s\n' "$index" "$(basename -- "$(dirname -- "$candidate")")" >&2; index=$((index+1)); done
+      read -r -p 'Installation number: ' choice
+      [[ "$choice" =~ ^[1-9][0-9]*$ ]] && ((choice <= ${#found[@]})) || hive_die 'No installation chosen'
+      HIVE_CONFIG=${found[choice-1]};;
+  esac
+  printf 'Hive: using %s (pass --config to choose another)\n' "$HIVE_CONFIG" >&2
+}
+
 hive_main() {
   local command=install confirmed=false interactive=true hold_on_failure=false
   HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_ALLOW_MIGRATIONS=false HIVE_RELAX_AUTH_LIMITS=false HIVE_BACKUP_STOPPED=false
@@ -727,11 +766,14 @@ hive_main() {
         shift;;
     esac
   done
-  case "$command" in init|plan|install|status|doctor|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|console-clients) ;; *) hive_die 'Unknown command';; esac
+  case "$command" in init|plan|install|status|doctor|upgrade|post-upgrade|rollback|backup|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|console-clients) ;; *) hive_die 'Unknown command';; esac
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
     case "$command" in plan|install|upgrade) ;; *) hive_die '--relax-auth-limits applies only to plan, install and upgrade';; esac
   fi
   hive_need jq
+  if [[ -z "$HIVE_CONFIG" ]]; then
+    case "$command" in install|init|plan) ;; *) hive_discover_config "$interactive";; esac
+  fi
   if [[ -z "$HIVE_CONFIG" ]]; then
     [[ "$interactive" == true ]] || hive_die '--config is required'
     hive_configure
@@ -792,6 +834,7 @@ hive_main() {
     cindertrace-collector) hive_need openssl; hive_need sha256sum; hive_manifest; hive_cindertrace_collector "${registry_arguments[@]}"; return;;
     magnus-agent) hive_need openssl; hive_need sha256sum; hive_manifest; HIVE_CONFIRMED=$confirmed hive_magnus_agent "${registry_arguments[@]}"; return;;
     console-clients) HIVE_CONFIRMED=$confirmed hive_console_clients "${registry_arguments[@]}"; return;;
+    post-upgrade) hive_need openssl; hive_need sha256sum; hive_manifest; HIVE_CONFIRMED=$confirmed hive_post_upgrade; return;;
   esac
   hive_need openssl; hive_need sha256sum; hive_manifest
   hive_plan
