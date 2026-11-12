@@ -6,6 +6,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Changed
+
+- Keep the reviewed Registry compiler pinned to TypeScript 6.0.3 with strict checks and explicit Node types; dependency automation leaves compiler selection to compatibility review.
+
 ### Security
 
 - Update both PostgreSQL runtime images to the fixed libxslt 1.1.45-r6 package for CVE-2026-125350. Keep the full image policy and existing database majors, collation runtime identities and data formats.
