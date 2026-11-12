@@ -37,4 +37,8 @@ hive_console_clients() {
   jq -e '.existingRecordsUnchanged==true' <<< "$result" >/dev/null || hive_die 'Oathweave did not confirm the change'
   printf 'Created clients: %s. Added to SUITE_ADMIN: %s. Sign out of the console and in again to use them.\n' \
     "$(jq -r '.createdClients|if length==0 then "none" else join(", ") end' <<< "$result")" "$(jq -r '.addedPermissions|if length==0 then "none" else join(", ") end' <<< "$result")"
+  # Every wanted client now exists, so the setup checklist item is done. Without a recorded
+  # checklist (a registry before 1.3.0) nothing is recorded.
+  local checklist
+  if checklist=$(hive_checklist_recorded 2>/dev/null); then hive_checklist_settle "$checklist" oathweave-console-clients done || true; fi
 }

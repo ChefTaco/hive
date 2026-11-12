@@ -6,6 +6,11 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Fixed
+
+- `hive.sh console-clients add` now marks the `oathweave-console-clients` setup checklist item done,
+  as `post-upgrade` already did.
+
 ## [3.6.0] - 2026-11-12
 
 ### Changed
