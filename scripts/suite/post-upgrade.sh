@@ -33,12 +33,9 @@ hive_post_upgrade_agent() {
     return 0
   fi
   printf -- '- Magnus agent: %s on the Magnus host; this release pins %s.\n' "$installed" "$wanted"
-  # Installer enrollment owns the single-host node and upgrades its agent in place.
-  if jq -e '.bootstrap!=null and (.hosts|length)==1 and .components.magnus.host==.console.host' "$HIVE_CONFIG" >/dev/null; then
-    hive_post_upgrade_run magnus-agent enroll || printf '  The agent was not upgraded; see above. Rerun: ./hive.sh magnus-agent enroll --config %s\n' "${HIVE_REGISTRY_ORIGINAL_CONFIG:-$HIVE_CONFIG}"
-  else
-    hive_post_upgrade_run magnus-agent install || printf '  The agent was not upgraded; see above. Rerun: ./hive.sh magnus-agent install --config %s\n' "${HIVE_REGISTRY_ORIGINAL_CONFIG:-$HIVE_CONFIG}"
-  fi
+  # Topology is not enrollment authority. Package updates preserve an operator's limited,
+  # Ardent-only or full-node posture; full enrollment requires its separate explicit command.
+  hive_post_upgrade_run magnus-agent install || printf '  The agent was not upgraded; see above. Rerun: ./hive.sh magnus-agent install --config %s\n' "${HIVE_REGISTRY_ORIGINAL_CONFIG:-$HIVE_CONFIG}"
 }
 
 # Browser clients for products added since the Oathweave store was created. The command
