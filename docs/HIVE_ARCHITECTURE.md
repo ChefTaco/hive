@@ -1,77 +1,125 @@
 # Hive Architecture
 
-Hive combines identity, memory, and model-routing operations into one repo and one operator console.
+Hive is the suite controller of the Hive:Magnus product line. This repository holds no product
+code. It holds the controller that installs the products, the signed releases that say exactly
+what to install, and the few images the suite builds for itself.
 
-## Services
+```
+              Agents, apps and native clients                Browser
+                          │                                     │
+                          ▼                                     ▼
+   ┌──────────────────────────── Hive Ingress (HTTPS) ─────────────────────────────┐
+   │   explicit browser and native path mappings · native ports · credential rules  │
+   └───┬──────────┬───────────┬────────────┬────────────┬────────────┬─────────────┘
+       ▼          ▼           ▼            ▼            ▼            ▼
+   Oathweave  Emberpath    HiveMem     HiveSkills    HiveXUI   Hive Registry   (+ Magnus,
+     │                        │                    (static UI)    (SQLite)       Cindertrace,
+   Redis                   Qdrant                                                ChatterMost,
+                                                                                 Emberfold, ...)
+          each product's datastore is private to that product's Compose network
+```
 
-`services/hive-iam` owns identity, JWT/OAuth flows, roles, groups, service accounts, Linux user mapping, and the Node middleware SDK. It is strict TypeScript and deploys as `hive-iam.service` under `/opt/hive-iam`.
+## The controller
 
-`services/hive-mem` owns semantic memory, sessions, task history, queue/consolidation, dashboard APIs, and the HiveMem dashboard. It runs the strict TypeScript core (`services/hive-mem/ts-core`) as `hivemem.service` under `/opt/hivemem`, backed by a Qdrant vector store. The old Python/FastAPI service has been removed from the repo.
+`hive.sh` and `scripts/suite/*` are the controller. It runs with Bash, jq, openssl and Docker
+Compose; the controller host needs no Node.js. One command set covers the whole lifecycle: `init`,
+`plan`, `install`, `status`, `doctor`, `upgrade`, `rollback`, `backup`, `rehearse`, `restore`,
+`adopt` and `migrate-native`, plus focused commands such as `tls-refresh`, `registry` and
+`magnus-agent`.
 
-`services/hive-router` owns provider routing, OpenAI-compatible API compatibility, trace/audit views, and the unified Hive UI. It is strict TypeScript and deploys as `hive-router.service` under `/opt/hive-router`.
+- **Installation file.** Interactive setup writes a protected installation JSON (see
+  `examples/installation.schema.json`). The same file drives unattended commands. It names the
+  release, the selected profile or components, the hosts and their placement, the HTTPS listener
+  and the certificate files.
+- **Hosts.** Each host has its own Compose project, ownership UUID, transaction journal and
+  backups. Remote hosts are reached over SSH; the host scripts run there. An installation can live
+  on one host or be [distributed](../deployment/DISTRIBUTED.md) over several, with each datastore on
+  its owning product's host.
+- **Transactions.** Every mutating command opens a transaction on every host, records its phase
+  and resumes its own plan when repeated. A different plan is refused while one is open. See
+  [when a command stops](../deployment/README.md#when-a-command-stops-transactions-and-recovery).
+- **Backups and rehearsals.** Backups are host-bound archives: online by default, or stopped. An
+  upgrade takes a verified backup and rehearses data changes on an isolated copy before it
+  activates anything. `rehearse` restores an archive into an isolated copy without touching the
+  live installation.
+- **Separate installations.** Independent installations never share databases, accounts,
+  credentials, the Registry or recovery files.
 
-`services/hive-skills` owns the Hermes Skills registry. It is a strict TypeScript/Hono service with SQLite metadata, immutable SHA-256 verified archives, PAM-backed OS operator authentication, and an audit log. It deploys as `hive-skills.service` under `/opt/hive-skills` and intentionally updates Hermes through a user-level pull timer instead of modifying Hermes Agent core.
+## Signed releases
 
-## Unified UI
+A suite release is `releases/X.Y.Z.json`, its detached Ed25519 signature
+`releases/X.Y.Z.json.sig`, and the publisher key `trust/publisher.pub`. The manifest pins every
+product, datastore and initialization image by multi-architecture digest. It lists the `core`
+and `full` profiles and the optional components, and carries each product's service contract and
+catalog entry, generated from `scripts/suite/release-contracts.mjs` and
+`scripts/suite/suite-catalog.json`.
 
-The Hive UI is delivered by Hive Router's admin plane. It keeps Router's OS/PAM login and operator allowlist model and adds major app pages:
+The manifest also pins the controller with `controllerSHA256`: the digest of the files that
+`hive_runtime_files` in `scripts/suite/controller.sh` lists. A controller refuses a manifest
+pinned to different controller source. `./hive.sh --release VERSION` therefore checks out the
+release's own tag (`scripts/suite/release-launcher.sh`), verifies the checkout, the signature and
+the controller digest, and only then runs that controller. Retained release checkouts live under
+`${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`.
 
-- Hive overview with an animated lattice for IAM, Memory, and Router.
-- IAM page with typed health/status data from Hive IAM.
-- Memory page with native HiveMem search, browse, CRUD, graph/conflict inspection, queue controls, webhook inspection, stats, recent memories, sessions, agents, and queue state. The legacy HiveMem `/dashboard` remains proxied for deeper operations.
-- Actors page that computes one inventory across IAM users, service accounts, Linux system users, Router client keys, and Memory agents.
-- Incidents page that groups failed Router traces and IAM audit denials/failures by `x-hive-request-id` or a short failure window.
-- Router page plus the existing provider, routing, testing, trace, key, audit, docs, and settings tools.
+How a release is built, signed and checked is in [RELEASING.md](RELEASING.md).
 
-Status data is provided by `GET /api/hive/status`, which probes local service health endpoints and returns a typed JSON summary to the React UI. Operator views are backed by `GET /api/hive/actors`, `GET /api/hive/incidents`, and `/api/memory/*`. The Memory endpoints use `HIVE_ROUTER_MEMORY_PROXY_TOKEN` server-side so browser code never stores a HiveMem bearer token. Router deploy recovers that token from `HIVE_ROUTER_MEMORY_PROXY_TOKEN` or the HiveMem env keys `HIVEMEM_ADMIN_TOKEN`, `HERMES_HIVEMEM_TOKEN`, and `HIVEMEM_MCP_TOKEN`.
+## Products
 
-## Deploy Topology
+Each product is released from its own repository as a multi-architecture image, and the suite
+pins it by digest:
 
-Each host you deploy to is an independent installation. Content, databases,
-identity/credential state, memory workspaces, and Skills assignments are never
-shared between installations, and matching code versions do not imply matching
-data or configuration. Deploy and verify each host separately with its own
-private env, certificate trust, backup archive, and acceptance results. Never
-restore one installation's archive onto another or copy credentials between
-hosts to eliminate drift.
+| Product | Role |
+|---|---|
+| Oathweave | OAuth 2.0 / OIDC identity, sign-in and resource-scoped tokens for every product |
+| Emberpath | OpenAI-compatible model gateway with routing, failover, quotas and tracing |
+| HiveMem | Long-term memory API for agents, persisted to Qdrant |
+| HiveSkills | Registry of versioned, checksummed skills for agents |
+| HiveXUI | The browser UI for the whole suite, Magnus included |
+| Magnus | Fleet management for agent hosts, with an optional web terminal gateway |
+| Cindertrace | Security event collection and response |
+| ChatterMost | Mattermost-compatible team chat for people and agents |
+| Emberfold | Context engine HTTP service |
+| Ardent Project Studio | Team projects for Ardent agents |
 
-`npm run deploy` requires `HIVE_DEPLOY_HOST` (the SSH host) and `HIVE_PUBLIC_FQDN`
-(the DNS name the Router serves), for example `HIVE_DEPLOY_HOST=hive` and
-`HIVE_PUBLIC_FQDN=hive.example.com`. Run it again with different values, such as
-`memory-host` and `memory.example.com`, to deploy the same full-server shape to
-another host. Set `HIVE_DEPLOY_SKILLS=true` on the host that should also run Hive
-Skills. Operational tools (`doctor`, `audit:deployments`, `backup`) read the host
-list from `HIVE_HOSTS`, a comma-separated list of `host:fqdn[:services]` entries
-such as `hive:hive.example.com:skills,memory-host:memory.example.com`.
+The `core` profile installs Oathweave, Emberpath, HiveMem, HiveSkills, HiveXUI, the ingress and
+the Registry with their private Redis and Qdrant stores. The `full` profile adds Magnus,
+Cindertrace, ChatterMost (each with its own PostgreSQL) and Emberfold. Optional components, such
+as the Magnus web terminal gateway and Ardent Project Studio, are never selected by a profile.
+Inference is external: no model or inference image belongs in a release.
 
-- HiveMem serves HTTPS on `HIVEMEM_WEB_PORT`; in the official Hive stack this is internal port `18443`.
-- Hive IAM serves HTTPS on port `4200` and uses local Redis for audit queue processing.
-- Hive Router serves API HTTPS on `4020` and the official unified UI/admin HTTPS on public `443` for `HIVE_PUBLIC_FQDN`.
-- Hive Skills serves its own TLS listener on `4030`, reusing the Router-managed server certificate. Hermes hosts pull `GET /v1/agent/manifest` and release archives from this listener.
-- HiveMem serves HTTPS internally on `18443` for the official Hive stack. Router proxies `/v1/*`, `/dashboard`, and `/dashboard/*` back to HiveMem so existing memory clients and old dashboard bookmarks continue to work.
+HiveXUI is the only UI of the suite. It is a static application served next to the ingress on
+the console host, and it signs in through Oathweave.
 
-The root deploy script runs Memory first on its internal HTTPS port, then IAM, then Router. IAM deploy ensures Redis is installed and active before restarting `hive-iam.service`; first install persists the generated Router client secret in protected IAM env so Router can mint server-side IAM proxy tokens. If neither the Router env nor the IAM env holds that client secret, Router deploy fails closed instead of generating a new one; recover or rotate the credential through IAM first. Router deploy finishes by installing a TLS certificate for the target FQDN (for example one issued by your private network or ACME provider), binding the unified UI/admin listener to `443`, recovering protected IAM/Memory proxy secrets through sudo when needed, and probing IAM plus Memory through service-local URLs.
+## Images built here
 
-Router pins the current HiveMem certificate at deploy time and addresses the
-internal listener through the certificate's public-FQDN SAN. The Memory-first
-order ensures Router always receives the newly issued leaf. Production startup
-and deploy both reject `HIVE_STATUS_ALLOW_INSECURE_TLS=true`; the IAM and
-HiveMem probes, proxy paths, deploy health gates, and rollback gate retain
-certificate and hostname verification.
+`deployment/images.json` lists the images this repository builds and publishes through the
+*Suite release* workflow, each at its own exact version with provenance, an SBOM and an
+attestation:
 
-IAM TLS uses a host-persistent private CA under root-only `/var/lib/hive-iam-pki`. IAM deploys issue a 30-day server leaf for the configured public FQDN, the target's short hostname, `localhost`, and loopback. Router and approved private-CA clients trust `/opt/hive-iam/certs/ca-bundle.crt`; it contains the current CA and, during a controlled rotation, the staged `next-ca.crt`. Every probe keeps certificate and hostname verification enabled. Leaf renewal therefore does not alter a client's trust anchor, and CA rollover can distribute both anchors before any leaf switches issuers.
+| Image | Source |
+|---|---|
+| `hive-registry` | `services/hive-registry` |
+| `hive-ingress` | `deployment/ingress.Dockerfile` (Caddy, with `deployment/Caddyfile`) |
+| `hive-postgres`, `hive-redis`, `hive-qdrant` | `deployment/datastores/` |
+| `hive-node-runtime` | `deployment/runtime/node.Dockerfile`, the hardened Node.js base of the Registry |
 
-The optional `example-portal` confidential client shows the least-privilege
-pattern for an external application that reads from Hive. Client-credentials
-tokens carry audience `example-portal`, client ID `example-portal`, and only
-`example-portal:read`; the token service filters any requested permission outside
-that allowlist. Authorization-code tokens for the same first-party client also
-carry the client-specific audience. The consuming application validates the
-signature through IAM's JWKS and enforces issuer, audience, client ID, and
-permission before trusting a result.
+## Hive Registry
 
-IAM signing key IDs are RFC 7638 SHA-256 thumbprints derived from the active RSA key. The JWKS publishes the active public key first and may publish retired public keys during an overlap. Tokens are always signed with the active thumbprint. The root-only keyring uses atomic releases under `/var/lib/hive-iam-keyring`; `hive-iam` can read the active release but cannot modify it. Its fsynced transaction journal reconciles interrupted `prepared`, `activated`, or `verified` operations before another rotation. Activation and rollback checks use the managed private CA and compare the exact live RSA material, not only `kid`. Run `/usr/local/libexec/hive-iam/rotate-jwt-signing-key.sh` through sudo to rotate, wait at least `JWT_ACCESS_TTL`, then use `--prune-expired` to remove retired verification keys. Retired private keys are destroyed after a verified cutover rather than archived, and hash-chained receipts are written only after deletion and directory fsync succeed.
+Every installation runs its own Hive Registry (`services/hive-registry`): the install catalog and
+lookup API of that installation. It is unrelated to HiveSkills. `hive.sh` is its normal writer. It
+records the products the signed release offers, what the installation runs, external products
+and an append-only history. The ingress exposes only explicit read routes under
+`/api/registry/`. See the [API reference](hive-registry-api.md).
 
-## Verification
+## Hive Ingress
 
-The deployed UI is verified at `HIVE_PUBLIC_FQDN`, OS/PAM login as an allowlisted operator, and `GET /api/hive/status`. A healthy status payload reports IAM, Memory, and Router as `online`; IAM exposes database and Redis checks, Memory exposes HiveMem health, and Router reports providers, route rules, and trace counts. Deploy proof should also smoke `/api/hive/actors`, `/api/hive/incidents`, `/api/iam/users?limit=1`, `/api/memory/dashboard-data`, and `/api/memory/search?query=&limit=25` through an authenticated Router session on every installation.
+The ingress is the single HTTPS entry point of an installation. It maps explicit browser paths to
+HiveXUI and the product APIs, and native paths and ports to the products their clients expect,
+stripping credentials a route must not forward. A [native migration](../deployment/MIGRATE_NATIVE.md)
+keeps every former native port and certificate on the ingress, so existing clients keep their URLs.
+
+## Native agents and hosts
+
+Magnus host agents, Hermes and Ardent profiles, and native clients run on hosts outside Compose.
+The controller enrolls them with explicit consent: see
+[native agents](../deployment/NATIVE_AGENTS.md) and [native consumers](../deployment/NATIVE_CONSUMERS.md).

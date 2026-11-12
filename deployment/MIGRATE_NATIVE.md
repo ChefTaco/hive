@@ -295,6 +295,8 @@ otherwise that section reports it needs a link. `plan` lists what is missing.
 ## Rehearsing
 
 `scripts/suite/native-migration-rehearsal.mjs --config PRIVATE_JSON` runs the real native packages
-and this controller on a restored copy, on a local Docker target with no outbound network. `backup-hive.sh
---online` takes the source archive without stopping a service; it is not a coordinated recovery point.
-The default backup stops the native services while it captures state.
+and this controller on a restored copy, on a local Docker target with no outbound network. The source
+archive comes from the native installation's own backup tool, `scripts/backup-hive.sh` at the
+[`v1.2.2` tag](https://github.com/ChefTaco/hive/tree/v1.2.2/scripts). Its `--online` option takes
+the archive without stopping a service; that is not a coordinated recovery point. The default
+backup stops the native services while it captures state.

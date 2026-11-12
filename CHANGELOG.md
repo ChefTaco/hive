@@ -12,6 +12,16 @@ All notable changes to this project are documented in this file. The format is b
 - Commands other than `install`, `init` and `plan` find the installation file themselves when there is exactly one under the configuration directory, or when `HIVE_INSTALLATION` names it. With several, they ask in a terminal and refuse unattended. `status`, `doctor` and the other lifecycle commands no longer start the setup questions when `--config` is missing.
 - Add optional Embermend catalog, ingress, identity initialization and shared API/worker contracts for a compatible Magnus release. Existing profiles and mutation authority remain unchanged; combined acceptance is required before production adoption.
 
+### Removed
+
+- Retire the npm 1.x line. Remove the source of `@hivemagnus/hive`, `hive-router`, `hive-iam-server`, `hive-iam-sdk`, `hivemem-server`, `hivemem-sdk` and `hive-skills` (`services/hive-router`, `services/hive-iam`, `services/hive-mem`, `services/hive-skills`, `packages/hive` and its release tooling), the npm publish and server image workflow, and their deploy, backup, doctor, development, packaging, upgrade and end-to-end scripts, OpenAPI snapshots and runbooks. 1.2.2 was the last release; the packages stay on npm without further fixes, and their source remains at the `v1.2.2` tag. The products continue in their own repositories, and `@hivemagnus/hivemem-sdk` continues in the HiveMem repository. Native installations move to the suite with `hive.sh migrate-native`. The controller runtime files, signed releases and suite images are unchanged.
+
+### Changed
+
+- CI, Dependabot and the root scripts cover only the controller, the release tooling and the Hive Registry. Dependabot now watches the Hive Registry's dependencies.
+- The smaller recovery corpus in CI applies only to pull requests that change nothing but the root README and contribution prose.
+- Rewrite the architecture overview for the suite, and clarify when a new Docker group membership needs a new login.
+
 ## [3.1.2] - 2026-11-11
 
 ### Security

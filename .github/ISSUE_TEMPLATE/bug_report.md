@@ -12,12 +12,15 @@ A clear, concise description of the problem.
 
 ## Affected component
 
-- [ ] Hive Router / console
-- [ ] Hive IAM
-- [ ] HiveMem
-- [ ] Hive Skills
-- [ ] An SDK (`@hivemagnus/hivemem-sdk`, `@hivemagnus/hive-iam-sdk`, Python)
-- [ ] Deploy / backup / operational scripts
+Product bugs (Oathweave, Emberpath, HiveMem, HiveSkills, HiveXUI, Magnus and the others) belong in
+that product's own repository.
+
+
+- [ ] `hive.sh` setup or a lifecycle command (install, upgrade, backup, restore, ...)
+- [ ] Hive Registry
+- [ ] Hive Ingress or a suite datastore image
+- [ ] A signed release manifest
+- [ ] Host preparation scripts (`install-prerequisites.sh`, `console-certificate.sh`, ...)
 - [ ] Other:
 
 ## Steps to reproduce
@@ -35,9 +38,9 @@ private values before posting.
 
 ## Environment
 
-- Hive version or commit:
+- Hive release or commit:
 - OS and architecture:
-- Node.js version:
-- Deployment style (local dev, systemd, Docker, other):
+- Docker and Compose versions:
+- Placement (single host, distributed, custom):
 
 ## Additional context

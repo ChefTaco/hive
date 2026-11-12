@@ -13,12 +13,12 @@ Closes #
 ## Testing
 
 - [ ] `npm run typecheck`
-- [ ] `npm test` (or the relevant service test suite)
-- [ ] `npm run scan:secrets`
+- [ ] `npm test`
+- [ ] `npm run scan:secrets` and `npm run check:private`
 - [ ] Manual verification (describe below)
 
 ## Checklist
 
-- [ ] Documentation and `.env.example` files are updated where behaviour or configuration changed
+- [ ] Documentation is updated where behaviour or configuration changed
 - [ ] No secrets, private hostnames or personal data are included
-- [ ] OpenAPI documents are regenerated (`npm run generate:openapi`) if an API changed
+- [ ] `CHANGELOG.md` notes user-facing changes

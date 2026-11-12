@@ -1,8 +1,8 @@
 # Releasing the Hive suite
 
 A suite release is a signed manifest that pins the exact images `hive.sh` installs. Suite versions
-start at 2.0.0 and use tags `vX.Y.Z`. The legacy npm packages keep their own `v1.Y.Z` tags and
-`.github/workflows/publish.yml`; a suite release publishes nothing to npm.
+start at 2.0.0 and use tags `vX.Y.Z`. The `v1.Y.Z` tags belong to the retired npm 1.x line; a
+suite release publishes nothing to npm.
 
 ## What a release contains
 

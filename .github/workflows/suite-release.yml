@@ -1,7 +1,8 @@
 name: Suite release
 
 # Hive suite releases (2.0.0 and later), installed by hive.sh from a signed manifest.
-# The legacy npm packages keep their v1.x tags and publish.yml; nothing here publishes to npm.
+# The v1.x tags belong to the retired npm 1.x line and never trigger this workflow; nothing here
+# publishes to npm.
 # 1. Run by hand from main: builds, executes and publishes the suite images listed in
 #    deployment/images.json (the Hive Registry, the ingress and the hardened datastores), each
 #    at its own exact version, for linux/amd64 and linux/arm64 with provenance, an SBOM and an

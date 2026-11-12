@@ -7,7 +7,7 @@ cd "$root"
 failed=false
 if rg -n --glob '*.sh' --glob '*.ts' \
   'curl[[:space:]]+(-[^[:space:]]*k|--insecure)|NODE_TLS_REJECT_UNAUTHORIZED[[:space:]]*=[[:space:]]*0' \
-  scripts services/*/scripts; then
+  hive.sh scripts services; then
   failed=true
 fi
 if rg -n --glob '!node_modules/**' --glob '!dist/**' --glob '!coverage/**' \

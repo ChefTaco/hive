@@ -1,4 +1,4 @@
-// Only known presentation-only PRs may use the smaller real recovery corpus.
+// Only known prose-only PRs may use the smaller real recovery corpus.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -8,11 +8,9 @@ export function recoveryScope(changes) {
   for (const { status, oldMode, newMode, path } of changes) {
     if (!['A', 'M'].includes(status) || newMode !== '100644' || (status === 'M' && oldMode !== '100644')) return { full: true, reason: 'special-change' };
     if (!/^[A-Za-z0-9_./-]+$/.test(path) || path.split('/').some((part) => part === '..' || !part)) return { full: true, reason: 'ambiguous-path' };
-    const presentation = /^services\/hive-router\/ui\/(src|public)\/.+\.(tsx?|css|svg|png|webp|ico)$/.test(path);
-    const prose = /^(README|CONTRIBUTING)\.md$/.test(path);
-    if (!presentation && !prose) return { full: true, reason: 'installer-shared-or-unclassified-change' };
+    if (!/^(README|CONTRIBUTING)\.md$/.test(path)) return { full: true, reason: 'installer-shared-or-unclassified-change' };
   }
-  return { full: false, reason: 'presentation-only-pr' };
+  return { full: false, reason: 'prose-only-pr' };
 }
 
 export function parseRawDiff(raw) {
