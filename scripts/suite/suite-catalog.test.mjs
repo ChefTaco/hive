@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { applySuiteCatalog, catalogFor, checkCapabilities, suiteCatalog } from './suite-catalog.mjs';
+import { applySuiteCatalog, catalogFor, checkCapabilities, compareVersions, suiteCatalog } from './suite-catalog.mjs';
+import { assertDatastoreProfileCurrent } from './release-contracts.mjs';
 
 const withSince = (name, since, run) => {
   const capability = suiteCatalog[name].capabilities['events.v1'];
@@ -89,4 +90,18 @@ test('reads the ingress mappings it relies on', () => {
   assert.equal(ingressMapping('/api/embermend')('/api/v1/plans'), '/api/v1/plans');
   assert.equal(ingressMapping('/api/hivemem')('/x'), '/v1/x');
   assert.throws(() => ingressMapping('/api/nowhere'), /no ingress route/);
+});
+
+test('versions compare numerically, part by part', () => {
+  assert.equal(compareVersions('2.10.0', '2.9.9'), 1);
+  assert.equal(compareVersions('2.9.9', '2.10.0'), -1);
+  assert.equal(compareVersions('3.6.1', '3.6.1'), 0);
+  assert.equal(compareVersions('3.6', '3.6.0'), 0);
+  assert.equal(compareVersions('3.10.0', '3.2.1'), 1);
+  // A superseded datastore profile may be selected up to its last release, and not after.
+  assert.doesNotThrow(() => assertDatastoreProfileCurrent('3.6.1', 'runtime-2026-11-xslt'));
+  assert.doesNotThrow(() => assertDatastoreProfileCurrent('3.2.10', 'runtime-2026-11-xslt'));
+  assert.throws(() => assertDatastoreProfileCurrent('3.6.2', 'runtime-2026-11-xslt'), /superseded/);
+  assert.throws(() => assertDatastoreProfileCurrent('3.10.0', 'runtime-2026-11'), /superseded/);
+  assert.doesNotThrow(() => assertDatastoreProfileCurrent('9.9.9', 'runtime-2026-11-pg1712'));
 });
