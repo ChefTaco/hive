@@ -216,7 +216,7 @@ for answer in y Y yes YES; do hive_confirm 'Question?' <<< "$answer" 2>/dev/null
 for answer in '' n no yess 'y es' ja; do if hive_confirm 'Question?' <<< "$answer" 2>/dev/null; then fail "Answer '$answer' was taken as consent"; fi; done
 if hive_confirm 'Question?' < /dev/null 2>/dev/null; then fail 'Missing input was taken as consent'; fi
 # Temporary files of a run are removed on exit, and nothing else is.
-mkdir "$temporary/agent-config"; touch "$temporary/agent-secrets" "$temporary/registry-copy" "$temporary/kept"
-( HIVE_REGISTRY_TEMPORARY=$temporary/registry-copy HIVE_AGENT_CONFIG_DIRECTORY=$temporary/agent-config HIVE_AGENT_SECRETS=$temporary/agent-secrets; trap hive_cleanup EXIT; exit 3 ) || true
-[[ ! -e "$temporary/agent-config" && ! -e "$temporary/agent-secrets" && ! -e "$temporary/registry-copy" && -e "$temporary/kept" ]] || fail 'Run cleanup left temporary files or removed another file'
-( HIVE_REGISTRY_TEMPORARY='' HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS=''; hive_cleanup ) || fail 'Cleanup failed with nothing to remove'
+mkdir "$temporary/agent-config"; touch "$temporary/agent-secrets" "$temporary/agent-enrollment" "$temporary/registry-copy" "$temporary/kept"
+( HIVE_REGISTRY_TEMPORARY=$temporary/registry-copy HIVE_AGENT_CONFIG_DIRECTORY=$temporary/agent-config HIVE_AGENT_SECRETS=$temporary/agent-secrets HIVE_AGENT_ENROLLMENT=$temporary/agent-enrollment; trap hive_cleanup EXIT; exit 3 ) || true
+[[ ! -e "$temporary/agent-config" && ! -e "$temporary/agent-secrets" && ! -e "$temporary/agent-enrollment" && ! -e "$temporary/registry-copy" && -e "$temporary/kept" ]] || fail 'Run cleanup left temporary files or removed another file'
+( HIVE_REGISTRY_TEMPORARY='' HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS='' HIVE_AGENT_ENROLLMENT=''; hive_cleanup ) || fail 'Cleanup failed with nothing to remove'

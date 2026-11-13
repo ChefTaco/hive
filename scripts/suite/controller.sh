@@ -18,6 +18,7 @@ hive_cleanup() {
   [[ -z "${HIVE_REGISTRY_TEMPORARY:-}" ]] || rm -f -- "$HIVE_REGISTRY_TEMPORARY"
   [[ -z "${HIVE_AGENT_CONFIG_DIRECTORY:-}" ]] || rm -rf -- "$HIVE_AGENT_CONFIG_DIRECTORY"
   [[ -z "${HIVE_AGENT_SECRETS:-}" ]] || rm -f -- "$HIVE_AGENT_SECRETS"
+  [[ -z "${HIVE_AGENT_ENROLLMENT:-}" ]] || rm -f -- "$HIVE_AGENT_ENROLLMENT"
 }
 # Keep this a literal printf list: the launcher parses it without executing downloaded code.
 hive_runtime_files() {
@@ -130,8 +131,9 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollb
 init prepares protected configuration for an explicitly fresh installation.
 magnus-agent install|status|remove [--host TARGET] [--install-node] [--trust] runs the Magnus agent on a
 fleet host (default: the Magnus host): Node.js check (and NodeSource install with consent), the
-release's verified agent package, its root-only environment and service, the first accepted
-heartbeat, and the web terminal approval. magnus-agent enroll reviews the installer-owned
+release's verified agent package, its root-only environment and service, a new agent's own node
+key through a one-time Magnus enrollment token (with a Magnus that has per-node credentials), the
+first accepted heartbeat, and the web terminal approval. magnus-agent enroll reviews the installer-owned
 single-host node and, with approval, enables commands, managed cron and selected restricted
 web terminals. It retains completed Ardent history and restores paused profile units.
 magnus-agent prepare-ardent remains available for deliberately limited Ardent-only nodes.
@@ -742,7 +744,7 @@ hive_main() {
   HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY='' HIVE_CINDERTRACE_SOURCES='' HIVE_AGENT_TARGET='' HIVE_AGENT_SSH_CONFIG='' HIVE_AGENT_SUDO_FILE='' HIVE_AGENT_INSTALL_NODE=false HIVE_AGENT_TRUST=false
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
   HIVE_RELEASE_SUMMARY='' HIVE_REGISTRY_FILE='' HIVE_REGISTRY_ORIGINAL_CONFIG='' HIVE_REGISTRY_TEMPORARY='' HIVE_OPERATION='' HIVE_CHECKLIST=''
-  HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS=''
+  HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS='' HIVE_AGENT_ENROLLMENT=''
   local -a registry_arguments=() trust_arguments=()
   if (($#)) && [[ "$1" != --* ]]; then command=$1; shift; fi
   while (($#)); do
