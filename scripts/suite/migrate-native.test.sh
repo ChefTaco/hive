@@ -191,6 +191,7 @@ env_of() { sed -n "s/^$2='\(.*\)'$/\1/p" "$directory/config/$1.env"; }
 [[ $(env_of oathweave COOKIE_SECRET) == fake-cookie-secret ]] || fail 'Native secrets carry over'
 [[ $(env_of oathweave TRUSTED_PROXY_IPS) == 192.0.2.10,10.200.0.0/24 ]] || fail 'The ingress subnet must be a trusted proxy, added to the native list'
 [[ $(env_of oathweave IAM_BROWSER_ISSUER) == "https://$fqdn/api/oathweave" ]] || fail 'Browser issuer'
+! grep -q '^HIVE_INGRESS_TRUSTED_PROXIES=' "$directory/config/ingress.env" || fail 'A migrated ingress trusts a forwarding proxy nobody configured'
 ! grep -q SEED_ "$directory/config/oathweave.env" || fail 'Seed values must not reach the suite'
 [[ $(env_of emberpath HIVE_ROUTER_SECURITY_EXPORT_TOKEN_HASH) == '$argon2id$v=19$m=65536$fakesalt$fakehash' ]] || fail 'A dollar sign must survive literally'
 [[ $(env_of emberpath HIVE_ROUTER_SECURITY_EXPORTER_CLIENT_ID) == legacy-exporter-name ]] || fail 'The kept client name must carry over'

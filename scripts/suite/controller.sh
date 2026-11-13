@@ -434,7 +434,8 @@ hive_validate() {
     jq -e '
       def path: type=="string" and test("^/[A-Za-z0-9_./-]+$") and (split("/")|all(.!=".."));
       . as $c | .console as $ui |
-      ($ui|type=="object" and (keys-["host","bindAddress","httpsPort","runtimeFile","nativeListeners","networkSubnet","edgeSubnet"]|length==0)) and
+      ($ui|type=="object" and (keys-["host","bindAddress","httpsPort","runtimeFile","nativeListeners","networkSubnet","edgeSubnet","trustedProxies"]|length==0)) and
+      (($ui.trustedProxies // [])|type=="array" and length<=16 and all(.[]; type=="string" and test("^(([0-9]{1,3}\\.){3}[0-9]{1,3}(/([0-9]|[12][0-9]|3[0-2]))?|[0-9A-Fa-f:]*:[0-9A-Fa-f:]*(/([0-9]{1,2}|1[01][0-9]|12[0-8]))?)$"))) and
       ($c.hosts[$ui.host]!=null) and $c.components.hivexui.host==$ui.host and $c.components.ingress.host==$ui.host and
       ($c.components.hivexui|has("envFile") or has("configDirectory")|not) and
       ($c.components.ingress.envFile|path) and ($c.components.ingress.configDirectory|path) and
@@ -442,7 +443,7 @@ hive_validate() {
       ($ui.httpsPort|type=="number" and floor==. and .>=1 and .<=65535) and
       ($ui.bindAddress|type=="string" and
         (.=="::" or .=="::1" or (split(".")|length==4 and all(.[];test("^[0-9]{1,3}$") and (tonumber<=255)))))
-    ' "$HIVE_CONFIG" >/dev/null || hive_die 'Invalid console placement: co-locate ingress and HiveXUI, supply an explicit listener and a public runtime file inside the protected installation config tree; HiveXUI cannot receive an environment file or backend configuration'
+    ' "$HIVE_CONFIG" >/dev/null || hive_die 'Invalid console placement: co-locate ingress and HiveXUI, supply an explicit listener and a public runtime file inside the protected installation config tree; HiveXUI cannot receive an environment file or backend configuration; console.trustedProxies lists at most 16 IP addresses or CIDR ranges'
   fi
   # A fresh installation may publish one more port on the console bind address: the Magnus
   # control API for host agents. Migrated installations keep their own native listeners.

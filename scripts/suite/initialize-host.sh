@@ -381,6 +381,14 @@ if has_component oathweave; then
   line TLS_CERT_PATH /config/tls.crt; line TLS_KEY_PATH /config/tls.key; line CORS_ORIGIN "$origin"
   line WEBAUTHN_RP_ID "$console_hostname"; line WEBAUTHN_RP_ORIGIN "$origin"; line WEBAUTHN_RP_NAME Oathweave
   line IAM_RECOVERY_OUTBOX_DIRECTORY /data/iam/recovery-outbox
+  # Oathweave rate limits, allowlists and audits by client address. It believes the address the
+  # ingress forwards only from a known ingress address, which needs the pinned network
+  # (console.networkSubnet), the ingress on this host and no directly published Oathweave port.
+  # Without that it uses the connecting address, which is the ingress for every browser request.
+  ingress_subnet=$(jq -r '.console.networkSubnet // empty' <<< "$input")
+  if [[ "$ingress_subnet" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$ ]] && has_component ingress && jq -e '.bootstrap.productEndpoints.oathweave==null' <<< "$input" >/dev/null; then
+    line TRUSTED_PROXY_IPS "$ingress_subnet"
+  fi
 } | publish_file oathweave "$directory/config/oathweave.env"
 fi
 if has_component emberpath; then
@@ -432,6 +440,10 @@ fi
 if has_component ingress; then
 {
   line HIVE_CONSOLE_HOST "$console_hostname"; line XDG_CONFIG_HOME /data/config; line XDG_DATA_HOME /data
+  # Reverse proxies in front of this console (console.trustedProxies): only their forwarded
+  # client address is believed. See the Caddyfile's trusted_proxies.
+  outer_proxies=$(jq -r '(.console.trustedProxies // [])|join(" ")' <<< "$input")
+  [[ ! "$outer_proxies" =~ ^[0-9A-Fa-f:./\ ]+$ ]] || line HIVE_INGRESS_TRUSTED_PROXIES "'$outer_proxies'"
   for mapping in oathweave:OATHWEAVE:4200 emberpath:EMBERPATH:9443 hivemem:HIVEMEM:18790 hiveskills:HIVESKILLS:4030; do
     component=${mapping%%:*}; tail=${mapping#*:}; label=${tail%%:*}; port=${tail##*:}
     jq -e --arg name "$component" '.bootstrapServiceUsers[$name]!=null' <<< "$input" >/dev/null || continue

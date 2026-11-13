@@ -58,7 +58,7 @@ const server=https.createServer({key:fs.readFileSync('/config/console.key'),cert
 });
 server.on('upgrade',(req,socket)=>{const accept=crypto.createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');socket.write('HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\nSec-WebSocket-Accept: '+accept+'\\r\\nX-Fixture-Cookie: '+req.headers.cookie+'\\r\\n\\r\\n');socket.write(Buffer.from([129,2,111,107]));setTimeout(()=>socket.destroy(),2000);});
 server.listen(9443,'0.0.0.0');
-const plain=http.createServer((req,res)=>{res.setHeader('Set-Cookie','MMSID=obviously-fake-forged');res.setHeader('Content-Type','application/json');res.end(JSON.stringify({path:req.url,authorization:req.headers.authorization,cookie:req.headers.cookie,origin:req.headers.origin}));});
+const plain=http.createServer((req,res)=>{res.setHeader('Set-Cookie','MMSID=obviously-fake-forged');res.setHeader('Content-Type','application/json');res.end(JSON.stringify({path:req.url,authorization:req.headers.authorization,cookie:req.headers.cookie,origin:req.headers.origin,headers:req.headers}));});
 plain.listen(8096,'0.0.0.0');
 const studio=http.createServer((req,res)=>{
  res.setHeader('Set-Cookie','hive_studio_forged=obviously-fake; Path=/');
@@ -282,11 +282,15 @@ gateway.listen(4310,'0.0.0.0');
     ['/api/v4/users/me', '/api/v4/users/me', chatCookies],
     ['/api/v1/security-fusion/events', '/api/v1/security-fusion/events', ['cindertrace_session']],
   ]) {
-    const result = await request(input, headers);
+    const result = await request(input, { ...headers, 'X-Forwarded-For': '192.0.2.1' });
     assert.equal(result.status, 200, input);
     const body = JSON.parse(result.body);
     assert.equal(body.path, expected);
     assert.equal(body.authorization, headers.Authorization);
+    // Products rate limit, allowlist and audit by this address: it is the one that connected to
+    // the ingress, alone, never one the caller sent.
+    assert.match(body.headers['x-forwarded-for'] ?? '', /^[0-9a-f.:]+$/, input + ' did not receive exactly one client address');
+    assert.notEqual(body.headers['x-forwarded-for'], '192.0.2.1', input + ' trusted a caller forwarding header');
     assert.equal(body.origin, headers.Origin);
     assert.deepEqual(cookieKeys(body.cookie), [...allowed].sort(), input + ' forwarded another product session');
     const cookies = (result.cookies || []).filter(Boolean);
@@ -299,6 +303,24 @@ gateway.listen(4310,'0.0.0.0');
     503,
     'Mismatched upstream certificate name was accepted',
   );
+  // Behind an outer reverse proxy (HIVE_INGRESS_TRUSTED_PROXIES): the proxy's X-Forwarded-For is
+  // read from the right, skipping trusted proxies, and the product still receives one address.
+  // This test connects from a private address, as that proxy would.
+  const proxiedName = network + '-edge-proxied';
+  containers.push(proxiedName);
+  const viaProxy = { ...options, port: await startIngress(proxiedName, [...env, '-e', 'HIVE_INGRESS_TRUSTED_PROXIES=private_ranges'], join(temporary, 'state-proxied')) };
+  await waitReady(viaProxy);
+  for (const [sent, expected] of [
+    ['198.51.100.7', '198.51.100.7'],
+    ['203.0.113.9, 198.51.100.7', '198.51.100.7'],
+    ['203.0.113.9, 198.51.100.7, 10.1.2.3', '198.51.100.7'],
+  ]) {
+    for (const path of ['/api/oathweave/users', '/api/hivemem/memories', '/api/magnus/console/session']) {
+      const result = await request(path, { Authorization: headers.Authorization, 'X-Forwarded-For': sent }, 'GET', undefined, viaProxy);
+      assert.equal(result.status, 200, path);
+      assert.equal(JSON.parse(result.body).headers['x-forwarded-for'], expected, path + ' resolved the wrong client address from "' + sent + '"');
+    }
+  }
   assert.equal(
     (await request('/api/unknown/path')).status,
     404,

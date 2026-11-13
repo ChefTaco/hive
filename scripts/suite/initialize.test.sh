@@ -60,6 +60,9 @@ find "$temporary/install/config" -type f -exec sha256sum {} + | sort > "$tempora
 cmp -s "$temporary/all.before" "$temporary/all.after" || fail 'Repeated initialization changed configuration'
 jq -e '.phase=="complete"' "$temporary/install/config/.initializer/receipt.json" >/dev/null
 jq -e '.mode=="suite" and (.products|length)==4 and (.identity|keys)==["apiPrefix","clients","issuer"]' "$temporary/install/config/runtime.json" >/dev/null
+# By default nothing in front of the console is trusted, and Oathweave trusts no forwarder.
+! grep -q '^HIVE_INGRESS_TRUSTED_PROXIES=' "$temporary/install/config/ingress.env" || fail 'A default ingress trusts a forwarding proxy'
+! grep -q '^TRUSTED_PROXY_IPS=' "$temporary/install/config/oathweave.env" || fail 'Oathweave trusts a forwarder without a pinned ingress network'
 # Public browser artifacts contain none of the generated credentials.
 while IFS= read -r file; do
   if rg -F -q -- "$(cat "$file")" "$temporary/install/config/runtime.json" "$temporary/install/config/ingress.env"; then fail 'Infrastructure credential reached a browser/ingress artifact'; fi
@@ -113,4 +116,15 @@ cp "$temporary/valid.json" "$temporary/config.json"
 printf 'OPERATOR_OWNED=retained\n' > "$temporary/install/config/emberpath.env"
 reject run_init
 [[ $(cat "$temporary/install/config/emberpath.env") == OPERATOR_OWNED=retained ]] || fail 'Existing configuration was overwritten'
+# Client addresses: on a pinned network Oathweave believes the address the ingress forwards, and
+# the ingress believes only the reverse proxies the configuration names.
+sed "s#$temporary/install#$temporary/proxied#g" "$temporary/valid.json" | jq '.console.networkSubnet="10.200.0.0/24" | .console.trustedProxies=["192.0.2.10","198.51.100.0/24","2001:db8::/32"]' > "$temporary/proxied.json"
+"$ROOT/hive.sh" init --config "$temporary/proxied.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/proxied.log" 2>&1 || fail 'Initialization with trusted proxies failed'
+grep -q -x 'TRUSTED_PROXY_IPS=10.200.0.0/24' "$temporary/proxied/config/oathweave.env" || fail 'Oathweave does not trust the pinned ingress network'
+grep -q -x "HIVE_INGRESS_TRUSTED_PROXIES='192.0.2.10 198.51.100.0/24 2001:db8::/32'" "$temporary/proxied/config/ingress.env" || fail 'The ingress does not trust the configured reverse proxies'
+for invalid in '["proxy.example.com"]' '["192.0.2.10 198.51.100.7"]' '["192.0.2.0/33"]' '"192.0.2.10"'; do
+  jq --argjson value "$invalid" '.console.trustedProxies=$value' "$temporary/valid.json" > "$temporary/invalid-proxies.json"
+  if "$ROOT/hive.sh" plan --config "$temporary/invalid-proxies.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive > "$temporary/invalid-proxies.log" 2>&1; then fail "console.trustedProxies $invalid was accepted"; fi
+  grep -q 'console.trustedProxies' "$temporary/invalid-proxies.log" || fail 'The trusted proxy refusal is unclear'
+done
 printf 'Passed: fresh configuration generation, no memory credential where none is used, interrupted entropy preservation, exact retry, repeat execution, public artifact secret isolation and existing-file refusal, wrong-name certificate refusal and console certificate refresh.\n'
