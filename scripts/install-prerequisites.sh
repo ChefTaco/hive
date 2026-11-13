@@ -20,7 +20,8 @@
 #
 # Supported: Ubuntu 22.04 and 24.04, Debian 12 and 13, on amd64 or arm64. Safe to re-run: every
 # step checks the current state first and does nothing when it is already satisfied. It never
-# changes firewall rules, Docker daemon settings or existing containers.
+# changes firewall rules, Docker daemon settings or existing containers. On another Linux
+# distribution it changes nothing, and --check still reports what is ready and what is missing.
 set -Eeuo pipefail
 umask 022
 
@@ -76,12 +77,21 @@ os_id=$(. "$OS_RELEASE"; printf '%s' "${ID:-}")
 os_version=$(. "$OS_RELEASE"; printf '%s' "${VERSION_ID:-}")
 os_codename=$(. "$OS_RELEASE"; printf '%s' "${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}")
 os_name=$(. "$OS_RELEASE"; printf '%s' "${PRETTY_NAME:-$os_id $os_version}")
+supported=true
 case "$os_id:$os_version" in
   ubuntu:22.04|ubuntu:24.04|debian:12|debian:13) ;;
-  *) die "unsupported distribution: $os_name. Supported: Ubuntu 22.04 and 24.04, Debian 12 and 13. Elsewhere, install Docker Engine with the Compose plugin (https://docs.docker.com/engine/install/) and the tools this script lists with --check yourself.";;
+  *) supported=false;;
 esac
-command -v dpkg >/dev/null && command -v apt-get >/dev/null || die 'dpkg and apt-get are required'
-architecture=$(dpkg --print-architecture)
+unsupported="unsupported distribution: $os_name. Supported: Ubuntu 22.04 and 24.04, Debian 12 and 13. Elsewhere, install Docker Engine with the Compose plugin (https://docs.docker.com/engine/install/) and the tools this script lists with --check yourself."
+# Only --check runs elsewhere: it reads the state and needs neither apt nor dpkg.
+[[ "$supported" == true || "$mode" == check ]] || die "$unsupported"
+if [[ "$supported" == true ]]; then
+  command -v dpkg >/dev/null && command -v apt-get >/dev/null || die 'dpkg and apt-get are required'
+  architecture=$(dpkg --print-architecture)
+else
+  architecture=$(uname -m)
+  case "$architecture" in x86_64) architecture=amd64;; aarch64) architecture=arm64;; esac
+fi
 case "$architecture" in amd64|arm64) ;; *) die "unsupported architecture: $architecture. Hive releases publish linux/amd64 and linux/arm64 images only";; esac
 [[ -z "$target_user" ]] || id "$target_user" >/dev/null 2>&1 || die "unknown account: $target_user"
 
@@ -109,10 +119,11 @@ if [[ "$controller" == false ]]; then
   [[ "$docker_source" != snap ]] || die 'Docker is installed as a snap. The snap only reaches files under /home, so hive.sh cannot use an installation directory such as /opt/hive. Remove it with "sudo snap remove --purge docker" (this deletes its containers and images), then re-run this script.'
   for package in "${CONFLICTING_PACKAGES[@]}"; do if installed "$package"; then conflicts+=("$package"); fi; done
   if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then compose_ok=true; fi
-  case "$docker_source" in
-    none) install_docker=true;;
-    docker-ce) for package in "${DOCKER_PACKAGES[@]}"; do installed "$package" || install_docker=true; done;;
-    docker.io|other)
+  # Package choices are for the distributions this script can change.
+  case "$supported:$docker_source" in
+    true:none) install_docker=true;;
+    true:docker-ce) for package in "${DOCKER_PACKAGES[@]}"; do installed "$package" || install_docker=true; done;;
+    true:docker.io|true:other)
       if [[ "$compose_ok" == true && "$replace_conflicting" == false ]]; then
         warn "Keeping the existing Docker Engine ($docker_source), which has the Compose plugin. Hive is tested with Docker's own packages; re-run with --replace-conflicting to switch to them."
       elif [[ "$replace_conflicting" == true && "$docker_source" == docker.io ]]; then install_docker=true
@@ -164,6 +175,7 @@ report() {
 
 if [[ "$mode" == check ]]; then
   if report; then say 'Ready: hive.sh prerequisites are installed.'; exit 0; fi
+  if [[ "$supported" != true ]]; then say "Not ready, and this script cannot change this system: $unsupported"; exit 1; fi
   if [[ "$controller" == true ]]; then say "Not ready. Run: sudo $0 --controller"; else say "Not ready. Run: sudo $0"; fi
   exit 1
 fi

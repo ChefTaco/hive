@@ -83,20 +83,24 @@ tailscale_name() {
 
 # Writes a fresh Tailscale certificate for $name to $1/$2, owned by $owner. Prints "changed" when
 # the files differ from what was there. tailscale returns its cached certificate until renewal is due.
+# The scratch copy of the key is removed on every exit, including a refusal part-way.
+issue_work=''
 tailscale_issue() {
-  local certificate=$1 private_key=$2 work group
-  work=$(mktemp -d)
-  trap 'rm -rf -- "$work"' RETURN
+  local certificate=$1 private_key=$2 group work
+  issue_work=$(mktemp -d); work=$issue_work
+  trap 'if [[ -n "$issue_work" ]]; then rm -rf -- "$issue_work"; fi' EXIT
   tailscale cert --cert-file "$work/console.crt" --key-file "$work/console.key" "$name" >&2 || die "tailscale cert failed for $name"
   group=$(id -gn "$owner")
   install -d -m 0750 -o "$owner" -g "$group" "$(dirname "$certificate")"
   if [[ -f "$certificate" && -f "$private_key" ]] && cmp -s "$work/console.crt" "$certificate" && cmp -s "$work/console.key" "$private_key"; then
     chown "$owner:$group" "$certificate" "$private_key"; chmod 0644 "$certificate"; chmod 0600 "$private_key"
+    rm -rf -- "$work"; issue_work=''
     return 0
   fi
   install -m 0600 -o "$owner" -g "$group" "$work/console.key" "$private_key.new"
   install -m 0644 -o "$owner" -g "$group" "$work/console.crt" "$certificate.new"
   mv -f -- "$private_key.new" "$private_key"; mv -f -- "$certificate.new" "$certificate"
+  rm -rf -- "$work"; issue_work=''
   printf 'changed\n'
 }
 
@@ -176,8 +180,12 @@ case "$command" in
         die 'Existing certificate renewal service is customized or unsafe; nothing was replaced'
       fi
     fi
-    command -v systemctl >/dev/null && [[ -d /run/systemd/system ]] || die 'systemd is not running; schedule renew with your own scheduler instead'
     if [[ "$use_tailscale" == true && -z "$owner" ]]; then owner=$(stat -c %U "$source_key"); fi
+    # systemd splits ExecStart on spaces and expands % and $ in it; no shell interprets these values.
+    [[ "$hive" =~ ^/[A-Za-z0-9_./+-]+$ && "$config" =~ ^/[A-Za-z0-9_./+-]+$ ]] ||
+      die "the renewal service cannot be scheduled for $config with $hive: both paths may contain only letters, digits and _ . / + -. Move the file or the checkout, or schedule renew with your own scheduler"
+    [[ "$use_tailscale" != true || "$owner" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || die "the renewal service cannot be scheduled for the account $owner: pass --owner USER"
+    command -v systemctl >/dev/null && [[ -d /run/systemd/system ]] || die 'systemd is not running; schedule renew with your own scheduler instead'
     flags=" --hive $hive"; [[ "$use_tailscale" == true ]] && flags+=" --owner $owner" || flags+=' --no-tailscale'
     printf '[Unit]\nDescription=Renew the Hive console certificate\nAfter=network-online.target docker.service tailscaled.service\nWants=network-online.target\n\n[Service]\nType=oneshot\nExecStart=%s renew --config %s%s\n' \
       "$hive/scripts/console-certificate.sh" "$config" "$flags" > /etc/systemd/system/hive-console-certificate.service

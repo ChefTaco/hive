@@ -54,6 +54,16 @@ for mode in local local-password local-cached remote remote-password; do
 done
 ! grep -Eq 'HOST_CODE_MUST_STAY_ON_STDIN|obviously-fake-(sudo-password|token)' "$temporary/arguments" || fail 'Program or secret appeared in process arguments'
 [[ $(wc -L < "$temporary/arguments") -lt 4096 ]] || fail 'Transport still places a large value in argv'
+# A refused password file stops the action in a conditional context too, where errexit is off:
+# it must never continue as the SSH account without sudo.
+jq --arg password "$temporary/password" '.hosts.control.sudoPasswordFile=$password' "$HIVE_CONFIG" > "$temporary/exposed.json"; mv "$temporary/exposed.json" "$HIVE_CONFIG"
+chmod 644 "$temporary/password"
+if ( hive_host control "$script" ) > "$temporary/refused" 2>&1; then fail 'An exposed sudo password file was accepted'; fi
+grep -q owner-only "$temporary/refused" || fail 'The password file refusal was unclear'
+! grep -q LARGE_HOST_OK "$temporary/refused" || fail 'The host program ran without sudo after its password file was refused'
+printf 'payload\n' > "$temporary/payload"
+if ( hive_transfer control "$temporary/payload" payload ) > "$temporary/refused" 2>&1; then fail 'A transfer continued after its password file was refused'; fi
+chmod 600 "$temporary/password"
 export CORRUPT_HOST_FRAME=true
 jq 'del(.hosts.control.sudoPasswordFile)' "$HIVE_CONFIG" > "$temporary/plain.json"; mv "$temporary/plain.json" "$HIVE_CONFIG"
 if hive_host control "$script" > "$temporary/corruption" 2>&1; then fail 'Corrupt transport frame was accepted'; fi

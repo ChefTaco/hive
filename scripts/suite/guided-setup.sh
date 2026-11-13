@@ -2,11 +2,7 @@
 # Optional host preparation for a person running a fresh, local installation.
 # Saved configurations, planning and unattended commands never enter this path.
 
-hive_setup_ask() {
-  local answer
-  read -r -p "$1 [y/N] " answer
-  [[ "$answer" == y || "$answer" == yes ]]
-}
+hive_setup_ask() { hive_confirm "$1"; }
 
 hive_setup_sudo() {
   if [[ $(id -u) == 0 ]]; then "$@"; else sudo -- "$@"; fi

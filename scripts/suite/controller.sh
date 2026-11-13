@@ -2,6 +2,23 @@
 
 hive_die() { printf 'Hive: %s\n' "$*" >&2; exit 1; }
 hive_need() { command -v "$1" >/dev/null || hive_die "Required tool missing: $1"; }
+# One yes-or-no question. Only y or yes, in any case, is consent; anything else, or no terminal
+# input, declines.
+hive_confirm() {
+  local answer=''
+  read -r -p "$1 [y/N] " answer || true
+  [[ "${answer,,}" == y || "${answer,,}" == yes ]]
+}
+# One signed value of every selected component, as a JSON object: $1 is a jq path in a release component.
+hive_release_selected() {
+  jq -c --slurpfile config "$HIVE_CONFIG" ".components|with_entries(select(.key as \$name|\$config[0].components[\$name]!=null))|map_values($1)" "$HIVE_MANIFEST"
+}
+# Temporary files of this run. Removed on every exit, including an interrupt at a prompt.
+hive_cleanup() {
+  [[ -z "${HIVE_REGISTRY_TEMPORARY:-}" ]] || rm -f -- "$HIVE_REGISTRY_TEMPORARY"
+  [[ -z "${HIVE_AGENT_CONFIG_DIRECTORY:-}" ]] || rm -rf -- "$HIVE_AGENT_CONFIG_DIRECTORY"
+  [[ -z "${HIVE_AGENT_SECRETS:-}" ]] || rm -f -- "$HIVE_AGENT_SECRETS"
+}
 # Keep this a literal printf list: the launcher parses it without executing downloaded code.
 hive_runtime_files() {
   printf '%s\n' LICENSE hive.sh deployment/Caddyfile \
@@ -139,7 +156,7 @@ magnus-trust approves SSH host keys for the optional Magnus fleet gateway, with 
 on the node itself: magnus-trust list|scan|add|rotate|extra|remove. See deployment/FULL.md.
 migrate-native moves one existing native (systemd) installation onto the suite on the same
 ports: migrate-native plan|prepare|cutover|verify|rollback|status|issue-admin-token|
-set-admin-password|tls-refresh. plan reads only, prepare stops nothing, and cutover and rollback
+set-admin-password|tls-refresh|refresh-memory-token. plan reads only, prepare stops nothing, and cutover and rollback
 act only when named. --hold-on-failure keeps a failed cutover running for inspection.
 See deployment/MIGRATE_NATIVE.md.
 post-upgrade [--yes] finishes an upgrade: it upgrades Magnus host agents that run an older version
@@ -177,7 +194,7 @@ hive_configure() {
   local inference='[]' agents='[]' temporary config selected_json runtime version agent_id agent_profile agent_environment agent_service authorized
   local external_ca enrollment_endpoint enrollment_prefix enrollment_credential enrollment_ca provider_slug provider_aliases
   local product product_host product_origin product_bind product_certificate product_key product_inference trust_bundle ssh_config magnus_console
-  local gateway_deploy='' gateway_username='' gateway_key='' gateway_grant=no agent_port='' external_magnus='' embermend_deploy=''
+  local gateway_deploy='' gateway_username='' gateway_key='' gateway_grant=no agent_port='' external_magnus='' embermend_deploy='' studio_deploy=''
   if [[ -z "$HIVE_VERSION" ]]; then hive_prompt HIVE_VERSION 'Exact suite release version'; fi
   if [[ -z "$HIVE_MANIFEST" ]]; then
     HIVE_MANIFEST="$HIVE_ROOT/releases/$HIVE_VERSION.json"
@@ -235,6 +252,7 @@ hive_configure() {
   printf 'The console listens on this address. The default, 127.0.0.1, accepts connections from this host only (for an SSH tunnel or a local reverse proxy); 0.0.0.0, or one of this host'"'"'s addresses, serves the network.\n'
   hive_prompt bind 'HTTPS bind address' 127.0.0.1
   hive_prompt port 'HTTPS listener port' 443
+  [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] && ((port <= 65535)) || hive_die 'The HTTPS listener port is a number from 1 to 65535'
   hive_prompt mode 'Configuration mode (fresh/distributed/prepared)' fresh
   if [[ "$mode" == fresh || "$mode" == distributed ]]; then
     hive_prompt username 'Initial operator username' admin
@@ -566,13 +584,15 @@ hive_host() {
     --arg skillsManifest "${HIVE_SKILLS_MANIFEST:-}" --arg skillsSignature "${HIVE_SKILLS_SIGNATURE:-}" --arg skillsTrust "${HIVE_SKILLS_TRUST:-}" --arg skillsTokenSHA "${HIVE_SKILLS_TOKEN_SHA:-}" \
     --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" --argjson registry "${HIVE_REGISTRY_INPUT:-null}" --argjson memoryCredential "${HIVE_MEMORY_CREDENTIAL_INPUT:-null}" --argjson auditCollection "${HIVE_AUDIT_COLLECTION_INPUT:-null}" --argjson magnusTrust "${HIVE_MAGNUS_TRUST_INPUT:-null}" --argjson cindertrace "${HIVE_CINDERTRACE_INPUT:-null}" --argjson magnusAgent "${HIVE_MAGNUS_AGENT_INPUT:-null}" --argjson consoleClients "${HIVE_CONSOLE_CLIENTS_INPUT:-null}" --arg abortStep "${HIVE_ABORT_STEP:-}" \
     --arg dataTool "${HIVE_NATIVE_DATA_TOOL:-}" --arg adminScript "${HIVE_NATIVE_ADMIN_SCRIPT:-}" --argjson reviewedLinks "${HIVE_NATIVE_LINKS:-null}" --arg tokenDigest "${HIVE_NATIVE_TOKEN_DIGEST:-}" --argjson tokenTtlSeconds "${HIVE_NATIVE_TOKEN_TTL:-null}" \
-    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,memoryCredential:$memoryCredential,auditCollection:$auditCollection,magnusTrust:$magnusTrust,cindertrace:$cindertrace,magnusAgent:$magnusAgent,abortStep:$abortStep,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,magnusMemoryIdentity:(.components.magnus!=null and .components.hivemem!=null and .components.oathweave!=null and .components.magnus.host==.components.oathweave.host),ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,snapshotTool:$snapshotTool,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,nativeMigration:(.nativeMigration // null),dataTool:$dataTool,adminScript:$adminScript,reviewedLinks:$reviewedLinks,tokenDigest:$tokenDigest,tokenTtlSeconds:$tokenTtlSeconds,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]} + (if .external then {external:.external} else {} end) + (if $consoleClients!=null then {consoleClients:$consoleClients} else {} end)' "$HIVE_CONFIG")
+    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,memoryCredential:$memoryCredential,auditCollection:$auditCollection,magnusTrust:$magnusTrust,cindertrace:$cindertrace,magnusAgent:$magnusAgent,abortStep:$abortStep,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,magnusMemoryIdentity:(.components.magnus!=null and .components.hivemem!=null and .components.oathweave!=null and .components.magnus.host==.components.oathweave.host),ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,snapshotTool:$snapshotTool,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,nativeMigration:(.nativeMigration // null),dataTool:$dataTool,adminScript:$adminScript,reviewedLinks:$reviewedLinks,tokenDigest:$tokenDigest,tokenTtlSeconds:$tokenTtlSeconds,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]} + (if .external then {external:.external} else {} end) + (if $consoleClients!=null then {consoleClients:$consoleClients} else {} end)' "$HIVE_CONFIG") ||
+    hive_die "The request for host $host could not be prepared"
   # A secret travels only in the payload, on standard input: it is read here from an owner-only
   # file, never placed in an argument.
   if [[ -n "${HIVE_HOST_SECRET_FILE:-}" ]]; then
     payload=$(jq -c --slurpfile secret "$HIVE_HOST_SECRET_FILE" '.secret=$secret[0]' <<< "$payload") || hive_die 'The secret could not be prepared'
   fi
-  sudo_file=$(hive_sudo_file "$host")
+  # A refused password file stops here in every calling context: never continue without sudo.
+  sudo_file=$(hive_sudo_file "$host") || exit 1
   # Frame the trusted program separately from its JSON input. Neither belongs
   # in argv: Linux limits a single argument even when total ARG_MAX is larger.
   local encoded launcher='set -euo pipefail
@@ -670,7 +690,7 @@ hive_transfer() {
   target=$(jq -r --arg host "$host" '.hosts[$host].target' "$HIVE_CONFIG")
   directory=$(jq -r --arg host "$host" '.hosts[$host].directory' "$HIVE_CONFIG")
   local sudo_file
-  sudo_file=$(hive_sudo_file "$host")
+  sudo_file=$(hive_sudo_file "$host") || exit 1
   if [[ "$target" == local ]]; then
     install -m 600 -- "$file" "$directory/$relative"
   elif [[ -n "$sudo_file" ]]; then
@@ -721,6 +741,7 @@ hive_main() {
   HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY='' HIVE_CINDERTRACE_SOURCES='' HIVE_AGENT_TARGET='' HIVE_AGENT_SSH_CONFIG='' HIVE_AGENT_SUDO_FILE='' HIVE_AGENT_INSTALL_NODE=false HIVE_AGENT_TRUST=false
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
   HIVE_RELEASE_SUMMARY='' HIVE_REGISTRY_FILE='' HIVE_REGISTRY_ORIGINAL_CONFIG='' HIVE_REGISTRY_TEMPORARY='' HIVE_OPERATION='' HIVE_CHECKLIST=''
+  HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS=''
   local -a registry_arguments=() trust_arguments=()
   if (($#)) && [[ "$1" != --* ]]; then command=$1; shift; fi
   while (($#)); do
@@ -789,7 +810,7 @@ hive_main() {
   # A renewal timer outlives the release in the configuration file; it runs this checkout's release.
   if [[ "$command" == tls-refresh && -z "$HIVE_VERSION" && -z "$HIVE_MANIFEST" ]]; then HIVE_VERSION=$(hive_checkout_release); fi
   HIVE_OPERATION=$command
-  trap 'if [[ -n "${HIVE_REGISTRY_TEMPORARY:-}" ]]; then rm -f -- "$HIVE_REGISTRY_TEMPORARY"; fi' EXIT
+  trap hive_cleanup EXIT
   hive_registry_configuration "$command"
   hive_validate
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
@@ -851,9 +872,7 @@ hive_main() {
   hive_plan
   if [[ "$confirmed" != true ]]; then
     [[ "$interactive" == true && -t 0 ]] || hive_die 'Applying changes requires --yes or interactive confirmation'
-    local answer
-    read -r -p 'Apply this exact installation plan? [y/N] ' answer
-    [[ "$answer" == y ]] || hive_die 'Cancelled'
+    hive_confirm 'Apply this exact installation plan?' || hive_die 'Cancelled'
   fi
   case "$command" in
     skills-prepare) hive_skills_prepare;;

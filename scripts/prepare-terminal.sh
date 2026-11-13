@@ -3,7 +3,6 @@
 set -Eeuo pipefail
 umask 077
 die() { printf 'prepare-terminal: %s\n' "$*" >&2; exit 1; }
-owner=${SUDO_USER:-}
 [[ $# == 2 && $1 == --owner ]] || die 'Usage: sudo scripts/prepare-terminal.sh --owner USER'
 owner=$2
 [[ $(id -u) == 0 ]] || die 'Run with sudo'
@@ -19,7 +18,8 @@ if id "$account" >/dev/null 2>&1; then
   [[ $(getent passwd "$account" | cut -d: -f6) == "$home" && $(id -u "$account") != 0 ]] || die 'The terminal account has an unexpected home or UID'
   [[ $(id -nG "$account") == "$account" ]] || die 'The terminal account has additional groups; review it manually'
 else
-  useradd --create-home --shell /bin/bash --comment 'Hive web terminal' "$account"
+  # The home is named, so a host whose useradd default is elsewhere passes the check above on a repeat.
+  useradd --create-home --home-dir "$home" --shell /bin/bash --comment 'Hive web terminal' "$account"
 fi
 install -d -m 0700 -o "$owner" -g "$(id -gn "$owner")" /etc/hive/fleet
 if [[ -e "$key" ]]; then

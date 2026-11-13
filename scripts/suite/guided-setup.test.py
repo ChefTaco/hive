@@ -13,6 +13,7 @@ with tempfile.TemporaryDirectory(prefix='hive-guided-') as temporary:
     fixture.write_text('''#!/usr/bin/env bash
 set -Eeuo pipefail
 HIVE_ROOT=$1; shift
+source "$HIVE_ROOT/scripts/suite/controller.sh"
 source "$HIVE_ROOT/scripts/suite/guided-setup.sh"
 unset HIVE_SETUP_LOCAL
 hive_die() { printf '%s\\n' "$*" >&2; exit 1; }

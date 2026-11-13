@@ -28,9 +28,7 @@ hive_console_clients() {
   host=$(jq -r .components.oathweave.host "$HIVE_CONFIG")
   printf 'Oathweave on %s: create any missing public browser client among %s, and add their permissions to the SUITE_ADMIN role.\n' "$host" "$(jq -r 'map(.id)|join(", ")' <<< "$clients")"
   if [[ "${HIVE_CONFIRMED:-false}" != true ]]; then
-    local answer=''
-    [[ -t 0 ]] && read -r -p 'Apply this identity change? [y/N] ' answer
-    [[ "$answer" == y || "$answer" == yes ]] || hive_die 'Cancelled; nothing was changed. Unattended use needs --yes'
+    [[ -t 0 ]] && hive_confirm 'Apply this identity change?' || hive_die 'Cancelled; nothing was changed. Unattended use needs --yes'
   fi
   result=$(HIVE_HOST_ACTION=console-clients HIVE_CONSOLE_CLIENTS_INPUT=$clients hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/console-clients-host.sh")") ||
     hive_die 'Oathweave was not changed; see the reason above'

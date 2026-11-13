@@ -38,6 +38,7 @@ reject "$ROOT/hive.sh" doctor --config "$temporary/config.json"
 cp "$temporary/runtime.good" "$temporary/install/config/runtime.json"
 chmod 644 "$temporary/install/config/ingress.env"
 reject "$ROOT/hive.sh" doctor --config "$temporary/config.json"
+grep -q 'ingress.env must be owner-only' "$temporary/result" || fail 'An exposed environment file was refused without its reason'
 chmod 600 "$temporary/install/config/ingress.env"
 jq '.hosts.control.minimumFreeMiB=999999999999' "$temporary/config.json" > "$temporary/full.json"
 reject "$ROOT/hive.sh" doctor --config "$temporary/full.json"

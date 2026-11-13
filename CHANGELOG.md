@@ -13,6 +13,29 @@ All notable changes to this project are documented in this file. The format is b
   result, so the failure surfaced later as a missing export file.
 - Hive Registry: a request target that is not a path (such as `GET //`) answers 404 `not_found`
   instead of 500 `internal` with an error log line. The next Hive Registry image carries the fix.
+- A refused sudo password file (wrong owner or permissions) now stops a host action in every case.
+  In lifecycle steps the refusal was printed and the action then continued over SSH without sudo.
+- `scripts/install-prerequisites.sh --check` reports readiness on other Linux distributions, as
+  the quickstart describes, instead of stopping at "unsupported distribution". Guided setup can
+  therefore continue on a prepared host or controller that is not Ubuntu or Debian. Every mode that
+  changes the system still refuses there.
+- `hive.sh magnus-agent install --host` removes its temporary copy of the node credentials on every
+  exit, including an interrupt at the confirmation prompt.
+- `scripts/console-certificate.sh` removes its scratch copy of a Tailscale key when issuing fails,
+  and `schedule` refuses a checkout path, configuration path or account name that systemd would
+  split or expand in the renewal service, instead of writing a broken unit.
+- `scripts/prepare-terminal.sh` creates the terminal account's home at `/home/hive-terminal` on hosts
+  whose `useradd` default is elsewhere, so a repeat no longer refuses the account it created.
+- Interactive setup refuses an HTTPS listener port that is not a number from 1 to 65535 with a
+  clear message.
+
+### Changed
+
+- Every yes-or-no prompt of `hive.sh` accepts `y` or `yes` in any case. The final "Apply this
+  exact installation plan?" prompt accepted only a lowercase `y` and cancelled on `yes`.
+- Host preflight (`hive.sh doctor` and the lifecycle commands) names the file, directory or port
+  behind each refusal; several checks failed with only "Host preflight failed".
+- `hive.sh --help` lists `migrate-native refresh-memory-token`.
 
 ## [3.7.0] - 2026-11-13
 
