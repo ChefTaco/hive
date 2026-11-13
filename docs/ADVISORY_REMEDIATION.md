@@ -227,3 +227,17 @@ selects the newly verified images after both architectures pass the full gate.
 The [native acceptance record](acceptance/2026-11-12-postgres-xslt.json) retains
 the four successful architecture/major checks, exact published image digests and
 the signed 3.2.2 full-policy result. The failed 3.2.1 tag remains unchanged.
+
+## PostgreSQL 17.12 and 18.7 security releases, 2026-11-13
+
+The PostgreSQL 2026-11-12 releases fix [CVE-2026-6460](https://www.postgresql.org/support/security/CVE-2026-6460/)
+(CVSS 8.8, all supported majors before 17.12 and 18.7: an object creator can execute code as the
+database operating system user) and [CVE-2026-116322](https://www.postgresql.org/support/security/CVE-2026-116322/)
+(PostgreSQL 18 before 18.7: an unauthenticated client can trigger a server restart). New
+`hive-postgres` 17.12-1 and 18.7-1 tags build the checksum-verified 17.12 and 18.7 sources on the
+same digest-pinned hardened base, ICU, libxml2 and fixed libxslt packages, and take the
+digest-pinned upstream 17.12 and 18.7 images for the entrypoint and nss_wrapper. The majors and
+collation-runtime identity are unchanged, so the `runtime-2026-11-pg1712` profile keeps every
+storage format. The native image checks add a direct start of data written by the previous
+published tag, with the receipt unchanged and reconciliation a no-op. Earlier tags, profiles and
+signed manifests are not rewritten; releases after 3.6.1 cannot select the superseded profile.

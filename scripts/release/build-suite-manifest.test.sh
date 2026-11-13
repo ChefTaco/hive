@@ -86,12 +86,12 @@ jq '.["unreviewed-product"]=.ardentstudio' "$temporary/studio-pinned.json" > "$t
 if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/bad-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An unknown product image passed' >&2; exit 1; fi
 # Explicit hardened datastore selection preserves historical defaults and declares each
 # collation transition. Test input failures before any network or host mutation.
-jq '.datastoreProfile="runtime-2026-11"' "$temporary/inputs.json" > "$temporary/runtime-inputs.json"
+jq '.datastoreProfile="runtime-2026-11" | .version="3.2.1"' "$temporary/inputs.json" > "$temporary/runtime-inputs.json"
 jq --arg redis "ghcr.io/cheftaco/hive-redis@$(digest 8)" --arg qdrant "ghcr.io/cheftaco/hive-qdrant@$(digest 9)" \
   --arg pg17 "ghcr.io/cheftaco/hive-postgres@$(digest 10)" --arg pg18 "ghcr.io/cheftaco/hive-postgres@$(digest 11)" \
   '.+{"datastore:redis":$redis,"datastore:qdrant":$qdrant,"datastore:postgres17":$pg17,"datastore:postgres18":$pg18}' \
   "$temporary/pinned.json" > "$temporary/runtime-pinned.json"
-node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/runtime-inputs.json" --pinned "$temporary/runtime-pinned.json" --output "$temporary/runtime.json" >/dev/null
+node "$root/scripts/release/build-suite-manifest.mjs" --version 3.2.1 --inputs "$temporary/runtime-inputs.json" --pinned "$temporary/runtime-pinned.json" --output "$temporary/runtime.json" >/dev/null
 jq -e --slurpfile old "$temporary/original.json" --slurpfile pinned "$temporary/runtime-pinned.json" '
   (.components as $components | all(["magnus-postgres","chattermost-postgres","cindertrace-postgres"][]; . as $name |
     $components[$name].storageFormat==($old[0].components[$name].storageFormat+"-runtime2") and
@@ -106,7 +106,7 @@ jq -e --slurpfile old "$temporary/original.json" --slurpfile pinned "$temporary/
   .components["hivemem-qdrant"].storageFormat=="qdrant-v1.18.1" and
   .components["magnus-postgres"].version=="17.11" and .components["cindertrace-postgres"].version=="18.6"
 ' "$temporary/runtime.json" >/dev/null || { echo 'The hardened datastore migration contract is incomplete' >&2; exit 1; }
-node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --check --inputs "$temporary/runtime-inputs.json" --output "$temporary/runtime.json" >/dev/null
+node "$root/scripts/release/build-suite-manifest.mjs" --version 3.2.1 --check --inputs "$temporary/runtime-inputs.json" --output "$temporary/runtime.json" >/dev/null
 # A patched library selects new immutable images without rewriting historical tags or
 # changing the already reviewed collation/storage transition.
 node --input-type=module - "$root/scripts/suite/release-contracts.mjs" <<'NODE'
@@ -122,15 +122,55 @@ assert.deepEqual(patched['datastore:redis'], old['datastore:redis']);
 assert.deepEqual(patched['datastore:qdrant'], old['datastore:qdrant']);
 NODE
 jq '.datastoreProfile="runtime-2026-11-xslt"' "$temporary/runtime-inputs.json" > "$temporary/patched-inputs.json"
-node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/patched-inputs.json" --pinned "$temporary/runtime-pinned.json" --output "$temporary/patched.json" >/dev/null
+node "$root/scripts/release/build-suite-manifest.mjs" --version 3.2.1 --inputs "$temporary/patched-inputs.json" --pinned "$temporary/runtime-pinned.json" --output "$temporary/patched.json" >/dev/null
 cmp "$temporary/runtime.json" "$temporary/patched.json" || { echo 'The library patch changed the storage or product contract' >&2; exit 1; }
+# A PostgreSQL security minor release selects new immutable images for the same majors.
+# Only the datastore image and recorded minor version change: the storage format, readable
+# formats and explicit reconciliation stay exactly the xslt profile's, so an upgrade from it
+# needs no storage transition. Superseded profiles are refused for later suite releases.
+node --input-type=module - "$root/scripts/suite/release-contracts.mjs" <<'NODE'
+import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
+const { datastoreProfileReferences: references, assertDatastoreProfileCurrent: current } = await import(pathToFileURL(process.argv[2]));
+const xslt = references('runtime-2026-11-xslt'), minor = references('runtime-2026-11-pg1712');
+assert.equal(xslt['datastore:postgres17'].image, 'ghcr.io/cheftaco/hive-postgres:17.11-4');
+assert.equal(xslt['datastore:postgres18'].image, 'ghcr.io/cheftaco/hive-postgres:18.6-4');
+assert.equal(minor['datastore:postgres17'].image, 'ghcr.io/cheftaco/hive-postgres:17.12-1');
+assert.equal(minor['datastore:postgres18'].image, 'ghcr.io/cheftaco/hive-postgres:18.7-1');
+assert.equal(minor['datastore:postgres17'].version, '17.12');
+assert.equal(minor['datastore:postgres18'].version, '18.7');
+assert.deepEqual(minor['datastore:redis'], xslt['datastore:redis']);
+assert.deepEqual(minor['datastore:qdrant'], xslt['datastore:qdrant']);
+for (const version of ['3.2.1', '3.6.1']) current(version, 'runtime-2026-11-xslt');
+current('3.2.1', 'runtime-2026-11');
+for (const version of ['3.6.2', '3.7.0', '4.0.0']) assert.throws(() => current(version, 'runtime-2026-11-xslt'), /superseded/);
+assert.throws(() => current('3.3.0', 'runtime-2026-11'), /superseded/);
+current('9.9.9', 'runtime-2026-11-pg1712');
+NODE
+jq '.datastoreProfile="runtime-2026-11-xslt"' "$temporary/inputs.json" > "$temporary/xslt-inputs.json"
+jq '.datastoreProfile="runtime-2026-11-pg1712"' "$temporary/inputs.json" > "$temporary/minor-inputs.json"
+jq --arg pg17 "ghcr.io/cheftaco/hive-postgres@$(digest 12)" --arg pg18 "ghcr.io/cheftaco/hive-postgres@$(digest 13)" \
+  '.+{"datastore:postgres17":$pg17,"datastore:postgres18":$pg18}' "$temporary/runtime-pinned.json" > "$temporary/minor-pinned.json"
+if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/xslt-inputs.json" --pinned "$temporary/runtime-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'A superseded datastore profile passed for a later release' >&2; exit 1; fi
+jq '.version="3.6.1"' "$temporary/xslt-inputs.json" > "$temporary/xslt-historical.json"
+jq '.version="3.6.1"' "$temporary/minor-inputs.json" > "$temporary/minor-historical.json"
+node "$root/scripts/release/build-suite-manifest.mjs" --version 3.6.1 --inputs "$temporary/xslt-historical.json" --pinned "$temporary/runtime-pinned.json" --output "$temporary/xslt.json" >/dev/null
+node "$root/scripts/release/build-suite-manifest.mjs" --version 3.6.1 --inputs "$temporary/minor-historical.json" --pinned "$temporary/minor-pinned.json" --output "$temporary/minor-same.json" >/dev/null
+node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/minor-inputs.json" --pinned "$temporary/minor-pinned.json" --output "$temporary/minor.json" >/dev/null
+jq -e --slurpfile pinned "$temporary/minor-pinned.json" '
+  .components["magnus-postgres"].image==$pinned[0]["datastore:postgres17"] and .components["chattermost-postgres"].image==$pinned[0]["datastore:postgres17"] and
+  .components["cindertrace-postgres"].image==$pinned[0]["datastore:postgres18"] and
+  .components["magnus-postgres"].version=="17.12" and .components["chattermost-postgres"].version=="17.12" and .components["cindertrace-postgres"].version=="18.7"
+' "$temporary/minor.json" >/dev/null || { echo 'The PostgreSQL minor profile did not select its images' >&2; exit 1; }
+strip='del(.components[]|select(.kind=="datastore" and (.image|startswith("ghcr.io/cheftaco/hive-postgres@")))|.image,.version)'
+cmp <(jq -S "$strip" "$temporary/xslt.json") <(jq -S "$strip" "$temporary/minor-same.json") || { echo 'The PostgreSQL minor release changed a storage or product contract' >&2; exit 1; }
 for profile in unknown legacy null; do
   jq --arg profile "$profile" '.datastoreProfile=(if $profile=="null" then null else $profile end)' "$temporary/runtime-inputs.json" > "$temporary/bad-inputs.json"
-  if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/runtime-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An unknown datastore profile passed' >&2; exit 1; fi
+  if node "$root/scripts/release/build-suite-manifest.mjs" --version 3.2.1 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/runtime-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An unknown datastore profile passed' >&2; exit 1; fi
 done
 for mutation in 'del(.["datastore:postgres17"])' '.["datastore:redis"]="ghcr.io/example/other@sha256:"+("a"*64)'; do
   jq "$mutation" "$temporary/runtime-pinned.json" > "$temporary/bad-pinned.json"
-  if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/runtime-inputs.json" --pinned "$temporary/bad-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An incomplete or foreign datastore pin passed' >&2; exit 1; fi
+  if node "$root/scripts/release/build-suite-manifest.mjs" --version 3.2.1 --inputs "$temporary/runtime-inputs.json" --pinned "$temporary/bad-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An incomplete or foreign datastore pin passed' >&2; exit 1; fi
 done
 # Emberpath 2.2.0 and HiveSkills 1.5.0 change their product data formats. Their upgrade is an
 # explicit storage transition running each product's own migrate; older pins stay unchanged.

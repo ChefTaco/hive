@@ -34,10 +34,13 @@ release's bytes only from the controller source of that release's tag.
 1. **Release the products.** Each product repository publishes its own multi-architecture image
    from its own version tag. Record the exact tags in `releases/X.Y.Z.inputs.json`. The input file
    lists the platforms each image must provide. Releases that adopt the patched datastore
-   runtime set `"datastoreProfile": "runtime-2026-11-xslt"`. This selects the reviewed Redis,
+   runtime set `"datastoreProfile": "runtime-2026-11-pg1712"`. This selects the reviewed Redis,
    Qdrant and PostgreSQL tags in `release-contracts.mjs`; older inputs retain their
    historical pins. PostgreSQL receives a new storage format and the explicit offline
    collation migration, so adoption requires the normal backup and rehearsal workflow.
+   `DATASTORE_PROFILE_LAST_RELEASE` names the last suite release that may select each superseded
+   profile; a later release that names one is refused, so a new datastore profile is adopted by the
+   next release.
    A product version that changes its own data format needs an entry in `PRODUCT_FORMATS` in
    `scripts/suite/release-contracts.mjs` before its first suite release. The builder then
    declares the storage transition and the product's `migrate` command for every release
@@ -130,3 +133,12 @@ its PostgreSQL libxslt dependency before publication. Suite 3.2.2 selects the ne
 `runtime-2026-11-xslt` image profile. The earlier profile and signed manifests keep
 their original pins. This library patch preserves the major, collation identity and
 storage format; the explicit unversioned-store recovery remains separately verified.
+
+Suite 3.7.0 and later select `runtime-2026-11-pg1712`: the PostgreSQL 17.12 and 18.7 security
+releases as `hive-postgres` 17.12-1 and 18.7-1. A minor release keeps the major, the hardened
+runtime and its collation receipt, so the storage format, readable formats and reconciliation
+command are identical to `runtime-2026-11-xslt` and an upgrade between them has no storage
+transition. Only the image and its recorded version change. The image workflow checks this by
+starting data written by the previous image (`upgradeFrom` in `deployment/images.json`) directly on
+the candidate. `runtime-2026-11-xslt` remains selectable up to suite 3.6.1, and its signed
+manifests keep their pins.

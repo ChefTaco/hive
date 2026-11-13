@@ -19,7 +19,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { addFullComponents, coreRelease, CORE_PRODUCTS, DATASTORE_IMAGES, DATASTORE_VERSIONS, FULL_PRODUCTS, OPTIONAL_PRODUCTS, datastoreProfileReferences, datastoreProfileComponent, applyDatastoreProfile, applyStorageRecovery, applyProductFormats } from '../suite/release-contracts.mjs';
+import { addFullComponents, coreRelease, CORE_PRODUCTS, DATASTORE_IMAGES, DATASTORE_VERSIONS, FULL_PRODUCTS, OPTIONAL_PRODUCTS, datastoreProfileReferences, datastoreProfileComponent, assertDatastoreProfileCurrent, applyDatastoreProfile, applyStorageRecovery, applyProductFormats } from '../suite/release-contracts.mjs';
 import { applySuiteCatalog } from '../suite/suite-catalog.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -40,6 +40,7 @@ for (const [name, product] of Object.entries(products)) {
   assert(Array.isArray(product.platforms) && product.platforms.includes('linux/amd64'), name + ': platforms must include linux/amd64');
 }
 const datastoreReferences = datastoreProfileReferences(inputs.datastoreProfile);
+assertDatastoreProfileCurrent(version, inputs.datastoreProfile);
 const references = { ...products, ...datastoreReferences };
 const repository = (reference) => reference.replace(/[:@].*$/, '');
 if (products.embermend) {
