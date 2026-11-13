@@ -6,6 +6,14 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Fixed
+
+- `hive.sh migrate-native`: the Redis export, import and comparison helper now fails when the
+  store ends the connection before answering a command. It used to end with status 0 and no
+  result, so the failure surfaced later as a missing export file.
+- Hive Registry: a request target that is not a path (such as `GET //`) answers 404 `not_found`
+  instead of 500 `internal` with an error log line. The next Hive Registry image carries the fix.
+
 ## [3.7.0] - 2026-11-13
 
 ### Changed
