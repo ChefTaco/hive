@@ -110,7 +110,9 @@ export function createApp(options: AppOptions): RequestListener {
 
   async function dispatch(request: IncomingMessage): Promise<Reply> {
     const method = request.method ?? 'GET';
-    const url = new URL(request.url ?? '/', 'http://registry.invalid');
+    // A request target that is not a path, such as `//`, does not parse. It names no resource.
+    const url = URL.parse(request.url ?? '/', 'http://registry.invalid');
+    if (!url) return notFound();
     if (url.pathname === '/health/live') return method === 'GET' ? { status: 200, body: { status: 'live' } } : failure(405, 'method_not_allowed', 'Use GET', { Allow: 'GET' });
     if (url.pathname === '/health/ready') {
       if (method !== 'GET') return failure(405, 'method_not_allowed', 'Use GET', { Allow: 'GET' });

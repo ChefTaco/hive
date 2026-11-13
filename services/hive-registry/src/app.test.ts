@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import type { AddressInfo } from 'node:net';
+import { connect, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -510,6 +510,16 @@ describe('Hive Registry API', () => {
       assert.equal((await call('GET', '/health/live')).status, 200);
       assert.equal((await call('POST', '/health/ready')).status, 405);
       for (const path of ['/v1/products/Bad%20Name', '/v1/products/emberpath/other', '/v1/products/a/b/c', '/v2/products', '/']) assert.equal((await call('GET', path)).status, 404, path);
+    });
+    it('answers 404, not a server error, for a request target that is not a path', async () => {
+      const { port } = server!.address() as AddressInfo;
+      const head = await new Promise<string>((done, reject) => {
+        const socket = connect(port, '127.0.0.1', () => socket.write('GET // HTTP/1.1\r\nHost: registry.example.com\r\nConnection: close\r\n\r\n'));
+        let text = '';
+        socket.setEncoding('utf8').on('data', (chunk: string) => { text += chunk; }).on('end', () => done(text)).on('error', reject);
+      });
+      assert.match(head, /^HTTP\/1\.1 404 /);
+      assert.match(head, /"code":"not_found"/);
     });
     it('caps request bodies', async () => {
       const response = await call('POST', '/v1/sync', { token: writeToken, raw: JSON.stringify({ padding: 'x'.repeat(1024 * 1024 + 1) }) });

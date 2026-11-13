@@ -13,7 +13,8 @@ const capabilityName = /^[a-z0-9.-]{1,64}$/;
 const localPath = /^\/[A-Za-z0-9._~/-]*$/;
 const versionPattern = /^\d+(\.\d+)*$/;
 
-function compareVersions(left, right) {
+// Dotted numeric versions, compared part by part; a missing part counts as 0.
+export function compareVersions(left, right) {
   const a = left.split('.').map(Number), b = right.split('.').map(Number);
   for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
     const difference = (a[index] ?? 0) - (b[index] ?? 0);
