@@ -6,6 +6,23 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.7.0] - 2026-11-13
+
+### Changed
+
+- Product update on the same controller: Emberpath 2.4.0, Cindertrace 0.6.1, HiveSkills 1.7.1 and
+  Chattermost and its migrator 0.5.2, with the `runtime-2026-11-pg1712` datastore profile below.
+  Every other pin and the storage recovery profile are unchanged from 3.6.1. No product changes its
+  data format or adds a migration, so an upgrade from 3.6.x needs no `--allow-migrations`.
+- Emberpath 2.4.0 serves the OpenAI Decisions API at `POST /v1/decisions`, with a `decision` alias
+  that prefers Jev through TypeSafe or OpenRouter and can fall back to OpenAI `gpt-6-luna`. It is off
+  until the operator sets `EMBERPATH_DECISIONS_JEV_ENABLED=true` or adds a provider that serves the
+  route; see Emberpath's README.
+- Cindertrace 0.6.1 rejects an ingested event with an out-of-range time on its own instead of failing
+  the whole batch, and its collector stamps zero or unparsable source times with the receive time.
+- Emberpath, Cindertrace, HiveSkills and Chattermost use `@hono/node-server` 2.1.8 (GHSA-qv5m-9pm6-hqp3,
+  GHSA-jpvv-r467-5p4w).
+
 ### Security
 
 - PostgreSQL runtime images `hive-postgres` 17.12-1 and 18.7-1, built from the PostgreSQL 17.12 and

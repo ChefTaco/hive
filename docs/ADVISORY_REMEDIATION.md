@@ -241,3 +241,6 @@ collation-runtime identity are unchanged, so the `runtime-2026-11-pg1712` profil
 storage format. The native image checks add a direct start of data written by the previous
 published tag, with the receipt unchanged and reconciliation a no-op. Earlier tags, profiles and
 signed manifests are not rewritten; releases after 3.6.1 cannot select the superseded profile.
+
+The [native acceptance record](acceptance/2026-11-13-postgres-1712-187.json) retains the exact
+published image digests, their publish workflows and the signed 3.7.0 full-policy result.

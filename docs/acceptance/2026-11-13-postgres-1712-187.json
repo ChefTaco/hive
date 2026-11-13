@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "date": "2026-11-13",
+  "result": "passed",
+  "advisories": [
+    "CVE-2026-6460",
+    "CVE-2026-116322"
+  ],
+  "vendorAdvisory": "https://www.postgresql.org/about/news/postgresql-187-1712-1616-1520-1425-and-19-rc-2-released-3442/",
+  "fixedVersions": [
+    "17.12",
+    "18.7"
+  ],
+  "imageSourceRevision": "4edc513dfe2168f58084f3dc031f72eac1986690",
+  "publishWorkflows": [
+    "https://github.com/ChefTaco/hive/actions/runs/43352876504",
+    "https://github.com/ChefTaco/hive/actions/runs/43352879206"
+  ],
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "images": {
+    "17.12-1": "ghcr.io/cheftaco/hive-postgres@sha256:2b15e59bf845c4661c5523dc7f2aeeeb573aa8a99a8258179dbdcf1bdb9c2ad1",
+    "18.7-1": "ghcr.io/cheftaco/hive-postgres@sha256:2f261bd6c38d75119f57fddfbe1af7452e514421e94d216932a805f4bde8c7d6"
+  },
+  "upgradeFrom": {
+    "17.12-1": "17.11-4",
+    "18.7-1": "18.6-4"
+  },
+  "nativeCases": [
+    "previous image data started directly on the candidate",
+    "runtime receipt unchanged",
+    "data and trigram index intact",
+    "minor version newer",
+    "hive-pg-reconcile already reconciled"
+  ],
+  "datastoreProfile": "runtime-2026-11-pg1712",
+  "fullHighCriticalPolicyIncludesUnfixed": true,
+  "newAdvisoryExceptionAdded": false,
+  "historicalTagsAndSignaturesUnchanged": true,
+  "postgresMajorsAndCollationIdentityUnchanged": true,
+  "signedRelease": "3.7.0",
+  "signedManifestSHA256": "8cb075cb0f069669d3bfe174a19226d80002f6b39a71564550834b512f0a0a25",
+  "fullPinnedReleaseImagePolicy": "passed with zero HIGH/CRITICAL on both platforms"
+}

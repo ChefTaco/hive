@@ -59,6 +59,12 @@ table you suspect is affected by the corruption fixes. The suite's products do n
 index types. If you added your own, rebuild them with `REINDEX` after the upgrade. Take a new full
 backup before relying on PostgreSQL incremental backups.
 
+The same release pins Emberpath 2.4.0, Cindertrace 0.6.1, HiveSkills 1.7.1 and Chattermost 0.5.2,
+none of which changes its data format. Emberpath's new Decisions API (`POST /v1/decisions`) stays
+off after the upgrade: set `EMBERPATH_DECISIONS_JEV_ENABLED=true` to serve it with the TypeSafe and
+OpenRouter keys Emberpath already holds for its shadow decision model, then add the `decision` alias
+and its rules as Emberpath's README describes.
+
 ## Suite 3.6.1: model API at /v1 on migrated hosts
 
 Suite 3.6.1 changes no data format and needs no flag from 3.6.0. It pins Magnus 2.9.1 and a new
