@@ -210,3 +210,13 @@ if HIVE_INSTALLATION=$temporary/missing.json "$ROOT/hive.sh" status --non-intera
 grep -q 'not a regular file' "$temporary/result" || fail 'A missing HIVE_INSTALLATION file was not explained' 
 "$ROOT/hive.sh" --help | grep -q 'agents-accept|skills-prepare' || fail 'Usage omits agents-accept'
 "$ROOT/hive.sh" --help | grep -q 'post-upgrade \[--yes\]' || fail 'Usage omits post-upgrade'
+"$ROOT/hive.sh" --help | grep -q 'refresh-memory-token' || fail 'Usage omits migrate-native refresh-memory-token'
+# One consent rule for every prompt: y or yes in any case; anything else, or no input, declines.
+for answer in y Y yes YES; do hive_confirm 'Question?' <<< "$answer" 2>/dev/null || fail "Consent $answer was refused"; done
+for answer in '' n no yess 'y es' ja; do if hive_confirm 'Question?' <<< "$answer" 2>/dev/null; then fail "Answer '$answer' was taken as consent"; fi; done
+if hive_confirm 'Question?' < /dev/null 2>/dev/null; then fail 'Missing input was taken as consent'; fi
+# Temporary files of a run are removed on exit, and nothing else is.
+mkdir "$temporary/agent-config"; touch "$temporary/agent-secrets" "$temporary/registry-copy" "$temporary/kept"
+( HIVE_REGISTRY_TEMPORARY=$temporary/registry-copy HIVE_AGENT_CONFIG_DIRECTORY=$temporary/agent-config HIVE_AGENT_SECRETS=$temporary/agent-secrets; trap hive_cleanup EXIT; exit 3 ) || true
+[[ ! -e "$temporary/agent-config" && ! -e "$temporary/agent-secrets" && ! -e "$temporary/registry-copy" && -e "$temporary/kept" ]] || fail 'Run cleanup left temporary files or removed another file'
+( HIVE_REGISTRY_TEMPORARY='' HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS=''; hive_cleanup ) || fail 'Cleanup failed with nothing to remove'
