@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { once } from 'node:events';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -108,3 +110,26 @@ test('a reader waits for a product holding a write lock instead of failing', asy
   assert.equal(state.tables.ClientApiKey.count, 1);
   await new Promise((done) => writer.once('exit', done));
 });
+
+// Runs the tool as the host does, against a store that ends the connection mid-command.
+const runTool = (request) => new Promise((done, reject) => {
+  const child = spawn(process.execPath, ['--no-warnings', '--input-type=module', '-e', readFileSync(new URL('./migrate-native-data.mjs', import.meta.url), 'utf8'), JSON.stringify(request)], { env: { PATH: process.env.PATH }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '', stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('error', reject).on('exit', (code) => done({ code, stdout, stderr }));
+});
+for (const [name, drop] of [['ends', (socket) => socket.end()], ['resets', (socket) => socket.destroy()]]) {
+  test(`a Redis export fails when the store ${name} the connection before it answers`, async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'hive-migrate-redis-'));
+    const server = createServer((socket) => socket.on('error', () => undefined).on('data', () => drop(socket))).listen(0, '127.0.0.1');
+    t.after(() => { server.close(); rmSync(directory, { recursive: true, force: true }); });
+    await once(server, 'listening');
+    const output = join(directory, 'redis.json');
+    const result = await runTool({ command: 'redis-export', url: 'redis://127.0.0.1:' + server.address().port, prefix: 'hive-iam', output });
+    assert.equal(result.code, 1, 'an unanswered command is a failure, never a silent success');
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /^migrate-native data: /);
+    assert.equal(existsSync(output), false);
+  });
+}

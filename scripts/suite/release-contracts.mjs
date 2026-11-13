@@ -3,7 +3,7 @@
 // (scripts/release/build-suite-manifest.mjs) and the disposable developer proofs build
 // their manifests from here, so the contract a proof exercises is the one that ships.
 // Callers supply only exact image references and the service owner.
-import { hiveRegistryComponent } from './suite-catalog.mjs';
+import { compareVersions, hiveRegistryComponent } from './suite-catalog.mjs';
 
 // Datastore images: the hardened builds in deployment/datastores (deployment/images.json),
 // published from this repository and pinned to their multi-architecture index digests.
@@ -50,9 +50,7 @@ export const DATASTORE_PROFILE_LAST_RELEASE = Object.freeze({
 export function assertDatastoreProfileCurrent(version, profile) {
   const last = typeof profile === 'string' && Object.hasOwn(DATASTORE_PROFILE_LAST_RELEASE, profile) ? DATASTORE_PROFILE_LAST_RELEASE[profile] : undefined;
   if (last === undefined) return;
-  const [a, b] = [version, last].map((value) => value.split('.').map(Number));
-  const newer = a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] > b[2];
-  if (newer) throw new Error(`Datastore profile ${profile} is superseded after suite ${last}; select a current reviewed profile`);
+  if (compareVersions(version, last) > 0) throw new Error(`Datastore profile ${profile} is superseded after suite ${last}; select a current reviewed profile`);
 }
 const DATASTORE_COMPONENTS = Object.freeze({
   redis: ['oathweave-redis', 'magnus-redis', 'cindertrace-redis'],
@@ -127,11 +125,7 @@ const PRODUCT_FORMATS = Object.freeze({
   hiveskills: Object.freeze([{ since: '1.5.0', storageFormat: 'hiveskills-managed-format-3', from: 'hiveskills-v1' }]),
 });
 const PRODUCT_MIGRATION = Object.freeze(['migrate', '--backup-dir', '/data/migration-backups']);
-const atLeast = (version, since) => {
-  const [a, b] = [version, since].map((value) => value.split('.').map(Number));
-  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
-  return true;
-};
+const atLeast = (version, since) => compareVersions(version, since) >= 0;
 export function applyProductFormats(manifest, products) {
   for (const [name, formats] of Object.entries(PRODUCT_FORMATS)) {
     const target = manifest.components[name];

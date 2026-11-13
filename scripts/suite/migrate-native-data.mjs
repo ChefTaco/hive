@@ -115,7 +115,7 @@ function redisClient(url) {
   // Credentials arrive through the environment, never in the request on the command line.
   const parsed = new URL(url ?? process.env.MIGRATE_REDIS_URL);
   const socket = createConnection(Number(parsed.port || 6379), parsed.hostname);
-  let buffer = Buffer.alloc(0), waiting = [];
+  let buffer = Buffer.alloc(0), waiting = [], closed = null;
   const parse = (offset) => {
     const end = buffer.indexOf('\r\n', offset);
     if (end < 0) return null;
@@ -151,11 +151,17 @@ function redisClient(url) {
     }
   });
   const command = (...parts) => new Promise((resolve, reject) => {
+    if (closed) { reject(closed); return; }
     waiting.push({ resolve, reject });
     const values = parts.map((part) => (Buffer.isBuffer(part) ? part : Buffer.from(String(part))));
     socket.write(Buffer.concat([Buffer.from('*' + values.length + '\r\n'), ...values.flatMap((value) => [Buffer.from('$' + value.length + '\r\n'), value, Buffer.from('\r\n')])]));
   });
-  socket.on('error', (error) => { for (const { reject } of waiting.splice(0)) reject(error); });
+  // A connection that ends, with or without an error, answers nothing more: every command still
+  // waiting fails, and so does any later one. Otherwise the process would end with status 0 and
+  // no result as soon as nothing else kept it running.
+  const fail = (error) => { closed ??= error; for (const { reject } of waiting.splice(0)) reject(closed); };
+  socket.on('error', fail);
+  socket.on('close', () => fail(Error('Redis closed the connection')));
   return { command, close: () => socket.end(), password: process.env.MIGRATE_REDIS_PASSWORD ?? decodeURIComponent(parsed.password) };
 }
 
