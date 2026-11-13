@@ -659,12 +659,41 @@ any fleet host, with `--ssh-config FILE` and `--sudo-password-file FILE` as that
    the agent port. The node credentials (`NODE_MANAGER_SECRET`, `RESULT_SIGNING_SECRET` and,
    when Magnus has one, `COMMAND_RECONCILIATION_SECRET`) come from the Magnus host's own configuration; for
    another host they stream through the controller on standard input only. They are never
-   printed and never a command-line value;
-4. runs the agent's `check`, then its own `install-service`, which sets up the versioned layout
+   printed and never a command-line value. They are still written when the agent also gets its
+   own node key (step 4): fleets with older agents need them until Magnus's enforce phase removes
+   them;
+4. with a Magnus that has per-node credentials, gives a **new** agent its own node key (see
+   [Node keys](#node-keys) below);
+5. runs the agent's `check`, then its own `install-service`, which sets up the versioned layout
    and unit that Magnus-driven upgrades use, and starts it;
-5. waits up to two minutes for Magnus to accept the first heartbeat and reports the node ID;
-6. with the web terminal gateway, reads the host's SSH host key fingerprint on the host and
-   offers to approve it (`--trust` agrees unattended), so the terminal works at once.
+6. waits up to two minutes for Magnus to accept the first heartbeat and reports the node ID;
+7. with the web terminal gateway, reads the host's SSH host key fingerprint on the host and
+   offers to approve it (`--trust` agrees unattended), so the terminal works at once;
+8. prints the node key fingerprint last, to compare with the fingerprint in Magnus's
+   notification for the binding.
+
+#### Node keys
+
+Magnus releases with per-node credentials (Magnus's `docs/NODE_CREDENTIALS.md`) give each agent
+its own Ed25519 key instead of relying on the fleet-wide `NODE_MANAGER_SECRET` alone. The
+installer asks the running Magnus whether it has them: Magnus serves
+`GET /api/v1/node-enrollment/server-key` exactly when it does. Without them, nothing below
+happens and the install is the same as before. With them, what the install does depends on the
+agent host, and the plan shows which case applies before the confirmation:
+
+| The agent host | What the install does |
+|---|---|
+| Has no agent service yet (a new node, or one reinstalled after `remove`) | Magnus issues a one-time enrollment token on its own host (registering the node first if Magnus has no record of it). The agent's `magnus-agent enroll --token` binds a new key as the agent's service account, at `/opt/magnus-agent/identity/node.key` (0600), before the service first starts |
+| Already has a node key | Keeps it; no token is issued. Running the install again never re-enrolls a node |
+| Runs an existing agent without a key | Nothing: after the update the agent binds its own key through Magnus's automatic upgrade of existing nodes, and Magnus notifies you with its fingerprint |
+
+The token takes the same path as the node credentials: from Magnus's API inside its container to
+an owner-only temporary file on the controller, to the agent host on standard input, and to the
+enroll command on its standard input. It is never a command-line value of any process, never
+printed or logged, and the temporary files are removed on every exit, including an interrupt. A
+token is valid for 15 minutes and works once; a failed enrollment starts no service, and running
+the install again issues a new one. An agent version without per-node credentials cannot use a
+token: it keeps the shared secret, and the unused token expires.
 
 The installer also stages the exact Ardent package pinned by the signed host agent's dependency
 lock. It verifies the npm integrity and prepares the package manifest the node agent checks. The
@@ -707,7 +736,8 @@ installations use Magnus's independent workflow in
 
 Running it again repairs the installation, or upgrades the agent in place to the version a newer
 release pins. `./hive.sh magnus-agent status --config FILE` prints one JSON document: the
-installed version, the service state, Magnus's last heartbeat and the web terminal approval;
+installed version, the service state, Magnus's last heartbeat (with the node key state, when
+Magnus has per-node credentials) and the web terminal approval;
 `remove` stops and removes the agent, and with `--trust` also revokes the approval. Magnus keeps
 its record of the node.
 
