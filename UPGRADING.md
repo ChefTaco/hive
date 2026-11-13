@@ -43,6 +43,22 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Suite 3.7.0: PostgreSQL security update
+
+Suite 3.7.0 selects the `runtime-2026-11-pg1712` datastore profile: PostgreSQL 17.12 and 18.7
+(`hive-postgres` 17.12-1 and 18.7-1), which fix CVE-2026-6460 and, on 18, CVE-2026-116322. This is a
+minor update within each major on the same hardened runtime, so the data files, collation receipt
+and storage formats stay as they are. From 3.6.x the PostgreSQL stores need no `--allow-migrations`
+and no dump or reload: the upgrade stops the suite, takes its verified backup, rehearses the new
+images on a restored copy, then starts them on the existing data. Expect the usual upgrade downtime.
+A binary rollback to 3.6.x can still read the data.
+
+The PostgreSQL release notes ask for some indexes to be rebuilt after updating: GiST indexes using
+`gist_trgm_ops`, B-tree indexes on `bpchar` columns declared without a length, and any GIN index or
+table you suspect is affected by the corruption fixes. The suite's products do not create these
+index types. If you added your own, rebuild them with `REINDEX` after the upgrade. Take a new full
+backup before relying on PostgreSQL incremental backups.
+
 ## Suite 3.6.1: model API at /v1 on migrated hosts
 
 Suite 3.6.1 changes no data format and needs no flag from 3.6.0. It pins Magnus 2.9.1 and a new

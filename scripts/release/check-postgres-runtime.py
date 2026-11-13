@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Disposable old-to-new PostgreSQL runtime, ownership and recovery acceptance.
 import argparse,subprocess,uuid,time,json
-parser=argparse.ArgumentParser();parser.add_argument('--baseline',required=True);parser.add_argument('--candidate',required=True);parser.add_argument('--major',required=True,choices=['17','18']);parser.add_argument('--platform',choices=['linux/amd64','linux/arm64']);a=parser.parse_args()
+parser=argparse.ArgumentParser();parser.add_argument('--baseline',required=True);parser.add_argument('--candidate',required=True);parser.add_argument('--major',required=True,choices=['17','18']);parser.add_argument('--platform',choices=['linux/amd64','linux/arm64']);parser.add_argument('--version');parser.add_argument('--previous');a=parser.parse_args()
 prefix='hive-pg-runtime-'+uuid.uuid4().hex[:12];names=set();volumes=set()
 def call(*args,check=True,stdin=None):
  if args and args[0]=='run' and a.platform:args=('run','--platform',a.platform,*args[1:])
@@ -30,6 +30,7 @@ try:
  fresh_data=volume('fresh');helper(fresh_data,'chown 1000:1000 /data')
  fresh=start('fresh',fresh_data,a.candidate)
  assert cmd('exec',fresh,'sh','-c','stat -c "%u:%g %a" "$PGDATA/.hive-runtime-collation"')=='1000:1000 600'
+ if a.version:assert sql(fresh,'SHOW server_version').split()[0]==a.version
  stop(fresh)
  print('PASS: fresh non-root initialization and protected runtime receipt',flush=True)
  data=volume('data');helper(data,'chown 1000:1000 /data')
@@ -102,6 +103,23 @@ try:
  assert sql(restored,"SELECT count(*) FROM pg_database WHERE datallowconn AND datcollversion IS DISTINCT FROM pg_database_collation_actual_version(oid)")=='0'
  assert 'collation version mismatch' not in cmd('logs',restored)
  print('PASS: non-root UID 1000, quoted database name, reindex/refresh, repeat, retained/new records, pg_trgm, XML, logical dump and physical restore',flush=True)
+ # A minor update of the same hardened runtime: data written by the previously published
+ # image starts directly on the candidate. The collation receipt is unchanged, so no
+ # reconciliation, rebuild or storage transition runs, and the explicit command is a no-op.
+ if a.previous:
+  prior=volume('prior');helper(prior,'chown 1000:1000 /data')
+  p=start('prior',prior,a.previous)
+  sql(p,"CREATE EXTENSION pg_trgm; CREATE TABLE minor_proof (id integer PRIMARY KEY, value text NOT NULL); INSERT INTO minor_proof VALUES(1,'minor synthetic value'); CREATE INDEX minor_search ON minor_proof USING gin(value gin_trgm_ops);")
+  prior_version=sql(p,'SHOW server_version_num');stop(p)
+  receipt=helper(prior,'cat /data/pgdata/.hive-runtime-collation')
+  assert receipt==cmd('run','--rm','--entrypoint','cat',a.candidate,'/usr/share/hive/postgres-runtime-id')
+  minor=start('minor',prior,a.candidate)
+  assert prior_version[:2]==sql(minor,'SHOW server_version_num')[:2]==a.major and int(sql(minor,'SHOW server_version_num'))>int(prior_version)
+  assert sql(minor,"SET enable_seqscan=off; SELECT id FROM minor_proof WHERE value % 'minor synthetic value'").splitlines()[-1]=='1'
+  sql(minor,"INSERT INTO minor_proof VALUES(2,'after minor update')");stop(minor)
+  assert helper(prior,'cat /data/pgdata/.hive-runtime-collation')==receipt
+  assert 'already reconciled' in cmd('run','--rm',*args(prior),a.candidate,'hive-pg-reconcile')
+  print('PASS: minor update from the previous image keeps the runtime receipt and data without reconciliation',flush=True)
  print(json.dumps({'major':a.major,'uid':1000,'oldDatabaseMetadata':json.loads(before),'retainedRows':1,'postUpgradeRows':1,'physicalRestoreRows':2,'newRuntimeCollationMismatch':False}),flush=True)
 finally:
  for n in names:call('rm','-f',n,check=False)

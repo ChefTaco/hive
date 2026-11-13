@@ -6,6 +6,20 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Security
+
+- PostgreSQL runtime images `hive-postgres` 17.12-1 and 18.7-1, built from the PostgreSQL 17.12 and
+  18.7 security releases, fix [CVE-2026-6460](https://www.postgresql.org/support/security/CVE-2026-6460/)
+  (CVSS 8.8: a user who can create database objects could run code as the database's operating
+  system user through `ALTER ... SET DATA TYPE`) and, on PostgreSQL 18,
+  [CVE-2026-116322](https://www.postgresql.org/support/security/CVE-2026-116322/) (an unauthenticated
+  client could make the server restart). A new `runtime-2026-11-pg1712` datastore profile selects
+  them. It keeps the PostgreSQL majors, the hardened runtime, its collation receipt and every storage
+  format, so an upgrade from a release on `runtime-2026-11-xslt` replaces only the images and needs
+  no `--allow-migrations` for them. Redis and Qdrant are unchanged. Suite releases after 3.6.1 can no
+  longer select a superseded datastore profile, and the image workflow now also starts data written
+  by the previously published image directly on each candidate.
+
 ## [3.6.1] - 2026-11-12
 
 ### Changed

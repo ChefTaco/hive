@@ -31,7 +31,29 @@ export const DATASTORE_RELEASE_PROFILES = Object.freeze({
     postgres17: { image: 'ghcr.io/cheftaco/hive-postgres:17.11-4', version: '17.11' },
     postgres18: { image: 'ghcr.io/cheftaco/hive-postgres:18.6-4', version: '18.6' },
   }),
+  // PostgreSQL 17.12 and 18.7 security minor releases. The same hardened runtime, major,
+  // collation receipt and storage format: an upgrade from the previous profile changes
+  // only the image, with no storage transition.
+  'runtime-2026-11-pg1712': Object.freeze({
+    redis: { image: 'ghcr.io/cheftaco/hive-redis:8.2.10-2', version: '8.2.10' },
+    qdrant: { image: 'ghcr.io/cheftaco/hive-qdrant:1.18.3-3', version: '1.18.3' },
+    postgres17: { image: 'ghcr.io/cheftaco/hive-postgres:17.12-1', version: '17.12' },
+    postgres18: { image: 'ghcr.io/cheftaco/hive-postgres:18.7-1', version: '18.7' },
+  }),
 });
+// A superseded profile names the last suite release that may select it, so later releases
+// cannot carry a known-vulnerable datastore forward. Signed historical inputs still rebuild.
+export const DATASTORE_PROFILE_LAST_RELEASE = Object.freeze({
+  'runtime-2026-11': '3.2.1',
+  'runtime-2026-11-xslt': '3.6.1',
+});
+export function assertDatastoreProfileCurrent(version, profile) {
+  const last = typeof profile === 'string' && Object.hasOwn(DATASTORE_PROFILE_LAST_RELEASE, profile) ? DATASTORE_PROFILE_LAST_RELEASE[profile] : undefined;
+  if (last === undefined) return;
+  const [a, b] = [version, last].map((value) => value.split('.').map(Number));
+  const newer = a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] > b[2];
+  if (newer) throw new Error(`Datastore profile ${profile} is superseded after suite ${last}; select a current reviewed profile`);
+}
 const DATASTORE_COMPONENTS = Object.freeze({
   redis: ['oathweave-redis', 'magnus-redis', 'cindertrace-redis'],
   qdrant: ['hivemem-qdrant'],
