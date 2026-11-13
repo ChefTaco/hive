@@ -25,7 +25,7 @@ hive_magnus_agent_target() {
       '.hosts["fleet-agent"]={target:$target,directory:"/opt/magnus-agent"}+(if $ssh!="" then {sshConfig:$ssh} else {} end)+(if $sudo!="" then {sudoPasswordFile:$sudo} else {} end)' \
       "$HIVE_CONFIG" > "$HIVE_AGENT_CONFIG_DIRECTORY/installation.json"
     chmod 600 "$HIVE_AGENT_CONFIG_DIRECTORY/installation.json"
-    trap 'rm -rf -- "$HIVE_AGENT_CONFIG_DIRECTORY"; if [[ -n "${HIVE_REGISTRY_TEMPORARY:-}" ]]; then rm -f -- "$HIVE_REGISTRY_TEMPORARY"; fi' EXIT
+    trap hive_cleanup EXIT
     HIVE_AGENT_HOST=fleet-agent HIVE_AGENT_BASE_CONFIG=$HIVE_CONFIG HIVE_CONFIG=$HIVE_AGENT_CONFIG_DIRECTORY/installation.json
   fi
   HIVE_MAGNUS_HOST=$magnus_host
@@ -59,9 +59,7 @@ hive_magnus_agent_trust() {
 hive_magnus_agent_confirm() { # FLAG QUESTION
   [[ "$1" != true ]] || return 0
   [[ -t 0 ]] || return 1
-  local answer
-  read -r -p "$2 [y/N] " answer
-  [[ "$answer" == y || "$answer" == yes ]]
+  hive_confirm "$2"
 }
 
 hive_magnus_agent_node_record() { # FQDN
@@ -209,11 +207,12 @@ hive_magnus_agent() {
   if [[ ${HIVE_FULL_NODE_ENROLLMENT:-false} == true ]]; then request=$(jq -c '.enableSupervisor=true' <<< "$request"); fi
   # The node credentials: read on the Magnus host itself when the agent runs there; for another
   # host they stream through this controller in an owner-only file and on standard input only.
+  # hive_cleanup removes the file on every exit, so an interrupt at the prompt below leaves nothing.
   local secrets=''
   if [[ "$HIVE_AGENT_HOST" == "$HIVE_MAGNUS_HOST" ]]; then
     request=$(jq -c --arg file "$magnus_directory/config/magnus.env" '.magnusEnvironment=$file' <<< "$request")
   else
-    secrets=$(mktemp); chmod 600 "$secrets"
+    secrets=$(mktemp); HIVE_AGENT_SECRETS=$secrets; trap hive_cleanup EXIT; chmod 600 "$secrets"
     HIVE_CONFIG=${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG} hive_magnus_agent_action "$HIVE_MAGNUS_HOST" magnus-agent-secrets \
       "$(jq -nc --arg file "$magnus_directory/config/magnus.env" '{magnusEnvironment:$file}')" > "$secrets" || { rm -f -- "$secrets"; hive_die 'The node credentials could not be read on the Magnus host'; }
   fi

@@ -60,8 +60,8 @@ hive_initialize() {
       (if (.key|test("-(qdrant|redis|postgres)$")) then true else .value.envFile==($c.hosts[.value.host].directory+"/config/"+.key+".env") end)
     end))
   ' "$HIVE_CONFIG" >/dev/null || hive_die 'Fresh suite initialization requires the Hive Registry, Oathweave, its private Redis, HiveXUI and ingress, locally placed selected-product datastores, explicit HTTPS endpoints across hosts and standard protected config paths. Ardent Project Studio needs Magnus and HiveMem (Magnus as the magnus component or an external Magnus), and runs on the console host with Oathweave. Existing or separately configured products must use their owning setup workflow; this command never adopts or overwrites their state.'
-  HIVE_BOOTSTRAP_USERS=$(jq -c --slurpfile config "$HIVE_CONFIG" '.components|with_entries(select(.key as $name|$config[0].components[$name]!=null))|map_values(.service.user)' "$HIVE_MANIFEST")
-  HIVE_BOOTSTRAP_IMAGES=$(jq -c --slurpfile config "$HIVE_CONFIG" ' .components|with_entries(select(.key as $name|$config[0].components[$name]!=null))|map_values(.image)' "$HIVE_MANIFEST")
+  HIVE_BOOTSTRAP_USERS=$(hive_release_selected .service.user)
+  HIVE_BOOTSTRAP_IMAGES=$(hive_release_selected .image)
   HIVE_BOOTSTRAP_INGRESS=$(base64 -w0 "$HIVE_ROOT/deployment/Caddyfile")
   local host identity_host
   identity_host=$(jq -r .components.oathweave.host "$HIVE_CONFIG")
@@ -99,7 +99,7 @@ hive_initialize() {
 hive_tls_refresh() {
   jq -e '.bootstrap!=null and .console!=null and .components.ingress!=null' "$HIVE_CONFIG" >/dev/null ||
     hive_die 'tls-refresh installs a renewed console certificate into a fresh installation. An installation moved with migrate-native uses: hive.sh migrate-native tls-refresh'
-  HIVE_BOOTSTRAP_USERS=$(jq -c --slurpfile config "$HIVE_CONFIG" '.components|with_entries(select(.key as $name|$config[0].components[$name]!=null))|map_values(.service.user)' "$HIVE_MANIFEST")
+  HIVE_BOOTSTRAP_USERS=$(hive_release_selected .service.user)
   HIVE_HOST_ACTION=console-certificate hive_host "$(jq -r .components.ingress.host "$HIVE_CONFIG")" "$(cat "$HIVE_ROOT/scripts/suite/input-artifacts-host.sh" "$HIVE_ROOT/scripts/suite/initialize-full-host.sh" "$HIVE_ROOT/scripts/suite/initialize-host.sh")" ||
     hive_die 'Console certificate refresh failed; see the reason above'
 }
