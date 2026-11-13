@@ -5,6 +5,10 @@
 # The agent version and its tarball integrity come from the signed release; the node credentials
 # move from the Magnus host's configuration to the agent's root-only environment without being
 # printed, passed as arguments or written anywhere else.
+# With a Magnus that has per-node credentials, a new agent also gets its own node key: Magnus
+# issues a one-time enrollment token on its host, the token travels like the credentials, and the
+# agent's own enroll command binds the key before its service first starts. Existing agents bind
+# their keys by Magnus's automatic upgrade; an agent that has a key keeps it.
 
 hive_magnus_agent_release() {
   jq -ce '.components.magnus.agentPackage|select(.name=="@hivemagnus/magnus-agent" and (.version|test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and (.integrity|test("^sha512-[A-Za-z0-9+/]{86}==$")))' "$HIVE_MANIFEST" 2>/dev/null ||
@@ -67,6 +71,36 @@ hive_magnus_agent_node_record() { # FQDN
   directory=$(jq -r --arg host "$HIVE_MAGNUS_HOST" '.hosts[$host].directory' "${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG}")
   HIVE_CONFIG=${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG} hive_magnus_agent_action "$HIVE_MAGNUS_HOST" magnus-agent-heartbeat \
     "$(jq -nc --arg compose "$directory/compose.json" --arg fqdn "$1" '{compose:$compose,hostFqdn:$fqdn}')"
+}
+
+# Per-node credentials on the Magnus host (MODE inspect or issue). An issue prints a one-time
+# token: its caller sends the output straight to an owner-only file.
+hive_magnus_agent_node_credential() { # MODE FQDN [AGENT_VERSION]
+  local directory
+  directory=$(jq -r --arg host "$HIVE_MAGNUS_HOST" '.hosts[$host].directory' "${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG}")
+  HIVE_CONFIG=${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG} hive_magnus_agent_action "$HIVE_MAGNUS_HOST" magnus-agent-node-credential \
+    "$(jq -nc --arg compose "$directory/compose.json" --arg fqdn "$2" --arg mode "$1" --arg version "${3:-}" '{compose:$compose,hostFqdn:$fqdn,mode:$mode,agentVersion:$version}')"
+}
+
+# How this install gives the agent its node key, printed before the confirmation: legacy (a
+# Magnus without per-node credentials: the shared secret only, as before), keep (the agent has a
+# key), automatic (an existing agent binds its key itself) or token (a new agent).
+hive_magnus_agent_credential_plan() { # INSPECT IDENTITY
+  local inspect=$1 identity=$2 server_key
+  server_key=$(jq -r 'if .credential.state=="active" then .credential.keyFingerprint // "" else "" end' <<< "$inspect")
+  if [[ $(jq -r .identity.state <<< "$identity") != none ]]; then
+    HIVE_AGENT_CREDENTIALS=keep
+    printf 'Node key: %s (%s); it is kept, no new enrollment.\n' "$(jq -r '.identity.keyFingerprint // "fingerprint unknown"' <<< "$identity")" "$(jq -r .identity.state <<< "$identity")"
+    [[ $(jq -r .identity.state <<< "$identity") != unbound ]] || printf 'Magnus has not bound this key yet. If it refuses it, re-enroll the node as the Magnus node credentials guide describes.\n'
+  elif [[ $(jq -r .unit <<< "$identity") == true ]]; then
+    HIVE_AGENT_CREDENTIALS=automatic
+    printf 'Node key: none yet. This existing agent binds its own key after the update (Magnus automatic upgrade); no token is issued.\n'
+    [[ -z "$server_key" ]] || printf 'Warning: Magnus holds key %s for this node but the agent has none, so Magnus refuses it. Reset or re-enroll the node as the Magnus node credentials guide describes.\n' "$server_key" >&2
+  else
+    HIVE_AGENT_CREDENTIALS=token
+    printf 'Node key: the new agent is enrolled with a one-time token that Magnus issues on its host; the token is never shown.\n'
+    [[ -z "$server_key" ]] || printf 'Magnus holds key %s for this node from an earlier agent; the enrollment replaces it.\n' "$server_key"
+  fi
 }
 
 hive_magnus_agent_prepare_ardent() {
@@ -208,7 +242,9 @@ hive_magnus_agent() {
   # The node credentials: read on the Magnus host itself when the agent runs there; for another
   # host they stream through this controller in an owner-only file and on standard input only.
   # hive_cleanup removes the file on every exit, so an interrupt at the prompt below leaves nothing.
-  local secrets=''
+  # The fleet-wide secrets are still written for every agent, also one that gets a node key:
+  # mixed fleets need them. Magnus phase 3 (enforce) removes them, and this copy with them.
+  local secrets='' inspect identity merged
   if [[ "$HIVE_AGENT_HOST" == "$HIVE_MAGNUS_HOST" ]]; then
     request=$(jq -c --arg file "$magnus_directory/config/magnus.env" '.magnusEnvironment=$file' <<< "$request")
   else
@@ -216,12 +252,39 @@ hive_magnus_agent() {
     HIVE_CONFIG=${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG} hive_magnus_agent_action "$HIVE_MAGNUS_HOST" magnus-agent-secrets \
       "$(jq -nc --arg file "$magnus_directory/config/magnus.env" '{magnusEnvironment:$file}')" > "$secrets" || { rm -f -- "$secrets"; hive_die 'The node credentials could not be read on the Magnus host'; }
   fi
+  # Per-node credentials: what the running Magnus serves decides, not a version number, because
+  # it is Magnus that issues the token and binds the key.
+  HIVE_AGENT_CREDENTIALS=legacy
+  inspect=$(hive_magnus_agent_node_credential inspect "$fqdn") && jq -e '.supported|type=="boolean"' <<< "$inspect" >/dev/null ||
+    { [[ -z "$secrets" ]] || rm -f -- "$secrets"; hive_die 'Magnus could not be asked whether it has per-node credentials; see above'; }
+  if jq -e '.supported' <<< "$inspect" >/dev/null; then
+    identity=$(hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-identity "$(jq -nc --arg root "${HIVE_MAGNUS_AGENT_ROOT:-}" 'if $root!="" then {root:$root} else {} end')" true) ||
+      { [[ -z "$secrets" ]] || rm -f -- "$secrets"; hive_die "The node key on $HIVE_AGENT_HOST could not be read; see above"; }
+    hive_magnus_agent_credential_plan "$inspect" "$identity"
+  fi
   hive_magnus_agent_confirm "$HIVE_CONFIRMED" "Install or update the Magnus agent $(jq -r .version <<< "$package") on $HIVE_AGENT_HOST as $fqdn?" || { [[ -z "$secrets" ]] || rm -f -- "$secrets"; hive_die 'Cancelled; nothing was changed'; }
+  if [[ "$HIVE_AGENT_CREDENTIALS" == token ]]; then
+    # The token goes from the Magnus host straight into an owner-only file, then into the secret
+    # file of the install request; hive_cleanup removes both on every exit, an interrupt included.
+    if [[ -z "$secrets" ]]; then secrets=$(mktemp); HIVE_AGENT_SECRETS=$secrets; trap hive_cleanup EXIT; chmod 600 "$secrets"; printf '{}\n' > "$secrets"; fi
+    HIVE_AGENT_ENROLLMENT=$(mktemp); trap hive_cleanup EXIT; chmod 600 "$HIVE_AGENT_ENROLLMENT"
+    hive_magnus_agent_node_credential issue "$fqdn" "$(jq -r .version <<< "$package")" > "$HIVE_AGENT_ENROLLMENT" ||
+      { rm -f -- "$secrets" "$HIVE_AGENT_ENROLLMENT"; hive_die 'Magnus did not issue an enrollment token; nothing was installed'; }
+    merged=$(jq -ce --slurpfile issued "$HIVE_AGENT_ENROLLMENT" '$issued[0].enrollmentToken as $token | select($token|type=="string" and test("^mne_[A-Za-z0-9_-]{43}$")) | .enrollmentToken=$token' "$secrets") ||
+      { rm -f -- "$secrets" "$HIVE_AGENT_ENROLLMENT"; hive_die 'Magnus returned no valid enrollment token; nothing was installed'; }
+    printf '%s\n' "$merged" > "$secrets"; merged=''
+    printf 'Magnus issued a one-time enrollment token for node %s%s.\n' "$(jq -r .nodeId "$HIVE_AGENT_ENROLLMENT")" "$(jq -r 'if .registered then ", registered now" else "" end' "$HIVE_AGENT_ENROLLMENT")"
+    rm -f -- "$HIVE_AGENT_ENROLLMENT"
+    request=$(jq -c '.nodeCredentials="token"' <<< "$request")
+  fi
   started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   result=$(HIVE_HOST_SECRET_FILE=$secrets hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-install "$request" true) || { [[ -z "$secrets" ]] || rm -f -- "$secrets"; hive_die 'The agent was not installed; see above'; }
   [[ -z "$secrets" ]] || rm -f -- "$secrets"
   printf 'Magnus agent %s on %s: service %s%s.\n' "$(jq -r .version <<< "$result")" "$HIVE_AGENT_HOST" "$(jq -r .service <<< "$result")" \
     "$(jq -r 'if .changed==false then ", already up to date and left running" else "" end' <<< "$result")"
+  if [[ "$HIVE_AGENT_CREDENTIALS" == token && $(jq -r '.nodeCredential.state // "unsupported"' <<< "$result") == unsupported ]]; then
+    printf 'This agent version cannot enroll with a token: it uses the shared node secret, and the unused token expires within 15 minutes.\n'
+  fi
 
   # Bounded wait for Magnus to accept the agent's heartbeat.
   local attempt
@@ -247,5 +310,20 @@ hive_magnus_agent() {
     else
       printf 'Not approved for the web terminal. Later: ./hive.sh magnus-trust add --config FILE --node-id %s --host %s --fingerprint %s --approved-by NAME --approval-ref REF\n' "$(jq -r .id <<< "$record")" "$fqdn" "$fingerprint"
     fi
+  fi
+  [[ "$HIVE_AGENT_CREDENTIALS" == legacy ]] || hive_magnus_agent_report_key "$result" "$record"
+}
+
+# The bound node key, last, so the operator can compare it with the Magnus notification.
+hive_magnus_agent_report_key() { # INSTALL_RESULT NODE_RECORD
+  local agent_key server_key
+  agent_key=$(jq -r 'if .nodeCredential.state=="bound" then .nodeCredential.keyFingerprint // "" else "" end' <<< "$1")
+  server_key=$(jq -r '.nodeCredential.keyFingerprint // ""' <<< "$2")
+  if [[ -z "$agent_key" ]]; then
+    printf 'Node key: not bound yet. Magnus binds the key of an existing agent by itself and notifies you with its fingerprint; on the host, magnus-agent identity show prints it.\n'
+  elif [[ -n "$server_key" && "$server_key" != "$agent_key" ]]; then
+    printf 'Warning: the agent holds node key %s but Magnus has %s bound for this node. Do not trust this node until they match; see the Magnus node credentials guide.\n' "$agent_key" "$server_key" >&2
+  else
+    printf 'Node key fingerprint: %s (node %s). Compare it with the fingerprint in the Magnus notification for this binding.\n' "$agent_key" "$(jq -r '.nodeCredential.nodeId // "unknown"' <<< "$1")"
   fi
 }

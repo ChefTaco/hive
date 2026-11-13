@@ -6,6 +6,22 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Added
+
+- `hive.sh magnus-agent install` gives a new Magnus agent its own node key when the running
+  Magnus has per-node credentials (it serves `GET /api/v1/node-enrollment/server-key`). Magnus
+  issues a one-time enrollment token on its host, registering the node first when it has no
+  record of it; the token travels like the node credentials (owner-only temporary file, standard
+  input only, removed on every exit) and the agent's own `enroll --token` binds the key as the
+  agent's service account before its service first starts. The command ends with the key
+  fingerprint. A node that already has a key keeps it, and an existing agent without one is left
+  to Magnus's automatic upgrade, as `post-upgrade` now says. With an older Magnus the install is
+  unchanged. The fleet-wide `NODE_MANAGER_SECRET`, `RESULT_SIGNING_SECRET` and
+  `COMMAND_RECONCILIATION_SECRET` are still written to every agent until Magnus's enforce phase.
+  `magnus-agent status` includes the node key state Magnus reports. See "Node keys" in
+  `deployment/FULL.md`. This changes controller runtime files, so the next release has a new
+  controller digest.
+
 ### Security
 
 - The ingress sends every product exactly one forwarded client address, the one it resolved, on

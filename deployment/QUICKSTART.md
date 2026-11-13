@@ -272,6 +272,8 @@ run `console-clients add` when it hosts Oathweave and needs missing HiveXUI brow
 Full-node enrollment is a separate authorization through `magnus-agent enroll`; a package update
 must not enable commands, cron or web terminals on an intentionally limited node. See
 [Magnus host agents](FULL.md#magnus-host-agents) for enrollment review and other hosts.
+An updated agent is not re-enrolled for its node key either: with a Magnus that has per-node
+credentials it binds its own key automatically; see [node keys](FULL.md#node-keys).
 
 Update Ardent packages in HiveXUI under Magnus > Ardent > Installations: stop running profiles,
 choose Update package, then start them again, and record it with
@@ -330,7 +332,9 @@ the host's SSH key so a terminal opens at once:
 ```
 
 It asks before installing Node.js 24 from NodeSource when the host has no suitable Node.js, and
-asks for your sudo password, as the agent runs as a root service. See
+asks for your sudo password, as the agent runs as a root service. With a Magnus that has per-node
+credentials, the new agent also gets its own node key with a one-time enrollment token, and the
+command ends by printing the key's fingerprint. See
 [installing the agent](FULL.md#installing-the-agent).
 
 ## Firewall and ports

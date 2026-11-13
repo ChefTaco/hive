@@ -36,9 +36,20 @@ stub npm 'case "$1" in
   *) exit 97;;
 esac'
 
-stub node 'if [[ "$1" == --input-type=module ]]; then cat >/dev/null; [[ ! -f "'"$temporary"'/fail-terminal-preflight" ]]; exit; fi
+# The agent's enroll command, reached through the installer's wrapper: the token arrives on
+# standard input; a copy is kept only so the test can search every log and argument for it.
+stub node 'if [[ "$1" == --input-type=module && -n "${HIVE_AGENT_ENTRY:-}" ]]; then
+  token=$(cat); printf "%s" "$token" > "'"$temporary"'/received-token"; printf "%s %s\n" "$(id -u)" "$AGENT_INSTALL_DIR" > "'"$temporary"'/enroll-context"
+  if [[ -f "'"$temporary"'/hold-enroll" ]]; then touch "'"$temporary"'/enroll-reached"; for _ in $(seq 1 300); do [[ -f "'"$temporary"'/release-enroll" ]] && break; sleep 0.1; done; exit 1; fi
+  [[ ! -f "'"$temporary"'/fail-enroll" ]] || { echo "magnus-agent: enrollment failed: ENROLLMENT_TOKEN_EXPIRED: The enrollment token has expired" >&2; exit 1; }
+  [[ "$token" =~ ^mne_[A-Za-z0-9_-]{43}$ ]] || exit 2
+  mkdir -p "$AGENT_INSTALL_DIR/identity"; printf "fixture key\n" > "$AGENT_INSTALL_DIR/identity/node.key"; chmod 600 "$AGENT_INSTALL_DIR/identity/node.key"
+  echo "Enrolled as node node-1."; exit; fi
+if [[ "$1" == --input-type=module ]]; then cat >/dev/null; [[ ! -f "'"$temporary"'/fail-terminal-preflight" ]]; exit; fi
 if [[ "$1" == --version ]]; then [[ -f "'"$temporary"'/node-version" ]] || exit 127; cat "'"$temporary"'/node-version"; exit; fi
 case "$2" in
+  --help) echo "Usage:"; [[ ! -f "'"$temporary"'/agent-node-credentials" ]] || printf "  magnus-agent enroll --token <token>\n  magnus-agent identity show [--json]\n";;
+  identity) if [[ -f "$AGENT_INSTALL_DIR/identity/node.key" ]]; then echo "{\"state\":\"bound\",\"nodeId\":\"node-1\",\"keyFingerprint\":\"SHA256:fixture-node-key\"}"; else echo "{\"state\":\"none\"}"; fi;;
   check) [[ -f "$4" ]];;
   install-service) dir=$4 unit=$6; v=$(jq -r .version "$dir/node_modules/@hivemagnus/magnus-agent/package.json")
     mkdir -p "$dir/versions/$v"; mv "$dir/node_modules" "$dir/versions/$v/"; ln -s "versions/$v" "$dir/current"; ln -s current/node_modules "$dir/node_modules"; printf "[Unit]\n" > "$unit";;
@@ -261,7 +272,10 @@ host magnus-agent-remove "$(jq -nc --arg root "$agent" '{root:$root}')" || fail 
 # The controller: no agent port, no install; Node.js without consent, no install.
 jq -n --arg dir "$temporary/install" '{schema:1,installation:"example-suite",origin:"https://hive.example.com",hosts:{control:{target:"local",directory:$dir}},
   components:{magnus:{host:"control"}},agents:[],inference:[],console:{host:"control"},bootstrap:{certificateFile:"/etc/hive/tls/console.crt",privateKeyFile:"/etc/hive/tls/console.key"}}' > "$temporary/config.json"
+mkdir -p "$temporary/controller-tmp"
 controller() { (
+  printf '%s\n' "$BASHPID" > "$temporary/controller.pid"
+  export TMPDIR=$temporary/controller-tmp
   export HIVE_ROOT=$ROOT; source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/magnus-gateway.sh"; source "$ROOT/scripts/suite/magnus-agent.sh"
   HIVE_CONFIG=$temporary/config.json HIVE_MANIFEST=$temporary/release.json HIVE_VERSION=9.9.9 HIVE_ID=example-suite
   HIVE_AGENT_TARGET=${HIVE_AGENT_TARGET:-} HIVE_AGENT_SSH_CONFIG='' HIVE_AGENT_SUDO_FILE='' HIVE_AGENT_INSTALL_NODE=false HIVE_AGENT_TRUST=${HIVE_AGENT_TRUST:-false} HIVE_CONFIRMED=true
@@ -281,7 +295,11 @@ no_secret "$log" "$temporary/controller.log"
 # A fleet host over SSH: the credentials stream from the Magnus host through an owner-only file
 # and standard input only, then Magnus accepts the heartbeat and the node is reported.
 stub ssh 'exec bash -c "${@: -1}"'
-stub docker 'printf "{\"id\":\"node-1\",\"name\":\"node-1.example.com\",\"status\":\"ONLINE\",\"lastHeartbeatAt\":\"%s\"}\n" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"'
+# Magnus without per-node credentials unless a test writes its answers: today's flow.
+credential_answers='if [[ "$*" == *HIVE_NODE_CREDENTIAL_MODE=inspect* ]]; then cat "'"$temporary"'/credential-inspect" 2>/dev/null || echo "{\"supported\":false}"; exit; fi
+if [[ "$*" == *HIVE_NODE_CREDENTIAL_MODE=issue* ]]; then [[ -f "'"$temporary"'/credential-issue" ]] || exit 1; cat "'"$temporary"'/credential-issue"; exit; fi
+'
+stub docker "$credential_answers"'printf "{\"id\":\"node-1\",\"name\":\"node-1.example.com\",\"status\":\"ONLINE\",\"lastHeartbeatAt\":\"%s\"}\n" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"'
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 30 -subj /CN=node-1.example.com -addext subjectAltName=DNS:node-1.example.com \
   -keyout "$temporary/node.key" -out "$temporary/node.crt" 2>/dev/null
 stub tailscale 'case "$1" in status) echo "{\"Self\":{\"DNSName\":\"node-1.example.com.\"},\"CertDomains\":[\"node-1.example.com\"]}";;
@@ -295,6 +313,9 @@ grep -q 'Magnus accepted the heartbeat: node node-1 (node-1.example.com), ONLINE
 /usr/bin/grep -qx "NODE_MANAGER_SECRET=$node_secret" "$agent/.env" && grep -qx 'MAGNUS_AGENT_TLS_RENEWAL=tailscale' "$agent/.env" && grep -qx 'HOST_FQDN=node-1.example.com' "$agent/.env" || fail 'The fleet host environment is wrong'
 [[ $(stat -c %a "$agent/certs/agent.key") == 600 ]] || fail 'The tailscale key is not owner-only'
 no_secret "$log" "$temporary/controller.log"
+# A Magnus without per-node credentials: today's flow exactly, with no token and no node key.
+! /usr/bin/grep -q 'HIVE_NODE_CREDENTIAL_MODE=issue' "$log" && [[ ! -e "$agent/identity" ]] || fail 'A Magnus without node credentials was asked for a token'
+! /usr/bin/grep -q 'Node key' "$temporary/controller.log" && ! /usr/bin/grep -q 'HIVE_AGENT_ENTRY\|identity show' "$log" || { cat "$temporary/controller.log" >&2; fail 'The legacy flow changed'; }
 # With the web terminal gateway, the host key read on the host is approved; the gateway's audit
 # record goes to an owner-only log, not the terminal, and remove --trust revokes it.
 jq -n '{services:{"magnus-gateway":{}}}' > "$temporary/install/compose.json"
@@ -307,12 +328,12 @@ fingerprint=$(sed -n 's/^Host key read on fleet: //p' "$temporary/controller.log
 ! /usr/bin/grep -q '^{' "$temporary/controller.log" || fail 'A raw audit record reached the terminal'
 [[ $(stat -c %a "$temporary/magnus-trust.log") == 600 ]] && /usr/bin/grep -q '^{' "$temporary/magnus-trust.log" || fail 'The audit record was not kept in the owner-only log'
 # status is one JSON document, with the node's web terminal approval in it.
-stub docker 'case "$*" in *"trust list"*) echo "{\"nodeId\":\"node-1\",\"host\":\"node-1.example.com\",\"port\":22,\"fingerprints\":[\"SHA256:example\"]}";;
+stub docker "$credential_answers"'case "$*" in *"trust list"*) echo "{\"nodeId\":\"node-1\",\"host\":\"node-1.example.com\",\"port\":22,\"fingerprints\":[\"SHA256:example\"]}";;
   *) printf "{\"id\":\"node-1\",\"name\":\"node-1.example.com\",\"status\":\"ONLINE\",\"lastHeartbeatAt\":\"%s\"}\n" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)";; esac'
 HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller status || { cat "$temporary/controller.log" >&2; fail 'status failed'; }
 /usr/bin/jq -e '.service=="active" and .node.status=="ONLINE" and .webTerminalApproval.nodeId=="node-1"' "$temporary/controller.log" >/dev/null || { cat "$temporary/controller.log" >&2; fail 'status is not one JSON document with the approval'; }
 # Run again unattended: nothing changes, the service keeps running, the approval is not repeated.
-stub docker 'case "$*" in *"trust list"*) echo "{\"nodeId\":\"node-1\",\"host\":\"node-1.example.com\",\"port\":22,\"fingerprints\":[\"'"$fingerprint"'\"]}";;
+stub docker "$credential_answers"'case "$*" in *"trust list"*) echo "{\"nodeId\":\"node-1\",\"host\":\"node-1.example.com\",\"port\":22,\"fingerprints\":[\"'"$fingerprint"'\"]}";;
   *) printf "{\"id\":\"node-1\",\"name\":\"node-1.example.com\",\"status\":\"ONLINE\",\"lastHeartbeatAt\":\"%s\"}\n" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)";; esac'
 : > "$log"
 HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install || { cat "$temporary/controller.log" >&2; fail 'A repeated install failed'; }
@@ -322,4 +343,75 @@ HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install || { ca
 HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet HIVE_AGENT_TRUST=true controller remove || { cat "$temporary/controller.log" >&2; fail 'remove with --trust failed'; }
 /usr/bin/grep -q 'trust remove --node-id node-1 --approved-by .* --approval-ref magnus-agent-remove' "$log" || fail 'The approval was not revoked with the gateway CLI arguments'
 [[ ! -e "$agent" ]] || fail 'remove kept the agent'
-printf 'Passed: Magnus agent Node.js range and NodeSource key, pinned package integrity, root-only credentials never in arguments or output, idempotent repair and upgrade, removal with revocation, the web terminal approval kept out of the terminal, and controller refusals.\n'
+
+# Per-node credentials: a new agent on a fleet host gets its own key with a one-time token.
+token="mne_obviously-fake-enrollment-token-$(printf 'x%.0s' {1..11})"
+no_token() { if /usr/bin/grep -rnF -e "$token" "$@" | cut -c1-300 >&2; then fail "The enrollment token appeared in $*"; fi; }
+touch "$temporary/agent-node-credentials"
+printf '{"supported":true,"mode":"compat","node":null,"credential":{"state":"none","origin":null,"keyFingerprint":null}}\n' > "$temporary/credential-inspect"
+jq -n --arg token "$token" '{nodeId:"node-1",registered:true,enrollmentToken:$token,expiresAt:"2030-01-01T00:00:00.000Z"}' > "$temporary/credential-issue"
+stub docker "$credential_answers"'printf "{\"id\":\"node-1\",\"name\":\"node-1.example.com\",\"status\":\"ONLINE\",\"lastHeartbeatAt\":\"%s\",\"nodeCredential\":{\"state\":\"active\",\"keyFingerprint\":\"SHA256:fixture-node-key\"}}\n" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"'
+jq 'del(.components["magnus-gateway"])' "$temporary/config.json" > "$temporary/next.json"; mv "$temporary/next.json" "$temporary/config.json"
+rm -f "$temporary/active"; : > "$log"
+HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install || { cat "$temporary/controller.log" >&2; fail 'A new agent was not enrolled with a token'; }
+[[ $(cat "$temporary/received-token") == "$token" ]] || fail 'The enroll command did not receive the issued token'
+[[ $(cat "$temporary/enroll-context") == "0 $agent" ]] || fail 'The enroll command did not run as the service account in the agent directory'
+[[ -f "$agent/identity/node.key" && $(stat -c %a "$agent/identity/node.key") == 600 ]] || fail 'The node key is missing or not owner-only'
+/usr/bin/grep -q 'HIVE_NODE_CREDENTIAL_MODE=inspect' "$log" && /usr/bin/grep -q 'HIVE_NODE_CREDENTIAL_MODE=issue' "$log" || fail 'The token was not issued on the Magnus host'
+[[ $(/usr/bin/grep -n 'HIVE_AGENT_ENTRY\|--input-type=module -e import' "$log" | head -n 1 | cut -d: -f1) -lt $(/usr/bin/grep -n 'install-service' "$log" | cut -d: -f1) ]] || fail 'The service was set up before the node was enrolled'
+/usr/bin/grep -qx "NODE_MANAGER_SECRET=$node_secret" "$agent/.env" && /usr/bin/grep -qx "RESULT_SIGNING_SECRET=$result_secret" "$agent/.env" || fail 'An enrolled agent lost the shared secrets that mixed fleets still need'
+/usr/bin/grep -q 'enrolled with a one-time token' "$temporary/controller.log" && /usr/bin/grep -q 'Node key fingerprint: SHA256:fixture-node-key (node node-1)' "$temporary/controller.log" ||
+  { cat "$temporary/controller.log" >&2; fail 'The bound key fingerprint was not reported'; }
+[[ $(/usr/bin/tail -n 1 "$temporary/controller.log") == 'Node key fingerprint: '* ]] || fail 'The fingerprint is not the last line'
+# Never an argument of any process, never in output or a leftover file.
+no_token "$log" "$temporary/controller.log" "$temporary/controller-tmp" "$agent"
+no_secret "$log" "$temporary/controller.log"
+[[ -z $(ls -A "$temporary/controller-tmp") ]] || { ls -la "$temporary/controller-tmp" >&2; fail 'Temporary files were left behind'; }
+
+# Rerun: the node has its key, so nothing is issued or enrolled; the fingerprint is reported.
+rm -f "$temporary/received-token"; : > "$log"
+HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install || { cat "$temporary/controller.log" >&2; fail 'A rerun on an enrolled node failed'; }
+! /usr/bin/grep -q 'HIVE_NODE_CREDENTIAL_MODE=issue' "$log" && [[ ! -e "$temporary/received-token" ]] || fail 'A rerun issued a token or enrolled again'
+/usr/bin/grep -q 'Node key: SHA256:fixture-node-key (bound); it is kept' "$temporary/controller.log" && /usr/bin/grep -q 'Node key fingerprint: SHA256:fixture-node-key' "$temporary/controller.log" ||
+  { cat "$temporary/controller.log" >&2; fail 'A rerun did not report the kept key'; }
+
+# An existing agent without a key is left to Magnus's automatic upgrade: no token.
+rm -rf "$agent/identity"; : > "$log"
+HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install || { cat "$temporary/controller.log" >&2; fail 'An existing agent update failed'; }
+! /usr/bin/grep -q 'HIVE_NODE_CREDENTIAL_MODE=issue' "$log" && [[ ! -e "$temporary/received-token" ]] || fail 'An existing agent was enrolled with a token'
+/usr/bin/grep -q 'binds its own key after the update' "$temporary/controller.log" || { cat "$temporary/controller.log" >&2; fail 'The automatic binding was not explained'; }
+
+# A failed enrollment starts no service and leaves the token nowhere; a rerun issues a new one.
+host magnus-agent-remove "$(jq -nc --arg root "$agent" '{root:$root}')" || fail 'remove failed'
+touch "$temporary/fail-enroll"; : > "$log"
+if HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install; then fail 'A failed enrollment was reported as installed'; fi
+/usr/bin/grep -q 'ENROLLMENT_TOKEN_EXPIRED' "$temporary/controller.log" && /usr/bin/grep -q 'the service was not started' "$temporary/controller.log" || { cat "$temporary/controller.log" >&2; fail 'The enrollment failure is unclear'; }
+[[ ! -e "$MAGNUS_AGENT_UNIT" && ! -e "$agent/identity/node.key" ]] || fail 'A failed enrollment started a service or left a key'
+no_token "$log" "$temporary/controller.log" "$temporary/controller-tmp" "$agent"
+[[ -z $(ls -A "$temporary/controller-tmp") ]] || fail 'A failed enrollment left temporary files'
+rm "$temporary/fail-enroll"
+# An interrupt while the token is on its way: every copy on the controller is removed.
+touch "$temporary/hold-enroll"; rm -f "$temporary/enroll-reached"
+HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install & interrupted=$!
+for _ in $(seq 1 300); do [[ -f "$temporary/enroll-reached" ]] && break; sleep 0.1; done
+[[ -f "$temporary/enroll-reached" ]] || fail 'The interrupt fixture never reached enrollment'
+/usr/bin/grep -rlqF -e "$token" "$temporary/controller-tmp" || fail 'The fixture did not hold the token in flight'
+{ kill -TERM "$(cat "$temporary/controller.pid")"; wait "$interrupted"; } 2>/dev/null || true
+touch "$temporary/release-enroll"; sleep 1
+no_token "$temporary/controller-tmp"
+[[ -z $(ls -A "$temporary/controller-tmp") ]] || { ls -la "$temporary/controller-tmp" >&2; fail 'An interrupt left temporary files'; }
+rm -f "$temporary/hold-enroll" "$temporary/release-enroll"
+# The rerun after both enrolls with a new token.
+rm -f "$temporary/received-token"; : > "$log"
+HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install || { cat "$temporary/controller.log" >&2; fail 'The rerun after a failed enrollment failed'; }
+[[ -f "$temporary/received-token" && -f "$agent/identity/node.key" ]] || fail 'The rerun did not enroll'
+
+# A Magnus with node credentials but an agent version without them: the shared secret, as before.
+host magnus-agent-remove "$(jq -nc --arg root "$agent" '{root:$root}')" || fail 'remove failed'
+rm -f "$temporary/agent-node-credentials" "$temporary/received-token"; : > "$log"
+HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install || { cat "$temporary/controller.log" >&2; fail 'An agent without node credentials failed'; }
+[[ ! -e "$temporary/received-token" && ! -e "$agent/identity" ]] || fail 'An agent without node credentials was enrolled'
+/usr/bin/grep -q 'cannot enroll with a token' "$temporary/controller.log" || { cat "$temporary/controller.log" >&2; fail 'The unused token was not explained'; }
+no_token "$log" "$temporary/controller.log" "$temporary/controller-tmp"
+
+printf 'Passed: Magnus agent Node.js range and NodeSource key, pinned package integrity, root-only credentials never in arguments or output, idempotent repair and upgrade, removal with revocation, the web terminal approval kept out of the terminal, controller refusals, and one-time token enrollment of new agents (token never an argument or output, removed on failure and interrupt, no re-enrollment on rerun, legacy flow without node credentials).\n'

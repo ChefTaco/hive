@@ -40,6 +40,8 @@ grep -qx 'magnus-agent install' "$calls" || fail 'An older installer agent was n
 grep -qx 'console-clients add' "$calls" || fail 'Missing browser clients were not checked'
 grep -q 'this release pins 2.4.3' "$temporary/output" || fail 'The pinned agent version was not reported'
 grep -q 'Update package' "$temporary/output" || fail 'The Ardent package step was not listed'
+# Upgraded agents are left to Magnus's automatic binding of their node keys: nothing is issued.
+grep -q 'Its node key: nothing to do' "$temporary/output" && grep -q 'Upgraded agents bind their node keys automatically' "$temporary/output" || fail 'The node key step of upgraded agents was not explained'
 
 # --yes confirms a package update, never a scope expansion. The same single-host config
 # can describe an intentionally LIMITED node, an Ardent-only node, or a fully enrolled node.

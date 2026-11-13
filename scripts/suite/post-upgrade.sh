@@ -45,6 +45,9 @@ hive_post_upgrade_agent() {
   printf -- '- Magnus agent: %s on the Magnus host; this release pins %s.\n' "$installed" "$wanted"
   # Topology is not enrollment authority. Package updates preserve an operator's limited,
   # Ardent-only or full-node posture; full enrollment requires its separate explicit command.
+  # An upgraded agent is never re-enrolled: with a Magnus that has per-node credentials it binds
+  # its own node key by Magnus's automatic upgrade of existing nodes, so nothing is issued here.
+  printf '  Its node key: nothing to do. An upgraded agent binds its own key automatically when Magnus has per-node credentials.\n'
   if hive_post_upgrade_run magnus-agent install; then hive_post_upgrade_done magnus-agent-enrolled
   else printf '  The agent was not upgraded; see above. Rerun: ./hive.sh magnus-agent install --config %s\n' "${HIVE_REGISTRY_ORIGINAL_CONFIG:-$HIVE_CONFIG}"; fi
 }
@@ -67,7 +70,7 @@ hive_post_upgrade() {
   hive_post_upgrade_clients
   if jq -e '.components.magnus!=null or .external.magnus!=null' "$HIVE_CONFIG" >/dev/null; then
     printf -- '- Ardent: in HiveXUI, open Magnus > Ardent > Installations. Stop running profiles, choose Update package, then start them again.\n'
-    printf -- '- Fleet hosts with their own Magnus agent: run ./hive.sh magnus-agent install --config %s --host HOST for each one.\n' "$HIVE_CONFIG"
+    printf -- '- Fleet hosts with their own Magnus agent: run ./hive.sh magnus-agent install --config %s --host HOST for each one. Upgraded agents bind their node keys automatically; only new agents are enrolled with a one-time token.\n' "$HIVE_CONFIG"
   fi
   case "$(hive_checklist_certificate_scheduled)" in
     false) printf -- '- HTTPS certificate: nothing renews it on this host. See deployment/QUICKSTART.md, section 9.\n';;
