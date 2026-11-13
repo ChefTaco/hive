@@ -2,11 +2,23 @@
 	admin off
 	https_port 8443
 	auto_https disable_redirects
+	# The client address. With nothing listed here (the default) it is the address that
+	# connected to this ingress, and forwarding headers a caller sends are discarded. An
+	# installation behind another reverse proxy lists that proxy's addresses or CIDR ranges,
+	# space-separated, in HIVE_INGRESS_TRUSTED_PROXIES (config/ingress.env): its
+	# X-Forwarded-For is then read from the right, skipping the listed proxies, so a caller
+	# still cannot choose its own address by sending the header.
+	servers {
+		trusted_proxies static {$HIVE_INGRESS_TRUSTED_PROXIES}
+		trusted_proxies_strict
+	}
 }
 
 # Upstream connections stay idle for at most 2 seconds. The products are Node servers, which close
 # an idle keep-alive connection after 5 seconds; a connection kept longer can be reused at the
 # instant the backend closes it, and a request that is not retried (a POST) then fails.
+# Every product receives exactly one forwarded address, the client address this ingress
+# resolved, never a list a caller could have started.
 (verified_backend) {
 	flush_interval -1
 	transport http {
@@ -15,6 +27,7 @@
 		tls_trust_pool file /config/backend-ca.pem
 		keepalive 2s
 	}
+	header_up X-Forwarded-For {client_ip}
 }
 
 # Plain HTTP upstreams on the private network, with the same idle limit.
@@ -22,6 +35,7 @@
 	transport http {
 		keepalive 2s
 	}
+	header_up X-Forwarded-For {client_ip}
 }
 
 # Product session cookies stay within their owning API, including responses.

@@ -6,6 +6,25 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Security
+
+- The ingress sends every product exactly one forwarded client address, the one it resolved, on
+  every route (`deployment/Caddyfile`). This was already the effective behaviour with the default
+  settings; it is now explicit and holds when the ingress itself is behind another proxy.
+- An installation behind another reverse proxy can name it: `console.trustedProxies` (written to
+  `HIVE_INGRESS_TRUSTED_PROXIES` in `config/ingress.env`). The ingress then takes the client
+  address from that proxy's `X-Forwarded-For`, read from the right and skipping the listed
+  proxies, so a caller cannot choose its own address. With nothing listed, behaviour is unchanged.
+- A fresh installation with `console.networkSubnet` writes `TRUSTED_PROXY_IPS` for Oathweave, as
+  `migrate-native` already did, so Oathweave rate limits and audits by the real client address
+  instead of the ingress address. See "Client addresses and reverse proxies" in
+  `deployment/README.md`, which also covers existing installations.
+
+  These changes are part of the controller and the ingress configuration, so the next release has
+  a new controller digest and an upgrade installs the new `Caddyfile`. They work with every
+  Oathweave version; Oathweave releases that read `X-Forwarded-For` from the right need nothing
+  else from the suite, because the ingress sends a single address.
+
 ### Fixed
 
 - `hive.sh migrate-native`: the Redis export, import and comparison helper now fails when the

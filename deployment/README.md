@@ -221,6 +221,39 @@ strict SSH inventories on one physical host. Full setup includes both an actual
 terminal wizard and unattended installation, plus authenticated restored peers.
 Separate physical machines and existing installations retain their own gates.
 
+## Client addresses and reverse proxies
+
+The products rate limit, allowlist and audit by client address. The ingress decides that address
+once and sends each product exactly one, in `X-Forwarded-For`; a forwarding header a caller sends
+is never passed on.
+
+- **Browsers connect to the console directly** (the default). The client address is the address
+  that connected to the ingress. Nothing needs configuring.
+- **Another reverse proxy or load balancer is in front of the console.** Without configuration
+  every request appears to come from that proxy. List its addresses or CIDR ranges in
+  `console.trustedProxies`, for example `"trustedProxies": ["192.0.2.10"]`. The ingress then reads
+  that proxy's `X-Forwarded-For` from the right, skipping the listed proxies, so the first address
+  that is not one of them is the client and a caller still cannot choose its own address by
+  sending the header. List every proxy tier. Setup writes the list to
+  `HIVE_INGRESS_TRUSTED_PROXIES` in `config/ingress.env`, space-separated. On an existing
+  installation add that line yourself, record the edit as in
+  [step 9 of the Studio upgrade](FULL.md) (`ingress.env`) so `hive.sh tls-refresh` still accepts
+  the file, and apply it as a reviewed configuration change (a new `configurationRevision`, then
+  `hive.sh plan` and `hive.sh upgrade`), which recreates the ingress. The ingress must then be
+  reachable only through that proxy: bind `console.bindAddress` accordingly.
+- **Oathweave.** Oathweave believes a forwarded address only from the proxies in its
+  `TRUSTED_PROXY_IPS`, and otherwise uses the connecting address, which behind the ingress is the
+  ingress itself: every browser then shares one address for Oathweave's per-address sign-in limits
+  and audit records. To give Oathweave the real client address, the ingress needs a known address
+  range: set `console.networkSubnet` to an unused IPv4 CIDR (for example `10.200.0.0/24`). Setup
+  then pins the console host's suite network to it and writes `TRUSTED_PROXY_IPS` with that range
+  to `config/oathweave.env`, when the ingress and Oathweave share a host and Oathweave has no
+  directly published endpoint. `migrate-native` always does this. On an existing fresh
+  installation, add `TRUSTED_PROXY_IPS` with the suite network's actual range
+  (`docker network inspect`) to `config/oathweave.env`, record and apply the edit the same way; the range stays valid only while that network is not recreated, so prefer the pinned
+  subnet. Oathweave reads `X-Forwarded-For` from the right as well and never uses an address a
+  caller supplied.
+
 ## When a command stops: transactions and recovery
 
 `install`, `upgrade`, `rollback`, `backup`, `rehearse`, `restore` and `adopt` each open a

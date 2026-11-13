@@ -97,6 +97,8 @@ One owner-only JSON file per installation. Paths and names below are placeholder
   host when `prepare` finishes.
 - `networkSubnet` must not overlap anything on the host. The identity service trusts forwarded
   client addresses only from this subnet, so audit records keep the real client address.
+  A reverse proxy in front of the console is named in `console.trustedProxies`; see
+  [Client addresses and reverse proxies](README.md#client-addresses-and-reverse-proxies).
 - `dataAliases.hiveskills` keeps stored archive paths valid without rewriting a row.
 
 ### Reviewed links

@@ -435,7 +435,7 @@ action_configure() {
   publish_copy hivemem-qdrant "$directory/config/hivemem-qdrant/qdrant.yaml" "$state/qdrant.yaml"; rm -f -- "$state/qdrant.yaml"
   ingress_fragments "$listeners"
   # The console listens for every name the native Router accepted on this port.
-  write_env ingress "$directory/config/ingress.env" "$(jq -nc --argjson skills "$(has_component hiveskills && printf true || printf false)" --arg magnus "$external_magnus" --arg magnusHost "$external_host" '{HIVE_CONSOLE_HOST:":8443",XDG_CONFIG_HOME:"/data/config",XDG_DATA_HOME:"/data",
+  write_env ingress "$directory/config/ingress.env" "$(jq -nc --argjson skills "$(has_component hiveskills && printf true || printf false)" --arg magnus "$external_magnus" --arg magnusHost "$external_host" --arg outerProxies "$(get '(.console.trustedProxies // [])|join(" ")')" '(if $outerProxies!="" then {HIVE_INGRESS_TRUSTED_PROXIES:$outerProxies} else {} end)+{HIVE_CONSOLE_HOST:":8443",XDG_CONFIG_HOME:"/data/config",XDG_DATA_HOME:"/data",
     OATHWEAVE_ENDPOINT:"https://oathweave:4200",OATHWEAVE_TLS_NAME:"oathweave",EMBERPATH_ENDPOINT:"https://emberpath:9443",EMBERPATH_TLS_NAME:"emberpath",
     EMBERPATH_API_ENDPOINT:"https://emberpath:4020",EMBERPATH_API_TLS_NAME:"emberpath",HIVEMEM_ENDPOINT:"https://hivemem:18790",HIVEMEM_TLS_NAME:"hivemem"}+
     (if $skills then {HIVESKILLS_ENDPOINT:"https://hiveskills:4030",HIVESKILLS_TLS_NAME:"hiveskills"} else {} end)+

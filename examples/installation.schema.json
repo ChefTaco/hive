@@ -229,6 +229,18 @@
         },
         "runtimeFile": {
           "$ref": "#/$defs/path"
+        },
+        "networkSubnet": {
+          "type": "string",
+          "description": "Optional fixed IPv4 CIDR for the console host's suite network, unused elsewhere on the host. With it Oathweave believes the client address the ingress forwards; without it Oathweave sees the ingress address for every browser request."
+        },
+        "trustedProxies": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string"
+          },
+          "description": "IP addresses or CIDR ranges of reverse proxies in front of the console. Only their X-Forwarded-For is believed, read from the right. Omit when browsers connect to the console directly."
         }
       }
     },
