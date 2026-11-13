@@ -84,7 +84,7 @@ boxes=0
 # Only these real tools are visible, so the machine's own Docker, snap or ufw never leak in.
 mkdir -p "$temporary/system"
 for tool in bash env cat grep sed awk tr cut head tail wc stat realpath mktemp install chmod chown mv rm cp touch \
-  mkdir dirname sort df timeout base64 sha256sum find cmp tar gzip flock ss jq openssl git ssh; do
+  mkdir dirname sort df timeout base64 sha256sum find cmp tar gzip flock ss jq openssl git ssh uname; do
   path=$(command -v "$tool") || fail "test needs $tool"
   ln -s "$path" "$temporary/system/$tool"
 done
@@ -145,6 +145,18 @@ run --yes || { cat "$box/out" >&2; fail 'apply with an existing repository faile
 machine fedora 41 none
 run --dry-run && fail 'accepted Fedora'
 expect 'unsupported distribution'
+run --yes && fail 'changed Fedora'
+expect 'unsupported distribution'
+[[ ! -s "$box/log" ]] || fail 'changed something on an unsupported distribution'
+# --check still reports there, without apt or dpkg, so the operator sees what to install by hand.
+rm -f "$box/bin/dpkg" "$box/bin/dpkg-query" "$box/bin/apt-get"
+run --check && fail '--check passed on Fedora without Docker'
+expect 'missing: Docker Engine with the Compose plugin'
+expect 'this script cannot change this system'
+printf 'docker-compose-plugin\n' >> "$box/installed"; cp "$box/docker.stub" "$box/bin/docker"; touch "$box/daemon"
+run --check || { cat "$box/out" >&2; fail '--check refused a prepared Fedora host'; }
+expect 'Ready'
+run --controller --check || { cat "$box/out" >&2; fail '--check refused a prepared Fedora controller'; }
 ARCH=armhf machine ubuntu 24.04 noble
 run --dry-run && fail 'accepted armhf'
 expect 'unsupported architecture: armhf'

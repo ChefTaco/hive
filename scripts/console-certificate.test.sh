@@ -73,6 +73,14 @@ expect "certificate: $tls/console.crt"
 run tailscale --dir "$tls" || fail 'repeat failed'
 grep -q '(new)' "$temporary/out" && fail 'a repeat reported a new certificate'
 
+# A refused issue leaves no scratch copy of the key behind.
+mkdir -p "$temporary/scratch"
+printf 'failing\n' > "$temporary/issue"; mkdir -p "$temporary/failing"; cp "$temporary/first/cert.pem" "$temporary/failing/cert.pem"
+TMPDIR="$temporary/scratch" run tailscale --dir "$temporary/etc/hive/failed" && fail 'a failed issue was accepted'
+expect 'tailscale cert failed'
+[[ -z $(find "$temporary/scratch" -mindepth 1 -print -quit) ]] || fail 'a failed issue left its scratch files behind'
+printf 'first\n' > "$temporary/issue"
+
 # renew: refreshes the Tailscale certificate, then hands it to hive.sh tls-refresh as the owner.
 checkout="$temporary/hive"
 mkdir -p "$checkout/scripts/suite"
@@ -97,6 +105,12 @@ run renew --config "$config" --hive "$checkout" || { cat "$temporary/out" >&2; f
 cmp -s "$temporary/second/cert.pem" "$tls/console.crt" || fail 'renew did not refresh the Tailscale certificate'
 grep -qx "runuser $user" "$temporary/hive.log" || fail 'tls-refresh did not run as the owner of the configuration'
 grep -qx "$user tls-refresh --config $config" "$temporary/hive.log" || fail 'renew did not run hive.sh tls-refresh'
+# schedule: values that systemd would split or expand in ExecStart are refused before anything is written.
+mkdir -p "$temporary/with space"; cp "$config" "$temporary/with space/installation.json"
+run schedule --config "$temporary/with space/installation.json" --hive "$checkout" && fail 'scheduled a path with a space'
+expect 'cannot be scheduled'
+run schedule --config "$config" --hive "$checkout" --owner 'deploy --no-tailscale' && fail 'scheduled an unsafe account name'
+expect 'cannot be scheduled'
 # A certificate for another name never reaches hive.sh.
 : > "$temporary/hive.log"
 cp "$temporary/other/cert.pem" "$tls/console.crt"; cp "$temporary/other/key.pem" "$tls/console.key"
