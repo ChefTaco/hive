@@ -1,0 +1,135 @@
+{
+  "schema": 1,
+  "version": "3.7.0",
+  "user": "1000:1000",
+  "products": {
+    "hive-registry": {
+      "image": "ghcr.io/cheftaco/hive-registry:2.0.7",
+      "version": "1.3.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "ingress": {
+      "image": "ghcr.io/cheftaco/hive-ingress:2.0.5",
+      "version": "2.0.5",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "oathweave": {
+      "image": "ghcr.io/cheftaco/oathweave:2.2.0",
+      "version": "2.2.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "emberpath": {
+      "image": "ghcr.io/cheftaco/emberpath:2.4.0",
+      "version": "2.4.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "hivemem": {
+      "image": "ghcr.io/cheftaco/hivemem:1.6.0",
+      "version": "1.6.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "hiveskills": {
+      "image": "ghcr.io/cheftaco/hiveskills:1.7.1",
+      "version": "1.7.1",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "hivexui": {
+      "image": "ghcr.io/cheftaco/hivexui:0.7.0",
+      "version": "0.7.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "magnus": {
+      "image": "ghcr.io/cheftaco/magnus-server:2.9.1",
+      "version": "2.9.1",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ],
+      "embermendProtocol": 1
+    },
+    "magnus-gateway": {
+      "image": "ghcr.io/cheftaco/magnus-fleet-gateway:2.9.1",
+      "version": "2.9.1",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "cindertrace": {
+      "image": "ghcr.io/cheftaco/cindertrace:0.6.1",
+      "version": "0.6.1",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "chattermost": {
+      "image": "ghcr.io/cheftaco/chattermost:0.5.2",
+      "version": "0.5.2",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "chat-migrator": {
+      "image": "ghcr.io/cheftaco/chattermost-migrator:0.5.2",
+      "version": "0.5.2",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "emberfold": {
+      "image": "ghcr.io/cheftaco/emberfold:0.3.0",
+      "version": "0.3.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "ardentstudio": {
+      "image": "ghcr.io/cheftaco/ardent-studio:0.4.0",
+      "version": "0.4.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "embermend": {
+      "image": "ghcr.io/cheftaco/embermend:0.3.0",
+      "version": "0.3.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    }
+  },
+  "magnusAgent": {
+    "name": "@hivemagnus/magnus-agent",
+    "version": "2.9.1",
+    "integrity": "sha512-t2AMGF1FpxP4E8+9HlGig+eNrA49YfRzlf9pbSZS22m5iZ6P4vtazau3j0XZD3clKR1VexeO8laOxzABgjqW+A=="
+  },
+  "datastoreProfile": "runtime-2026-11-pg1712",
+  "storageRecovery": "embermend-postgres-runtime2-unversioned"
+}
