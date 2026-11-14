@@ -145,7 +145,17 @@ for (const version of ['3.2.1', '3.6.1']) current(version, 'runtime-2026-11-xslt
 current('3.2.1', 'runtime-2026-11');
 for (const version of ['3.6.2', '3.7.0', '4.0.0']) assert.throws(() => current(version, 'runtime-2026-11-xslt'), /superseded/);
 assert.throws(() => current('3.3.0', 'runtime-2026-11'), /superseded/);
-current('9.9.9', 'runtime-2026-11-pg1712');
+current('3.7.0', 'runtime-2026-11-pg1712');
+assert.throws(() => current('3.8.0', 'runtime-2026-11-pg1712'), /superseded/);
+// The libxslt patch of the same minor releases: new immutable PostgreSQL tags only.
+const patch = references('runtime-2026-11-pg1712-xslt');
+assert.equal(patch['datastore:postgres17'].image, 'ghcr.io/cheftaco/hive-postgres:17.12-2');
+assert.equal(patch['datastore:postgres18'].image, 'ghcr.io/cheftaco/hive-postgres:18.7-2');
+assert.equal(patch['datastore:postgres17'].version, minor['datastore:postgres17'].version);
+assert.equal(patch['datastore:postgres18'].version, minor['datastore:postgres18'].version);
+assert.deepEqual(patch['datastore:redis'], minor['datastore:redis']);
+assert.deepEqual(patch['datastore:qdrant'], minor['datastore:qdrant']);
+current('9.9.9', 'runtime-2026-11-pg1712-xslt');
 NODE
 jq '.datastoreProfile="runtime-2026-11-xslt"' "$temporary/inputs.json" > "$temporary/xslt-inputs.json"
 jq '.datastoreProfile="runtime-2026-11-pg1712"' "$temporary/inputs.json" > "$temporary/minor-inputs.json"
@@ -156,7 +166,8 @@ jq '.version="3.6.1"' "$temporary/xslt-inputs.json" > "$temporary/xslt-historica
 jq '.version="3.6.1"' "$temporary/minor-inputs.json" > "$temporary/minor-historical.json"
 node "$root/scripts/release/build-suite-manifest.mjs" --version 3.6.1 --inputs "$temporary/xslt-historical.json" --pinned "$temporary/runtime-pinned.json" --output "$temporary/xslt.json" >/dev/null
 node "$root/scripts/release/build-suite-manifest.mjs" --version 3.6.1 --inputs "$temporary/minor-historical.json" --pinned "$temporary/minor-pinned.json" --output "$temporary/minor-same.json" >/dev/null
-node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/minor-inputs.json" --pinned "$temporary/minor-pinned.json" --output "$temporary/minor.json" >/dev/null
+jq '.version="3.7.0"' "$temporary/minor-inputs.json" > "$temporary/minor-370.json"
+node "$root/scripts/release/build-suite-manifest.mjs" --version 3.7.0 --inputs "$temporary/minor-370.json" --pinned "$temporary/minor-pinned.json" --output "$temporary/minor.json" >/dev/null
 jq -e --slurpfile pinned "$temporary/minor-pinned.json" '
   .components["magnus-postgres"].image==$pinned[0]["datastore:postgres17"] and .components["chattermost-postgres"].image==$pinned[0]["datastore:postgres17"] and
   .components["cindertrace-postgres"].image==$pinned[0]["datastore:postgres18"] and
@@ -164,6 +175,12 @@ jq -e --slurpfile pinned "$temporary/minor-pinned.json" '
 ' "$temporary/minor.json" >/dev/null || { echo 'The PostgreSQL minor profile did not select its images' >&2; exit 1; }
 strip='del(.components[]|select(.kind=="datastore" and (.image|startswith("ghcr.io/cheftaco/hive-postgres@")))|.image,.version)'
 cmp <(jq -S "$strip" "$temporary/xslt.json") <(jq -S "$strip" "$temporary/minor-same.json") || { echo 'The PostgreSQL minor release changed a storage or product contract' >&2; exit 1; }
+jq '.datastoreProfile="runtime-2026-11-pg1712-xslt" | .version="3.6.1"' "$temporary/inputs.json" > "$temporary/patch-inputs.json"
+jq --arg pg17 "ghcr.io/cheftaco/hive-postgres@$(digest 14)" --arg pg18 "ghcr.io/cheftaco/hive-postgres@$(digest 15)" \
+  '.+{"datastore:postgres17":$pg17,"datastore:postgres18":$pg18}' "$temporary/runtime-pinned.json" > "$temporary/patch-pinned.json"
+node "$root/scripts/release/build-suite-manifest.mjs" --version 3.6.1 --inputs "$temporary/patch-inputs.json" --pinned "$temporary/patch-pinned.json" --output "$temporary/patch-same.json" >/dev/null
+cmp <(jq -S "$strip" "$temporary/minor-same.json") <(jq -S "$strip" "$temporary/patch-same.json") || { echo 'The PostgreSQL library patch changed a storage or product contract' >&2; exit 1; }
+if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/minor-inputs.json" --pinned "$temporary/minor-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'The superseded PostgreSQL minor profile passed for a later release' >&2; exit 1; fi
 for profile in unknown legacy null; do
   jq --arg profile "$profile" '.datastoreProfile=(if $profile=="null" then null else $profile end)' "$temporary/runtime-inputs.json" > "$temporary/bad-inputs.json"
   if node "$root/scripts/release/build-suite-manifest.mjs" --version 3.2.1 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/runtime-pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An unknown datastore profile passed' >&2; exit 1; fi
