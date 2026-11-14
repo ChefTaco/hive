@@ -14,8 +14,11 @@
 #   magnus-agent-identity   this host's node key: its state and fingerprint, never the key
 #   magnus-agent-node-credential  (Magnus host) whether Magnus has per-node credentials, a node's
 #                           key state, or (mode issue) a one-time enrollment token for a new node
+#   magnus-agent-node-summary  (Magnus host) the fleet's node-key readiness: mode, blocker codes, counts
 # A one-time enrollment token arrives like the credentials, in the request's secret on standard
 # input, and reaches the agent's own enroll command on its standard input only.
+# With nodeKeysOnly (a release pinning Magnus 3.0.0 or later) no fleet-wide node secret is written:
+# a new agent must be enrolled with a token, and an existing agent's secret lines stay as they are.
 set -Eeuo pipefail
 umask 077
 read -r input
@@ -24,6 +27,7 @@ request=$(jq -c '.magnusAgent // {}' <<< "$input")
 root=$(jq -r '.root // "/opt/magnus-agent"' <<< "$request")
 package=$(jq -r '.package.name // "@hivemagnus/magnus-agent"' <<< "$request")
 port=$(jq -r '.agentPort // 4100' <<< "$request")
+keys_only=$(jq -r '.nodeKeysOnly==true' <<< "$request")
 die() { printf 'Magnus agent: %s\n' "$*" >&2; exit 1; }
 [[ "$root" =~ ^/[A-Za-z0-9_./-]+$ && "$root" != *'/../'* && "$root" != / ]] || die 'Invalid agent directory'
 [[ "$port" =~ ^[0-9]{2,5}$ ]] || die 'Invalid agent port'
@@ -62,6 +66,12 @@ agent_has_node_credentials() {
   [[ -f "$(entry)" ]] || return 1
   usage=$(node "$(entry)" --help 2>/dev/null) || return 1
   [[ "$usage" == *'enroll --token'* && "$usage" == *'identity show'* ]]
+}
+# Agents 2.10.0 and later read the token with enroll --token-file - (standard input).
+agent_reads_token_file() {
+  local usage
+  usage=$(node "$(entry)" --help 2>/dev/null) || return 1
+  [[ "$usage" == *'enroll --token-file'* ]]
 }
 # This node's key as the agent reports it: state, node id and fingerprint, never the key.
 identity_state() {
@@ -163,7 +173,7 @@ install_locked_package() {
 }
 
 write_environment() {
-  local environment="$root/.env" temporary secret_source control fqdn certificate key renewal reconciliation='' staged_path='' supervisor='' terminal_user=''
+  local environment="$root/.env" temporary secret_source control fqdn certificate key renewal reconciliation='' staged_path='' supervisor='' terminal_user='' owned
   control=$(jq -er .controlApiUrl <<< "$request"); fqdn=$(jq -er .hostFqdn <<< "$request")
   certificate=$(jq -er .certificate.certificate <<< "$request"); key=$(jq -er .certificate.key <<< "$request")
   renewal=$(jq -r '.certificate.renewal // ""' <<< "$request")
@@ -182,9 +192,13 @@ write_environment() {
   if [[ -z "$staged_path" || "$staged_path" == "$root-artifacts/"* ]]; then staged_path=${native_stage_path:-$staged_path}; fi
   {
     # Retain operator settings for native runtimes when repairing or upgrading the host agent.
-    # Only the connection, credentials and certificate settings below are installer-owned.
+    # Only the connection, credentials and certificate settings below are installer-owned. With
+    # node keys only, the fleet-wide secrets are no longer installer-owned: lines an existing agent
+    # has stay exactly as they are (its records MACed with them must stay readable).
+    owned='CONTROL_API_URL|HOST_FQDN|NODE_ENV|MAGNUS_AGENT_PRIVILEGED|NODE_MANAGER_PORT|TLS_CERT_PATH|TLS_KEY_PATH|LOG_LEVEL|MAGNUS_AGENT_TLS_RENEWAL|NODE_MANAGER_SECRET|RESULT_SIGNING_SECRET|COMMAND_RECONCILIATION_SECRET|ARDENT_OWNER_USER|ARDENT_STAGED_PACKAGE|MAGNUS_EXECUTION_SUPERVISOR_ENABLED|MAGNUS_AGENT_MANAGED_TERMINAL_USER'
+    [[ "$keys_only" != true ]] || owned='CONTROL_API_URL|HOST_FQDN|NODE_ENV|MAGNUS_AGENT_PRIVILEGED|NODE_MANAGER_PORT|TLS_CERT_PATH|TLS_KEY_PATH|LOG_LEVEL|MAGNUS_AGENT_TLS_RENEWAL|ARDENT_OWNER_USER|ARDENT_STAGED_PACKAGE|MAGNUS_EXECUTION_SUPERVISOR_ENABLED|MAGNUS_AGENT_MANAGED_TERMINAL_USER'
     if [[ -f "$environment" ]]; then
-      awk '!/^(CONTROL_API_URL|HOST_FQDN|NODE_ENV|MAGNUS_AGENT_PRIVILEGED|NODE_MANAGER_PORT|TLS_CERT_PATH|TLS_KEY_PATH|LOG_LEVEL|MAGNUS_AGENT_TLS_RENEWAL|NODE_MANAGER_SECRET|RESULT_SIGNING_SECRET|COMMAND_RECONCILIATION_SECRET|ARDENT_OWNER_USER|ARDENT_STAGED_PACKAGE|MAGNUS_EXECUTION_SUPERVISOR_ENABLED|MAGNUS_AGENT_MANAGED_TERMINAL_USER)=/' "$environment"
+      awk -v owned="^($owned)=" '$0 !~ owned' "$environment"
     fi
     printf 'ARDENT_OWNER_USER=%s\n' "$native_owner"
     printf 'MAGNUS_EXECUTION_SUPERVISOR_ENABLED=%s\n' "$supervisor"
@@ -194,10 +208,11 @@ write_environment() {
     printf 'TLS_CERT_PATH=%s\nTLS_KEY_PATH=%s\nLOG_LEVEL=info\n' "$certificate" "$key"
     [[ "$renewal" != tailscale ]] || printf 'MAGNUS_AGENT_TLS_RENEWAL=tailscale\n'
     # The credentials: from the Magnus host's configuration on that host, or from the request.
-    # They are still written for agents enrolled with a node key: mixed fleets need them, and
-    # Magnus phase 3 (enforce) removes them from agents, templates and this installer.
+    # Before Magnus 3.0.0 they are written for agents enrolled with a node key too: mixed fleets
+    # need them. With node keys only none is written, whatever the request carries.
     secret_source=$(jq -r '.magnusEnvironment // ""' <<< "$request")
-    if [[ -n "$secret_source" ]]; then
+    if [[ "$keys_only" == true ]]; then :
+    elif [[ -n "$secret_source" ]]; then
       [[ -f "$secret_source" && ! -L "$secret_source" ]] || die 'The Magnus configuration is missing on this host'
       printf 'NODE_MANAGER_SECRET=%s\nRESULT_SIGNING_SECRET=%s\n' "$(get "$secret_source" NODE_MANAGER_SECRET)" "$(get "$secret_source" RESULT_SIGNING_SECRET)"
       reconciliation=$(get "$secret_source" COMMAND_RECONCILIATION_SECRET)
@@ -208,7 +223,7 @@ write_environment() {
     # The server's reconciliation key, when it has one: the same value on the server and every agent.
     [[ -z "$reconciliation" ]] || printf 'COMMAND_RECONCILIATION_SECRET=%s\n' "$reconciliation"
   } > "$temporary"
-  grep -qE '^NODE_MANAGER_SECRET=.{32,}$' "$temporary" && grep -qE '^RESULT_SIGNING_SECRET=.{32,}$' "$temporary" || { rm -f -- "$temporary"; die 'The Magnus node credentials are missing'; }
+  [[ "$keys_only" == true ]] || { grep -qE '^NODE_MANAGER_SECRET=.{32,}$' "$temporary" && grep -qE '^RESULT_SIGNING_SECRET=.{32,}$' "$temporary"; } || { rm -f -- "$temporary"; die 'The Magnus node credentials are missing'; }
   [[ -z "$reconciliation" || ${#reconciliation} -ge 32 ]] || { rm -f -- "$temporary"; die 'COMMAND_RECONCILIATION_SECRET on the Magnus host is shorter than 32 characters'; }
   chmod 600 "$temporary"
   if [[ -f "$environment" ]] && cmp -s "$temporary" "$environment"; then rm -f -- "$temporary"; return 1; fi
@@ -319,6 +334,10 @@ install_agent() {
     jq -e '.secret.enrollmentToken|type=="string" and test("^mne_[A-Za-z0-9_-]{43}$")' <<< "$input" >/dev/null || die 'The one-time enrollment token is missing or malformed; nothing was changed'
     enroll=true
   fi
+  # Node keys only: an agent without a key can join only by token enrollment, and gets no shared secret.
+  if [[ "$keys_only" == true && "$enroll" != true && ! -f "$root/identity/node.key" ]]; then
+    die 'The Magnus of this release accepts node keys only: an agent without a node key needs a one-time enrollment token, and none was given; nothing was changed'
+  fi
   [[ ! -L "$root" ]] || die 'The agent directory cannot be a symlink'
   install -d -m 0700 "$root"
   prepare_certificate
@@ -358,9 +377,11 @@ install_agent() {
     '{version:$version,service:$state,changed:$changed,nodeCredential:$credential}'
 }
 
-# The agent's own `magnus-agent enroll --token`, run as its service account. Its command line
-# would expose the token in the process table, so a small wrapper reads the token from standard
-# input and hands it to the agent's command in memory; no process has it as an argument.
+# The agent's own enroll command, run as its service account, with the token on standard input
+# only: `magnus-agent enroll --token-file -` where the agent has it (2.10.0 and later). For an agent
+# with only `enroll --token`, whose command line would expose the token in the process table, a
+# small wrapper reads the token from standard input and hands it to the agent's command in memory.
+# No process has the token as an argument.
 ENROLL_WRAPPER='import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 const entry = process.env.HIVE_AGENT_ENTRY;
@@ -370,10 +391,13 @@ await import(pathToFileURL(entry).href);'
 enroll_node() {
   local log="$root/enroll.log"
   if ! agent_has_node_credentials; then
+    [[ "$keys_only" != true ]] || die 'This agent version cannot enroll with a token, and the Magnus of this release accepts node keys only; the service was not started'
     printf 'This agent version cannot enroll with a token; it keeps the shared node secret.\n' >&2
     return 0
   fi
-  if ! jq -j '.secret.enrollmentToken' <<< "$input" | as_service env HIVE_AGENT_ENTRY="$(entry)" node --input-type=module -e "$ENROLL_WRAPPER" > "$log" 2>&1; then
+  local -a enroll_command=(env HIVE_AGENT_ENTRY="$(entry)" node --input-type=module -e "$ENROLL_WRAPPER")
+  if agent_reads_token_file; then enroll_command=(node "$(entry)" enroll --token-file -); fi
+  if ! jq -j '.secret.enrollmentToken' <<< "$input" | as_service "${enroll_command[@]}" > "$log" 2>&1; then
     cat -- "$log" >&2; rm -f -- "$log"
     die 'Enrollment with the one-time token failed; the service was not started. Rerun the install to issue a new token'
   fi
@@ -405,8 +429,8 @@ remove_agent() {
   jq -nc '{removed:true}'
 }
 
-# The fleet-wide secrets, still copied to every agent in this phase: mixed fleets need them.
-# Magnus phase 3 (enforce) removes them; then this action goes too.
+# The fleet-wide secrets, copied to every agent of a release pinning Magnus before 3.0.0: mixed
+# fleets need them. A release pinning Magnus 3.0.0 or later never asks for them.
 magnus_secrets() {
   local file
   file=$(jq -er .magnusEnvironment <<< "$request")
@@ -484,6 +508,24 @@ node_credential() {
     magnus node --input-type=module -e "$NODE_CREDENTIAL_SCRIPT"
 }
 
+# The fleet summary of per-node credentials, read like the node record. Only the mode, whether it
+# is deprecated, and the blocker codes with their counts leave the container: no node names.
+NODE_SUMMARY_SCRIPT='const response = await fetch("https://localhost:" + (process.env.CONTROL_API_PORT || "4000") + "/api/v1/node-credentials/summary", { headers: { "x-api-secret": process.env.API_SECRET } });
+if (response.status === 404) { console.log(JSON.stringify({ supported: false })); process.exit(0); }
+const body = await response.json().catch(() => ({}));
+const data = body?.data;
+if (response.status !== 200 || typeof data?.enforceReady !== "boolean" || !Array.isArray(data.blockers)) {
+  console.error("Magnus refused the node credential summary: HTTP " + response.status + " " + (body?.error?.code ?? ""));
+  process.exit(1);
+}
+console.log(JSON.stringify({ supported: true, mode: data.mode ?? null, modeDeprecated: data.modeDeprecated === true, enforceReady: data.enforceReady,
+  blockers: data.blockers.map(item => ({ code: String(item.code), count: Number(item.count) || 0 })) }));'
+node_summary() {
+  local compose
+  compose=$(jq -er .compose <<< "$request")
+  docker compose -f "$compose" exec -T magnus node --input-type=module -e "$NODE_SUMMARY_SCRIPT"
+}
+
 ardent_review() {
   need_root
   local owner uid home native_home profiles processes gateway=null config code mode proof initializer container maintenance=""
@@ -518,6 +560,8 @@ ardent_review() {
   proof=$(jq -c --arg id "$maintenance" --arg version "$(installed_version)" \
     --arg supervisor "$(get "$root/.env" MAGNUS_EXECUTION_SUPERVISOR_ENABLED)" --arg terminal "$(get "$root/.env" MAGNUS_AGENT_MANAGED_TERMINAL_USER)" \
     '.maintenanceId=$id | .agentRuntime={version:$version,supervisor:($supervisor=="true"),terminalUser:$terminal}' <<< "$proof")
+  # Node keys only: the review signs its requests to the agent with the server key (node-enrollment.mjs).
+  if [[ "$keys_only" == true ]]; then proof=$(jq -c '.nodeKeysOnly=true' <<< "$proof"); fi
   code=$(jq -er .reviewScript <<< "$request")
   printf '%s' "$code" | base64 -d | docker compose -f "$(jq -er .compose <<< "$request")" exec -T \
     -e "HIVE_ARDENT_REVIEW=$proof" magnus node --input-type=module
@@ -526,7 +570,7 @@ ardent_review() {
 terminal_authority_preflight() {
   need_root
   jq -er '.terminalRouteScript' <<< "$request" | base64 -d |
-    HIVE_TERMINAL_PREFLIGHT_ROOT="$root" node --input-type=module || die 'Managed terminal authority preflight failed before pausing profiles'
+    HIVE_TERMINAL_PREFLIGHT_ROOT="$root" HIVE_TERMINAL_PREFLIGHT_NODE_KEYS_ONLY="$keys_only" node --input-type=module || die 'Managed terminal authority preflight failed before pausing profiles'
 }
 
 node_maintenance() {
@@ -587,6 +631,7 @@ case "$action" in
   magnus-agent-heartbeat) heartbeat;;
   magnus-agent-identity) identity;;
   magnus-agent-node-credential) node_credential;;
+  magnus-agent-node-summary) node_summary;;
   magnus-agent-ardent-review) ardent_review;;
   magnus-agent-node-maintenance) node_maintenance;;
   magnus-agent-terminal-preflight) terminal_authority_preflight;;
