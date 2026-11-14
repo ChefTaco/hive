@@ -170,7 +170,7 @@ gateway.listen(4310,'0.0.0.0');
   writeFileSync(join(temporary, 'native-listeners-magnus-agents.caddy'), ':4000 {\n\ttls /config/console.crt /config/console.key\n\timport magnus_agent_listener\n}\n', { mode: 0o600 });
   // The gateway is optional: this ingress has it, and a second one below does not.
   let agentPort;
-  async function startIngress(name, environment, state, extraPorts = [], mounts = []) {
+  async function startIngress(name, environment, state, extraPorts = [], mounts = [], config = '/config/Caddyfile') {
     mkdirSync(state, { recursive: true, mode: 0o700 });
     docker(
       'run',
@@ -193,7 +193,7 @@ gateway.listen(4310,'0.0.0.0');
       'caddy',
       'run',
       '--config',
-      '/config/Caddyfile',
+      config,
       '--adapter',
       'caddyfile',
     );
@@ -886,9 +886,28 @@ gateway.listen(4310,'0.0.0.0');
   assert.equal(consoleHeartbeat.status, 404, 'The console port served an agent route');
   const consoleSession = JSON.parse((await request('/api/magnus/console/session', { Authorization: headers.Authorization, 'X-Node-Token': 'obviously-fake-node-token' })).body);
   assert.equal(consoleSession.headers['x-node-token'], undefined, 'The console port forwarded x-node-token');
+  // A release pinning Magnus 3.0.0 or later: the controller's ingress for it no longer relays the
+  // shared node secret on the agent port; signatures, token enrollment and the server key still pass.
+  writeFileSync(join(temporary, 'magnus-3-release.json'), JSON.stringify({ components: { magnus: { version: '3.0.0' } } }), { mode: 0o600 });
+  const keysOnlyTemplate = execFileSync('bash', ['-c', 'source "$1/scripts/suite/controller.sh"; HIVE_ROOT=$1 HIVE_MANIFEST=$2; hive_ingress_template', 'ingress', root, join(temporary, 'magnus-3-release.json')], { encoding: 'utf8' });
+  writeFileSync(join(temporary, 'Caddyfile-magnus-3'), Buffer.from(keysOnlyTemplate, 'base64'), { mode: 0o600 });
+  const keysOnlyName = network + '-edge-node-keys';
+  containers.push(keysOnlyName);
+  await waitReady({ ...options, port: await startIngress(keysOnlyName, env, join(temporary, 'state-node-keys'), [4000], [], '/config/Caddyfile-magnus-3') });
+  const keysOnly = { ...options, port: agentPort };
+  for (const [method, path] of [['POST', '/api/v1/heartbeat'], ['POST', '/api/v1/resource-leases/enrollment/terminal-claim'], ['GET', '/api/v1/node-enrollment/server-key'], ['POST', '/api/v1/node-enrollment/enroll'], ['POST', '/api/v1/node-enrollment/rotate']]) {
+    const result = await request(path, forged, method, method === 'POST' ? '{}' : undefined, keysOnly);
+    assert.equal(result.status, 200, method + ' ' + path + ' did not reach Magnus on the Magnus 3 agent port');
+    const body = JSON.parse(result.body);
+    assert.equal(body.headers['x-node-token'], undefined, path + ' relayed x-node-token for Magnus 3');
+    assert.equal(body.headers['x-magnus-signature'], 'b'.repeat(86), path + ' dropped the node signature for Magnus 3');
+    assert.equal(body.headers['x-magnus-node-id'], 'node-1');
+    assert.equal(body.headers['x-log-token'], 'obviously-fake-log-token');
+  }
+  assert.equal((await request('/api/v1/node-enrollment/legacy-upgrade', forged, 'POST', '{}', keysOnly)).status, 404, 'The Magnus 3 agent port routed the legacy upgrade');
   passed = true;
   console.log(
-    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming, WebSocket transport, the Magnus route allowlist with machine credentials and acting subjects stripped, the optional Ardent Project Studio route with its prefix kept, no cookies and unbuffered streams, the exact fleet gateway browser routes with Origin and Sec-Fetch-Site intact, an external Magnus verified against the system trust store on its own name while every other product keeps the suite authority, and the Magnus host agent port with its own allowlist and no client-asserted identity.',
+    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming, WebSocket transport, the Magnus route allowlist with machine credentials and acting subjects stripped, the optional Ardent Project Studio route with its prefix kept, no cookies and unbuffered streams, the exact fleet gateway browser routes with Origin and Sec-Fetch-Site intact, an external Magnus verified against the system trust store on its own name while every other product keeps the suite authority, and the Magnus host agent port with its own allowlist and no client-asserted identity, without the shared node secret for Magnus 3.',
   );
 } catch (error) {
   for (const container of containers) {

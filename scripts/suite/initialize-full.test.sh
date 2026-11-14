@@ -401,6 +401,24 @@ fragment="$temporary/agents/config/ingress/native-listeners-magnus-agents.caddy"
 grep -qx ':4000 {' "$fragment" && grep -qx $'\ttls /config/console.crt /config/console.key' "$fragment" && grep -qx $'\timport magnus_agent_listener' "$fragment" || fail 'The Magnus agent listener is not the reviewed route set'
 grep -q '^(magnus_agent_listener) {' "$temporary/agents/config/ingress/Caddyfile" || fail 'The installed Caddyfile lacks the agent route set'
 [[ ! -e "$temporary/install/config/ingress/native-listeners-magnus-agents.caddy" ]] || fail 'An agent port was published without being asked for'
+cmp -s "$temporary/agents/config/ingress/Caddyfile" "$ROOT/deployment/Caddyfile" || fail 'A release pinning Magnus before 3.0.0 did not install deployment/Caddyfile as it is'
+# A release pinning Magnus 3.0.0: node keys only. No fleet-wide node secret is generated for the
+# fresh Magnus, and the agent port no longer relays x-node-token; the rest is unchanged.
+jq '.components.magnus.version="3.0.0"' "$temporary/release.json" > "$temporary/release-magnus3.json"
+openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/release-magnus3.json" -out "$temporary/release-magnus3.json.sig"
+agent_config magnus3 '[{"port":4000,"component":"magnus"}]'
+"$ROOT/hive.sh" init --config "$temporary/magnus3.json" --manifest "$temporary/release-magnus3.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes > "$temporary/magnus3.log" 2>&1 || { cat "$temporary/magnus3.log" >&2; fail 'A fresh install pinning Magnus 3.0.0 failed'; }
+magnus3="$temporary/magnus3/config"
+if rg -q '^(NODE_MANAGER_SECRET|RESULT_SIGNING_SECRET|COMMAND_RECONCILIATION_SECRET)=' "$magnus3/magnus.env"; then fail 'A fresh Magnus 3.0.0 got a fleet-wide node secret'; fi
+for name in magnus-manager magnus-result magnus-reconcile; do [[ ! -e "$magnus3/.initializer/secrets/$name" ]] || fail "A fresh Magnus 3.0.0 generated $name"; done
+for setting in API_SECRET JWT_SECRET AUDIT_HMAC_SECRET LOG_INGEST_SIGNING_SECRET CREDENTIAL_ROTATION_KEY METRICS_TOKEN WEBHOOK_ENCRYPTION_KEY RESOURCE_PARTICIPANT_RECONCILIATION_SECRET; do
+  rg -q "^$setting=[a-f0-9]{64}\$" "$magnus3/magnus.env" || fail "A fresh Magnus 3.0.0 lacks $setting"
+done
+relay=$'\t\t\theader_up X-Node-Token {http.request.header.X-Node-Token}'
+grep -qxF -- "$relay" "$temporary/agents/config/ingress/Caddyfile" && ! grep -qxF -- "$relay" "$magnus3/ingress/Caddyfile" || fail 'The Magnus 3.0.0 agent port still relays x-node-token'
+grep -vxF -- "$relay" "$ROOT/deployment/Caddyfile" | cmp -s - "$magnus3/ingress/Caddyfile" || fail 'The Magnus 3.0.0 ingress changes more than the x-node-token relay'
+
+grep -qx $'\timport magnus_agent_listener' "$magnus3/ingress/native-listeners-magnus-agents.caddy" || fail 'The Magnus 3.0.0 agent port is missing'
 "$ROOT/hive.sh" plan --config "$temporary/agents.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive | jq -e '.console.magnusAgentPort==4000' >/dev/null || fail 'The plan does not show the agent port'
 rendered=$(source "$ROOT/scripts/suite/controller.sh"; HIVE_ROOT=$ROOT HIVE_CONFIG=$temporary/agents.json HIVE_MANIFEST=$temporary/release.json HIVE_SIGNATURE=$temporary/release.json.sig HIVE_TRUST_KEY=$temporary/publisher.pub HIVE_VERSION=0.1.0; hive_validate; hive_manifest >/dev/null; hive_render control)
 jq -e --arg bind "$(jq -r .console.bindAddress "$temporary/agents.json")" '.services.ingress.ports|any(.target==4000 and .published=="4000" and .host_ip==$bind)' <<< "$rendered" >/dev/null || fail 'The agent port is not published on the console bind address'
