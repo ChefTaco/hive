@@ -94,6 +94,7 @@ Setup checklist: 2 pending (settle one by hand with ./hive.sh setup done ID or .
 | Item | Listed when | Recorded by | Done when |
 | --- | --- | --- | --- |
 | `magnus-agent-enrolled` | Install and upgrade, with Magnus and a [host agent port](#magnus-host-agents) | Install, upgrade | `post-upgrade` finds the agent at the release's pinned version, or installs it (`./hive.sh magnus-agent install`). HiveXUI's check `magnus.agent` |
+| `magnus-node-keys` | Upgrade, with Magnus, from a release that pins Magnus 3.0.0 or later | Upgrade | Magnus's fleet summary (`GET /api/v1/node-credentials/summary`) reports no blockers: found at the upgrade, or by `post-upgrade`, which lists the blockers until then. See [Node keys](#node-keys) |
 | `oathweave-console-clients` | Upgrade, with Oathweave, the console and Magnus (or an external Magnus), Embermend or Ardent Project Studio | Upgrade | `post-upgrade` runs `./hive.sh console-clients add`. Check `oathweave.console-client` |
 | `ardent-packages-updated` | Upgrade, with Magnus or an external Magnus | Upgrade | You update the Ardent packages in HiveXUI (Magnus > Ardent > Installations), then `./hive.sh setup done ardent-packages-updated` |
 | `certificate-renewal` | Install and upgrade, on a fresh installation whose console host is this machine | Install, upgrade | A renewal timer exists (`sudo ./scripts/console-certificate.sh schedule --config FILE`, see [QUICKSTART](QUICKSTART.md#9-keep-the-certificate-current)); found at the next upgrade or `post-upgrade`. Skip it when you renew another way |
@@ -602,6 +603,11 @@ the Magnus server and every node agent. Fresh setup generates it into `config/ma
 `/opt/magnus-agent/.env` and restart `magnus-agent`. Without it, that one decision answers
 `RECONCILIATION_UNAVAILABLE`; everything else works.
 
+From a release that pins Magnus 3.0.0 or later, Magnus signs these decisions with its server key
+for each node, and the agents verify that signature. Fresh setup then generates no
+`COMMAND_RECONCILIATION_SECRET` and the agent install copies none; an existing installation keeps
+the one it has (see [Node keys](#node-keys)).
+
 ## Magnus host agents
 
 A host joins the fleet by running the Magnus agent, which calls Magnus's agent API. On a fresh
@@ -620,10 +626,15 @@ Magnus has its own HTTPS endpoint, and adding the port to an existing installati
 
 The port is not the console. The ingress serves only the routes the agent and its Hermes sync
 call (`GET /`, the heartbeat, log ingest, resource-lease, managed cron occurrence and Hermes
-registry client routes) and answers 404 to everything else, including every operator, browser
-and system route. Only the agent credentials (`x-node-token`, `x-log-token`,
-`x-hermes-registry-token`), `Content-Type` and `Accept` reach Magnus: no `Authorization`, cookie
-or `x-api-secret` passes, and `X-Forwarded-For` is the client's address. Bind the console to an
+registry client routes, and of the node enrollment routes the server key, token enrollment and key
+rotation) and answers 404 to everything else, including every operator, browser and system route
+and the shared-secret legacy upgrade. Only the agent credentials (`x-log-token`,
+`x-hermes-registry-token`, the five `x-magnus-*` headers of a request signed with the node key,
+and, for a release that pins a Magnus before 3.0.0, `x-node-token`), `Content-Type` and `Accept`
+reach Magnus: no `Authorization`, cookie or `x-api-secret` passes, and `X-Forwarded-For` is the
+client's address. The controller installs `deployment/Caddyfile` as it is for a Magnus before
+3.0.0; for Magnus 3.0.0 or later, which refuses the shared node secret, it installs the same file
+without the line that relays `x-node-token` on this port. Bind the console to an
 address that only your hosts can reach, or limit the port with your network's firewall: ports
 Docker publishes bypass ufw.
 
@@ -656,12 +667,13 @@ any fleet host, with `--ssh-config FILE` and `--sudo-password-file FILE` as that
    services at boot, and writes `ARDENT_OWNER_USER` in `/opt/magnus-agent/.env`. An explicitly
    configured owner and other native-runtime settings survive repairs and upgrades. The root-only
    environment also has `CONTROL_API_URL` from the console name and
-   the agent port. The node credentials (`NODE_MANAGER_SECRET`, `RESULT_SIGNING_SECRET` and,
-   when Magnus has one, `COMMAND_RECONCILIATION_SECRET`) come from the Magnus host's own configuration; for
-   another host they stream through the controller on standard input only. They are never
-   printed and never a command-line value. They are still written when the agent also gets its
-   own node key (step 4): fleets with older agents need them until Magnus's enforce phase removes
-   them;
+   the agent port. For a release that pins a Magnus before 3.0.0, the node credentials
+   (`NODE_MANAGER_SECRET`, `RESULT_SIGNING_SECRET` and, when Magnus has one,
+   `COMMAND_RECONCILIATION_SECRET`) come from the Magnus host's own configuration; for another host
+   they stream through the controller on standard input only. They are never printed and never a
+   command-line value. They are written also when the agent gets its own node key (step 4):
+   fleets with older agents need them. A release that pins Magnus 3.0.0 or later reads and writes
+   none of them (see [Node keys](#node-keys));
 4. with a Magnus that has per-node credentials, gives a **new** agent its own node key (see
    [Node keys](#node-keys) below);
 5. runs the agent's `check`, then its own `install-service`, which sets up the versioned layout
@@ -693,7 +705,33 @@ enroll command on its standard input. It is never a command-line value of any pr
 printed or logged, and the temporary files are removed on every exit, including an interrupt. A
 token is valid for 15 minutes and works once; a failed enrollment starts no service, and running
 the install again issues a new one. An agent version without per-node credentials cannot use a
-token: it keeps the shared secret, and the unused token expires.
+token: it keeps the shared secret, and the unused token expires. An agent of 2.10.0 or later reads
+the token with `magnus-agent enroll --token-file -` (standard input); for an agent that offers only
+`--token`, a small wrapper hands it the token in memory.
+
+**Magnus 3.0.0 or later.** From 3.0.0 Magnus runs in `enforce` mode by default: it accepts node
+signatures only, refuses the shared node secret in both directions, and has closed the automatic
+upgrade of existing nodes. A release that pins it changes the install like this:
+
+| | A release pinning Magnus 2.10.x | A release pinning Magnus 3.0.0 or later |
+|---|---|---|
+| Fleet-wide secrets in the agent's `.env` | Written for every agent | None written. An existing agent keeps the lines it has, unchanged: they are never removed |
+| A new agent | Enrolled with a token | Enrolled with a token; the token is required, and the install stops before any change when the running Magnus issues none or the agent cannot enroll |
+| An existing agent without a key | Left to Magnus's automatic upgrade | Enrolled with a token |
+| An agent with a key | Keeps it | Keeps it |
+| A fresh Magnus | `NODE_MANAGER_SECRET`, `RESULT_SIGNING_SECRET`, `COMMAND_RECONCILIATION_SECRET` generated | None of the three generated |
+| The host agent port | Relays `x-node-token` | Does not relay it |
+
+An existing agent keeps `RESULT_SIGNING_SECRET` because the records it MACed with it before the
+upgrade (its command ledger, receipts and decisions) stay readable only with that key. Magnus's
+guide describes how to retire it: move its value to `RESULT_SIGNING_PREVIOUS_SECRET` in the
+agent's `.env` and restart the agent. Older records keep verifying, new ones use a node-local key,
+and the agent can then no longer be downgraded to 2.10.x without losing them, so the installer
+leaves that step to you. An existing installation's `config/magnus.env` is never changed by an
+upgrade either; Magnus 3.0.0 still accepts the secrets there and needs them only under an
+explicit `NODE_AUTH_MODE=compat` or `warn`. After the upgrade, `hive.sh post-upgrade` reads
+Magnus's fleet summary (`GET /api/v1/node-credentials/summary`) and lists any blockers, or marks
+the `magnus-node-keys` setup step done when there are none.
 
 The installer also stages the exact Ardent package pinned by the signed host agent's dependency
 lock. It verifies the npm integrity and prepares the package manifest the node agent checks. The

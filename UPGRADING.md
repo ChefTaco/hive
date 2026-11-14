@@ -43,6 +43,49 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Magnus 3.0.0: node keys only
+
+This section is bound for the suite release that pins Magnus 3.0.0 (planned as 3.9.0); it has not
+been released yet. Magnus 3.0.0 runs in `enforce` mode by default: nodes authenticate with their
+own keys only, the shared node secret is refused in both directions, HMAC-only evidence is
+refused, and the automatic binding of keys for existing nodes is closed. A Magnus whose
+`NODE_AUTH_MODE` is unset **refuses to start** while any real node has no active key, an agent
+does not sign its evidence, or an agent runs 2.10.0 or 2.10.1. See Magnus's
+`docs/NODE_CREDENTIALS.md`, "Upgrading to 3.0.0".
+
+Before the suite upgrade, on the current release (Magnus 2.10.2):
+
+1. Run every agent on 2.10.2 or later (`./hive.sh magnus-agent install --config FILE [--host HOST]`).
+2. Give every node its key. An agent that reaches Magnus through the suite's host agent port never
+   binds one automatically; enroll it with a token as Magnus's guide describes.
+3. Set `NODE_AUTH_MODE=warn` in `config/magnus.env`, restart Magnus, use the fleet for a day, and
+   confirm `GET /api/v1/node-credentials/summary` reports `enforceReady: true`.
+4. Remove `NODE_AUTH_MODE` again (or set `enforce`) before the upgrade. To upgrade first and
+   enforce later, set `NODE_AUTH_MODE=compat` explicitly instead: Magnus 3.0.0 honours it,
+   deprecated, for this major.
+
+What the controller of that release changes:
+
+- `hive.sh magnus-agent install` copies no `NODE_MANAGER_SECRET`, `RESULT_SIGNING_SECRET` or
+  `COMMAND_RECONCILIATION_SECRET` to an agent. A new agent, and an existing agent without a key,
+  is enrolled with a one-time token (read by `magnus-agent enroll --token-file -`); without a token
+  the install stops before changing anything. An agent with a key keeps it. An existing agent's
+  `.env` keeps the secret lines it has: they are never removed, because records it MACed with
+  `RESULT_SIGNING_SECRET` stay readable only with it. To retire it, follow Magnus's guide: move its
+  value to `RESULT_SIGNING_PREVIOUS_SECRET` (and keep it there while those records matter); the
+  agent can then no longer be downgraded to 2.10.x without losing them.
+- A fresh installation generates none of those three secrets for Magnus. An upgrade never changes
+  an existing `config/magnus.env`.
+- The ingress `Caddyfile` the upgrade installs no longer relays `x-node-token` on the host agent
+  port; the node signature headers, token enrollment and the server key still pass. The
+  shared-secret legacy upgrade was never routed there.
+- `hive.sh post-upgrade` reads Magnus's fleet summary and lists its blockers, notes an explicit
+  (deprecated) `compat` or `warn`, and marks the `magnus-node-keys` setup step done when the
+  summary has no blockers.
+
+The controller changes, so the release pins a new controller digest. A release that pins Magnus
+2.10.x keeps the earlier behaviour exactly.
+
 ## Suite 3.8.1: Magnus managed requests to agents with a node key
 
 Suite 3.8.1 changes no storage format and needs no flag from 3.8.0. It pins Magnus, its fleet

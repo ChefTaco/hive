@@ -6,6 +6,31 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Changed
+
+- Magnus 3.0.0 support, gated on the pinned Magnus version: a release that pins Magnus 3.0.0 or
+  later (node keys only, `enforce` by default) changes the controller as follows, and a release
+  that pins Magnus 2.10.x behaves exactly as before. See `UPGRADING.md`, "Magnus 3.0.0: node keys
+  only".
+  - `hive.sh magnus-agent install` reads and writes no `NODE_MANAGER_SECRET`,
+    `RESULT_SIGNING_SECRET` or `COMMAND_RECONCILIATION_SECRET` for an agent. A new agent, and an
+    existing agent without a node key (Magnus 3.0.0 closes the automatic binding), is enrolled
+    with a one-time token, which is required: the install stops before any change when the
+    running Magnus issues none or the agent cannot enroll. An existing agent's secret lines are
+    kept unchanged, never removed.
+  - Fresh setup generates none of the three secrets for Magnus; an existing `config/magnus.env`
+    is never changed.
+  - The ingress no longer relays `x-node-token` on the Magnus host agent port. The controller
+    derives this `Caddyfile` from `deployment/Caddyfile`, which a 2.10.x release installs as it is.
+  - Full-node enrollment signs its scheduler inventory request to the agent with Magnus's server
+    key, and the managed terminal route preflight no longer sends a shared secret.
+  - `hive.sh post-upgrade` reads Magnus's fleet summary and lists its node-key blockers, and the
+    upgrade's setup checklist gains a `magnus-node-keys` step, done when there are none.
+- The agent install reads the enrollment token with `magnus-agent enroll --token-file -` when the
+  agent offers it (2.10.0 and later), and keeps the in-memory wrapper only for an agent that does
+  not.
+- The controller runtime changes, so the next signed release pins a new controller digest.
+
 ## [3.8.1] - 2026-11-14
 
 ### Fixed
