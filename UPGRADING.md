@@ -79,6 +79,17 @@ What the controller of that release changes:
 - The ingress `Caddyfile` the upgrade installs no longer relays `x-node-token` on the host agent
   port; the node signature headers, token enrollment and the server key still pass. The
   shared-secret legacy upgrade was never routed there.
+- `hive.sh upgrade` checks the running Magnus 2.x first, before the plan is confirmed and before
+  any change, as Magnus 3's start-up guard will: it reads the active release, `NODE_AUTH_MODE` in
+  `config/magnus.env` and the fleet (real nodes only: the internal `__control-api__` and
+  `__dashboard__` log sources and decommissioned nodes never count). With the mode unset it
+  refuses while a node has no active key, its keys were all revoked, its agent does not sign
+  evidence, its agent runs 2.10.0 or 2.10.1, or the server key cannot be read, naming the blockers
+  and the two ways out. An explicit `compat` or `warn` passes with a deprecation note, an explicit
+  `enforce` passes and names what it will refuse, a value other than those three is refused, and so
+  is a Magnus older than 2.10.2. A Magnus that does not answer is refused unless the mode is
+  explicit. An external Magnus is only warned about; `hive.sh plan` contacts no host and prints a
+  note instead.
 - `hive.sh post-upgrade` reads Magnus's fleet summary and lists its blockers, notes an explicit
   (deprecated) `compat` or `warn`, and marks the `magnus-node-keys` setup step done when the
   summary has no blockers.

@@ -26,9 +26,22 @@ All notable changes to this project are documented in this file. The format is b
     key, and the managed terminal route preflight no longer sends a shared secret.
   - `hive.sh post-upgrade` reads Magnus's fleet summary and lists its node-key blockers, and the
     upgrade's setup checklist gains a `magnus-node-keys` step, done when there are none.
+  - `hive.sh upgrade` checks a suite-managed Magnus that runs 2.x before it changes anything, the
+    way Magnus 3's start-up guard checks its fleet: with `NODE_AUTH_MODE` unset in
+    `config/magnus.env`, it refuses while a real node has no active key, an agent does not sign
+    its evidence, or an agent runs 2.10.0 or 2.10.1, and names the blockers with the two ways out
+    (enroll or upgrade them, or set `NODE_AUTH_MODE=compat` explicitly). An explicit `compat` or
+    `warn` passes with a deprecation note, an explicit `enforce` passes with what it will refuse,
+    and a Magnus older than 2.10.2 is refused (Magnus 3 upgrades from 2.10.2 only). An external
+    Magnus only gets a warning; `hive.sh plan`, which contacts no host, prints a note.
 - The agent install reads the enrollment token with `magnus-agent enroll --token-file -` when the
   agent offers it (2.10.0 and later), and keeps the in-memory wrapper only for an agent that does
   not.
+- The native agent and Skills developer round trips (`native-agent-roundtrip.mjs`,
+  `skills-native-roundtrip.mjs`) read the server image's Magnus version: against Magnus 3.x the
+  synthetic server and agent get no shared node secret or result key, the agent binds its node key
+  with a one-time enrollment token, and the proof waits until the fleet summary has no blockers.
+  Against 2.x they run as before.
 - The controller runtime changes, so the next signed release pins a new controller digest.
 
 ## [3.8.1] - 2026-11-14

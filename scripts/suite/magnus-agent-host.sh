@@ -15,6 +15,8 @@
 #   magnus-agent-node-credential  (Magnus host) whether Magnus has per-node credentials, a node's
 #                           key state, or (mode issue) a one-time enrollment token for a new node
 #   magnus-agent-node-summary  (Magnus host) the fleet's node-key readiness: mode, blocker codes, counts
+#   magnus-agent-upgrade-readiness  (Magnus host) before an upgrade to Magnus 3: the active Magnus,
+#                           the NODE_AUTH_MODE of its configuration and what its start-up guard would block
 # A one-time enrollment token arrives like the credentials, in the request's secret on standard
 # input, and reaches the agent's own enroll command on its standard input only.
 # With nodeKeysOnly (a release pinning Magnus 3.0.0 or later) no fleet-wide node secret is written:
@@ -526,6 +528,88 @@ node_summary() {
   docker compose -f "$compose" exec -T magnus node --input-type=module -e "$NODE_SUMMARY_SCRIPT"
 }
 
+# What Magnus 3's start-up guard (services/node-auth-startup-guard.ts) would find, read on the
+# running Magnus before an upgrade moves it from 2.x: the version it runs and the blockers that
+# would keep a server with NODE_AUTH_MODE unset from starting. Magnus 2.10 serves no
+# AGENTS_NEED_UPGRADE and counts the internal __control-api__ and __dashboard__ log sources in its
+# summary, so the per-node blockers are counted here from the node list (which leaves those out),
+# exactly as Magnus 3 counts them: real, not decommissioned nodes without an active key, whose keys
+# were all revoked, whose agent does not sign evidence, or which run agent 2.10.0 or 2.10.1 with a
+# key. The summary gives the server key's availability and the blockers that only warn. Only codes
+# and counts leave the container: no node names.
+UPGRADE_READINESS_SCRIPT='const base = "https://localhost:" + (process.env.CONTROL_API_PORT || "4000") + "/api/v1";
+const headers = { "x-api-secret": process.env.API_SECRET };
+async function call(path) {
+  const response = await fetch(base + path, { headers });
+  return { status: response.status, reply: await response.json().catch(() => ({})) };
+}
+function refused(what, result) {
+  console.error("Magnus refused " + what + ": HTTP " + result.status + " " + (result.reply?.error?.code ?? ""));
+  process.exit(1);
+}
+const version = await call("/self-update/version");
+if (version.status !== 200 || typeof version.reply?.data?.controlApiVersion !== "string") refused("its version", version);
+const running = version.reply.data.controlApiVersion;
+const summary = await call("/node-credentials/summary");
+if (summary.status === 404) { console.log(JSON.stringify({ version: running, supported: false })); process.exit(0); }
+if (summary.status !== 200 || !Array.isArray(summary.reply?.data?.blockers)) refused("the node credential summary", summary);
+const nodes = [];
+for (let page = 1; ; page++) {
+  const list = await call("/nodes?pageSize=100&page=" + page);
+  if (list.status !== 200 || !Array.isArray(list.reply?.data)) refused("the node list", list);
+  nodes.push(...list.reply.data);
+  if (list.reply.meta?.hasMore !== true || list.reply.data.length === 0 || page >= 1000) break;
+}
+const internal = new Set(["__control-api__", "__dashboard__"]);
+const real = nodes.filter((node) => !internal.has(node.id) && node.status !== "DECOMMISSIONED");
+const state = (node) => node.nodeCredential?.state ?? "none";
+const active = real.filter((node) => state(node) === "active");
+const counts = [
+  ["SERVER_KEY_UNAVAILABLE", summary.reply.data.blockers.some((item) => item?.code === "SERVER_KEY_UNAVAILABLE") ? 1 : 0],
+  ["NODES_WITHOUT_KEY", real.filter((node) => state(node) === "none").length],
+  ["NODES_REVOKED", real.filter((node) => state(node) === "revoked").length],
+  ["NODES_NOT_SIGNING_EVIDENCE", active.filter((node) => node.nodeCredential.evidenceSigning !== true).length],
+  ["AGENTS_NEED_UPGRADE", active.filter((node) => /^2\.10\.[01](?:[-+][0-9A-Za-z.+-]*)?$/.test(String(node.agent?.version ?? ""))).length],
+];
+const startup = new Set(counts.map(([code]) => code));
+console.log(JSON.stringify({ version: running, supported: true, mode: summary.reply.data.mode ?? null, nodes: real.length,
+  blockers: counts.filter(([, count]) => count > 0).map(([code, count]) => ({ code, count })),
+  warnings: summary.reply.data.blockers.filter((item) => !startup.has(String(item?.code))).map((item) => ({ code: String(item.code), count: Number(item.count) || 0 })) }));'
+# The Magnus host's side of the check before an upgrade to a Magnus 3 release: the active suite
+# release and the Magnus it pins, whether that Magnus runs here, the NODE_AUTH_MODE its
+# configuration sets (the value, which is no secret, parsed from the file), and the fleet as above
+# when the active Magnus is older than 3.0.0. A fleet that cannot be read is reported, not fatal:
+# the controller decides.
+upgrade_readiness() {
+  local directory environment version='' pinned='' running=false mode fleet=null error='' errors
+  directory=$(jq -er .directory <<< "$request"); environment=$(jq -er .magnusEnvironment <<< "$request")
+  [[ "$directory" =~ ^/[A-Za-z0-9_./-]+$ && "$directory" != *'/../'* ]] || die 'Invalid installation directory'
+  if [[ -f "$directory/receipt.json" && ! -L "$directory/receipt.json" ]]; then
+    version=$(jq -r '.version // ""' "$directory/receipt.json")
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || die 'The active release receipt is unreadable'
+    if [[ -f "$directory/releases/$version/manifest" && ! -L "$directory/releases/$version/manifest" ]]; then
+      pinned=$(jq -r '.components.magnus.version // ""' "$directory/releases/$version/manifest")
+    fi
+  fi
+  if [[ -f "$directory/compose.json" ]] && jq -e '.services.magnus!=null' "$directory/compose.json" >/dev/null 2>&1; then running=true; fi
+  mode='{"set":false,"value":""}'
+  if [[ -f "$environment" && ! -L "$environment" ]]; then
+    mode=$(jq -Rsc --arg sq "'" 'split("\n")|map(select(startswith("NODE_AUTH_MODE="))|.[15:]|
+      if length>1 and ((startswith("\"") and endswith("\"")) or (startswith($sq) and endswith($sq))) then .[1:-1] else . end) as $values|
+      {set:($values|length>0),value:($values|last // ""|gsub("^\\s+|\\s+$";""))}' "$environment")
+  fi
+  if [[ "$running" == true && ( -z "$pinned" || ! "$pinned" =~ ^([3-9]|[1-9][0-9]+)\. ) ]]; then
+    errors=$(mktemp)
+    if ! fleet=$(docker compose -f "$directory/compose.json" exec -T magnus node --input-type=module -e "$UPGRADE_READINESS_SCRIPT" 2> "$errors") ||
+      ! jq -e 'type=="object" and (.version|type=="string")' <<< "$fleet" >/dev/null 2>&1; then
+      fleet=null; error=$(grep -m1 '^Magnus refused' "$errors" || printf 'Magnus did not answer')
+    fi
+    rm -f -- "$errors"
+  fi
+  jq -nc --arg release "$version" --arg pinned "$pinned" --argjson running "$running" --argjson mode "$mode" --argjson fleet "$fleet" --arg error "$error" \
+    '{installed:($release!=""),release:(if $release=="" then null else $release end),pinned:(if $pinned=="" then null else $pinned end),running:$running,mode:$mode,fleet:$fleet,error:(if $error=="" then null else $error end)}'
+}
+
 ardent_review() {
   need_root
   local owner uid home native_home profiles processes gateway=null config code mode proof initializer container maintenance=""
@@ -632,6 +716,7 @@ case "$action" in
   magnus-agent-identity) identity;;
   magnus-agent-node-credential) node_credential;;
   magnus-agent-node-summary) node_summary;;
+  magnus-agent-upgrade-readiness) upgrade_readiness;;
   magnus-agent-ardent-review) ardent_review;;
   magnus-agent-node-maintenance) node_maintenance;;
   magnus-agent-terminal-preflight) terminal_authority_preflight;;
