@@ -365,6 +365,15 @@ gateway.listen(4310,'0.0.0.0');
     ['/api/magnus/notifications/preferences', '/api/v1/notifications/preferences', 'PUT', '{"synthetic":true}'],
     ['/api/magnus/nodes/node-1', '/api/v1/nodes/node-1', 'PATCH', '{"synthetic":true}'],
     ['/api/magnus/nodes/node-1', '/api/v1/nodes/node-1', 'DELETE'],
+    // Magnus 2.10 node credentials: ADMIN browser routes (the role is checked by Magnus).
+    ['/api/magnus/nodes/node-1/credentials', '/api/v1/nodes/node-1/credentials'],
+    ['/api/magnus/node-credentials/summary', '/api/v1/node-credentials/summary'],
+    ['/api/magnus/node-credentials/pending-bindings', '/api/v1/node-credentials/pending-bindings'],
+    ['/api/magnus/node-credentials/downgrade-check?nodeId=node-1&to=2.9.1', '/api/v1/node-credentials/downgrade-check?nodeId=node-1&to=2.9.1'],
+    ['/api/magnus/nodes/node-1/credentials/revoke', '/api/v1/nodes/node-1/credentials/revoke', 'POST', '{"synthetic":true}'],
+    ['/api/magnus/nodes/node-1/credentials/reset', '/api/v1/nodes/node-1/credentials/reset', 'POST', '{"synthetic":true}'],
+    ['/api/magnus/node-credentials/pending-bindings/binding-1/approve', '/api/v1/node-credentials/pending-bindings/binding-1/approve', 'POST', '{"synthetic":true}'],
+    ['/api/magnus/node-credentials/pending-bindings/binding-1/reject', '/api/v1/node-credentials/pending-bindings/binding-1/reject', 'POST', '{"synthetic":true}'],
   ]) {
     const result = await request(input, magnusHeaders, method, payload);
     assert.equal(result.status, 200, input);
@@ -386,6 +395,17 @@ gateway.listen(4310,'0.0.0.0');
   assert.equal((await request('/api/magnus/console/session', { Authorization: 'Basic b2JfdmlvdXNseQ==' })).status, 401, 'Non-bearer Authorization reached Magnus');
   for (const [input, method] of [
     ['/api/magnus/heartbeat', 'POST'],
+    // The agent-facing enrollment routes and token issuing are not browser routes.
+    ['/api/magnus/node-enrollment/server-key'],
+    ['/api/magnus/node-enrollment/enroll', 'POST'],
+    ['/api/magnus/node-enrollment/legacy-upgrade', 'POST'],
+    ['/api/magnus/node-enrollment/rotate', 'POST'],
+    ['/api/magnus/nodes/node-1/enrollment-token', 'POST'],
+    ['/api/magnus/nodes/node-1/credentials', 'POST'],
+    ['/api/magnus/nodes/node-1/credentials/revoke'],
+    ['/api/magnus/nodes/node-1/credentials/rotate', 'POST'],
+    ['/api/magnus/node-credentials/summary', 'POST'],
+    ['/api/magnus/node-credentials/pending-bindings/binding-1/approve'],
     ['/api/magnus/ardent/agents'],
     ['/api/magnus/ardent/agents/operations'],
     ['/api/magnus/ardent/agents/operations/op-1', 'POST'],
@@ -737,6 +757,11 @@ gateway.listen(4310,'0.0.0.0');
     'X-Node-Token': 'obviously-fake-node-token',
     'X-Log-Token': 'obviously-fake-log-token',
     'X-Hermes-Registry-Token': 'obviously-fake-registry-token',
+    'X-Magnus-Node-Id': 'node-1',
+    'X-Magnus-Key-Id': 'a'.repeat(64),
+    'X-Magnus-Timestamp': '1700000000000',
+    'X-Magnus-Nonce': 'obviously-fake-nonce-1',
+    'X-Magnus-Signature': 'b'.repeat(86),
     Authorization: 'Bearer obviously-fake-operator-token',
     'X-Api-Secret': 'obviously-fake-system-secret',
     'X-Fleet-Gateway-Token': 'obviously-fake-gateway-token',
@@ -776,6 +801,9 @@ gateway.listen(4310,'0.0.0.0');
     ['POST', '/api/v1/hermes-registry/capture'],
     ['POST', '/api/v1/hermes-registry/receipts'],
     ['POST', '/api/v1/hermes-registry/inventory'],
+    ['GET', '/api/v1/node-enrollment/server-key'],
+    ['POST', '/api/v1/node-enrollment/enroll'],
+    ['POST', '/api/v1/node-enrollment/rotate'],
   ];
   for (const [method, path] of agentRoutes) {
     const payload = method === 'POST' ? '{"synthetic":true}' : undefined;
@@ -788,6 +816,12 @@ gateway.listen(4310,'0.0.0.0');
     assert.equal(body.headers['x-node-token'], 'obviously-fake-node-token');
     assert.equal(body.headers['x-log-token'], 'obviously-fake-log-token');
     assert.equal(body.headers['x-hermes-registry-token'], 'obviously-fake-registry-token');
+    // A request signed with the node key (Magnus 2.10) keeps its five signature headers.
+    assert.equal(body.headers['x-magnus-node-id'], 'node-1', path + ' dropped the node signature');
+    assert.equal(body.headers['x-magnus-key-id'], 'a'.repeat(64));
+    assert.equal(body.headers['x-magnus-timestamp'], '1700000000000');
+    assert.equal(body.headers['x-magnus-nonce'], 'obviously-fake-nonce-1');
+    assert.equal(body.headers['x-magnus-signature'], 'b'.repeat(86));
     for (const name of ['authorization', 'x-api-secret', 'x-fleet-gateway-token', 'x-resource-drain-key', 'cookie', 'x-real-ip', 'x-forwarded-user', 'x-hive-user', 'x-hive-roles', 'x-magnus-work-id', 'origin'])
       assert.equal(body.headers[name], undefined, path + ' forwarded ' + name + ' from an agent port client');
     assert.notEqual(body.headers['x-forwarded-for'], '203.0.113.9', 'The agent port trusted a client X-Forwarded-For');
@@ -833,6 +867,15 @@ gateway.listen(4310,'0.0.0.0');
     ['POST', '/api/v1/%2e%2e/users'],
     ['POST', '/api/v1/heartbeat%2f..%2fusers'],
     ['POST', '/api/v1/resource-leases/enrollment/work/a/b/node-receipt'],
+    // The automatic first binding checks the caller's address, which is the ingress here.
+    ['POST', '/api/v1/node-enrollment/legacy-upgrade'],
+    ['GET', '/api/v1/node-enrollment/enroll'],
+    ['POST', '/api/v1/node-enrollment/server-key'],
+    ['POST', '/api/v1/node-enrollment/other'],
+    ['POST', '/api/v1/nodes/node-1/enrollment-token'],
+    ['GET', '/api/v1/nodes/node-1/credentials'],
+    ['POST', '/api/v1/nodes/node-1/credentials/revoke'],
+    ['GET', '/api/v1/node-credentials/summary'],
   ]) {
     const result = await request(path, forged, method, method === 'POST' ? '{}' : undefined, agents);
     assert.equal(result.status, 404, method + ' ' + path + ' passed the agent port allowlist: ' + result.body.slice(0, 200));

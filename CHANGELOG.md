@@ -43,6 +43,18 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- The ingress routes Magnus 2.10's node credentials. The host agent port passes the five
+  `x-magnus-*` headers of a request signed with the node key, and routes the agent's public server
+  key, enrollment with a one-time token and key rotation (`/api/v1/node-enrollment/server-key`,
+  `enroll`, `rotate`). Without them `hive.sh magnus-agent install` of a new agent through that port
+  failed at enrollment, and an agent with a key would have been refused. The automatic first
+  binding with the shared node secret (`legacy-upgrade`) stays unrouted there, because Magnus checks
+  the caller's address and every agent on the port has the ingress address; existing agents on the
+  port keep the shared secret until they are enrolled with a token. The browser allowlist adds
+  Magnus's new ADMIN routes for node keys (`GET /api/v1/nodes/{id}/credentials`, its `revoke` and
+  `reset`, and `/api/v1/node-credentials/summary`, `pending-bindings` with `approve` and `reject`,
+  and `downgrade-check`), which HiveXUI 0.8.0 uses.
+
 - `hive.sh migrate-native`: the Redis export, import and comparison helper now fails when the
   store ends the connection before answering a command. It used to end with status 0 and no
   result, so the failure surfaced later as a missing export file.
