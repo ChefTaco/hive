@@ -11,7 +11,10 @@ plan, takes a verified pre-change backup and rehearses data changes on a copy be
 Moving from 2.x to 3.x with existing PostgreSQL stores also needs `--allow-migrations`, described
 below, and so does moving an installation with Emberpath or HiveSkills from a release before
 3.4.0 to 3.4.0 or later, an installation with Embermend from a release before 3.6.0 to 3.6.0 or
-later, and an installation that runs Magnus from a release before 3.8.0 to 3.8.0 or later. A failed or uncertain step holds its transaction for recovery, as described in
+later, and an installation that runs Magnus from a release before 3.8.0 to 3.8.0 or later. An
+installation that runs Magnus moves to 3.9.0 (Magnus 3) from 3.8.1 only, after its nodes have
+their keys; see [Suite 3.9.0](#suite-390-magnus-301-node-keys-only). A failed or uncertain step
+holds its transaction for recovery, as described in
 [when a command stops](deployment/README.md#when-a-command-stops-transactions-and-recovery); never
 delete transaction or runtime receipts to force another attempt. See also
 [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
@@ -43,12 +46,52 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Suite 3.9.0: Magnus 3.0.1, node keys only
+
+Suite 3.9.0 pins Magnus, its fleet gateway and agent 3.0.1, and HiveXUI 0.9.0, whose console reads
+the Magnus 3 contract. Every other pin, the datastore profile, the storage recovery profile and
+every storage format are those of 3.8.1. Magnus 3.0.0 and 3.0.1 add no migrations to 2.10.2 (their
+release metadata lists none), so **an upgrade from 3.8.1 needs no flag**. The controller changes
+as the next section describes, so the release pins a new controller digest.
+
+Magnus 3 upgrades from 2.10.2 only, so an installation on a release before 3.8.1 upgrades to
+3.8.1 first (from 3.7.x with `--allow-migrations`, as described for 3.8.0 below). Then, in this
+order:
+
+1. **Prepare the fleet on 3.8.1 (Magnus 2.10.2).** Every agent runs 2.10.2 or later and every
+   node has its key, as the next section's list describes: `./hive.sh magnus-agent install --config
+   FILE [--host HOST]` for the agents the suite installs, and enrollment with a one-time token for
+   any other. Optionally run Magnus with `NODE_AUTH_MODE=warn` for a day. Before the upgrade,
+   `GET /api/v1/node-credentials/summary` must report no blockers and `config/magnus.env` must
+   set no `NODE_AUTH_MODE`.
+2. **Upgrade the Magnus server first, 2.10.2 to 3.0.1,** with the suite:
+   `./hive.sh upgrade --config FILE --release 3.9.0`. Before it confirms the plan or changes
+   anything, the upgrade checks the running Magnus as Magnus 3's own start-up guard will, and
+   refuses, naming the blockers, while a real node has no active key, its keys were all revoked,
+   its agent does not sign evidence or runs 2.10.0 or 2.10.1, or the server key cannot be read.
+   Magnus 3.0.1 itself, with `NODE_AUTH_MODE` unset, refuses to start on the same blockers. Agents
+   on 2.10.2 keep working with the 3.0.1 server.
+3. **Then the agents, 2.10.2 to 2.10.3 to 3.0.1.** After the upgrade, `./hive.sh post-upgrade`
+   moves the Magnus host's own agent to the pinned 3.0.1, and `./hive.sh magnus-agent install
+   --config FILE --host HOST` does the same for each fleet host the suite installed; agents keep
+   their keys. Agents that Magnus manages move with its managed upgrade, which crosses the major
+   only from 2.10.3: run, in Magnus's container (`docker compose -f DIRECTORY/compose.json exec
+   magnus ...`), `magnus-server agents upgrade --to 2.10.3 --dry-run`, then without `--dry-run`,
+   then `magnus-server agents upgrade --to 3.0.1 --allow-major --dry-run`, then without
+   `--dry-run`. See Magnus's `docs/NODE_CREDENTIALS.md`, "Moving agents across a major version".
+
+To upgrade before every node is ready, set `NODE_AUTH_MODE=compat` explicitly in
+`config/magnus.env` first: the check then passes with a deprecation note and Magnus 3.0.1 keeps
+accepting the shared node secret for this major. That explicit `compat` is also the rollback: a
+Magnus 3.0.1 that locks agents out returns to the shared node secret by setting
+`NODE_AUTH_MODE=compat` in `config/magnus.env` and restarting it, with no change of release;
+remove it again once the summary has no blockers.
+
 ## Magnus 3.0.0: node keys only
 
-This section is bound for the suite release that pins Magnus 3.0.0 (planned as 3.9.0); it has not
-been released yet. Magnus 3.0.0 runs in `enforce` mode by default: nodes authenticate with their
-own keys only, the shared node secret is refused in both directions, HMAC-only evidence is
-refused, and the automatic binding of keys for existing nodes is closed. A Magnus whose
+Suite 3.9.0 is the release that pins Magnus 3 (3.0.1). Magnus 3.0.0 runs in `enforce` mode by
+default: nodes authenticate with their own keys only, the shared node secret is refused in both
+directions, HMAC-only evidence is refused, and the automatic binding of keys for existing nodes is closed. A Magnus whose
 `NODE_AUTH_MODE` is unset **refuses to start** while any real node has no active key, an agent
 does not sign its evidence, or an agent runs 2.10.0 or 2.10.1. See Magnus's
 `docs/NODE_CREDENTIALS.md`, "Upgrading to 3.0.0".
@@ -64,7 +107,7 @@ Before the suite upgrade, on the current release (Magnus 2.10.2):
    enforce later, set `NODE_AUTH_MODE=compat` explicitly instead: Magnus 3.0.0 honours it,
    deprecated, for this major.
 
-What the controller of that release changes:
+What the controller of 3.9.0 changes:
 
 - `hive.sh magnus-agent install` copies no `NODE_MANAGER_SECRET`, `RESULT_SIGNING_SECRET` or
   `COMMAND_RECONCILIATION_SECRET` to an agent. A new agent, and an existing agent without a key,

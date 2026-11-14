@@ -6,8 +6,17 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.9.0] - 2026-11-14
+
 ### Changed
 
+- Magnus, its fleet gateway and agent 3.0.1, and HiveXUI 0.9.0. Magnus 3 accepts node keys only
+  (`NODE_AUTH_MODE` enforce by default) and refuses to start while a real node lacks its key; it
+  adds no migrations to 2.10.2, so the storage formats are unchanged and an upgrade from 3.8.1
+  needs no flag. Upgrade the Magnus server first, then the agents. HiveXUI 0.9.0 reads the
+  Magnus 3 contract. Every other pin, the datastore profile and the storage recovery profile are
+  unchanged from 3.8.1; the controller changes as below, so the release pins a new controller
+  digest. See `UPGRADING.md`, "Suite 3.9.0: Magnus 3.0.1, node keys only".
 - Magnus 3.0.0 support, gated on the pinned Magnus version: a release that pins Magnus 3.0.0 or
   later (node keys only, `enforce` by default) changes the controller as follows, and a release
   that pins Magnus 2.10.x behaves exactly as before. See `UPGRADING.md`, "Magnus 3.0.0: node keys
@@ -42,7 +51,7 @@ All notable changes to this project are documented in this file. The format is b
   synthetic server and agent get no shared node secret or result key, the agent binds its node key
   with a one-time enrollment token, and the proof waits until the fleet summary has no blockers.
   Against 2.x they run as before.
-- The controller runtime changes, so the next signed release pins a new controller digest.
+- The controller runtime changes, so this release pins a new controller digest.
 
 ## [3.8.1] - 2026-11-14
 
