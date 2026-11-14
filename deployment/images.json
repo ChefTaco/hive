@@ -3,7 +3,7 @@
   "images": [
     {
       "image": "hive-registry",
-      "version": "2.0.7",
+      "version": "2.0.8",
       "context": "services/hive-registry",
       "file": "services/hive-registry/Dockerfile",
       "check": [

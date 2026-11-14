@@ -59,7 +59,7 @@ All notable changes to this project are documented in this file. The format is b
   store ends the connection before answering a command. It used to end with status 0 and no
   result, so the failure surfaced later as a missing export file.
 - Hive Registry: a request target that is not a path (such as `GET //`) answers 404 `not_found`
-  instead of 500 `internal` with an error log line. The next Hive Registry image carries the fix.
+  instead of 500 `internal` with an error log line. Hive Registry 1.3.1 (image 2.0.8) carries the fix.
 - A refused sudo password file (wrong owner or permissions) now stops a host action in every case.
   In lifecycle steps the refusal was printed and the action then continued over SSH without sudo.
 - `scripts/install-prerequisites.sh --check` reports readiness on other Linux distributions, as
