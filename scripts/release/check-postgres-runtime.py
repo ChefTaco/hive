@@ -103,8 +103,9 @@ try:
  assert sql(restored,"SELECT count(*) FROM pg_database WHERE datallowconn AND datcollversion IS DISTINCT FROM pg_database_collation_actual_version(oid)")=='0'
  assert 'collation version mismatch' not in cmd('logs',restored)
  print('PASS: non-root UID 1000, quoted database name, reindex/refresh, repeat, retained/new records, pg_trgm, XML, logical dump and physical restore',flush=True)
- # A minor update of the same hardened runtime: data written by the previously published
- # image starts directly on the candidate. The collation receipt is unchanged, so no
+ # A minor update, or a library rebuild of the same minor, of the same hardened runtime: data
+ # written by the previously published image starts directly on the candidate, never on an
+ # older server. The collation receipt is unchanged, so no
  # reconciliation, rebuild or storage transition runs, and the explicit command is a no-op.
  if a.previous:
   prior=volume('prior');helper(prior,'chown 1000:1000 /data')
@@ -114,7 +115,7 @@ try:
   receipt=helper(prior,'cat /data/pgdata/.hive-runtime-collation')
   assert receipt==cmd('run','--rm','--entrypoint','cat',a.candidate,'/usr/share/hive/postgres-runtime-id')
   minor=start('minor',prior,a.candidate)
-  assert prior_version[:2]==sql(minor,'SHOW server_version_num')[:2]==a.major and int(sql(minor,'SHOW server_version_num'))>int(prior_version)
+  assert prior_version[:2]==sql(minor,'SHOW server_version_num')[:2]==a.major and int(sql(minor,'SHOW server_version_num'))>=int(prior_version)
   assert sql(minor,"SET enable_seqscan=off; SELECT id FROM minor_proof WHERE value % 'minor synthetic value'").splitlines()[-1]=='1'
   sql(minor,"INSERT INTO minor_proof VALUES(2,'after minor update')");stop(minor)
   assert helper(prior,'cat /data/pgdata/.hive-runtime-collation')==receipt
