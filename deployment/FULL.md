@@ -685,7 +685,7 @@ agent host, and the plan shows which case applies before the confirmation:
 |---|---|
 | Has no agent service yet (a new node, or one reinstalled after `remove`) | Magnus issues a one-time enrollment token on its own host (registering the node first if Magnus has no record of it). The agent's `magnus-agent enroll --token` binds a new key as the agent's service account, at `/opt/magnus-agent/identity/node.key` (0600), before the service first starts |
 | Already has a node key | Keeps it; no token is issued. Running the install again never re-enrolls a node |
-| Runs an existing agent without a key | Nothing: after the update the agent binds its own key through Magnus's automatic upgrade of existing nodes, and Magnus notifies you with its fingerprint |
+| Runs an existing agent without a key | Nothing: after the update the agent binds its own key through Magnus's automatic upgrade of existing nodes, and Magnus notifies you with its fingerprint. An agent that reaches Magnus through the suite's host agent port is the exception: that automatic binding is not routed there (Magnus checks the caller's address, and through the port every agent has the ingress address), so it keeps the shared secret until you enroll it with a token as Magnus's node credentials guide describes |
 
 The token takes the same path as the node credentials: from Magnus's API inside its container to
 an owner-only temporary file on the controller, to the agent host on standard input, and to the
