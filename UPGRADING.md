@@ -43,6 +43,15 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Suite 3.8.1: Magnus managed requests to agents with a node key
+
+Suite 3.8.1 changes no storage format and needs no flag from 3.8.0. It pins Magnus, its fleet
+gateway and agent 2.10.2, which add no migrations; every other pin and the controller are those of
+3.8.0. With Magnus 2.10.0, an agent that had bound its own node key refused the server's managed
+requests on an enrolled node, so agent upgrades from the console failed. Upgrade the suite first;
+Magnus 2.10.2 then reaches those agents and can upgrade them. From 3.7.x, upgrade directly to
+3.8.1 with `--allow-migrations`, as described for 3.8.0 below.
+
 ## Suite 3.8.0: Magnus node credentials and product security updates
 
 Suite 3.8.0 changes no storage format. It selects the `runtime-2026-11-pg1712-xslt` datastore
