@@ -842,6 +842,10 @@ hive_main() {
   case "$command" in
     plan)
       if [[ -n "$HIVE_MANIFEST" || -n "$HIVE_SIGNATURE" || -n "$HIVE_TRUST_KEY" ]]; then hive_need openssl; hive_need sha256sum; hive_manifest; fi
+      # A plan never contacts a host, so the running Magnus is checked by the upgrade itself.
+      if jq -e '.components.magnus!=null' "$HIVE_CONFIG" >/dev/null && hive_magnus_node_keys_only; then
+        printf 'Hive: this release pins Magnus %s (node keys only). An upgrade from Magnus 2.x first checks the running Magnus and stops before any change while a node lacks its key, unless config/magnus.env sets NODE_AUTH_MODE explicitly; see UPGRADING.md, "Magnus 3.0.0: node keys only".\n' "$(jq -r .components.magnus.version "$HIVE_MANIFEST")" >&2
+      fi
       hive_plan; return;;
     status)
       local host registry_report registry_host
@@ -891,6 +895,9 @@ hive_main() {
     post-upgrade) hive_need openssl; hive_need sha256sum; hive_manifest; HIVE_CONFIRMED=$confirmed hive_post_upgrade; return;;
   esac
   hive_need openssl; hive_need sha256sum; hive_manifest
+  # Before the plan is confirmed and before anything changes: a Magnus 2.x that the pinned Magnus 3
+  # would refuse to start on stops the upgrade here.
+  if [[ "$command" == upgrade ]]; then hive_magnus_upgrade_check; fi
   hive_plan
   if [[ "$confirmed" != true ]]; then
     [[ "$interactive" == true && -t 0 ]] || hive_die 'Applying changes requires --yes or interactive confirmation'

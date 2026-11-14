@@ -340,6 +340,96 @@ hive_magnus_node_summary() {
   hive_magnus_agent_action "$host" magnus-agent-node-summary "$(jq -nc --arg compose "$directory/compose.json" '{compose:$compose}')"
 }
 
+# VERSION is X.Y.Z (any suffix ignored) and at least MINIMUM.
+hive_magnus_version_at_least() { # VERSION MINIMUM
+  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || return 1
+  jq -en --arg version "${BASH_REMATCH[0]}" --arg minimum "$2" '($version|split(".")|map(tonumber)) >= ($minimum|split(".")|map(tonumber))' >/dev/null
+}
+
+# What each blocker of Magnus 3's start-up guard means, as its refusal words it.
+hive_magnus_upgrade_blocker() { # CODE COUNT
+  case $1 in
+    SERVER_KEY_UNAVAILABLE) printf '  - the server signing key cannot be read\n';;
+    NODES_WITHOUT_KEY) printf '  - %s node(s) without a node key (still on the shared node secret)\n' "$2";;
+    NODES_REVOKED) printf '  - %s node(s) whose node keys were all revoked\n' "$2";;
+    NODES_NOT_SIGNING_EVIDENCE) printf '  - %s node(s) whose agent does not sign its evidence with the node key (an agent older than 2.10.0, or not told yet)\n' "$2";;
+    AGENTS_NEED_UPGRADE) printf '  - %s node(s) running agent 2.10.0 or 2.10.1, whose managed requests enforce mode cannot reach\n' "$2";;
+    *) printf '  - %s (%s)\n' "$1" "$2";;
+  esac
+}
+
+# Before an upgrade to a release that pins Magnus 3.0.0 or later: a suite-managed Magnus that runs
+# 2.x is checked the way Magnus 3's own start-up guard checks its fleet, so that the upgrade stops
+# before it changes anything instead of activating a Magnus that refuses to start. With
+# NODE_AUTH_MODE unset in config/magnus.env (enforce, the 3.0.0 default), every real node needs an
+# active key and an agent that signs its evidence, and no agent may run 2.10.0 or 2.10.1. An
+# explicit mode is the operator's decision, as for Magnus: compat or warn passes with a deprecation
+# note, enforce passes and names what it will refuse. Magnus 3 upgrades from 2.10.2 only. An
+# external Magnus is upgraded outside this installation, so it only gets a warning.
+hive_magnus_upgrade_check() {
+  local host directory readiness
+  hive_magnus_node_keys_only || return 0
+  if jq -e '.components.magnus==null' "$HIVE_CONFIG" >/dev/null; then
+    if jq -e '.external.magnus!=null' "$HIVE_CONFIG" >/dev/null; then
+      printf 'Hive: warning: this release pins Magnus %s, which accepts node keys only (NODE_AUTH_MODE enforce by default). The external Magnus at %s is upgraded outside this installation: before moving it to 3.x, give every node its key until GET /api/v1/node-credentials/summary reports no blockers, or set NODE_AUTH_MODE=compat explicitly in its environment; otherwise it refuses to start. See UPGRADING.md, "Magnus 3.0.0: node keys only".\n' \
+        "$(jq -r .components.magnus.version "$HIVE_MANIFEST")" "$(jq -r .external.magnus.url "$HIVE_CONFIG")" >&2
+    fi
+    return 0
+  fi
+  host=$(jq -r .components.magnus.host "$HIVE_CONFIG")
+  directory=$(jq -r --arg host "$host" '.hosts[$host].directory' "$HIVE_CONFIG")
+  readiness=$(hive_magnus_agent_action "$host" magnus-agent-upgrade-readiness "$(jq -nc --arg directory "$directory" --arg file "$directory/config/magnus.env" '{directory:$directory,magnusEnvironment:$file}')") ||
+    hive_die "The running Magnus on $host could not be checked before the upgrade to Magnus $(jq -r .components.magnus.version "$HIVE_MANIFEST"); nothing was changed"
+  hive_magnus_upgrade_decide "$readiness"
+}
+
+# The decision on the Magnus host's READINESS (magnus-agent-upgrade-readiness). Prints its notes on
+# standard error; refuses with the blockers and the two ways out.
+hive_magnus_upgrade_decide() { # READINESS
+  local readiness=$1 target current mode blockers
+  target=$(jq -r .components.magnus.version "$HIVE_MANIFEST")
+  # A new installation, or one that adds Magnus now: no running Magnus to lock out.
+  jq -e '.installed==true and .running==true' <<< "$readiness" >/dev/null || return 0
+  current=$(jq -r '.fleet.version // .pinned // ""' <<< "$readiness")
+  if [[ -n "$current" ]] && hive_magnus_version_at_least "$current" 3.0.0; then return 0; fi
+  if [[ -n "$current" ]] && ! hive_magnus_version_at_least "$current" 2.10.2; then
+    hive_die "Magnus $current cannot move to $target directly: Magnus 3 upgrades from 2.10.2 only. Upgrade to a suite release that pins Magnus 2.10.2 (3.8.1) first, give its nodes their keys, then upgrade to $HIVE_VERSION. Nothing was changed"
+  fi
+  blockers=$(jq -r '(.fleet.blockers // [])[]|"\(.code) \(.count)"' <<< "$readiness")
+  mode=$(jq -r 'if .mode.set==true then .mode.value else "" end' <<< "$readiness")
+  case "$mode" in
+    compat|warn)
+      printf 'Magnus node keys: NODE_AUTH_MODE=%s is set explicitly in config/magnus.env, so Magnus %s starts and keeps accepting the shared node secret. This mode is deprecated and removed in its next major: remove it once GET /api/v1/node-credentials/summary reports no blockers.\n' "$mode" "$target" >&2
+      if [[ -n "$blockers" ]]; then printf '  Still blocking enforce mode:\n' >&2; while read -r code count; do hive_magnus_upgrade_blocker "$code" "$count" >&2; done <<< "$blockers"; fi
+      return 0;;
+    enforce)
+      printf 'Magnus node keys: NODE_AUTH_MODE=enforce is set explicitly in config/magnus.env, so Magnus %s starts whatever its fleet looks like.\n' "$target" >&2
+      if [[ -n "$blockers" ]]; then printf '  It will refuse:\n' >&2; while read -r code count; do hive_magnus_upgrade_blocker "$code" "$count" >&2; done <<< "$blockers"; fi
+      return 0;;
+    '') ;;
+    *) hive_die "NODE_AUTH_MODE=$mode in config/magnus.env is not compat, warn or enforce, so Magnus $target would not start with it. Fix or remove it; nothing was changed";;
+  esac
+  if ! jq -e '.fleet.supported==true' <<< "$readiness" >/dev/null; then
+    hive_die "$(printf 'The running Magnus could not be checked before its upgrade to %s (%s). With NODE_AUTH_MODE unset, Magnus %s refuses to start while any node lacks its key, so this upgrade does not start blind. Start Magnus on the current release and repeat, or set NODE_AUTH_MODE=compat explicitly in config/magnus.env (deprecated). Nothing was changed' \
+      "$target" "$(jq -r '.error // "no node credential summary"' <<< "$readiness")" "$target")"
+  fi
+  if [[ -n "$blockers" ]]; then
+    {
+      printf 'Hive: Magnus %s would refuse to start: NODE_AUTH_MODE is not set in config/magnus.env, so it runs in enforce mode (the default since 3.0.0), which accepts node signatures and node-signed evidence only. Enforce mode would lock out:\n' "$target"
+      while read -r code count; do hive_magnus_upgrade_blocker "$code" "$count"; done <<< "$blockers"
+      printf 'Either:\n'
+      printf '  1. enroll or upgrade them first, on the current release: ./hive.sh magnus-agent install --config %s --host HOST upgrades an agent and enrolls one without a key with a one-time token; Magnus lists the nodes in GET /api/v1/node-credentials/summary. Repeat the upgrade once it reports no blockers; or\n' "${HIVE_REGISTRY_ORIGINAL_CONFIG:-$HIVE_CONFIG}"
+      printf '  2. set NODE_AUTH_MODE=compat explicitly in config/magnus.env: the shared node secret keeps working for this major (deprecated, removed in the next), and you switch to enforce once the summary is clean.\n'
+      printf 'See UPGRADING.md, "Magnus 3.0.0: node keys only". Nothing was changed.\n'
+    } >&2
+    exit 1
+  fi
+  printf 'Magnus node keys: ready for Magnus %s; every one of the %s node(s) has an active key and signs its evidence.\n' "$target" "$(jq -r '.fleet.nodes // 0' <<< "$readiness")" >&2
+  if jq -e '(.fleet.warnings // [])|length>0' <<< "$readiness" >/dev/null; then
+    printf '  Not blocking the start: %s\n' "$(jq -r '[.fleet.warnings[]|"\(.code) (\(.count))"]|join(", ")' <<< "$readiness")" >&2
+  fi
+}
+
 # The bound node key, last, so the operator can compare it with the Magnus notification.
 hive_magnus_agent_report_key() { # INSTALL_RESULT NODE_RECORD
   local agent_key server_key
