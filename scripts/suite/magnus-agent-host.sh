@@ -15,6 +15,8 @@
 #   magnus-agent-node-credential  (Magnus host) whether Magnus has per-node credentials, a node's
 #                           key state, or (mode issue) a one-time enrollment token for a new node
 #   magnus-agent-node-summary  (Magnus host) the fleet's node-key readiness: mode, blocker codes, counts
+#   magnus-agent-ardent-installations  (Magnus host, or the Studio host for an external Magnus) each
+#                           Ardent installation's version and the one its node agent stages; read only
 #   magnus-agent-upgrade-readiness  (Magnus host) before an upgrade to Magnus 3: the active Magnus,
 #                           the NODE_AUTH_MODE of its configuration and what its start-up guard would block
 # A one-time enrollment token arrives like the credentials, in the request's secret on standard
@@ -528,6 +530,47 @@ node_summary() {
   docker compose -f "$compose" exec -T magnus node --input-type=module -e "$NODE_SUMMARY_SCRIPT"
 }
 
+# The Ardent installations as Magnus lists them for Magnus > Ardent > Installations (GET
+# /api/v1/ardent/installations), read only: inside the Magnus container with its API secret, or,
+# for an external Magnus, inside the Ardent Project Studio container as Studio's own service
+# identity, which Magnus allows that read. No credential leaves the container. Only each node's
+# name, its installed Ardent version, the version its node agent stages (what Update package
+# installs), whether that staged package failed its check, and whether the node answered.
+ARDENT_INSTALLATIONS_SCRIPT='const environment = process.env;
+let base, headers;
+if (environment.HIVE_ARDENT_SOURCE === "magnus") {
+  base = "https://localhost:" + (environment.CONTROL_API_PORT || "4000");
+  headers = { "x-api-secret": environment.API_SECRET };
+} else {
+  for (const name of ["ARDENT_STUDIO_MAGNUS_URL", "ARDENT_STUDIO_OATHWEAVE_TOKEN_URL", "ARDENT_STUDIO_MAGNUS_CLIENT_ID", "ARDENT_STUDIO_MAGNUS_CLIENT_SECRET"])
+    if (!environment[name]) { console.error("Ardent Project Studio has no " + name); process.exit(1); }
+  const form = new URLSearchParams({ grant_type: "client_credentials", client_id: environment.ARDENT_STUDIO_MAGNUS_CLIENT_ID, client_secret: environment.ARDENT_STUDIO_MAGNUS_CLIENT_SECRET });
+  if (environment.ARDENT_STUDIO_MAGNUS_SCOPE) form.set("scope", environment.ARDENT_STUDIO_MAGNUS_SCOPE);
+  const issued = await fetch(environment.ARDENT_STUDIO_OATHWEAVE_TOKEN_URL, { method: "POST", redirect: "error", signal: AbortSignal.timeout(10000),
+    headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" }, body: form.toString() });
+  const token = (await issued.json().catch(() => ({})))?.access_token;
+  if (issued.status !== 200 || typeof token !== "string") { console.error("Oathweave refused the Studio service token: HTTP " + issued.status); process.exit(1); }
+  base = environment.ARDENT_STUDIO_MAGNUS_URL.replace(/\/+$/, "");
+  headers = { authorization: "Bearer " + token };
+}
+const response = await fetch(base + "/api/v1/ardent/installations", { headers, redirect: "error", signal: AbortSignal.timeout(60000) });
+if (response.status === 404) { console.log(JSON.stringify({ supported: false })); process.exit(0); }
+const body = await response.json().catch(() => ({}));
+if (response.status !== 200 || !Array.isArray(body?.data)) {
+  console.error("Magnus refused the Ardent installations: HTTP " + response.status + " " + (body?.error?.code ?? ""));
+  process.exit(1);
+}
+console.log(JSON.stringify({ supported: true, installations: body.data.filter(item => item?.installed === true || typeof item?.version === "string").map(item => ({
+  name: String(item.nodeName ?? item.nodeId ?? "unknown").slice(0, 128), version: typeof item.version === "string" ? item.version : null,
+  staged: typeof item.stagedPackage?.version === "string" ? item.stagedPackage.version : null,
+  stagedError: Boolean(item.stagedPackageError), reachable: item.reachable === true })) }));'
+ardent_installations() {
+  local compose service
+  compose=$(jq -er .compose <<< "$request"); service=$(jq -er .service <<< "$request")
+  [[ "$service" == magnus || "$service" == ardentstudio ]] || die 'Unknown source of the Ardent installations'
+  docker compose -f "$compose" exec -T -e "HIVE_ARDENT_SOURCE=$service" "$service" node --input-type=module -e "$ARDENT_INSTALLATIONS_SCRIPT"
+}
+
 # What Magnus 3's start-up guard (services/node-auth-startup-guard.ts) would find, read on the
 # running Magnus before an upgrade moves it from 2.x: the version it runs and the blockers that
 # would keep a server with NODE_AUTH_MODE unset from starting. Magnus 2.10 serves no
@@ -716,6 +759,7 @@ case "$action" in
   magnus-agent-identity) identity;;
   magnus-agent-node-credential) node_credential;;
   magnus-agent-node-summary) node_summary;;
+  magnus-agent-ardent-installations) ardent_installations;;
   magnus-agent-upgrade-readiness) upgrade_readiness;;
   magnus-agent-ardent-review) ardent_review;;
   magnus-agent-node-maintenance) node_maintenance;;

@@ -21,6 +21,9 @@ hive_checklist_certificate_unit=$temporary/no-such-unit
 HIVE_VERSION=9.9.9 HIVE_MANIFEST=$temporary/release.json HIVE_SIGNATURE=$temporary/release.json.sig HIVE_TRUST_KEY=$temporary/publisher.pub
 jq -n '{components:{magnus:{agentPackage:{name:"@hivemagnus/magnus-agent",version:"2.4.3",integrity:("sha512-"+("A"*86)+"==")}}}}' > "$HIVE_MANIFEST"
 agent_version=''
+# Magnus's Ardent installations, as the host action reads them; empty means Magnus did not answer.
+ardent_fixture=''
+hive_magnus_ardent_installations() { printf 'ardent\n' >> "$calls"; [[ -n "$ardent_fixture" ]] && printf '%s\n' "$ardent_fixture"; }
 hive_post_upgrade_run() {
   printf '%s\n' "$*" >> "$calls"
   if [[ "$*" == 'magnus-agent status' ]]; then jq -n --arg version "$agent_version" '{installedVersion:(if $version=="" then null else $version end)}'; fi
@@ -114,6 +117,45 @@ run '.components={magnus:{host:"control"}} | .hosts={control:{target:"local",dir
 ! grep -q '^registry ' "$calls" || fail 'post-upgrade wrote to a registry without a checklist'
 ! grep -q 'Setup checklist' "$temporary/output" || fail 'A checklist was listed without one recorded'
 printf 'Passed: post-upgrade marks the checklist items it completes, and only those.\n'
+
+# Ardent: post-upgrade asks Magnus, read only, and never runs Update package. Every installation on
+# the Ardent its node agent stages settles the item; one behind, unanswered or without a checked
+# staged package is named and the item stays pending; no answer keeps the manual step.
+installation() { jq -nc --arg name "$1" --arg version "$2" --arg staged "$3" --argjson reachable "${4:-true}" --argjson error "${5:-false}" \
+  '{name:$name,version:(if $version=="" then null else $version end),staged:(if $staged=="" then null else $staged end),stagedError:$error,reachable:$reachable}'; }
+ardent_fixture=$(jq -sc '{supported:true,installations:.}' <(installation alpha 3.1.3 3.1.3) <(installation bravo 3.1.3 3.1.3))
+recorded_checklist=$(jq -sc . <(checklist_item ardent-packages-updated pending))
+agent_version=2.4.3
+run '.components={magnus:{host:"control"}} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
+grep -qx ardent "$calls" || fail 'post-upgrade did not ask Magnus about Ardent'
+grep -q 'Ardent: every installation runs the Ardent version its node agent stages; nothing to update' "$temporary/output" || { cat "$temporary/output" >&2; fail 'Current installations were not reported'; }
+grep -qx 'registry PUT /v1/setup/items/ardent-packages-updated {"status":"done"}' "$calls" || fail 'Current installations did not settle the Ardent item'
+! grep -q 'Update package\|package-install' "$temporary/output" "$calls" || fail 'post-upgrade offered or ran an update for current installations'
+! grep -q 'Setup checklist' "$temporary/output" || fail 'A settled Ardent item was listed as pending'
+# The Ardent read follows the agent step, whose new agent can stage a newer Ardent.
+[[ $(grep -n 'magnus-agent status' "$calls" | cut -d: -f1) -lt $(grep -nx ardent "$calls" | cut -d: -f1) ]] || fail 'Ardent was read before the agent step'
+ardent_fixture=$(jq -sc '{supported:true,installations:.}' <(installation alpha 3.1.3 3.1.3) <(installation bravo 3.1.2 3.1.3) <(installation charlie 3.1.3 3.1.3 false) <(installation delta 3.1.3 '') <(installation echo 3.1.3 3.1.3 true true))
+run '.components={magnus:{host:"control"}} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
+grep -q 'Ardent: 4 installation(s) to update' "$temporary/output" || { cat "$temporary/output" >&2; fail 'The installations behind were not counted'; }
+grep -q 'bravo: runs Ardent 3.1.2; its node agent stages 3.1.3' "$temporary/output" && grep -q 'charlie: did not answer Magnus' "$temporary/output" &&
+  grep -q 'delta: its node agent stages no Ardent package' "$temporary/output" && grep -q 'echo: the Ardent package its node agent stages failed its check' "$temporary/output" || fail 'An installation behind was not named with its reason'
+! grep -q 'alpha' "$temporary/output" || fail 'A current installation was listed'
+grep -q 'Stop running profiles, choose Update package' "$temporary/output" || fail 'The update in HiveXUI was not explained'
+! grep -q 'setup/items/ardent-packages-updated' "$calls" || fail 'The Ardent item was settled with installations behind'
+grep -q 'Setup checklist: 1 pending' "$temporary/output" || fail 'The Ardent item was not listed as pending'
+ardent_fixture=''
+run '.components={magnus:{host:"control"}} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
+grep -q 'Magnus could not be asked from here' "$temporary/output" && grep -q 'choose Update package' "$temporary/output" || fail 'An unanswered read lost the manual step'
+! grep -q 'setup/items/ardent-packages-updated' "$calls" || fail 'An unanswered read settled the Ardent item'
+ardent_fixture='{"supported":false}'
+run '.components={magnus:{host:"control"}} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
+! grep -q 'setup/items/ardent-packages-updated' "$calls" || fail 'A Magnus without the installation list settled the Ardent item'
+# An external Magnus is asked the same way (through Studio, in the reader), and settles it too.
+ardent_fixture=$(jq -sc '{supported:true,installations:.}' <(installation alpha 3.1.3 3.1.3))
+run '.components={hivemem:{host:"control"},ardentstudio:{host:"control"}} | .external={magnus:{url:"https://magnus.example.com:4000"}} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
+grep -qx 'registry PUT /v1/setup/items/ardent-packages-updated {"status":"done"}' "$calls" || fail 'An external Magnus with current installations did not settle the Ardent item'
+ardent_fixture=''; recorded_checklist=''
+printf 'Passed: post-upgrade checks the Ardent installations read only and settles the item only when all are current.\n'
 hive_post_upgrade_run() {
   printf '%s\n' "$*" >> "$calls"
   if [[ "$*" == 'magnus-agent status' ]]; then jq -n --arg version "$agent_version" '{installedVersion:(if $version=="" then null else $version end)}'; fi

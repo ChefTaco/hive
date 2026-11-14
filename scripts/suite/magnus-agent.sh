@@ -340,6 +340,20 @@ hive_magnus_node_summary() {
   hive_magnus_agent_action "$host" magnus-agent-node-summary "$(jq -nc --arg compose "$directory/compose.json" '{compose:$compose}')"
 }
 
+# The Ardent installations Magnus lists, read only (magnus-agent-ardent-installations): one JSON
+# line with supported and, per installation, its node name, installed version, the version its
+# node agent stages, a failed staged package and whether the node answered. A suite-managed Magnus
+# is read on its host with its API secret; an external Magnus through Ardent Project Studio's own
+# service identity, when this installation runs Studio. Fails when neither is there, or on no answer.
+hive_magnus_ardent_installations() {
+  local host service
+  if jq -e '.components.magnus!=null' "$HIVE_CONFIG" >/dev/null; then host=$(jq -r .components.magnus.host "$HIVE_CONFIG"); service=magnus
+  elif jq -e '.external.magnus!=null and .components.ardentstudio!=null' "$HIVE_CONFIG" >/dev/null; then host=$(jq -r .components.ardentstudio.host "$HIVE_CONFIG"); service=ardentstudio
+  else return 1; fi
+  hive_magnus_agent_action "$host" magnus-agent-ardent-installations \
+    "$(jq -nc --arg compose "$(jq -r --arg host "$host" '.hosts[$host].directory' "$HIVE_CONFIG")/compose.json" --arg service "$service" '{compose:$compose,service:$service}')"
+}
+
 # VERSION is X.Y.Z (any suffix ignored) and at least MINIMUM.
 hive_magnus_version_at_least() { # VERSION MINIMUM
   [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || return 1

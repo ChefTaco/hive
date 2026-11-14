@@ -2,7 +2,8 @@
 # hive.sh post-upgrade: the steps that follow an upgrade, in one command. It checks the Magnus
 # host agent on the Magnus host against the release's pinned agent and upgrades it through the
 # existing magnus-agent paths. It adds HiveXUI browser clients that are missing from Oathweave,
-# using console-clients add. Then it lists what is left for the operator. Every change goes
+# using console-clients add. It asks Magnus whether any Ardent installation is behind the Ardent
+# its node agent stages, read only. Then it lists what is left for the operator. Every change goes
 # through the confirmations of the command it uses; nothing is changed without them. Each step it
 # finds done is marked done in the setup checklist the registry recorded, at once and idempotently.
 
@@ -78,6 +79,27 @@ hive_post_upgrade_node_keys() {
   fi
 }
 
+# The Ardent installations: read from Magnus, never changed here. Update package replaces the
+# runtime that a person's agents run on, so Magnus refuses it while a profile runs, and each
+# extension's peer pins are only proven by the install itself; both stay a decision in HiveXUI.
+# When every installation already runs the Ardent its node agent stages, the step is done.
+hive_post_upgrade_ardent() {
+  local summary lagging
+  if summary=$(hive_magnus_ardent_installations 2>/dev/null); then lagging=$(hive_checklist_ardent_lagging "$summary"); else lagging=null; fi
+  if [[ "$lagging" == '[]' ]]; then
+    printf -- '- Ardent: every installation runs the Ardent version its node agent stages; nothing to update.\n'
+    hive_post_upgrade_done ardent-packages-updated
+    return 0
+  fi
+  if [[ "$lagging" == null ]]; then
+    printf -- '- Ardent: Magnus could not be asked from here about its Ardent installations.\n'
+  else
+    printf -- '- Ardent: %s installation(s) to update:\n' "$(jq -r length <<< "$lagging")"
+    jq -r '.[]|"    \(.name): \(.reason)"' <<< "$lagging"
+  fi
+  printf '  In HiveXUI, open Magnus > Ardent > Installations. Stop running profiles, choose Update package, then start them again. Rerun post-upgrade to confirm, or record it with ./hive.sh setup done ardent-packages-updated.\n'
+}
+
 # Browser clients for products added since the Oathweave store was created. The command
 # creates only the missing ones and reports "none" when nothing was missing.
 hive_post_upgrade_clients() {
@@ -96,7 +118,7 @@ hive_post_upgrade() {
   hive_post_upgrade_node_keys
   hive_post_upgrade_clients
   if jq -e '.components.magnus!=null or .external.magnus!=null' "$HIVE_CONFIG" >/dev/null; then
-    printf -- '- Ardent: in HiveXUI, open Magnus > Ardent > Installations. Stop running profiles, choose Update package, then start them again.\n'
+    hive_post_upgrade_ardent
     if hive_magnus_node_keys_only; then
       printf -- '- Fleet hosts with their own Magnus agent: run ./hive.sh magnus-agent install --config %s --host HOST for each one. Agents with a node key keep it; an agent without one is enrolled with a one-time token. No fleet-wide node secret is copied to agents any more.\n' "$HIVE_CONFIG"
     else
