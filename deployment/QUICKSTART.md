@@ -288,8 +288,13 @@ is copied to agents; `./hive.sh post-upgrade` then lists any blockers from Magnu
 (see [Upgrading](../UPGRADING.md#magnus-300-node-keys-only)).
 
 Update Ardent packages in HiveXUI under Magnus > Ardent > Installations: stop running profiles,
-choose Update package, then start them again, and record it with
-`./hive.sh setup done ardent-packages-updated`. Update agents on other fleet hosts separately,
+choose Update package, then start them again. `./hive.sh post-upgrade` asks Magnus, read only,
+whether any installation is behind the Ardent version its node agent stages: it names those, and
+records `ardent-packages-updated` as done once none is (also when the upgrade changed nothing for
+Ardent). With an external Magnus it asks through Ardent Project Studio's service identity, so
+without Studio record it yourself with `./hive.sh setup done ardent-packages-updated`. The
+controller never runs Update package itself: Magnus refuses it while a profile runs, so it means
+stopping agents people use, and an extension's peer pins are proven only by the install. Update agents on other fleet hosts separately,
 and check certificate renewal when nothing renews the certificate.
 
 From the Hive Registry 1.3.0, the upgrade records these steps in the

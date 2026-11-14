@@ -34,14 +34,40 @@ hive_checklist_node_keys() {
   if jq -e '.enforceReady==true' <<< "$summary" >/dev/null; then printf 'ready\n'; else printf 'blocked\n'; fi
 }
 
+# Which Ardent installations still need Update package, from SUMMARY (what
+# hive_magnus_ardent_installations read), as a JSON array of {name, reason}; null when SUMMARY is
+# not a readable list. An installation is current when it answered and runs the Ardent version its
+# node agent stages, which is what Magnus > Ardent > Installations offers to install. One that did
+# not answer, or whose agent stages no checked package, cannot be shown current and is listed.
+hive_checklist_ardent_lagging() { # SUMMARY
+  local lagging
+  lagging=$(jq -sc '.[-1] // null | if type=="object" and .supported==true and (.installations|type=="array") then [.installations[] |
+      if .reachable!=true then {name, reason:"did not answer Magnus"}
+      elif .stagedError==true then {name, reason:"the Ardent package its node agent stages failed its check"}
+      elif .staged==null then {name, reason:"its node agent stages no Ardent package"}
+      elif .version!=.staged then {name, reason:"runs Ardent \(.version // "none"); its node agent stages \(.staged)"}
+      else empty end] else null end' <<< "$1" 2>/dev/null) || lagging=null
+  printf '%s\n' "${lagging:-null}"
+}
+
+# Whether every Ardent installation already runs the Ardent its node agent stages: true, false, or
+# null when Magnus cannot be read from here. Read only; nothing is installed or restarted.
+hive_checklist_ardent_current() {
+  local summary lagging
+  summary=$(hive_magnus_ardent_installations 2>/dev/null) || { printf 'null\n'; return; }
+  lagging=$(hive_checklist_ardent_lagging "$summary")
+  jq -r 'if .==null then "null" elif length==0 then "true" else "false" end' <<< "$lagging"
+}
+
 # The checklist for OPERATION (install or upgrade), merged with the recorded items PREVIOUS
 # (a JSON array, or null) that the registry kept for release PREVIOUS_RELEASE. Pure: it reads
 # only the configuration. Prints the items as a JSON array. NODE_KEYS is what
-# hive_checklist_node_keys found (absent when not given).
+# hive_checklist_node_keys found (absent when not given); ARDENT what hive_checklist_ardent_current
+# found (null when not given).
 hive_checklist_items() {
-  local operation=$1 previous=${2:-null} previous_release=${3:-} certificate=${4:-null} node_keys=${5:-absent}
+  local operation=$1 previous=${2:-null} previous_release=${3:-} certificate=${4:-null} node_keys=${5:-absent} ardent=${6:-null}
   jq -c --arg operation "$operation" --argjson previous "$previous" --arg previousRelease "$previous_release" --arg release "${HIVE_VERSION:-}" \
-    --argjson certificate "$certificate" --arg nodeKeys "$node_keys" '
+    --argjson certificate "$certificate" --arg nodeKeys "$node_keys" --argjson ardent "$ardent" '
     . as $c |
     def item($id; $title; $command; $docs; $extra; $scope; $when): {item:({id:$id,title:$title,status:"pending",command:$command,docs:$docs}+$extra),scope:$scope,when:$when,detected:null};
     ($c.components.magnus!=null) as $magnus |
@@ -59,9 +85,10 @@ hive_checklist_items() {
       (if $identity and ($c.bootstrap.magnusGateway.grantTerminalToInitialOperator != true) and ($magnus or $c.external.magnus!=null or $c.components.embermend!=null or $c.components.ardentstudio!=null)
         then item("oathweave-console-clients"; "Add the HiveXUI browser clients to Oathweave"; "./hive.sh console-clients add";
         "deployment/QUICKSTART.md#8-upgrade"; {product:"oathweave",check:"oathweave.console-client"}; "release"; ["upgrade"]) else empty end),
-      # Ardent packages are updated in HiveXUI; the operator confirms it.
+      # Ardent packages are updated in HiveXUI, not by the controller: an update needs the profiles stopped.
+      # Done by itself when Magnus reports every installation on the Ardent its agent stages.
       (if $magnus or $c.external.magnus!=null then item("ardent-packages-updated"; "Update the Ardent packages in HiveXUI (Magnus > Ardent > Installations)";
-        "./hive.sh setup done ardent-packages-updated"; "deployment/QUICKSTART.md#8-upgrade"; {product:"magnus"}; "release"; ["upgrade"]) else empty end),
+        "./hive.sh setup done ardent-packages-updated"; "deployment/QUICKSTART.md#8-upgrade"; {product:"magnus"}; "release"; ["upgrade"]) + {detected:$ardent} else empty end),
       # A certificate renewal timer on a local console host.
       (if $localConsole then item("certificate-renewal"; "Schedule the HTTPS certificate renewal"; "sudo ./scripts/console-certificate.sh schedule --config FILE";
         "deployment/QUICKSTART.md#9-keep-the-certificate-current"; {product:"ingress"}; "installation"; ["install","upgrade"]) + {detected:$certificate} else empty end),
@@ -94,7 +121,12 @@ hive_checklist_prepare() {
     printf 'Hive: the setup checklist was not updated, because the registry did not answer; run post-upgrade later to record it.\n' >&2
     return 0
   fi
-  HIVE_CHECKLIST=$(hive_checklist_items "$HIVE_OPERATION" "$(jq -c '.setup.items // null' <<< "$current")" "$(jq -r '.release.version // ""' <<< "$current")" "$(hive_checklist_certificate_scheduled)" "$(if [[ "$HIVE_OPERATION" == upgrade ]]; then hive_checklist_node_keys; else printf 'absent\n'; fi)")
+  # The Ardent check runs here for an external Magnus only: with a suite-managed Magnus,
+  # post-upgrade first moves the Magnus host agent to the release pin, which can stage a newer
+  # Ardent, so post-upgrade checks it after that.
+  HIVE_CHECKLIST=$(hive_checklist_items "$HIVE_OPERATION" "$(jq -c '.setup.items // null' <<< "$current")" "$(jq -r '.release.version // ""' <<< "$current")" "$(hive_checklist_certificate_scheduled)" \
+    "$(if [[ "$HIVE_OPERATION" == upgrade ]]; then hive_checklist_node_keys; else printf 'absent\n'; fi)" \
+    "$(if [[ "$HIVE_OPERATION" == upgrade ]] && jq -e '.components.magnus==null and .external.magnus!=null' "$HIVE_CONFIG" >/dev/null; then hive_checklist_ardent_current; else printf 'null\n'; fi)")
 }
 
 # The recorded checklist items as a JSON array, or nothing when the registry has none or did not answer.

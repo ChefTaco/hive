@@ -6,6 +6,17 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Changed
+
+- The `ardent-packages-updated` setup item settles itself. `hive.sh post-upgrade` asks Magnus, read
+  only, for its Ardent installations (`GET /api/v1/ardent/installations`): when every one runs the
+  Ardent version its node agent stages, the item is done; otherwise it names each installation that
+  is behind, did not answer or has no checked staged package, and the item stays pending. A
+  suite-managed Magnus is read on its host with its API secret, after `post-upgrade` moves the host
+  agent; an external Magnus is read through Ardent Project Studio's service identity, also at the
+  upgrade itself. Nothing is installed or restarted: Update package stays in HiveXUI. The
+  controller changes, so the next release pins a new controller digest.
+
 ## [3.9.0] - 2026-11-14
 
 ### Changed
