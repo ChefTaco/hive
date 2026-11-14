@@ -10,8 +10,8 @@ The launcher checks out and verifies the tagged controller of that release. The 
 plan, takes a verified pre-change backup and rehearses data changes on a copy before activation.
 Moving from 2.x to 3.x with existing PostgreSQL stores also needs `--allow-migrations`, described
 below, and so does moving an installation with Emberpath or HiveSkills from a release before
-3.4.0 to 3.4.0 or later, and an installation with Embermend from a release before 3.6.0 to 3.6.0 or
-later. A failed or uncertain step holds its transaction for recovery, as described in
+3.4.0 to 3.4.0 or later, an installation with Embermend from a release before 3.6.0 to 3.6.0 or
+later, and an installation that runs Magnus from a release before 3.8.0 to 3.8.0 or later. A failed or uncertain step holds its transaction for recovery, as described in
 [when a command stops](deployment/README.md#when-a-command-stops-transactions-and-recovery); never
 delete transaction or runtime receipts to force another attempt. See also
 [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
@@ -42,6 +42,50 @@ An older Cindertrace does not know the new sources and refuses to start with the
 credential. Before rolling back to a release whose Cindertrace predates them, run
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
+
+## Suite 3.8.0: Magnus node credentials and product security updates
+
+Suite 3.8.0 changes no storage format. It selects the `runtime-2026-11-pg1712-xslt` datastore
+profile: the same PostgreSQL 17.12 and 18.7 as `hive-postgres` 17.12-2 and 18.7-2 with libxslt
+1.1.45-r8 (CVE-2026-9947, CVE-2026-87636), which start on the existing data with no storage
+transition; Redis and Qdrant are unchanged. Magnus 2.10.0 adds two
+additive database migrations (new node credential tables and two columns with defaults; no row is
+rewritten). The upgrade finds them pending on the restored copy, so an installation that runs Magnus
+upgrades from 3.7.x with:
+
+```bash
+./hive.sh plan --config ~/.config/hive/ID/installation.json --release 3.8.0 --allow-migrations
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.8.0 --allow-migrations
+```
+
+An installation without Magnus, or with an external Magnus, needs no flag. The other products add
+no migration; HiveMem 1.7.0 keeps every existing collection name and gives an encoded name only to
+private collections of agent IDs that Qdrant could not store. The controller changes, and the
+upgrade installs the new ingress `Caddyfile`, which sends each product one forwarded client address
+and routes Magnus 2.10's node credentials. Check these before or after upgrading:
+
+- **Oathweave 2.3.0:** a confidential client must send its client secret to exchange an
+  authorization code. The suite's HiveXUI clients are public PKCE clients and need nothing. A
+  Magnus console registered as a confidential client needs `HIVE_OAUTH_CLIENT_SECRET`; a
+  confidential client without a secret gets one with `POST /clients/{id}/rotate-secret`. Behind
+  several proxies, list every tier in `TRUSTED_PROXY_IPS`.
+- **Emberpath 2.5.0:** changing a provider's `baseUrl` to another scheme, host or port requires
+  its secret again, a provider behind a redirect fails until `baseUrl` is its final address, and
+  provider reads and configuration exports show `[redacted]` for credential header values.
+- **HiveMem 1.7.0:** editing or moving a memory needs write access to its workspace (and to the
+  destination), and only an administrator can create the `default` workspace record.
+- **Chattermost 0.6.1:** sockets close when their credential ends, and channel, post and team
+  routes require the matching membership or manager role.
+- **Magnus 2.10.0:** host agents get their own node keys in `compat` mode; the shared node secret
+  keeps working. Upgrade Magnus first, then the agents (`./hive.sh magnus-agent install`). A new
+  agent is enrolled with a one-time token. Magnus's server signing key is kept in its data
+  directory, so the suite backup includes it. An existing agent that reaches Magnus through the
+  suite's host agent port keeps the shared secret until it is enrolled with a token; see
+  [Node keys](deployment/FULL.md#node-keys) and Magnus's `docs/NODE_CREDENTIALS.md`. Leave
+  `NODE_AUTH_MODE=enforce` off until every agent has a key.
+
+Magnus 2.9.x ignores the new tables. Before moving an agent that has bound a key back to an
+older agent release, reset that node's credentials in Magnus, as its upgrade notes describe.
 
 ## Suite 3.7.0: PostgreSQL security update
 

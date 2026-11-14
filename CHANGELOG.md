@@ -6,6 +6,45 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.8.0] - 2026-11-14
+
+### Changed
+
+- Product update with a new controller: Oathweave 2.3.0, Emberpath 2.5.0, HiveMem 1.7.0,
+  HiveSkills 1.8.0, HiveXUI 0.8.0, Magnus and its fleet gateway and agent 2.10.0, Cindertrace 0.7.0,
+  Chattermost and its migrator 0.6.1, Emberfold 0.4.0, Ardent Project Studio 0.4.1, Embermend 0.3.1
+  and the Hive Registry 1.3.1 (image 2.0.8), with the `runtime-2026-11-pg1712-xslt` datastore
+  profile (`hive-postgres` 17.12-2 and 18.7-2, under Security). The ingress image (2.0.5), Redis,
+  Qdrant and the storage recovery profile are unchanged from 3.7.0. No storage format changes.
+  Magnus 2.10.0 adds two additive database migrations, so an upgrade of an installation that runs
+  Magnus needs `--allow-migrations`. The controller changes (below), so an installation upgrades
+  with the 3.8.0 controller, which `./hive.sh upgrade --release 3.8.0` selects, and the upgrade
+  installs the new ingress `Caddyfile`. Every pinned image passes the full HIGH/CRITICAL policy on
+  both architectures.
+- Oathweave 2.3.0 requires a confidential client to send its client secret when it exchanges an
+  authorization code, and reads `X-Forwarded-For` from the right. Suite browser clients (public,
+  with PKCE) are unaffected; a Magnus console registered as a confidential client needs
+  `HIVE_OAUTH_CLIENT_SECRET`. A deployment with several proxy tiers lists every tier in
+  `TRUSTED_PROXY_IPS`.
+- Emberpath 2.5.0 binds a stored provider credential to the origin of the provider's `baseUrl`: an
+  update that moves a provider to another scheme, host or port must send the secret again. Provider
+  requests no longer follow redirects, and provider reads redact credential header values.
+- HiveMem 1.7.0 requires workspace write access to edit or move a memory, lets only an
+  administrator create the `default` workspace record, and limits other agents' profiles to what
+  the caller can read. Private memories of an agent ID that Qdrant cannot use in a collection name
+  get an encoded collection name; every other collection keeps its exact name.
+- Chattermost 0.6.1 ends a WebSocket with its credential and tightens channel, post and team
+  permissions. Its `v0.6.0` tag is not a release.
+- Magnus 2.10.0 gives each host agent its own node key (per-node credentials, `compat` mode by
+  default) and keeps the shared node secret working for older agents. `hive.sh magnus-agent
+  install` enrolls a new agent with a one-time token (see Added). Back up Magnus's server signing
+  key with its data; see Magnus's `docs/NODE_CREDENTIALS.md`.
+- Every yes-or-no prompt of `hive.sh` accepts `y` or `yes` in any case. The final "Apply this
+  exact installation plan?" prompt accepted only a lowercase `y` and cancelled on `yes`.
+- Host preflight (`hive.sh doctor` and the lifecycle commands) names the file, directory or port
+  behind each refusal; several checks failed with only "Host preflight failed".
+- `hive.sh --help` lists `migrate-native refresh-memory-token`.
+
 ### Added
 
 - `hive.sh magnus-agent install` gives a new Magnus agent its own node key when the running
@@ -81,14 +120,6 @@ All notable changes to this project are documented in this file. The format is b
   whose `useradd` default is elsewhere, so a repeat no longer refuses the account it created.
 - Interactive setup refuses an HTTPS listener port that is not a number from 1 to 65535 with a
   clear message.
-
-### Changed
-
-- Every yes-or-no prompt of `hive.sh` accepts `y` or `yes` in any case. The final "Apply this
-  exact installation plan?" prompt accepted only a lowercase `y` and cancelled on `yes`.
-- Host preflight (`hive.sh doctor` and the lifecycle commands) names the file, directory or port
-  behind each refusal; several checks failed with only "Host preflight failed".
-- `hive.sh --help` lists `migrate-native refresh-memory-token`.
 
 ## [3.7.0] - 2026-11-13
 
