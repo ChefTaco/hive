@@ -119,6 +119,37 @@ hive_post_upgrade_run() {
   if [[ "$*" == 'magnus-agent status' ]]; then jq -n --arg version "$agent_version" '{installedVersion:(if $version=="" then null else $version end)}'; fi
 }
 
+# A release pinning Magnus 3.0.0 accepts node keys only: post-upgrade reads Magnus's fleet summary,
+# lists its blockers or marks the node-key step done, and says agents get no shared secret.
+jq '.components.magnus.version="3.0.0"' "$HIVE_MANIFEST" > "$temporary/magnus3.json"; cp "$HIVE_MANIFEST" "$temporary/magnus2.json"; cp "$temporary/magnus3.json" "$HIVE_MANIFEST"
+summary_fixture='{"supported":true,"mode":"compat","modeDeprecated":true,"enforceReady":false,"blockers":[{"code":"NODES_WITHOUT_KEY","count":2},{"code":"RECENT_SHARED_SECRET_USE","count":1}]}'
+hive_magnus_node_summary() { printf 'summary\n' >> "$calls"; [[ -n "$summary_fixture" ]] && printf '%s\n' "$summary_fixture"; }
+recorded_checklist=$(jq -sc . <(checklist_item magnus-node-keys pending))
+agent_version=2.4.2
+run '.components={magnus:{host:"control"}} | .console={host:"control"} | .bootstrap={} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
+grep -q 'Magnus node keys: NODES_WITHOUT_KEY (2), RECENT_SHARED_SECRET_USE (1)' "$temporary/output" || { cat "$temporary/output" >&2; fail 'The node-key blockers were not listed'; }
+grep -q 'explicit NODE_AUTH_MODE=compat, which is deprecated' "$temporary/output" || fail 'The deprecated mode was not reported'
+grep -q 'an agent without a key is enrolled with a one-time token' "$temporary/output" && grep -q 'No fleet-wide node secret is copied' "$temporary/output" || fail 'The node-key steps of a Magnus 3 release were not explained'
+! grep -q 'bind their node keys automatically\|binds its own key automatically' "$temporary/output" || fail 'A Magnus 3 release promised the automatic binding'
+! grep -q 'setup/items/magnus-node-keys' "$calls" || fail 'The node-key step was marked done with blockers'
+summary_fixture='{"supported":true,"mode":"enforce","modeDeprecated":false,"enforceReady":true,"blockers":[]}'
+run '.components={magnus:{host:"control"}} | .console={host:"control"} | .bootstrap={} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
+grep -q 'Magnus node keys: no blockers; every agent authenticates with its own key (mode enforce)' "$temporary/output" || fail 'A clean summary was not reported'
+grep -qx 'registry PUT /v1/setup/items/magnus-node-keys {"status":"done"}' "$calls" || fail 'A clean summary did not mark the node-key step done'
+! grep -q 'deprecated' "$temporary/output" || fail 'An enforce server was called deprecated'
+# Not readable here (no answer, or an external Magnus): a note that points at the summary.
+summary_fixture=''
+run '.components={magnus:{host:"control"}} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
+grep -q 'Check its fleet summary, GET /api/v1/node-credentials/summary' "$temporary/output" || fail 'An unreadable summary got no note'
+: > "$temporary/calls-external"
+run '.components={hivemem:{host:"control"}} | .external={magnus:{url:"https://magnus.example.com:4000"}} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
+grep -q 'Check its fleet summary' "$temporary/output" && ! grep -qx summary "$calls" || fail 'An external Magnus was not pointed at its summary'
+# A release pinning Magnus 2.x never reads the summary and prints no node-key step.
+cp "$temporary/magnus2.json" "$HIVE_MANIFEST"; recorded_checklist=''
+run '.components={magnus:{host:"control"}} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
+! grep -qx summary "$calls" && ! grep -q 'Magnus node keys' "$temporary/output" || fail 'A Magnus 2 release read the node-key summary'
+printf 'Passed: post-upgrade reports Magnus 3 node-key readiness and marks it done only without blockers.\n'
+
 # The real runner passes the installation, release and confirmation to its own controller process.
 unset -f hive_post_upgrade_run
 source "$ROOT/scripts/suite/post-upgrade.sh"

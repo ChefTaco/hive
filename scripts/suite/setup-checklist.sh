@@ -24,13 +24,24 @@ hive_checklist_certificate_scheduled() {
   else printf 'null\n'; fi
 }
 
+# Magnus node keys after an upgrade: absent (the release pins a Magnus before 3.0.0, or the
+# installation runs no Magnus of its own), ready (Magnus's fleet summary has no blockers), blocked,
+# or unknown (Magnus did not answer).
+hive_checklist_node_keys() {
+  local summary
+  if ! jq -e '.components.magnus!=null' "$HIVE_CONFIG" >/dev/null || ! hive_magnus_node_keys_only; then printf 'absent\n'; return; fi
+  if ! summary=$(hive_magnus_node_summary 2>/dev/null) || ! jq -e '.supported==true' <<< "$summary" >/dev/null 2>&1; then printf 'unknown\n'; return; fi
+  if jq -e '.enforceReady==true' <<< "$summary" >/dev/null; then printf 'ready\n'; else printf 'blocked\n'; fi
+}
+
 # The checklist for OPERATION (install or upgrade), merged with the recorded items PREVIOUS
 # (a JSON array, or null) that the registry kept for release PREVIOUS_RELEASE. Pure: it reads
-# only the configuration. Prints the items as a JSON array.
+# only the configuration. Prints the items as a JSON array. NODE_KEYS is what
+# hive_checklist_node_keys found (absent when not given).
 hive_checklist_items() {
-  local operation=$1 previous=${2:-null} previous_release=${3:-} certificate=${4:-null}
+  local operation=$1 previous=${2:-null} previous_release=${3:-} certificate=${4:-null} node_keys=${5:-absent}
   jq -c --arg operation "$operation" --argjson previous "$previous" --arg previousRelease "$previous_release" --arg release "${HIVE_VERSION:-}" \
-    --argjson certificate "$certificate" '
+    --argjson certificate "$certificate" --arg nodeKeys "$node_keys" '
     . as $c |
     def item($id; $title; $command; $docs; $extra; $scope; $when): {item:({id:$id,title:$title,status:"pending",command:$command,docs:$docs}+$extra),scope:$scope,when:$when,detected:null};
     ($c.components.magnus!=null) as $magnus |
@@ -41,6 +52,9 @@ hive_checklist_items() {
       # The Magnus host agent: post-upgrade installs or upgrades it to the release pin.
       (if $magnus and $agentPort then item("magnus-agent-enrolled"; "Install the Magnus agent on the Magnus host"; "./hive.sh magnus-agent install";
         "deployment/FULL.md#installing-the-agent"; {product:"magnus",check:"magnus.agent"}; "release"; ["install","upgrade"]) else empty end),
+      # Magnus 3.0.0 or later accepts node keys only: its fleet summary must list no blockers.
+      (if $nodeKeys!="absent" then item("magnus-node-keys"; "Give every Magnus agent its own node key (no blockers in the Magnus fleet summary)"; "./hive.sh post-upgrade";
+        "UPGRADING.md#magnus-300-node-keys-only"; {product:"magnus"}; "release"; ["upgrade"]) + {detected:(if $nodeKeys=="ready" then true elif $nodeKeys=="blocked" then false else null end)} else empty end),
       # HiveXUI browser clients of products added to an existing Oathweave store. Fresh setup seeds them.
       (if $identity and ($c.bootstrap.magnusGateway.grantTerminalToInitialOperator != true) and ($magnus or $c.external.magnus!=null or $c.components.embermend!=null or $c.components.ardentstudio!=null)
         then item("oathweave-console-clients"; "Add the HiveXUI browser clients to Oathweave"; "./hive.sh console-clients add";
@@ -55,7 +69,7 @@ hive_checklist_items() {
       (if $c.bootstrap!=null and $c.components.oathweave!=null then item("first-admin"; "Create your own administrator account and stop using the initial operator";
         "./hive.sh setup done first-admin"; "deployment/QUICKSTART.md#6-sign-in"; {product:"oathweave",check:"iam.first-admin"}; "installation"; ["install"]) else empty end)
     ] as $candidates |
-    ["magnus-agent-enrolled","oathweave-console-clients","ardent-packages-updated","certificate-renewal","first-admin"] as $known |
+    ["magnus-agent-enrolled","magnus-node-keys","oathweave-console-clients","ardent-packages-updated","certificate-renewal","first-admin"] as $known |
     (($previous // [])|map({key:.id,value:.})|from_entries) as $old |
     ($previousRelease != "" and $previousRelease != $release) as $newRelease |
     [ $candidates[] | . as $candidate | $old[$candidate.item.id] as $recorded |
@@ -80,7 +94,7 @@ hive_checklist_prepare() {
     printf 'Hive: the setup checklist was not updated, because the registry did not answer; run post-upgrade later to record it.\n' >&2
     return 0
   fi
-  HIVE_CHECKLIST=$(hive_checklist_items "$HIVE_OPERATION" "$(jq -c '.setup.items // null' <<< "$current")" "$(jq -r '.release.version // ""' <<< "$current")" "$(hive_checklist_certificate_scheduled)")
+  HIVE_CHECKLIST=$(hive_checklist_items "$HIVE_OPERATION" "$(jq -c '.setup.items // null' <<< "$current")" "$(jq -r '.release.version // ""' <<< "$current")" "$(hive_checklist_certificate_scheduled)" "$(if [[ "$HIVE_OPERATION" == upgrade ]]; then hive_checklist_node_keys; else printf 'absent\n'; fi)")
 }
 
 # The recorded checklist items as a JSON array, or nothing when the registry has none or did not answer.

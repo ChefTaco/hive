@@ -26,6 +26,8 @@ studio_hivemem_client=ardentstudio-hivemem
 # Its secret is generated where Oathweave and Magnus run together; without that, it is not configured.
 magnus_hivemem_client=magnus-hivemem
 magnus_memory=$(jq -r '.magnusMemoryIdentity==true' <<< "$input")
+# A release pinning Magnus 3.0.0 or later: Magnus authenticates nodes by their own keys only.
+magnus_node_keys_only=$(jq -r '.magnusNodeKeysOnly==true' <<< "$input")
 magnus_hivemem_permissions='["admin:agents","workspaces:write","memories:read","memories:write","sessions:read","sessions:write"]'
 distributed=$(jq -r '.bootstrap.productEndpoints!=null' <<< "$input")
 # A Magnus outside this installation (deployment/FULL.md#external-magnus): the console and Studio
@@ -224,7 +226,11 @@ if has_component oathweave; then for name in admin-password oath-cookie oath-age
 if has_component emberpath; then ensure_secret router-key; fi
 if has_component hivemem; then for name in memory-key memory-renewal qdrant-key; do ensure_secret "$name"; done; fi
 if has_component hiveskills; then ensure_secret skills-session; fi
-if has_component magnus; then for name in magnus-db magnus-redis magnus-api magnus-jwt magnus-manager magnus-audit magnus-result magnus-log magnus-rotation magnus-metrics magnus-webhook magnus-reconcile magnus-resource-review; do ensure_secret "$name"; done; fi
+# The fleet-wide node secrets (magnus-manager, magnus-result, magnus-reconcile) only for a Magnus
+# before 3.0.0: from 3.0.0 nodes authenticate with their own keys only.
+if has_component magnus; then for name in magnus-db magnus-redis magnus-api magnus-jwt magnus-manager magnus-audit magnus-result magnus-log magnus-rotation magnus-metrics magnus-webhook magnus-reconcile magnus-resource-review; do
+  if [[ "$magnus_node_keys_only" == true && "$name" =~ ^magnus-(manager|result|reconcile)$ ]]; then continue; fi
+  ensure_secret "$name"; done; fi
 if has_component magnus-gateway; then for name in magnus-gateway-api magnus-gateway-drain; do ensure_secret "$name"; done; fi
 if has_component cindertrace; then for name in security-db security-redis security-admin-password security-session security-console security-audit security-receipt security-backup security-rate; do ensure_secret "$name"; done; fi
 if has_component chattermost; then for name in chat-db chat-cookie chat-token chat-admin-password chat-bot; do ensure_secret "$name"; done; fi

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assertFullNodeReview } from './node-enrollment.mjs';
+import { assertFullNodeReview, managedInventoryRequest } from './node-enrollment.mjs';
 const fresh = () => ({ freshInstallation: true, initializerSHA256: 'a'.repeat(64),
   owner: { uid: 1001, profileCount: 0, processes: ['systemd', '(sd-pam)', 'dbus-daemon'] },
   ardentScopeActive: false, history: [], unsettled: 0,
@@ -33,4 +33,15 @@ test('never approves incomplete discovery, foreign cron, native schedulers or un
   for (const kind of ['LEGACY_OR_UNSUPPORTED_CRONTAB', 'NATIVE_HERMES_SCHEDULES', 'NATIVE_HERMES_UNSETTLED_CLAIMS', 'NATIVE_AT_QUEUE', 'UNRECOGNIZED']) {
     const review = fresh(); review.scheduler.blockers[0].kind = kind; assert.throws(() => assertFullNodeReview(review));
   }
+});
+test('reads the managed inventory with the shared node secret before Magnus 3, and signed for the node with node keys only', async () => {
+  const calls = [];
+  const fetch = async (url, init) => { calls.push(['fetch', url, init.headers, init.redirect]); return 'plain'; };
+  const agentFetch = async (target, url, init) => { calls.push(['signed', url, target, init.headers, init.redirect]); return 'signed'; };
+  assert.equal(await managedInventoryRequest('https://node-1.example.com:4100', 'node-1', false, { agentFetch, nodeSecret: () => 'obviously-fake-node-token', fetch }), 'plain');
+  assert.equal(await managedInventoryRequest('https://node-1.example.com:4100', 'node-1', true, { agentFetch, nodeSecret: () => assert.fail('the shared secret was read'), fetch }), 'signed');
+  assert.deepEqual(calls, [
+    ['fetch', 'https://node-1.example.com:4100/api/v1/cron/managed-inventory', { 'x-node-token': 'obviously-fake-node-token' }, 'error'],
+    ['signed', 'https://node-1.example.com:4100/api/v1/cron/managed-inventory', { nodeId: 'node-1' }, undefined, 'error'],
+  ]);
 });

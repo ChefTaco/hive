@@ -220,3 +220,25 @@ mkdir "$temporary/agent-config"; touch "$temporary/agent-secrets" "$temporary/ag
 ( HIVE_REGISTRY_TEMPORARY=$temporary/registry-copy HIVE_AGENT_CONFIG_DIRECTORY=$temporary/agent-config HIVE_AGENT_SECRETS=$temporary/agent-secrets HIVE_AGENT_ENROLLMENT=$temporary/agent-enrollment; trap hive_cleanup EXIT; exit 3 ) || true
 [[ ! -e "$temporary/agent-config" && ! -e "$temporary/agent-secrets" && ! -e "$temporary/agent-enrollment" && ! -e "$temporary/registry-copy" && -e "$temporary/kept" ]] || fail 'Run cleanup left temporary files or removed another file'
 ( HIVE_REGISTRY_TEMPORARY='' HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS='' HIVE_AGENT_ENROLLMENT=''; hive_cleanup ) || fail 'Cleanup failed with nothing to remove'
+# Magnus 3.0.0 or later accepts node keys only: the ingress template stops relaying x-node-token on
+# the agent port and changes nothing else; a release pinning an older Magnus, or none, gets
+# deployment/Caddyfile byte for byte.
+ingress_for() { jq -n --arg version "$1" 'if $version=="" then {components:{}} else {components:{magnus:{version:$version}}} end' > "$temporary/ingress-release.json"; ( HIVE_MANIFEST=$temporary/ingress-release.json; hive_ingress_template ) | base64 -d; }
+for version in '' 2.10.2 2.99.99 3.0.0-rc.1 x.y.z; do
+  ingress_for "$version" | cmp -s - "$ROOT/deployment/Caddyfile" || fail "The ingress for Magnus '$version' differs from deployment/Caddyfile"
+  ( HIVE_MANIFEST=$temporary/ingress-release.json; ! hive_magnus_node_keys_only ) || fail "Magnus '$version' was taken for node keys only"
+done
+( unset HIVE_MANIFEST; ! hive_magnus_node_keys_only ) || fail 'No release was taken for node keys only'
+for version in 3.0.0 3.1.0 10.0.0; do
+  ingress_for "$version" > "$temporary/Caddyfile.keys"
+  ( HIVE_MANIFEST=$temporary/ingress-release.json; hive_magnus_node_keys_only ) || fail "Magnus $version was not taken for node keys only"
+  diff "$ROOT/deployment/Caddyfile" "$temporary/Caddyfile.keys" > "$temporary/Caddyfile.diff" || true
+  [[ $(grep -c '^[<>]' "$temporary/Caddyfile.diff") == 1 ]] || fail "The Magnus $version ingress changes more than one line"
+  grep -qxF $'< \t\t\theader_up X-Node-Token {http.request.header.X-Node-Token}' "$temporary/Caddyfile.diff" || fail "The Magnus $version ingress still relays x-node-token"
+  awk '/^\(magnus_agent_listener\) \{/,/^}/' "$temporary/Caddyfile.keys" > "$temporary/agent-listener"
+  for kept in '{path} == "/api/v1/node-enrollment/enroll"' '{path} == "/api/v1/node-enrollment/server-key"' 'header_up X-Magnus-Node-Id' 'header_up X-Magnus-Key-Id' 'header_up X-Magnus-Timestamp' 'header_up X-Magnus-Nonce' 'header_up X-Magnus-Signature' 'header_up -*'; do
+    grep -qF -- "$kept" "$temporary/agent-listener" || fail "The Magnus $version agent port lost: $kept"
+  done
+  ! grep -q 'legacy-upgrade\|X-Node-Token' "$temporary/agent-listener" || fail "The Magnus $version agent port routes the shared node secret"
+  grep -qxF $'\theader_up -X-Node-Token' "$temporary/Caddyfile.keys" || fail 'The browser routes no longer strip x-node-token'
+done

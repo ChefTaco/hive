@@ -24,12 +24,20 @@ hive_full_configuration() {
       fi
       line DATABASE_URL "postgresql://magnus:$(secret magnus-db)@magnus-postgres:5432/magnus"
       line REDIS_URL "redis://:$(secret magnus-redis)@magnus-redis:6379"
+      if [[ "$magnus_node_keys_only" == true ]]; then
+        # Magnus 3.0.0 or later: nodes and decisions are signed with node and server keys only, so a
+        # fresh Magnus gets none of the fleet-wide node secrets and agents need none.
+        line API_SECRET "$(secret magnus-api)"; line JWT_SECRET "$(secret magnus-jwt)"
+        line AUDIT_HMAC_SECRET "$(secret magnus-audit)"; line LOG_INGEST_SIGNING_SECRET "$(secret magnus-log)"
+        line CREDENTIAL_ROTATION_KEY "$(secret magnus-rotation)"; line METRICS_TOKEN "$(secret magnus-metrics)"; line WEBHOOK_ENCRYPTION_KEY "$(secret magnus-webhook)"
+      else
       line API_SECRET "$(secret magnus-api)"; line JWT_SECRET "$(secret magnus-jwt)"; line NODE_MANAGER_SECRET "$(secret magnus-manager)"
       line AUDIT_HMAC_SECRET "$(secret magnus-audit)"; line RESULT_SIGNING_SECRET "$(secret magnus-result)"; line LOG_INGEST_SIGNING_SECRET "$(secret magnus-log)"
       line CREDENTIAL_ROTATION_KEY "$(secret magnus-rotation)"; line METRICS_TOKEN "$(secret magnus-metrics)"; line WEBHOOK_ENCRYPTION_KEY "$(secret magnus-webhook)"
       # The node agents hold the same key (hive.sh magnus-agent install copies it), so an ADMIN can
       # settle an Ardent action whose outcome is unknown.
       line COMMAND_RECONCILIATION_SECRET "$(secret magnus-reconcile)"
+      fi
       line RESOURCE_PARTICIPANT_RECONCILIATION_SECRET "$(secret magnus-resource-review)"
       line TLS_CERT_PATH /config/tls.crt; line TLS_KEY_PATH /config/tls.key; line CONTROL_API_BIND_HOST 0.0.0.0; line CONTROL_API_PORT 4000
       line CONTROL_API_URL "$(product_endpoint magnus https://magnus:4000)"; line CORS_ORIGIN "$origin"; line DASHBOARD_PUBLIC_ORIGIN "$origin"

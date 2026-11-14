@@ -13,6 +13,25 @@ hive_confirm() {
 hive_release_selected() {
   jq -c --slurpfile config "$HIVE_CONFIG" ".components|with_entries(select(.key as \$name|\$config[0].components[\$name]!=null))|map_values($1)" "$HIVE_MANIFEST"
 }
+# True when the release pins Magnus 3.0.0 or later. From 3.0.0 Magnus authenticates nodes by
+# their own keys only (NODE_AUTH_MODE enforce, its default), so this controller then gives new
+# agents no fleet-wide node secrets, generates none for a fresh Magnus, enrolls every agent
+# without a key with a one-time token, and its ingress no longer relays x-node-token. A release
+# pinning an older Magnus, or none, keeps the earlier behaviour exactly.
+hive_magnus_node_keys_only() {
+  [[ -n "${HIVE_MANIFEST:-}" && -f "$HIVE_MANIFEST" ]] || return 1
+  jq -e '(.components.magnus.version // "") as $v | ($v|type=="string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and (($v|split(".")|map(tonumber)) >= [3,0,0])' "$HIVE_MANIFEST" >/dev/null 2>&1
+}
+# The release's ingress configuration, base64-encoded for the host actions that install it:
+# deployment/Caddyfile as it is, except that with Magnus 3.0.0 or later the agent port no longer
+# relays the shared node secret (x-node-token) to Magnus. Its signature headers, the token
+# enrollment and the server key routes stay; the shared-secret legacy upgrade is never routed.
+hive_ingress_template() {
+  local caddyfile=$HIVE_ROOT/deployment/Caddyfile line=$'\t\t\theader_up X-Node-Token {http.request.header.X-Node-Token}'
+  if ! hive_magnus_node_keys_only; then base64 -w0 "$caddyfile"; return; fi
+  [[ $(grep -cxF -- "$line" "$caddyfile") == 1 ]] || hive_die 'deployment/Caddyfile does not relay x-node-token on the Magnus agent port exactly once; this controller cannot adapt it for Magnus 3'
+  grep -vxF -- "$line" "$caddyfile" | base64 -w0
+}
 # Temporary files of this run. Removed on every exit, including an interrupt at a prompt.
 hive_cleanup() {
   [[ -z "${HIVE_REGISTRY_TEMPORARY:-}" ]] || rm -f -- "$HIVE_REGISTRY_TEMPORARY"
@@ -583,11 +602,11 @@ hive_host() {
   target=$(jq -r --arg host "$host" '.hosts[$host].target' "$HIVE_CONFIG")
   payload=$(jq -c --arg host "$host" --arg installation "$HIVE_ID" --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" --arg plan "${HIVE_PLAN_DIGEST:-}" \
     --arg action "${HIVE_HOST_ACTION:-}" --arg operation "${HIVE_OPERATION:-}" --arg archive "${HIVE_ARCHIVE:-}" --argjson allowMigrations "${HIVE_ALLOW_MIGRATIONS:-false}" \
-    --argjson serviceUsers "$bootstrap_users" --argjson images "$bootstrap_images" --argjson identityIds "${HIVE_BOOTSTRAP_IDENTITIES:-null}" --arg ingressTemplate "${HIVE_BOOTSTRAP_INGRESS:-}" --arg integrityScript "$(base64 -w0 "$HIVE_ROOT/scripts/suite/check-data.mjs")" --arg snapshotTool "${HIVE_SNAPSHOT_TOOL:-}" \
+    --argjson serviceUsers "$bootstrap_users" --argjson images "$bootstrap_images" --argjson identityIds "${HIVE_BOOTSTRAP_IDENTITIES:-null}" --arg ingressTemplate "${HIVE_BOOTSTRAP_INGRESS:-}" --argjson magnusNodeKeysOnly "${HIVE_MAGNUS_NODE_KEYS_ONLY:-false}" --arg integrityScript "$(base64 -w0 "$HIVE_ROOT/scripts/suite/check-data.mjs")" --arg snapshotTool "${HIVE_SNAPSHOT_TOOL:-}" \
     --arg skillsManifest "${HIVE_SKILLS_MANIFEST:-}" --arg skillsSignature "${HIVE_SKILLS_SIGNATURE:-}" --arg skillsTrust "${HIVE_SKILLS_TRUST:-}" --arg skillsTokenSHA "${HIVE_SKILLS_TOKEN_SHA:-}" \
     --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" --argjson registry "${HIVE_REGISTRY_INPUT:-null}" --argjson memoryCredential "${HIVE_MEMORY_CREDENTIAL_INPUT:-null}" --argjson auditCollection "${HIVE_AUDIT_COLLECTION_INPUT:-null}" --argjson magnusTrust "${HIVE_MAGNUS_TRUST_INPUT:-null}" --argjson cindertrace "${HIVE_CINDERTRACE_INPUT:-null}" --argjson magnusAgent "${HIVE_MAGNUS_AGENT_INPUT:-null}" --argjson consoleClients "${HIVE_CONSOLE_CLIENTS_INPUT:-null}" --arg abortStep "${HIVE_ABORT_STEP:-}" \
     --arg dataTool "${HIVE_NATIVE_DATA_TOOL:-}" --arg adminScript "${HIVE_NATIVE_ADMIN_SCRIPT:-}" --argjson reviewedLinks "${HIVE_NATIVE_LINKS:-null}" --arg tokenDigest "${HIVE_NATIVE_TOKEN_DIGEST:-}" --argjson tokenTtlSeconds "${HIVE_NATIVE_TOKEN_TTL:-null}" \
-    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,memoryCredential:$memoryCredential,auditCollection:$auditCollection,magnusTrust:$magnusTrust,cindertrace:$cindertrace,magnusAgent:$magnusAgent,abortStep:$abortStep,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,magnusMemoryIdentity:(.components.magnus!=null and .components.hivemem!=null and .components.oathweave!=null and .components.magnus.host==.components.oathweave.host),ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,snapshotTool:$snapshotTool,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,nativeMigration:(.nativeMigration // null),dataTool:$dataTool,adminScript:$adminScript,reviewedLinks:$reviewedLinks,tokenDigest:$tokenDigest,tokenTtlSeconds:$tokenTtlSeconds,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]} + (if .external then {external:.external} else {} end) + (if $consoleClients!=null then {consoleClients:$consoleClients} else {} end)' "$HIVE_CONFIG") ||
+    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,memoryCredential:$memoryCredential,auditCollection:$auditCollection,magnusTrust:$magnusTrust,cindertrace:$cindertrace,magnusAgent:$magnusAgent,abortStep:$abortStep,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,magnusMemoryIdentity:(.components.magnus!=null and .components.hivemem!=null and .components.oathweave!=null and .components.magnus.host==.components.oathweave.host),ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,snapshotTool:$snapshotTool,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,nativeMigration:(.nativeMigration // null),dataTool:$dataTool,adminScript:$adminScript,reviewedLinks:$reviewedLinks,tokenDigest:$tokenDigest,tokenTtlSeconds:$tokenTtlSeconds,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]} + (if .external then {external:.external} else {} end) + (if $consoleClients!=null then {consoleClients:$consoleClients} else {} end) + (if $magnusNodeKeysOnly==true then {magnusNodeKeysOnly:true} else {} end)' "$HIVE_CONFIG") ||
     hive_die "The request for host $host could not be prepared"
   # A secret travels only in the payload, on standard input: it is read here from an owner-only
   # file, never placed in an argument.

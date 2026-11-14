@@ -27,7 +27,7 @@ hive_native_inputs() {
   HIVE_OPERATION=install
   HIVE_BOOTSTRAP_USERS=$(hive_release_selected .service.user)
   HIVE_BOOTSTRAP_IMAGES=$(hive_release_selected .image)
-  HIVE_BOOTSTRAP_INGRESS=$(base64 -w0 "$HIVE_ROOT/deployment/Caddyfile")
+  HIVE_BOOTSTRAP_INGRESS=$(hive_ingress_template)
   HIVE_NATIVE_DATA_TOOL=$(base64 -w0 "$HIVE_ROOT/scripts/suite/migrate-native-data.mjs")
   HIVE_NATIVE_ADMIN_SCRIPT=$(base64 -w0 "$HIVE_ROOT/scripts/suite/set-admin-password.sh")
   HIVE_NATIVE_LINKS=''

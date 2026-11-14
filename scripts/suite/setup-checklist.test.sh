@@ -164,3 +164,26 @@ refused 'older than 1.3.0' done first-admin
 refused 'older than 1.3.0' list
 "$ROOT/hive.sh" --help | grep -q 'setup \[list\] | setup done ID | setup skip ID' || fail 'Usage omits setup'
 printf 'Passed: hive.sh setup lists the checklist and settles one recorded item at a time.\n'
+
+# Magnus 3.0.0 or later accepts node keys only: an upgrade lists the node-key step, found done when
+# Magnus's fleet summary has no blockers, and nothing changes for a release pinning an older Magnus.
+node_ids() { HIVE_CONFIG=$full HIVE_VERSION=3.9.0 hive_checklist_items upgrade null 3.8.1 false "$1" | jq -c 'map(select(.id=="magnus-node-keys"))|map([.id,.status,.docs])'; }
+expect "$(node_ids absent)" '[]' 'Node keys before Magnus 3'
+expect "$(node_ids blocked)" '[["magnus-node-keys","pending","UPGRADING.md#magnus-300-node-keys-only"]]' 'Node keys with blockers'
+expect "$(node_ids unknown)" '[["magnus-node-keys","pending","UPGRADING.md#magnus-300-node-keys-only"]]' 'Node keys not readable'
+expect "$(node_ids ready)" '[["magnus-node-keys","done","UPGRADING.md#magnus-300-node-keys-only"]]' 'Node keys without blockers'
+expect "$(HIVE_CONFIG=$full hive_checklist_items install null '' false ready | jq -c 'map(select(.id=="magnus-node-keys"))')" '[]' 'Node keys on a fresh install'
+# Which readiness the controller finds: from the summary of a Magnus it runs, for a 3.x pin only.
+jq -n '{components:{magnus:{version:"3.0.0"}}}' > "$temporary/magnus3.json"; jq -n '{components:{magnus:{version:"2.10.2"}}}' > "$temporary/magnus2.json"
+summary_fixture=''
+hive_magnus_node_summary() { [[ -n "$summary_fixture" ]] && printf '%s\n' "$summary_fixture"; }
+node_keys() { HIVE_CONFIG=$1 HIVE_MANIFEST=$2 hive_checklist_node_keys; }
+summary_fixture='{"supported":true,"mode":"compat","modeDeprecated":true,"enforceReady":false,"blockers":[{"code":"NODES_WITHOUT_KEY","count":2}]}'
+expect "$(node_keys "$full" "$temporary/magnus2.json")" absent 'A Magnus 2 pin'
+expect "$(node_keys "$core" "$temporary/magnus3.json")" absent 'No Magnus of its own'
+expect "$(node_keys "$full" "$temporary/magnus3.json")" blocked 'A summary with blockers'
+summary_fixture='{"supported":true,"mode":"enforce","modeDeprecated":false,"enforceReady":true,"blockers":[]}'
+expect "$(node_keys "$full" "$temporary/magnus3.json")" ready 'A summary without blockers'
+summary_fixture=''
+expect "$(node_keys "$full" "$temporary/magnus3.json")" unknown 'No summary'
+printf 'Passed: the Magnus node-key step for releases pinning Magnus 3.0.0 or later.\n'

@@ -275,7 +275,11 @@ Full-node enrollment is a separate authorization through `magnus-agent enroll`; 
 must not enable commands, cron or web terminals on an intentionally limited node. See
 [Magnus host agents](FULL.md#magnus-host-agents) for enrollment review and other hosts.
 An updated agent is not re-enrolled for its node key either: with a Magnus that has per-node
-credentials it binds its own key automatically; see [node keys](FULL.md#node-keys).
+credentials it binds its own key automatically; see [node keys](FULL.md#node-keys). From a
+release that pins Magnus 3.0.0 or later, which accepts node keys only, an agent that already has a
+key keeps it, an agent without one is enrolled with a one-time token, and no fleet-wide node secret
+is copied to agents; `./hive.sh post-upgrade` then lists any blockers from Magnus's fleet summary
+(see [Upgrading](../UPGRADING.md#magnus-300-node-keys-only)).
 
 Update Ardent packages in HiveXUI under Magnus > Ardent > Installations: stop running profiles,
 choose Update package, then start them again, and record it with
@@ -336,8 +340,9 @@ the host's SSH key so a terminal opens at once:
 It asks before installing Node.js 24 from NodeSource when the host has no suitable Node.js, and
 asks for your sudo password, as the agent runs as a root service. With a Magnus that has per-node
 credentials, the new agent also gets its own node key with a one-time enrollment token, and the
-command ends by printing the key's fingerprint. See
-[installing the agent](FULL.md#installing-the-agent).
+command ends by printing the key's fingerprint. With Magnus 3.0.0 or later the token is the only
+way in: the agent gets no fleet-wide node secret, and the command stops before changing anything
+when no token can be issued. See [installing the agent](FULL.md#installing-the-agent).
 
 ## Firewall and ports
 
