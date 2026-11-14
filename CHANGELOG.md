@@ -24,6 +24,12 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Security
 
+- PostgreSQL runtime images `hive-postgres` 17.12-2 and 18.7-2 with libxslt 1.1.45-r8, which fixes
+  CVE-2026-9947 and CVE-2026-87636 (HIGH) in the 1.1.45-r6 of 17.12-1 and 18.7-1. The new
+  `runtime-2026-11-pg1712-xslt` datastore profile selects them; the PostgreSQL versions, collation
+  receipt and storage formats are those of `runtime-2026-11-pg1712`, so an upgrade replaces only the
+  images. Suite releases after 3.7.0 can no longer select `runtime-2026-11-pg1712`. See
+  [the advisory record](docs/ADVISORY_REMEDIATION.md#postgresql-libxslt-1145-r8-2026-11-14).
 - The ingress sends every product exactly one forwarded client address, the one it resolved, on
   every route (`deployment/Caddyfile`). This was already the effective behaviour with the default
   settings; it is now explicit and holds when the ingress itself is behind another proxy.

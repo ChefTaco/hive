@@ -244,3 +244,17 @@ signed manifests are not rewritten; releases after 3.6.1 cannot select the super
 
 The [native acceptance record](acceptance/2026-11-13-postgres-1712-187.json) retains the exact
 published image digests, their publish workflows and the signed 3.7.0 full-policy result.
+
+## PostgreSQL libxslt 1.1.45-r8, 2026-11-14
+
+The full-policy gate for suite 3.8.0 refused the unchanged `hive-postgres` 17.12-1 and 18.7-1
+images on both architectures: the vulnerability database now reports CVE-2026-9947 and
+CVE-2026-87636 (HIGH) in Wolfi's libxslt 1.1.45-r6, fixed in 1.1.45-r7. These are the libxslt
+identifiers HiveXUI 0.2.6 remediated in Alpine's package; Wolfi's fix arrived later. No exception
+is accepted. New `hive-postgres` 17.12-2 and 18.7-2 tags pin libxslt and libxslt-dev 1.1.45-r8 on
+the same digest-pinned base, PostgreSQL sources, ICU and libxml2. The native image checks run the
+real xml2 XSLT transform, recovery, collation, checksum and backup checks, and start data written by
+17.12-1 and 18.7-1 directly. The majors and collation-runtime identity are unchanged, so the
+`runtime-2026-11-pg1712-xslt` profile keeps every storage format and an upgrade from
+`runtime-2026-11-pg1712` replaces only the images. Earlier tags and signed manifests are not
+rewritten; releases after 3.7.0 cannot select the superseded profile.
