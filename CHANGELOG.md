@@ -6,6 +6,18 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.8.1] - 2026-11-14
+
+### Fixed
+
+- Magnus, its fleet gateway and agent 2.10.2. A 2.10.0 agent with a node key refused every signed
+  managed request from the server on an enrolled node as a replay, which blocked agent upgrades and
+  other managed changes of that node; 2.10.2 authenticates each request once and reaches 2.10.0
+  and 2.10.1 agents with a key without upgrading them first. It also includes 2.10.1's Hermes
+  health check, which no longer waits on a slow version probe. Every other pin, the datastore
+  profile, the storage recovery profile and the controller are unchanged from 3.8.0. Magnus
+  2.10.1 and 2.10.2 add no migrations, so an upgrade from 3.8.0 needs no flag.
+
 ## [3.8.0] - 2026-11-14
 
 ### Changed
