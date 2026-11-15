@@ -109,6 +109,8 @@ hive_lifecycle() {
       hive_all complete || hive_hold
       if [[ "$operation" == install ]]; then hive_install_summary; fi
       hive_checklist_report
+      # Only once the upgrade completed on every host: its archive is now the installed release's.
+      if [[ "$operation" == upgrade ]] && declare -F hive_retention_after_upgrade >/dev/null; then hive_retention_after_upgrade; fi
       ;;
     backup)
       HIVE_ARCHIVE=${HIVE_ARCHIVE:-"backup-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 4)"}

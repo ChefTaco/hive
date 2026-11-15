@@ -429,7 +429,7 @@ snapshot_space() {
   [[ "$data" =~ ^[0-9]+$ ]] || die 'The data directory size could not be read'
   need=$(( data * 3 + minimum * 1024 ))
   free=$(df -Pk -- "$directory/backups" | awk 'NR==2 {print $4}')
-  ((free >= need)) || die "Online backup needs $((need / 1024)) MiB free for its snapshot and archive; $((free / 1024)) MiB are available. Nothing was changed"
+  ((free >= need)) || die "Online backup needs $((need / 1024)) MiB free for its snapshot and archive; $((free / 1024)) MiB are available. Nothing was changed; ./hive.sh backups prune lists old backups and rehearsals that can go"
   if [[ $(stat -c %d "$directory/data") != $(stat -c %d "$directory/backups") ]]; then
     free=$(df -Pk -- "$directory/data" | awk 'NR==2 {print $4}')
     ((free >= data + minimum * 1024)) || die "Online backup needs $(((data + minimum * 1024) / 1024)) MiB free beside the data for store snapshots. Nothing was changed"
