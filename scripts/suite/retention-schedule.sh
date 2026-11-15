@@ -240,7 +240,10 @@ hive_retention_schedule_run() (
   config=$(hive_retention_schedule_config) || hive_die 'The installation file cannot be resolved'
   digest=$(hive_controller_digest)
   printf '%s scheduled prune start: installation %s, %s, controller %s (%s)\n' "$(date -u +%FT%TZ)" "$(jq -r .installation "$HIVE_CONFIG")" "$config" "$(realpath -e -- "$HIVE_ROOT/hive.sh")" "${digest:0:12}"
-  if HIVE_RETENTION_APPLY=true HIVE_RETENTION_KEEP='' HIVE_RETENTION_KEEP_DAYS='' HIVE_RETENTION_CONTROLLER=$digest HIVE_RETENTION_TRIGGER=schedule \
+  # A schedule is single-host only (enable refuses otherwise); a line left from before is refused
+  # before any host is contacted. backups prune --apply releases copies there by hand.
+  if ! hive_retention_writable; then status=1
+  elif HIVE_RETENTION_APPLY=true HIVE_RETENTION_KEEP='' HIVE_RETENTION_KEEP_DAYS='' HIVE_RETENTION_KEEP_FULL='' HIVE_RETENTION_CONTROLLER=$digest HIVE_RETENTION_TRIGGER=schedule \
       hive_backups_command prune; then status=0; else status=$?; fi
   if ((status == 0)); then
     printf '%s scheduled prune end: succeeded\n' "$(date -u +%FT%TZ)"
@@ -253,8 +256,8 @@ hive_retention_schedule_run() (
 hive_retention_schedule_command() {
   local subcommand=${1:-status}
   (($# <= 1)) || hive_die "$hive_retention_schedule_usage"
-  [[ -z "${HIVE_RETENTION_KEEP:-}${HIVE_RETENTION_KEEP_DAYS:-}" && "${HIVE_RETENTION_APPLY:-false}" != true ]] ||
-    hive_die 'backups schedule uses the installation file'"'"'s retention settings; --keep, --keep-days and --apply apply only to backups prune'
+  [[ -z "${HIVE_RETENTION_KEEP:-}${HIVE_RETENTION_KEEP_DAYS:-}${HIVE_RETENTION_KEEP_FULL:-}" && "${HIVE_RETENTION_APPLY:-false}" != true ]] ||
+    hive_die 'backups schedule uses the installation file'"'"'s retention settings; --keep, --keep-days, --keep-full and --apply apply only to backups prune'
   [[ -z "${HIVE_RETENTION_AT:-}" || "$subcommand" == enable ]] || hive_die '--at applies only to backups schedule enable'
   case "$subcommand" in
     enable) hive_retention_schedule_enable;;

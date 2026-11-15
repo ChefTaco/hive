@@ -232,7 +232,9 @@ multi_host_change() (
   jq '.retention={auto:true}' "$HIVE_CONFIG" > "$multi/next.json"; mv "$multi/next.json" "$HIVE_CONFIG"
   hive_retention_after_upgrade > "$multi/upgrade" 2>&1 || exit 1
   grep -q 'Multi-host backup pruning is disabled' "$multi/upgrade" || exit 1
-  [[ ! -e "$multi/actions" ]] || { printf 'Multi-host manual or automatic pruning contacted a host\n' >&2; exit 1; }
+  # A multi-host prune --apply reads each host and may release restored copies; it never asks a
+  # host to remove a pair.
+  ! grep -q 'retention-apply' "$multi/actions" 2>/dev/null || { printf 'Multi-host manual or automatic pruning asked a host to remove a pair\n' >&2; exit 1; }
   for host in a b; do
     if [[ ! -f "$multi/$host/backups/old/state.tar.gz" || ! -f "$multi/$host/rehearsals/old/result.json" ]]; then
       printf 'Unsafe retention: %s on host %s after %s changed on host %s\n' old "$host" "$change" "$changed" >&2
@@ -336,6 +338,105 @@ grep -q 'Removed 5 entries' "$temporary/after.log" || { cat "$temporary/after.lo
 [[ ! -e "$directory/backups/pre-failed" && ! -e "$directory/rehearsals/pre-30" && -d "$directory/backups/pre-29" ]] || fail 'Retention after the upgrade removed the wrong entries'
 jq -e '.trigger=="upgrade" and .keep==3 and .keepDays==30' "$directory"/retention/prune-*.json >/dev/null || fail 'The upgrade audit record is wrong'
 printf 'Passed: retention preserves protected archives, removes single-host pairs only with explicit apply or automatic opt-in, records each prune, and refuses every multi-host write before contacting a host despite late protection changes.\n'
+
+# ---- Restored copies: a passed rehearsal keeps its evidence and gives up its copy; only the newest
+# --keep-full keep theirs. The pair stays, and stays restorable. ----
+copy_rehearsal() { # BASE HOST NAME DAYS
+  local base=$1 host=$2 name=$3 restored="$1/rehearsals/$3" sha
+  mkdir -p "$base/backups/$name" "$restored/data/store" "$restored/config"
+  printf 'archive %s\n' "$name" > "$base/backups/$name/state.tar.gz"
+  sha=$(sha256sum "$base/backups/$name/state.tar.gz" | cut -d ' ' -f1)
+  jq -n --arg sha "$sha" --arg host "$host" '{schema:1,uuid:"fixture-uuid",installation:"example-suite",host:$host,sha256:$sha,verified:true}' > "$base/backups/$name/receipt.json"
+  head -c 262144 /dev/zero > "$restored/data/store/file"; printf 'SECRET=fixture-only\n' > "$restored/config/store.env"
+  jq -n --arg sha "$sha" '{schema:1,result:"passed",archiveSHA256:$sha,installationUUID:"fixture-uuid",candidatePlan:("c"*64),isolated:true,portsPublished:false}' > "$restored/result.json"
+  jq -n --arg base "$restored" --arg name "rehearsal-example-suite-$host-$name" '{name:$name,services:{store:{image:"example.com/store:1",environment:{HIVE_REHEARSAL:"true"},volumes:[{type:"bind",source:($base+"/data/store"),target:"/data"}],env_file:[($base+"/config/store.env")]}},networks:{default:{internal:true,driver:"bridge"}}}' > "$restored/isolated.json"
+  jq -n --arg sha "$sha" --arg spec "$(sha256sum "$restored/isolated.json" | cut -d ' ' -f1)" '{schema:1,installationUUID:"fixture-uuid",archiveSHA256:$sha,composeSHA256:$spec,resourcesReleased:true,releasedAt:"2026-01-01T00:00:00Z",evidenceDirectory:"resource-evidence.fixture"}' > "$restored/resources-released.json"
+  mkdir -p "$restored/resource-evidence.fixture"; printf 'log\n' > "$restored/resource-evidence.fixture/container-output.log"
+  touch -d "$(ago "$4")" "$base/backups/$name/receipt.json" "$restored/result.json"
+}
+copies_fixture() {
+  rm -rf -- "$directory"; mkdir -p "$directory/backups" "$directory/rehearsals" "$directory/rehearsal-history"
+  printf '{"schema":1,"installation":"example-suite","host":"control","uuid":"fixture-uuid"}\n' > "$directory/installation.json"
+  jq -n --arg plan "$current_plan" '{schema:1,installation:"example-suite",host:"control",version:"0.1.0",plan:$plan}' > "$directory/receipt.json"
+  jq -n --arg plan "$current_plan" '{schema:1,plan:$plan,phase:"complete",version:"0.1.0",operation:"upgrade"}' > "$directory/transaction.json"
+  for item in c1:3 c2:2 c3:1; do copy_rehearsal "$directory" control "${item%:*}" "${item#*:}"; done
+}
+releases() { awk '$1=="release" {print $2}' "$1" | sort | paste -sd' '; }
+copies_fixture; before=$(snapshot)
+hive prune > "$temporary/copies-dry" 2>&1 || { cat "$temporary/copies-dry" >&2; fail 'The copy dry run failed'; }
+[[ $(releases "$temporary/copies-dry") == 'c1 c2' && -z $(removals "$temporary/copies-dry") ]] || { cat "$temporary/copies-dry" >&2; fail 'The dry run releases the wrong copies'; }
+grep -E '^  release +c1 +restorable ' "$temporary/copies-dry" | grep -qE 'release copy, frees [0-9]+ KiB; evidence and backup kept; pair kept: ' || { cat "$temporary/copies-dry" >&2; fail 'A release line does not say what it frees'; }
+grep -q '^Dry run: 2 restored copies would be released, freeing .*Nothing was released' "$temporary/copies-dry" || { cat "$temporary/copies-dry" >&2; fail 'The dry run does not total the copies'; }
+[[ $(snapshot) == "$before" ]] && [[ -f "$directory/rehearsals/c1/data/store/file" ]] || fail 'The copy dry run changed the host'
+hive list > "$temporary/copies-list" 2>&1 || fail 'backups list failed'
+reason c3 'newest full restored copy' "$temporary/copies-list"
+grep -q 'They also release 2 restored copies' "$temporary/copies-list" || fail 'backups list does not mention the copies'
+hive prune --keep-full 2 > "$temporary/copies-two" 2>&1 || fail 'keep-full 2 failed'
+[[ $(releases "$temporary/copies-two") == c1 ]] || { cat "$temporary/copies-two" >&2; fail 'keep-full 2 releases the wrong copies'; }
+grep -q 'prune --keep-full 2 --apply' "$temporary/copies-two" || fail 'The apply hint drops --keep-full'
+refused '--keep-full is the number' hive prune --keep-full 0
+refused '--keep-full applies only to backups prune' "$ROOT/hive.sh" status --keep-full 2 --config "$temporary/config.json"
+refused '--keep-full and --apply apply only to backups prune' hive schedule status --keep-full 2
+hive prune --apply > "$temporary/copies-apply" 2>&1 || { cat "$temporary/copies-apply" >&2; fail 'Releasing copies failed'; }
+grep -q '^Released 2 restored copies, freeing ' "$temporary/copies-apply" || { cat "$temporary/copies-apply" >&2; fail 'The release was not reported'; }
+for name in c1 c2; do
+  [[ ! -e "$directory/rehearsals/$name/data" && ! -e "$directory/rehearsals/$name/config" && -f "$directory/rehearsals/$name/result.json" && -f "$directory/backups/$name/state.tar.gz" ]] || fail "$name was not released to its evidence"
+  jq -e '.trigger=="prune" and (.released|sort)==["config","data"] and (.controllerSourceSHA256|test("^[a-f0-9]{64}$"))' "$directory/rehearsals/$name/copy-released.json" >/dev/null || { cat "$directory/rehearsals/$name/copy-released.json" >&2; fail "$name record is wrong"; }
+done
+[[ -f "$directory/rehearsals/c3/data/store/file" ]] || fail 'The newest full copy was released'
+records=("$directory"/retention/release-*.json)
+((${#records[@]} == 1)) && jq -e '.trigger=="prune" and .keepFull==1 and (.releasedCopies|map(.name)|sort)==["c1","c2"] and .freedBytes>0 and .backupsKept' "${records[0]}" >/dev/null || fail 'The release audit record is wrong'
+[[ ! -e "$directory/retention" || -z $(find "$directory/retention" -name 'prune-*.json' -print -quit) ]] || fail 'A copy release wrote a removal record'
+hive list > "$temporary/copies-after" 2>&1 || fail 'backups list after release failed'
+grep -E '^  keep +c1 +restorable ' "$temporary/copies-after" | grep -q "restored copy released $(date -u +%F); evidence kept" || { cat "$temporary/copies-after" >&2; fail 'backups list does not show the released copy'; }
+(
+  source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/retention.sh"
+  HIVE_CONFIG=$temporary/config.json HIVE_ROOT=$ROOT HIVE_VERSION=0.1.0 HIVE_ID=example-suite
+  plans=$(hive_retention_plans "$(hive_retention_input 5 14 1)")
+  jq -e '.[0].entries | (map(select(.name=="c1"))[0] | .kind=="restorable" and .copyReleased==true and (.copyReleasedAt|test("^20")) and .rehearsalKiB<200) and (map(select(.name=="c3"))[0] | .copyReleased==false and .copyReleasedAt==null)' <<< "$plans" >/dev/null
+) || fail 'The inventory does not report copyReleased'
+hive prune --apply > "$temporary/copies-again" 2>&1 && grep -q '^Nothing to remove' "$temporary/copies-again" || { cat "$temporary/copies-again" >&2; fail 'A repeated release found more'; }
+# The scheduled run is backups prune --apply with the installation's settings.
+copies_fixture
+( source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/retention.sh"; source "$ROOT/scripts/suite/retention-schedule.sh"
+  HIVE_CONFIG=$temporary/config.json HIVE_ROOT=$ROOT HIVE_VERSION=0.1.0 HIVE_ID=example-suite HIVE_RETENTION_APPLY=true HIVE_RETENTION_TRIGGER=schedule hive_backups_command prune ) > "$temporary/copies-schedule" 2>&1 || { cat "$temporary/copies-schedule" >&2; fail 'The scheduled release failed'; }
+jq -e '.trigger=="schedule"' "$directory/rehearsals/c1/copy-released.json" >/dev/null || fail 'The scheduled release was not recorded as such'
+# A copy whose containers were never released, or that still has containers, keeps its copy.
+copies_fixture; rm "$directory/rehearsals/c1/resources-released.json"
+hive prune > "$temporary/copies-held" 2>&1 || fail 'The held dry run failed'
+[[ $(releases "$temporary/copies-held") == c2 ]] || { cat "$temporary/copies-held" >&2; fail 'A rehearsal without released resources was planned for release'; }
+hive list > "$temporary/copies-held" 2>&1; reason c1 'resources-released.json is missing' "$temporary/copies-held"
+
+# Several hosts: --apply releases copies on each host, and still removes no pair.
+multi_copies() (
+  source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/retention.sh"
+  local copies_dir="$temporary/multi-copies" host status=0
+  rm -rf -- "$copies_dir"; mkdir -p "$copies_dir"
+  HIVE_CONFIG=$copies_dir/config.json HIVE_ROOT=$ROOT HIVE_VERSION=0.1.0 HIVE_ID=example-suite
+  jq -nc --arg base "$copies_dir" '{origin:"https://hive.example.com",hosts:{a:{target:"local",directory:($base+"/a")},b:{target:"local",directory:($base+"/b")}},components:{},agents:[],inference:[]}' > "$HIVE_CONFIG"
+  for host in a b; do
+    mkdir -p "$copies_dir/$host"
+    jq -nc --arg host "$host" '{installation:"example-suite",host:$host,uuid:"fixture-uuid"}' > "$copies_dir/$host/installation.json"
+    printf '{"version":"0.1.0"}\n' > "$copies_dir/$host/receipt.json"; printf '{"phase":"complete"}\n' > "$copies_dir/$host/transaction.json"
+    copy_rehearsal "$copies_dir/$host" "$host" old 30; copy_rehearsal "$copies_dir/$host" "$host" middle 20; copy_rehearsal "$copies_dir/$host" "$host" newest 10
+  done
+  hive_retention_action() {
+    printf '%s %s\n' "$1" "$2" >> "$copies_dir/actions"
+    HIVE_HOST_ACTION=$2 HIVE_RETENTION_INPUT=$3 hive_host "$1" "$(cat "$ROOT/scripts/suite/ownership-host.sh" "$ROOT/scripts/suite/rehearsal-copy-host.sh" "$ROOT/scripts/suite/retention-host.sh")"
+  }
+  HIVE_RETENTION_KEEP=2 HIVE_RETENTION_KEEP_DAYS=0 hive_backups_command prune > "$copies_dir/preview" 2>&1 || exit 1
+  grep -q 'Multi-host preview: 2 entries match' "$copies_dir/preview" && grep -q '4 restored copies, .* can be released' "$copies_dir/preview" || { cat "$copies_dir/preview" >&2; exit 1; }
+  if HIVE_RETENTION_KEEP=2 HIVE_RETENTION_KEEP_DAYS=0 HIVE_RETENTION_APPLY=true hive_backups_command prune > "$copies_dir/apply" 2>&1; then cat "$copies_dir/apply" >&2; exit 1; fi
+  grep -q 'Multi-host backup pruning is disabled' "$copies_dir/apply" && grep -q '^Released 4 restored copies' "$copies_dir/apply" || { cat "$copies_dir/apply" >&2; exit 1; }
+  grep -q 'retention-release' "$copies_dir/actions" && ! grep -q 'retention-apply' "$copies_dir/actions" || { printf 'A multi-host prune asked a host to remove a pair\n' >&2; exit 1; }
+  for host in a b; do
+    for name in old middle; do [[ -f "$copies_dir/$host/rehearsals/$name/copy-released.json" && ! -e "$copies_dir/$host/rehearsals/$name/data" ]] || { printf '%s on %s kept its copy\n' "$name" "$host" >&2; exit 1; }; done
+    [[ -f "$copies_dir/$host/rehearsals/newest/data/store/file" ]] || exit 1
+    [[ -f "$copies_dir/$host/backups/old/state.tar.gz" && -f "$copies_dir/$host/rehearsals/old/result.json" ]] || { printf 'A multi-host pair was removed\n' >&2; exit 1; }
+  done
+)
+multi_copies || fail 'A multi-host prune did not release copies only'
+printf 'Passed: restored copies are listed with what they free, released only with --apply or the schedule, keep the newest --keep-full, are recorded, and are released on multi-host installations while pair removal stays refused.\n'
 
 # The daily prune (backups schedule) has its own fixture: fake crontab and ssh.
 bash "$ROOT/scripts/suite/retention-schedule.test.sh"

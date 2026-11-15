@@ -278,12 +278,17 @@ never replayed: the product's migration outcome is unknown and needs its own rec
 **Start fresh** only when every host's phase is `complete` or `aborted`. Never edit
 `transaction.json` by hand.
 
-Finished isolated rehearsals release their stopped containers and networks, retaining restored
-files, receipts and protected diagnostics. Staging also cleans verified leftovers from earlier
-controllers before downtime. A repeated rehearsal preserves the finished prior attempt under
-`rehearsal-history/` and restores a fresh copy; incomplete or unverified attempts require review.
-`hive.sh backups prune` removes old backup and rehearsal pairs together, as a dry run unless
-`--apply` is given, on single-host installations; a successful upgrade runs it only when the
+Finished isolated rehearsals release their stopped containers and networks, retaining receipts
+and protected diagnostics. Staging also cleans verified leftovers from earlier controllers before
+downtime. Only the newest passed rehearsal keeps its full restored copy: each rehearse step first
+releases the restored files of earlier passed rehearsals (their data, configuration and release
+copies), keeping their result, isolated Compose definition and diagnostics, so their backups stay
+restorable. Failed and incomplete rehearsals keep everything. See
+[restored copies](BACKUPS.md#restored-copies). A repeated rehearsal preserves the finished prior
+attempt under `rehearsal-history/` and restores a fresh copy; incomplete or unverified attempts
+require review.
+`hive.sh backups prune` removes old backup and rehearsal pairs together and releases older restored
+copies, as a dry run unless `--apply` is given; it removes pairs only on single-host installations; a successful upgrade runs it only when the
 installation opts in, and `hive.sh backups schedule enable` runs it every day; see
 [retention](BACKUPS.md#retention).
 

@@ -285,10 +285,9 @@ transaction for recovery; a watchdog started with each pause also resumes it wit
 ## Retention
 
 Every upgrade and rollback keeps its pre-change backup in `backups/ID` and the rehearsal that
-restored it in `rehearsals/ID`. A rehearsal is a complete restored copy of the installation, so it
-is usually many times the size of its compressed backup, and `restore` accepts an archive only
-while its passed rehearsal is there: the two are one restore point. `hive.sh backups` manages
-them on every host of the installation:
+restored it in `rehearsals/ID`. `restore` accepts an archive only while its passed rehearsal is
+there: the two are one restore point. `hive.sh backups` manages them on every host of the
+installation:
 
 ```bash
 ./hive.sh backups list                                     # every entry, and why it stays
@@ -296,19 +295,81 @@ them on every host of the installation:
 ./hive.sh backups prune --keep 5 --keep-days 14 --apply    # remove it
 ```
 
-`prune` is a dry run unless `--apply` is given. It prints each entry it would remove and the space
-that frees, and removes nothing. On a single-host installation, `--apply` removes the eligible
-entries and prints each one. Automatic pruning is off by default; from 3.9.4 a single-host
+### Restored copies
+
+A rehearsal restores the whole backup into `rehearsals/ID` and runs the candidate release on it,
+so while it runs it is a complete restored copy of the installation: usually many times the size
+of its compressed backup. Once it has passed and its containers are gone, nothing reads that copy
+again. A restore check reads only the rehearsal's `result.json`, and `restore` extracts the backup
+archive afresh. So only the newest passed rehearsal keeps its full copy. The others **release**
+it, from suite 3.9.5, and keep their evidence:
+
+- **Released:** `data/`, `config/` (which holds copies of every secret environment file),
+  `releases/`, `agents/`, `agent-profiles/`, `native-profiles/` and leftover integrity scratch
+  directories.
+- **Kept, byte for byte:**
+  - `result.json`, `isolated.json`, `resources-released.json` and the `resource-evidence.*`
+    container logs and states;
+  - `compose.json`, `receipt.json`, `installation.json` and `data-formats.json`;
+  - the schema-upgrade and manifest records;
+  - anything else a later release adds.
+- **Added:** an owner-only `copy-released.json`. It records:
+  - the installation, the archive's SHA-256 and the digests of `isolated.json` and `result.json`;
+  - what was released and its size, when, by which trigger (`rehearse`, `prune` or `schedule`),
+    and with which release and controller.
+
+Nothing about the restore point changes. The backup stays restorable, by this controller and by
+every earlier one since 2.4.0, because their stage housekeeping accepts a rehearsal whose
+`resources-released.json` matches its `isolated.json`. To inspect a full copy again, rehearse
+the backup once more: `./hive.sh rehearse --archive ID`. That retains the previous attempt in
+`rehearsal-history/ID` and makes the new rehearsal the newest full copy.
+
+The copies are released in two places:
+
+- **Each rehearse step.** This covers `hive.sh rehearse` and the rehearsal inside every upgrade
+  and rollback. Before it extracts its own copy, the step releases the copies of every earlier
+  passed rehearsal and of superseded attempts in `rehearsal-history/`, so the disk never holds
+  both. This is best effort: a copy that cannot be released is reported, kept, and retried by
+  the next prune; it never fails the step.
+- **`backups prune`.** It lists each copy it would release as `release`, with the space that
+  frees. `--apply` and the daily prune release them, keeping the newest `--keep-full N` (default
+  1, from 1 to 1000). This covers rehearsals made before 3.9.5. `--keep-full` is a command-line
+  option only: the installation file has no key for it, because older controllers refuse unknown
+  `retention` keys. `backups list` shows a released copy as `restored copy released DATE;
+  evidence kept`, with its small size, and its kind stays `restorable`.
+
+A copy is never released from:
+
+- a failed or incomplete rehearsal: those copies are evidence;
+- a rehearsal whose container resources are not released yet (no matching
+  `resources-released.json`; the next upgrade's staging releases them first), or whose
+  containers still exist;
+- a rehearsal with a symlink in its path or among the released directories;
+- a rehearsal whose backup no longer verifies;
+- any rehearsal while another command holds the controller lock, or while a transaction is open,
+  except the rehearse step's own.
+
+A release moves the directories into `rehearsals/ID/.releasing.*` on the same file system, writes
+`copy-released.json`, then deletes them. An interrupted release is finished by the next one.
+Releasing a copy changes no backup, so it also runs on an installation with several hosts. There,
+`prune --apply` releases copies on each host under that host's lock, and pair removal stays
+refused (below).
+
+`prune` is a dry run unless `--apply` is given. It prints each entry it would remove, each restored
+copy it would release, and the space that frees, and changes nothing. On a single-host
+installation, `--apply` removes the eligible entries, releases the copies and prints each one. Automatic pruning is off by default; from 3.9.4 a single-host
 installation can [prune every day](#daily-pruning).
 Each run uses one private snapshot of its installation configuration through planning and
 deletion; edits to the operator's configuration file take effect on the next command.
 
-**Several hosts.** `list` and dry runs are available, but `--apply` and automatic pruning are
-disabled for installations with more than one host. The current controller cannot hold every
+**Several hosts.** `list` and dry runs are available, but pair removal by `--apply` and automatic
+pruning are disabled for installations with more than one host. There `--apply` only releases
+[restored copies](#restored-copies), which keeps every backup restorable, and then exits with the
+same refusal for the pairs the rules match. The current controller cannot hold every
 host's lock continuously from selection through deletion. Another controller could protect an
 archive on one host after the plan was read, leaving an incomplete restore point if its
-counterpart were deleted elsewhere. Destructive pruning refuses before contacting any host;
-an explicit `"auto": true` does not override this protection.
+counterpart were deleted elsewhere. Pair removal is never requested from any host; an explicit
+`"auto": true` does not override this protection.
 
 **What stays.** Retention keeps the union of:
 
@@ -366,7 +427,8 @@ for example for a rollback.
 
 **Records and other copies.** Each host records every prune that removed something in
 `retention/prune-TIME-ID.json` in its installation directory: when, what triggered it, the
-settings, and each removed archive with its kind, time, SHA-256 and size. Retention only removes
+settings, and each removed archive with its kind, time, SHA-256 and size. A prune that released
+restored copies records them in `retention/release-TIME-ID.json`. Retention only removes
 entries under the host's `backups/`, `rehearsals/` and `rehearsal-history/`. Copies kept elsewhere,
 on another machine or by your own backup job, are never touched; use the record's names and
 digests to reconcile them.
@@ -398,7 +460,8 @@ the `PATH` that controller had, so cron finds the same `jq`, `ssh` and `flock`. 
 controller machine's local time; choose one away from that installation's backups and upgrades.
 
 **Each run** is `backups prune --apply` with the installation file's `keep` and `keepDays`
-(defaults 5 and 14); `--keep`, `--keep-days` and `--at` are refused. It needs no terminal: an SSH
+(defaults 5 and 14) and one full restored copy; `--keep`, `--keep-days`, `--keep-full` and `--at`
+are refused. It needs no terminal: an SSH
 host uses the configuration's `sshConfig` and `sudoPasswordFile`, as every other command does. It
 takes each host's controller lock and refuses, removing nothing, while another command holds it,
 while a transaction is open, and unless the host's `receipt.json` names this controller's digest
@@ -408,7 +471,7 @@ different code. Each run appends a start line and an end line, each with its UTC
 outcome (`succeeded`, or `refused or failed` with its exit status), and the prune's own output to
 `$XDG_STATE_HOME/hive/INSTALLATION/retention-schedule.log` (by default under
 `~/.local/state/hive/`), which `enable` creates owner-only. Nothing secret is written there. A prune
-that removes something records it under `retention/` with the trigger `schedule`. A refused run
+that removes or releases something records it under `retention/` with the trigger `schedule`. A refused run
 is retried the next day.
 
 **Several hosts.** `enable` and every run refuse with the same message as `prune --apply`, before

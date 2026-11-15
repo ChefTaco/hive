@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Backup and rehearsal retention on one host, transported verbatim by the controller after
-# ownership-host.sh. Only JSON crosses the SSH boundary. retention-plan and retention-controller
-# read only; retention-apply removes, under the controller lock, only the names the controller
-# passes that this host still finds removable, and records what it removed under retention/.
+# ownership-host.sh and rehearsal-copy-host.sh. Only JSON crosses the SSH boundary.
+# retention-plan and retention-controller read only; retention-apply removes, under the
+# controller lock, only the names the controller passes that this host still finds removable, and
+# records what it removed under retention/. retention-release releases the restored copies of
+# passed rehearsals (rehearsal-copy-host.sh) for the names the controller passes, keeping the
+# newest keepFull; it never removes a backup or a rehearsal's evidence.
 set -Eeuo pipefail
 umask 077
 read -r input
@@ -23,7 +26,9 @@ jq -e --arg id "$installation" --arg host "$host" '.installation==$id and .host=
 identity=$(jq -er .uuid "$directory/installation.json")
 keep=$(jq -er '.retention.keep' <<< "$input")
 keep_days=$(jq -er '.retention.keepDays' <<< "$input")
-[[ "$keep" =~ ^[0-9]+$ && "$keep" -ge 2 && "$keep_days" =~ ^[0-9]+$ ]] || die 'Invalid retention settings'
+keep_full=$(jq -r '.retention.keepFull // 1' <<< "$input")
+[[ "$keep" =~ ^[0-9]+$ && "$keep" -ge 2 && "$keep_days" =~ ^[0-9]+$ && "$keep_full" =~ ^[0-9]+$ && "$keep_full" -ge 1 ]] || die 'Invalid retention settings'
+declare -F hive_rehearsal_copy_plan >/dev/null || die 'Rehearsal copy definitions are missing'
 name_pattern='^[a-zA-Z0-9][a-zA-Z0-9.-]{0,95}$'
 
 # A lifecycle step between two host actions (upgrade, rollback, backup, restore, rehearse)
@@ -66,7 +71,7 @@ current_plan=$(jq -r '.plan // empty' "$directory/receipt.json" 2>/dev/null || t
 
 # One JSON line per name in backups/, rehearsals/ and rehearsal-history/.
 inventory() {
-  local name backup rehearsal history created kind result sha plan uuid released receipt_ok restorable
+  local name backup rehearsal history created kind result sha plan uuid released receipt_ok restorable copy_released copy_at
   local -A names=()
   for name in "$directory"/backups/* "$directory"/rehearsals/* "$directory"/rehearsal-history/*; do
     [[ -e "$name" || -L "$name" ]] || continue
@@ -79,7 +84,7 @@ inventory() {
       jq -nc --arg name "$name" '{name:$name,kind:"unrecognised",createdAt:0,backupKiB:0,rehearsalKiB:0,historyKiB:0}'
       continue
     fi
-    receipt_ok=false sha='' result=none plan='' uuid='' released=false created=0 restorable=false
+    receipt_ok=false sha='' result=none plan='' uuid='' released=false created=0 restorable=false copy_released=false copy_at=''
     if [[ -d "$backup" ]]; then
       if [[ -f "$backup/receipt.json" && ! -L "$backup/receipt.json" ]] && jq -e --arg uuid "$identity" --arg id "$installation" --arg host "$host" \
         '.uuid==$uuid and .installation==$id and .host==$host and .verified==true and (.sha256|test("^[a-f0-9]{64}$"))' "$backup/receipt.json" >/dev/null 2>&1; then
@@ -93,6 +98,7 @@ inventory() {
         if [[ "$result" == passed && "$receipt_ok" == true ]] && jq -e --arg sha "$sha" --arg uuid "$identity" '.archiveSHA256==$sha and .installationUUID==$uuid and .isolated==true' "$rehearsal/result.json" >/dev/null; then restorable=true; else restorable=false; fi
       else result=incomplete; [[ -d "$backup" ]] || created=$(mtime "$rehearsal"); fi
       [[ ! -f "$rehearsal/resources-released.json" || -L "$rehearsal/resources-released.json" ]] || released=true
+      if hive_rehearsal_copy_record "$rehearsal"; then copy_released=true; copy_at=$(jq -r '.releasedAt // ""' "$rehearsal/copy-released.json"); fi
     fi
     if [[ ! -d "$backup" && ! -d "$rehearsal" ]]; then created=$(mtime "$history"); fi
     if [[ -d "$backup" && -d "$rehearsal" && "$result" == passed && "$restorable" == true ]]; then kind=restorable
@@ -104,9 +110,9 @@ inventory() {
     elif [[ -d "$rehearsal" ]]; then kind=orphan-rehearsal
     else kind=orphan-history; fi
     jq -nc --arg name "$name" --arg kind "$kind" --arg result "$result" --arg sha "$sha" --arg rehearsalSha "$(jq -r '.archiveSHA256 // ""' "$rehearsal/result.json" 2>/dev/null || true)" --arg plan "$plan" \
-      --argjson created "$created" --argjson released "$released" --argjson backupKiB "$( [[ -d "$backup" ]] && kib "$backup" || printf 0)" \
+      --argjson created "$created" --argjson released "$released" --argjson copyReleased "$copy_released" --arg copyReleasedAt "$copy_at" --argjson backupKiB "$( [[ -d "$backup" ]] && kib "$backup" || printf 0)" \
       --argjson rehearsalKiB "$( [[ -d "$rehearsal" ]] && kib "$rehearsal" || printf 0)" --argjson historyKiB "$( [[ -d "$history" ]] && kib "$history" || printf 0)" \
-      '{name:$name,kind:$kind,rehearsal:$result,backupSHA256:$sha,rehearsalArchiveSHA256:$rehearsalSha,candidatePlan:$plan,createdAt:$created,resourcesReleased:$released,backupKiB:$backupKiB,rehearsalKiB:$rehearsalKiB,historyKiB:$historyKiB}'
+      '{name:$name,kind:$kind,rehearsal:$result,backupSHA256:$sha,rehearsalArchiveSHA256:$rehearsalSha,candidatePlan:$plan,createdAt:$created,resourcesReleased:$released,copyReleased:$copyReleased,copyReleasedAt:(if $copyReleasedAt=="" then null else $copyReleasedAt end),backupKiB:$backupKiB,rehearsalKiB:$rehearsalKiB,historyKiB:$historyKiB}'
   done
 }
 
@@ -134,21 +140,6 @@ decide() {
       ]))'
 }
 
-# Rehearsal containers that still exist (for example after an interrupted rehearsal) keep it:
-# their bind mounts are its files. The next upgrade's staging releases them.
-containers_remain() {
-  local name=$1 rehearsal="$directory/rehearsals/$1" project
-  [[ -d "$rehearsal" ]] || return 1
-  if [[ -f "$rehearsal/isolated.json" && ! -L "$rehearsal/isolated.json" ]]; then
-    project=$(jq -r '.name // empty' "$rehearsal/isolated.json" 2>/dev/null || true)
-  fi
-  [[ -n "${project:-}" ]] || project="rehearsal-$installation-$host-$name"
-  project=$(tr 'A-Z' 'a-z' <<< "$project" | tr -cd 'a-z0-9_-')
-  command -v docker >/dev/null 2>&1 || return 0
-  local found; found=$(docker ps -aq --filter "label=com.docker.compose.project=$project" 2>/dev/null) || return 0
-  [[ -n "$found" ]]
-}
-
 plan_entries() {
   local entries line name
   entries=$(inventory | decide "$(date +%s)")
@@ -159,13 +150,20 @@ plan_entries() {
       entries=$(jq -c --arg name "$name" 'map(if .name==$name then .reasons+=["rehearsal containers still exist: the next upgrade releases them"] else . end)' <<< "$entries")
     fi
   done < <(jq -r '.[]|select((.reasons|length)==0 and (.kind|IN("restorable","failed","mismatched","orphan-rehearsal","orphan-history")))|.name' <<< "$entries")
-  jq -c 'map(.remove=((.reasons|length)==0 and (.kind|IN("restorable","failed","mismatched","orphan-rehearsal","orphan-history"))))|sort_by(.createdAt,.name)' <<< "$entries"
+  entries=$(jq -c 'map(.remove=((.reasons|length)==0 and (.kind|IN("restorable","failed","mismatched","orphan-rehearsal","orphan-history"))))|sort_by(.createdAt,.name)' <<< "$entries")
+  # Restored copies: releasing one never changes what is restorable, so it does not depend on the
+  # rules above. The controller releases copies only of entries that it does not remove.
+  jq -c --argjson copies "$(hive_rehearsal_copy_plan "$keep_full" | jq -sc .)" '
+    map(. as $e | ([$copies[]|select(.name==$e.name)]) as $mine |
+      .releaseCopy=([$mine[]|select(.release)]|length>0) |
+      .releaseCopyKiB=([$mine[]|select(.release)|.kib]|add // 0) |
+      .copyNote=([$mine[]|select(.release|not)|.reason|select(.!="")]|unique|join("; ")))' <<< "$entries"
 }
 
 report() {
   jq -c --arg host "$host" --arg directory "$directory" --argjson keep "$keep" --argjson days "$keep_days" --arg release "$(jq -r '.version // ""' "$directory/receipt.json" 2>/dev/null || true)" \
     --argjson free "$(df -Pk -- "$directory" | awk 'NR==2 {print $4}')" \
-    '{schema:1,host:$host,directory:$directory,release:$release,keep:$keep,keepDays:$days,freeKiB:$free,entries:.}'
+    --argjson keepFull "$keep_full" '{schema:1,host:$host,directory:$directory,release:$release,keep:$keep,keepDays:$days,keepFull:$keepFull,freeKiB:$free,entries:.}'
 }
 
 case "$action" in
@@ -201,6 +199,26 @@ case "$action" in
       chmod 600 "$record.tmp"; mv -T -- "$record.tmp" "$record"
     fi
     jq -c --argjson removed "$removed" '.removed=$removed' <<< "$(plan_entries | report)"
+    exit "$status";;
+  retention-release)
+    requested=$(jq -c '.retention.release // []' <<< "$input")
+    jq -e 'type=="array" and all(.[]; type=="string")' <<< "$requested" >/dev/null || die 'Invalid retention request'
+    trigger=$(jq -r '.retention.trigger // "prune"' <<< "$input")
+    [[ "$trigger" =~ ^(prune|schedule|upgrade)$ ]] || die 'Invalid retention trigger'
+    status=0
+    if results=$(hive_release_rehearsal_copies "$keep_full" "$trigger" false "$requested"); then :; else status=1; fi
+    [[ -n "$results" ]] || results='[]'
+    released=$(jq -c '[.[]|select(.status=="released")]' <<< "$results")
+    if [[ $(jq length <<< "$released") != 0 ]]; then
+      [[ ! -L "$directory/retention" ]] || die 'Unsafe retention record directory'
+      install -d -m 700 "$directory/retention"
+      record="$directory/retention/release-$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 4).json"
+      jq -n --argjson released "$released" --arg at "$(date -u +%FT%TZ)" --arg host "$host" --arg installation "$installation" --arg release "$(jq -r '.version // ""' "$directory/receipt.json" 2>/dev/null || true)" \
+        --arg trigger "$trigger" --argjson keepFull "$keep_full" \
+        '{schema:1,at:$at,trigger:$trigger,installation:$installation,host:$host,release:$release,keepFull:$keepFull,releasedCopies:$released,freedBytes:([$released[].releasedKiB]|add // 0|.*1024),backupsKept:true}' > "$record.tmp"
+      chmod 600 "$record.tmp"; mv -T -- "$record.tmp" "$record"
+    fi
+    jq -nc --arg host "$host" --argjson results "$results" '{host:$host,released:[$results[]|select(.status=="released")],refused:[$results[]|select(.status!="released" and .status!="already-released")]}'
     exit "$status";;
   *) die 'Unknown retention action';;
 esac

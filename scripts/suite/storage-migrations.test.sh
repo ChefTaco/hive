@@ -14,6 +14,7 @@ cat > "$temporary/bin/docker" <<'DOCKER'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 [[ $1 != run ]] || exit 0 # Integrity containers do not attach stdin.
+[[ $1 != ps ]] || exit 0 # No rehearsal containers remain.
 [[ $1 == compose && $2 == -f ]]
 file=$3; shift 3
 case $1 in
@@ -31,15 +32,16 @@ DOCKER
 chmod 700 "$temporary/bin/docker"
 export PATH="$temporary/bin:$PATH"
 script=''
-for file in ownership-host.sh public-runtime.sh integrity-host.sh input-artifacts-host.sh native-initialization-host.sh adapters-host.sh inference-registration.sh initialize-migrations-host.sh host-runtime.sh; do
+for file in ownership-host.sh public-runtime.sh integrity-host.sh input-artifacts-host.sh native-initialization-host.sh adapters-host.sh inference-registration.sh initialize-migrations-host.sh rehearsal-copy-host.sh host-runtime.sh; do
   script+=$(cat "$ROOT/scripts/suite/$file")$'\n'
 done
 plan=$(printf '%064d' 7)
 version=0.2.0
 host() {
   jq -nc --arg directory "$directory" --arg action "$1" --arg plan "$plan" --arg version "$version" --arg digest "$(printf '%064d' 2)" \
-    '{directory:$directory,installation:"example-suite",host:"control",action:$action,plan:$plan,version:$version,digest:$digest,archive:"archive",operation:"upgrade",allowMigrations:true,integrityScript:"ZXhwb3J0IHt9",agents:[],inference:[],placements:{}}' |
-    bash -c "$script" > "$temporary/host.log" 2>&1
+    --arg archive "${ARCHIVE:-archive}" --arg operation "${OPERATION:-upgrade}" \
+    '{directory:$directory,installation:"example-suite",host:"control",action:$action,plan:$plan,version:$version,digest:$digest,archive:$archive,operation:$operation,allowMigrations:true,integrityScript:"ZXhwb3J0IHt9",agents:[],inference:[],placements:{}}' |
+    bash -c "${HOST_SCRIPT:-$script}" > "$temporary/host.log" 2>&1
 }
 reset() {
   rm -rf -- "$directory"; rm -f "$temporary/migrated" "$temporary/consumed-"*
@@ -124,3 +126,55 @@ for corruption in data mode config empty-directory format receipt compose phase 
   unset RUNNING_STORAGE
 done
 printf 'Passed: isolated stdin runs every storage migration; uncertain outcomes never replay; unchanged failed rehearsals hand off with evidence and unsafe recovery fails closed.\n'
+
+# ---- Restored copies: the rehearse step releases earlier passed copies before it extracts; a
+# released rehearsal stays restorable, for this controller and for the 3.9.3 and 3.9.4 ones. ----
+plan=$(printf '%064d' 7); version=0.2.0
+reset
+host backup || { cat "$temporary/host.log" >&2; fail 'First backup failed'; }
+host rehearse || { cat "$temporary/host.log" >&2; fail 'First rehearsal failed'; }
+[[ -f "$directory/rehearsals/archive/data/alpha/state.txt" ]] || fail 'The first rehearsal has no full copy'
+before=$(cd "$directory/rehearsals/archive" && sha256sum result.json isolated.json resources-released.json compose.json receipt.json installation.json data-formats.json)
+rm -f "$temporary/migrated"
+ARCHIVE=second host backup || { cat "$temporary/host.log" >&2; fail 'Second backup failed'; }
+ARCHIVE=second host rehearse || { cat "$temporary/host.log" >&2; fail 'Second rehearsal failed'; }
+grep -q 'released 1 earlier restored rehearsal copies' "$temporary/host.log" || { cat "$temporary/host.log" >&2; fail 'The rehearse step did not report the released copy'; }
+for member in data config releases; do [[ ! -e "$directory/rehearsals/archive/$member" ]] || fail "The earlier rehearsal kept $member"; done
+[[ -f "$directory/rehearsals/second/data/alpha/state.txt" ]] || fail 'The new rehearsal is not a full copy'
+[[ $(cd "$directory/rehearsals/archive" && sha256sum result.json isolated.json resources-released.json compose.json receipt.json installation.json data-formats.json) == "$before" ]] || fail 'Releasing the copy changed its evidence'
+jq -e '.trigger=="rehearse" and .release=="0.2.0" and (.released|index("data")!=null)' "$directory/rehearsals/archive/copy-released.json" >/dev/null || fail 'The rehearse release record is wrong'
+host complete || fail 'The rehearsal transaction could not complete'
+compatible_script() { # VERSION: that release's host files
+  local file out=''
+  for file in ownership-host.sh public-runtime.sh integrity-host.sh input-artifacts-host.sh native-initialization-host.sh adapters-host.sh inference-registration.sh initialize-migrations-host.sh host-runtime.sh; do
+    out+=$(git -C "$ROOT" show "v$1:scripts/suite/$file")$'\n'
+  done
+  printf '%s' "$out"
+}
+reconcile() {
+  jq -nc --arg sha "$(jq -r .sha256 "$directory/backups/archive/receipt.json")" --arg data "$(cd "$directory/data" && find . -type f -print0 | sort -z | xargs -0 -r sha256sum --zero | sha256sum | cut -d ' ' -f1)" \
+    '{hosts:{control:{installationUUID:"fixture",archiveSHA256:$sha,currentDataSHA256:$data,subsequentWritesReconciled:true}}}' > "$directory/reconciliation.$plan.json"
+}
+# Stage housekeeping and the restore check of 3.9.3 and 3.9.4, which run on rollback to them.
+compatible=()
+for release in 3.9.3 3.9.4; do
+  if ! git -C "$ROOT" rev-parse -q --verify "v$release^{commit}" >/dev/null; then printf 'Skipped: the %s controller is not in this checkout\n' "$release"; continue; fi
+  compatible+=("$release")
+  (
+    source <(git -C "$ROOT" show "v$release:scripts/suite/host-runtime.sh" | sed -n '/^# Rehearsal resources /,/^# End rehearsal resources\./p')
+    digest() { sha256sum -- "$1" | cut -d ' ' -f1; }; atomic_json() { jq . > "$1"; }; die() { printf '%s\n' "$*" >&2; exit 1; }
+    identity=fixture installation=example-suite host=control
+    hive_cleanup_completed_rehearsals
+  ) || fail "The $release stage housekeeping refused a released copy"
+  reconcile
+  OPERATION=restore HOST_SCRIPT=$(compatible_script "$release") host restore-check || { cat "$temporary/host.log" >&2; fail "The $release restore check refused a released copy"; }
+done
+# This controller restores the released rehearsal's backup.
+reconcile
+OPERATION=restore host restore-check || { cat "$temporary/host.log" >&2; fail 'The restore check refused a released copy'; }
+OPERATION=restore host prepare || { cat "$temporary/host.log" >&2; fail 'Restore prepare failed'; }
+OPERATION=restore host quiesce || { cat "$temporary/host.log" >&2; fail 'Restore quiesce failed'; }
+printf 'later-write\n' >> "$directory/data/alpha/state.txt"; reconcile
+OPERATION=restore host restore || { cat "$temporary/host.log" >&2; fail 'Restoring a released rehearsal'"'"'s backup failed'; }
+[[ $(cat "$directory/data/alpha/state.txt") == retained ]] || fail 'The restore did not bring back the archived data'
+printf 'Passed: the rehearse step releases earlier restored copies with their evidence byte-exact; their backups restore, and the %s controllers accept them.\n' "${compatible[*]:-(none available)}"

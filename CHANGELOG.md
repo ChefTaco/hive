@@ -8,6 +8,22 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Only the newest passed rehearsal keeps its full restored copy of the installation.
+  - **The rehearse step:** before it extracts its own copy, each rehearse step releases the
+    restored files of earlier passed rehearsals and of superseded attempts. This covers
+    `hive.sh rehearse` and the rehearsal in every upgrade and rollback. The released files are
+    `data/`, `config/` (with its copies of secret environment files), `releases/`, `agents/`,
+    `agent-profiles/`, `native-profiles/` and scratch directories.
+  - **Evidence kept:** `result.json`, `isolated.json`, `resources-released.json` and the container
+    diagnostics stay byte for byte, and `copy-released.json` records what went. Backups stay
+    restorable by this and every earlier controller since 2.4.0.
+  - **Never released:** failed and incomplete rehearsals keep everything.
+  - **`backups prune`:** it lists each copy it would release (`release copy, frees X`), and
+    `--apply` and the daily prune release them, keeping the newest `--keep-full N` (default 1).
+    `backups list` shows a released copy as `restored copy released DATE; evidence kept`. A
+    multi-host `--apply` releases copies only; pair removal stays refused there.
+  - `./hive.sh rehearse --archive ID` rebuilds a full copy.
+
 - `restore --prepare-reconciliation` verifies a rehearsed archive, holds services, and prints
   current suite and native inventory digests for operator review before a destructive restore.
 - `backup --native-recovery FILE` explicitly reconciles an approved pre-capture native shutdown,
