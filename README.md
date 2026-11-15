@@ -55,21 +55,21 @@ certificate renewal, firewalls and managing the host from another machine.
 
 `--release latest` resolves GitHub’s latest published, non-prerelease suite release once, prints
 the exact version, and runs its tagged controller. To choose a version, use `./hive.sh --release
-3.9.5` instead. The launcher retains release checkouts under
+3.9.6` instead. The launcher retains release checkouts under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`; keep them for later commands and certificate
 renewal timers. It leaves the original checkout and current working directory unchanged. After
 setup, change to the printed release checkout for the lifecycle commands below; return to the
 original launcher checkout when selecting a new release with `--release latest`.
 
-For example, release 3.9.5 verifies `releases/3.9.5.json` against `releases/3.9.5.json.sig` with the publisher key
+For example, release 3.9.6 verifies `releases/3.9.6.json` against `releases/3.9.6.json.sig` with the publisher key
 in `trust/publisher.pub` before installing product resources, and refuses a manifest pinned to a different
 controller. The setup writes a protected installation file that the same commands accept
 unattended. Use the exact version setup reported for repeatable planning and applying
-(the following is an example for 3.9.5):
+(the following is an example for 3.9.6):
 
 ```bash
-./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.9.5
-./hive.sh install --config ~/.config/hive/ID/installation.json --release 3.9.5 --non-interactive --yes
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.9.6
+./hive.sh install --config ~/.config/hive/ID/installation.json --release 3.9.6 --non-interactive --yes
 ./hive.sh status  --config ~/.config/hive/ID/installation.json
 ./hive.sh doctor  --config ~/.config/hive/ID/installation.json
 ```
@@ -138,8 +138,10 @@ installation that runs Magnus moves to 3.9.0 or later, which pin Magnus 3 (node 
 3.8.1 only, after every Magnus node has its key. Each upgrade keeps a backup and a restored
 rehearsal: `./hive.sh backups list|prune` reviews and removes old pairs, from 3.9.4
 `./hive.sh backups schedule enable|disable|status` prunes them daily on a single-host installation,
-and from 3.9.5 only the newest rehearsal keeps its full restored copy
-(see [retention](deployment/BACKUPS.md#retention)).
+from 3.9.5 only the newest rehearsal keeps its full restored copy
+(see [retention](deployment/BACKUPS.md#retention)). From 3.9.6, which pins Magnus 3.1.0, backups
+include the Ardent profiles of the Magnus agent the Hive installer created
+(see [native profiles](deployment/BACKUPS.md#magnus-managed-native-profiles)).
 See [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade),
 [deployment/README.md](deployment/README.md) and [UPGRADING.md](UPGRADING.md). Existing native
 installations move onto the suite with [`hive.sh migrate-native`](deployment/MIGRATE_NATIVE.md);

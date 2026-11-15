@@ -82,10 +82,13 @@ included` with the reason. The receipt records it as `"nativeProfiles": {"includ
 "reason": "no-magnus-component" | "not-installer-owned" | "no-native-agent"}`. Back such agents up
 with their own tooling. An installer-owned root that fails its ownership checks is an error.
 
-The installer-owned agent must support the product's `native-snapshot` contract. No Magnus release
-has it yet: until one does, its profiles are listed as not included, with `"reason":
+The installer-owned agent must support the product's `native-snapshot` contract. Magnus 3.1.0 is
+the first release with it, and suite 3.9.6 is the first suite release that pins it. With an older
+agent (Magnus 3.0.3 and earlier) its profiles are listed as not included, with `"reason":
 "no-native-snapshot"` and the agent's version, and backups, upgrades and restore checks continue.
-They are included with no further change once a Magnus with the contract is installed. An agent
+They are included with no further change once the agent runs 3.1.0 or later: after an upgrade to
+3.9.6, `./hive.sh post-upgrade` (or `./hive.sh magnus-agent install`) moves the installer-owned
+agent to the pinned 3.1.0. No flag is needed. An agent
 whose `native-snapshot` fails, or that does not run, stops the backup. If native preparation fails
 before it has reserved or stopped anything, the upgrade or `--stopped` backup closes its
 transaction as aborted and the suite keeps serving; after that point it holds for recovery.

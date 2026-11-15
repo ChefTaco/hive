@@ -46,6 +46,37 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Suite 3.9.6: Magnus 3.1.0 and native profile backup
+
+Suite 3.9.6 pins Magnus 3.1.0: the server, the fleet gateway and the node agent. Every other
+product pin, the datastore profile, the storage recovery profile and the controller are those of
+3.9.5, and no storage format changes. Magnus 3.1.0 adds no migrations and no settings, so an upgrade
+from 3.9.5 needs no flag. Pass `--release 3.9.6` to later commands, as described in
+[the upgrade procedure](deployment/QUICKSTART.md#8-upgrade). From 3.8.1, upgrade directly to 3.9.6
+as described for 3.9.0 below, with 3.9.6 and Magnus 3.1.0 in place of 3.9.0 and 3.0.1.
+
+**Native profiles are now backed up.** Magnus 3.1.0 is the first release whose agent has the
+`native-snapshot` contract. Once the Magnus agent that the Hive installer created runs 3.1.0,
+backups, upgrades and rollbacks include its Ardent profiles, also those created through **New
+Agent**, and the receipt's `nativeProfiles` reads `"included": true`; see
+[Magnus-managed native profiles](deployment/BACKUPS.md#magnus-managed-native-profiles). No flag or
+setting turns this on. The upgrade's own pre-change backup still runs with the agent that was
+installed before, so it lists those profiles as not included ("the installed Magnus agent 3.0.3
+has no native-snapshot"). `./hive.sh post-upgrade` (or `./hive.sh magnus-agent install`) then moves
+the agent to the pinned 3.1.0, and every later backup includes them.
+
+**Agents installed outside the Hive installer are still not part of Hive backups.** A host without
+the installation's Magnus component, or a Magnus agent without the installer's ownership record
+(such as a fleet agent that Magnus upgrades with `magnus-server agents upgrade --to 3.1.0`), is
+listed as not included, as in 3.9.5. Back those agents up with their own tooling.
+
+Magnus 3.1.0 mixes with 3.0.x agents in both directions; agents that Magnus manages move with
+`magnus-server agents upgrade --to 3.1.0`. An external Magnus is upgraded outside this
+installation.
+
+**Rolling back to 3.9.5.** Nothing to change first. The 3.9.5 controller restores and rehearses
+archives that hold native profiles, and its rollback takes and rehearses its own backup.
+
 ## Suite 3.9.5: restored copies and native profile backup
 
 Suite 3.9.5 changes no storage format and needs no flag from 3.9.4: every product pin (including
