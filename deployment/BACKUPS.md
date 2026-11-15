@@ -204,9 +204,9 @@ upgrade. Configure it in the installation file:
 Each key is optional: `keep` from 2 to 1000, `keepDays` from 0 to 3650, and `auto` defaults to
 `false`. On a single-host installation, set `auto` to `true` to prune after successful upgrades,
 or leave it off and use `--apply` after reviewing a dry run. `--keep` and `--keep-days` override
-the file for one run. Retention is unreleased and is not available in suite 3.9.2; that older
-controller refuses an installation file with `retention`. Do not add the key to 3.9.2, and remove
-it before running an older release's controller, for example for a rollback.
+the file for one run. Retention is available from suite 3.9.3; the controller of 3.9.2 or earlier
+refuses an installation file with `retention`, so remove the key before running an older release's
+controller, for example for a rollback.
 
 **Records and other copies.** Each host records every prune that removed something in
 `retention/prune-TIME-ID.json` in its installation directory: when, what triggered it, the

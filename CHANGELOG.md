@@ -6,14 +6,55 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.9.3] - 2026-11-15
+
+### Added
+
+- Backup and rehearsal retention. `hive.sh backups list` shows each host's backups and restore
+  rehearsals and why each stays; `hive.sh backups prune [--keep N] [--keep-days D] [--apply]` is a
+  dry run unless `--apply` is given, prints what it would remove and the space that frees, and
+  removes a backup together with its rehearsal on single-host installations. It keeps the newest N
+  restorable pairs (default 5) and everything newer than D days (default 14), and never removes the
+  newest restorable pair, the installed release's upgrade archive, anything a transaction, receipt,
+  recovery or supersession record or reconciliation names, or a backup that has no rehearsal (such
+  as those `hive.sh backup` takes). It holds the controller lock and refuses while a transaction is
+  open. Automatic pruning after a successful upgrade requires explicit single-host opt-in through
+  the new `retention` settings (`{"keep":5,"keepDays":14,"auto":false}` by default); each prune that
+  removes something is recorded under `retention/` on the host, and copies kept elsewhere are never
+  touched. Retention protects only archives that the installation's state files name, the newest
+  restorable pairs it keeps and those newer than its age limit: keep any archive you plan to
+  restore later, such as a pre-3.0.0 original-state backup, outside the installation directory
+  before `./hive.sh backups prune --apply`. See `deployment/BACKUPS.md#retention` and
+  `UPGRADING.md`, "Backup and rehearsal retention". The controller changes, so this release pins a
+  new controller digest.
+
+### Changed
+
+- HiveMem 1.7.1, HiveSkills 1.8.1, Cindertrace 0.7.1, Embermend 0.3.2, Emberpath 2.5.1, Ardent
+  Project Studio 0.4.2 and ChatterMost 0.6.4, each on `@hivemagnus/hive-common` 0.5.0. The shared
+  kit's audit export redaction also masks URL credentials with only a user or only a password and
+  detail keys containing `jwt`, `bearer` or `signature`; verifier and health settings are checked at
+  startup; security headers, constant-time comparisons, bounded request bodies and the HiveEvent
+  feed order come from the shared helpers. Routes, responses, tokens and feed cursors are unchanged.
+  HiveMem discards the rest of an upload over its body limit after the 413 instead of resetting the
+  connection, Emberpath refuses an admin token without `roles` or `clientId` before the online
+  session check, and HiveSkills answers a malformed feed cursor, which it never writes, with 400.
+  None of these versions adds a migration or changes a storage format, so an upgrade from 3.9.2
+  needs no flag.
+- ChatterMost 0.6.4 (0.6.2 and 0.6.3 were never published). Health responses carry `X-Request-Id`
+  like every other response, and an Oathweave token without a `roles` array is refused before the
+  online session check. 0.6.1 is a reviewed upgrade source and no database migration was added.
+- Every other pin, the datastore profile and the storage recovery profile are unchanged from 3.9.2.
+  See `UPGRADING.md`, "Suite 3.9.3: retention and the hive-common 0.5.0 products".
+
 ### Fixed
 
 - The browser ingress permits only the exact GET route for Magnus's read-only node software and
   package-cache status. Mutating methods, extra path segments and the host-agent listener remain
-  denied. This changes the controller digest for the next signed release.
+  denied. The controller changes with it.
 - Protected sudo password files work with or without a final newline. Host commands and file
   transfers keep their input separate from the password, and empty or multiline password files
-  fail before an action runs. This changes the controller digest for the next signed release.
+  fail before an action runs. The controller changes with it.
 - Fresh Magnus node enrollment recognizes both Node.js main-thread process names while retaining
   the exact process count and parent checks. Current Node.js releases no longer fail full-node
   review solely because they report `node-MainThread` instead of `MainThread`. Read-only process
@@ -28,22 +69,6 @@ All notable changes to this project are documented in this file. The format is b
   single-host installation sets `"auto": true`. Retention protects only archives that state files
   name, so keep any archive you plan to restore later outside the installation directory before
   `--apply`.
-
-### Added
-
-- Backup and rehearsal retention. `hive.sh backups list` shows each host's backups and restore
-  rehearsals and why each stays; `hive.sh backups prune [--keep N] [--keep-days D] [--apply]` is a
-  dry run unless `--apply` is given, prints what it would remove and the space that frees, and
-  removes a backup together with its rehearsal on single-host installations. It keeps the newest N restorable pairs (default 5)
-  and everything newer than D days (default 14), and never removes the newest restorable pair, the
-  installed release's upgrade archive, anything a transaction, receipt, recovery or supersession
-  record or reconciliation names, or a backup that has no rehearsal (such as those `hive.sh backup`
-  takes). It holds the controller lock and refuses while a transaction is open. Automatic
-  pruning after a successful upgrade requires explicit single-host opt-in through the new
-  `retention` settings (`{"keep":5,"keepDays":14,"auto":false}` by default); each prune that removes something is recorded under
-  `retention/` on the host, and copies kept elsewhere are never touched. See
-  `deployment/BACKUPS.md#retention` and `UPGRADING.md`, "Backup and rehearsal retention". The
-  controller changes, so the next release pins a new controller digest.
 
 ## [3.9.2] - 2026-11-15
 
