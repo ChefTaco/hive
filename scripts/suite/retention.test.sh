@@ -336,3 +336,6 @@ grep -q 'Removed 5 entries' "$temporary/after.log" || { cat "$temporary/after.lo
 [[ ! -e "$directory/backups/pre-failed" && ! -e "$directory/rehearsals/pre-30" && -d "$directory/backups/pre-29" ]] || fail 'Retention after the upgrade removed the wrong entries'
 jq -e '.trigger=="upgrade" and .keep==3 and .keepDays==30' "$directory"/retention/prune-*.json >/dev/null || fail 'The upgrade audit record is wrong'
 printf 'Passed: retention preserves protected archives, removes single-host pairs only with explicit apply or automatic opt-in, records each prune, and refuses every multi-host write before contacting a host despite late protection changes.\n'
+
+# The daily prune (backups schedule) has its own fixture: fake crontab and ssh.
+bash "$ROOT/scripts/suite/retention-schedule.test.sh"

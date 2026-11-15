@@ -163,6 +163,11 @@
           "type": "boolean",
           "default": false,
           "description": "Opt a single-host installation into pruning after each successful upgrade. Multi-host pruning remains disabled."
+        },
+        "schedule": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "description": "Daily prune time, 24-hour local time of the controller machine (deployment/BACKUPS.md#daily-pruning). install adds the crontab line on a single-host installation; afterwards hive.sh backups schedule enable|disable manage it. Requires suite 3.9.4 or later: older controllers refuse the key."
         }
       }
     }

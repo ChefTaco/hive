@@ -111,6 +111,8 @@ hive_lifecycle() {
       hive_checklist_report
       # Only once the upgrade completed on every host: its archive is now the installed release's.
       if [[ "$operation" == upgrade ]] && declare -F hive_retention_after_upgrade >/dev/null; then hive_retention_after_upgrade; fi
+      # The daily prune follows the controller that now runs the installation.
+      if declare -F hive_retention_schedule_after >/dev/null; then hive_retention_schedule_after "$operation"; fi
       ;;
     backup)
       HIVE_ARCHIVE=${HIVE_ARCHIVE:-"backup-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 4)"}
@@ -169,6 +171,7 @@ hive_lifecycle() {
       hive_registry_begin || hive_registry_failed "$operation"
       hive_registry_complete || hive_registry_failed "$operation"
       hive_all complete || hive_die 'Adoption receipt could not be finalized'
+      if declare -F hive_retention_schedule_after >/dev/null; then hive_retention_schedule_after "$operation"; fi
       ;;
   esac
 }

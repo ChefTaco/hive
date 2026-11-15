@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Backup and rehearsal retention on one host, transported verbatim by the controller after
-# ownership-host.sh. Only JSON crosses the SSH boundary. retention-plan reads only;
-# retention-apply removes, under the controller lock, only the names the controller passes that
-# this host still finds removable, and records what it removed under retention/.
+# ownership-host.sh. Only JSON crosses the SSH boundary. retention-plan and retention-controller
+# read only; retention-apply removes, under the controller lock, only the names the controller
+# passes that this host still finds removable, and records what it removed under retention/.
 set -Eeuo pipefail
 umask 077
 read -r input
@@ -31,6 +31,17 @@ name_pattern='^[a-zA-Z0-9][a-zA-Z0-9.-]{0,95}$'
 if [[ -f "$directory/transaction.json" ]]; then
   phase=$(jq -r '.phase // "none"' "$directory/transaction.json" 2>/dev/null || printf 'unreadable\n')
   [[ "$phase" == complete || "$phase" == aborted ]] || die "The transaction is in phase $phase: finish or recover it first; backup retention removes nothing while one is open"
+fi
+
+# A scheduled prune names the controller it runs. It must be the one that installed the current
+# release, checked here under the lock, so a stale schedule never prunes with other code.
+installed_release=$(jq -r '.version // ""' "$directory/receipt.json" 2>/dev/null || true)
+installed_controller=$(jq -r '.controllerSourceSHA256 // ""' "$directory/receipt.json" 2>/dev/null || true)
+expected_controller=$(jq -r '.retention.controller // ""' <<< "$input")
+if [[ -n "$expected_controller" ]]; then
+  [[ "$expected_controller" =~ ^[a-f0-9]{64}$ ]] || die 'Invalid scheduled retention controller'
+  [[ "$installed_controller" == "$expected_controller" ]] ||
+    die "This installation runs the controller of release ${installed_release:-unknown} (${installed_controller:0:12}), not the one this scheduled prune runs (${expected_controller:0:12}). Nothing was removed. Point the schedule at the installation's controller with its ./hive.sh backups schedule enable"
 fi
 
 kib() { { du -sk --one-file-system -- "$1" 2>/dev/null || printf '0\n'; } | cut -f1; }
@@ -158,6 +169,7 @@ report() {
 }
 
 case "$action" in
+  retention-controller) jq -nc --arg release "$installed_release" --arg controller "$installed_controller" '{release:$release,controllerSourceSHA256:$controller}';;
   retention-plan) plan_entries | report;;
   retention-apply)
     requested=$(jq -c '.retention.remove // []' <<< "$input")

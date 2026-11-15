@@ -46,6 +46,28 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Suite 3.9.4: daily backup pruning
+
+The 3.9.4 controller can prune old backup and rehearsal pairs every day on a single-host
+installation: `./hive.sh backups schedule enable [--at HH:MM]` adds one line to the crontab of the
+controller's user that runs `backups prune --apply` with the installation file's retention settings,
+`status` shows it with its last run and `disable` removes it. See
+[daily pruning](deployment/BACKUPS.md#daily-pruning). An upgrade changes nothing here: an existing
+installation prunes on a schedule only once its operator enables it, and installations with
+several hosts refuse, as for `prune --apply`. Guided setup of a new single-host installation offers
+it, defaulting to yes at 03:40, and saved configurations ask for it with
+`"retention": {"schedule": "HH:MM"}`, which `install` reads.
+
+Each scheduled run prunes only while the installation's receipt names the controller the line runs.
+A later `upgrade`, `rollback` or `adopt` moves the line to the controller it ran with, so run them
+with the controller that should own the schedule. A run that meets another controller's receipt,
+the controller lock or an open transaction removes nothing and says so in its log.
+
+The 3.9.3 and older controllers do not know the line and refuse `retention.schedule`. Before rolling
+back to one of them, run `./hive.sh backups schedule disable` with the 3.9.4 controller and remove
+`retention.schedule` from the installation file. A line left behind refuses every run, because the
+installation then runs another controller; remove it with `crontab -e`.
+
 ## Suite 3.9.3: retention and the hive-common 0.5.0 products
 
 Suite 3.9.3 changes no storage format and needs no flag from 3.9.2. It pins HiveMem 1.7.1,
@@ -89,7 +111,8 @@ coordinated locking across all hosts. A change in protection on one host must no
 point without its counterpart elsewhere. A pruning refusal never fails a completed upgrade.
 
 Retention is not in suite 3.9.2 or earlier. Their controllers reject an installation file with
-`retention`: remove the key before rolling back to one of them.
+`retention`: remove the key before rolling back to one of them. The 3.9.3 controller rejects
+`retention.schedule`, added in 3.9.4 for the [daily prune](deployment/BACKUPS.md#daily-pruning).
 
 ## Suite 3.9.2: Magnus 3.0.3, HiveXUI 0.9.1, ingress 2.0.6
 

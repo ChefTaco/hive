@@ -284,7 +284,8 @@ controllers before downtime. A repeated rehearsal preserves the finished prior a
 `rehearsal-history/` and restores a fresh copy; incomplete or unverified attempts require review.
 `hive.sh backups prune` removes old backup and rehearsal pairs together, as a dry run unless
 `--apply` is given, on single-host installations; a successful upgrade runs it only when the
-installation opts in; see [retention](BACKUPS.md#retention).
+installation opts in, and `hive.sh backups schedule enable` runs it every day; see
+[retention](BACKUPS.md#retention).
 
 ## Hive Registry
 

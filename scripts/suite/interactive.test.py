@@ -58,6 +58,7 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
         ('Protected Emberpath enrollment Authorization header file', '/opt/credentials/enrollment.header'),
         ('Protected Emberpath CA file', ''), ('Provider slug in Emberpath', 'synthetic-provider'),
         ('Provider aliases', 'synthetic-fast, synthetic-default'),
+        ('Prune old backups and rehearsals daily', ''),
         ('Write protected installation configuration to', str(output)),
     ]
     arguments = [str(root / 'hive.sh'), 'plan', '--release', '0.1.0', '--manifest', str(release), '--trust-key', str(base / 'publisher.pub')]
@@ -110,10 +111,14 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     assert not (base / 'deployment').exists(), 'Planning contacted or initialized a host'
     plan = json.loads(subprocess.check_output([*arguments[:2], '--config', str(output), *arguments[2:]], text=True))
     assert plan['installation'] == 'interactive-proof' and plan['manifestDigest']
+    assert config['retention'] == {'schedule': '03:40'}, 'Daily pruning is not offered by default'
+    transcript_text = re.sub(r'\x1b\[[0-9;]*m', '', transcript)
+    assert 'every day at 03:40' in transcript_text and 'keeps the newest 5 restorable pairs, everything from the last 14 days' in transcript_text, 'Setup did not name the pruning time and rules'
     print('Passed: real terminal setup, complete core inventory, protected output, identical unattended planning and no host changes.')
 
     distributed_output = base / 'inventory' / 'distributed.json'
-    distributed_questions = [(label, 'distributed' if label == 'Configuration mode' else answer) for label, answer in questions[:-1]]
+    # Several hosts: daily pruning is single-host only, so it is not offered.
+    distributed_questions = [(label, 'distributed' if label == 'Configuration mode' else answer) for label, answer in questions[:-1] if label != 'Prune old backups and rehearsals daily']
     distributed_questions += [('Product trust bundle file available on every host', '/opt/certificates/product-ca.pem')]
     for index, product in enumerate(['oathweave', 'emberpath', 'hivemem', 'hiveskills']):
         distributed_questions += [(f'Inventory host for {product}', 'identity' if product == 'oathweave' else 'control')]
@@ -140,6 +145,7 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     assert distributed['components']['hivemem']['host'] == 'control'
     assert len(distributed['bootstrap']['productEndpoints']) == 4
     assert distributed['bootstrap']['trustBundleFile'] == '/opt/certificates/product-ca.pem'
+    assert 'retention' not in distributed, 'Daily pruning was configured for several hosts'
     assert not (base / 'deployment').exists(), 'Distributed planning contacted a host'
     subprocess.run([*arguments[:2], '--config', str(distributed_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
     print('Passed: interactive distributed product placement, local datastore placement, explicit TLS references and identical unattended planning.')
@@ -271,6 +277,7 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     # Without the magnus component, setup offers a Magnus that runs outside the installation.
     custom_questions += [('External Magnus HTTPS URL', ''),
                          ('Existing external inference HTTPS endpoint', ''),
+                         ('Prune old backups and rehearsals daily', '04:15'),
                          ('Write protected installation configuration to', str(custom_output))]
     review.write_text(json.dumps({'command': arguments, 'questions': custom_questions,
                                  'transcriptFile': str(base / 'custom-transcript.log'), 'timeoutSeconds': 30}))
@@ -279,6 +286,7 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     assert custom_config['profile'] == 'custom'
     assert set(custom_config['components']) == {'hive-registry', 'oathweave', 'oathweave-redis', 'hivexui', 'ingress', 'hiveskills'}
     assert custom_config['inference'] == [] and custom_config['agents'] == []
+    assert custom_config['retention'] == {'schedule': '04:15'}, 'A chosen daily pruning time was not saved'
     assert custom_output.stat().st_mode & 0o077 == 0
     subprocess.run([*arguments[:2], '--config', str(custom_output), *arguments[2:]], check=True, stdout=subprocess.DEVNULL)
     print('Passed: interactive custom selection adds the identity/console foundation, omits unselected products and matches unattended planning.')
@@ -377,11 +385,12 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     remote_questions = [('Installation name', 'remote-proof'), ('Installation directory on the selected host', '/opt/remote-proof'),
                         ('Host SSH target', 'deploy@hive.example.com'),
                         ('Protected SSH configuration for the selected host', '/opt/credentials/ssh-config')]
-    remote_questions += [item for item in custom_questions[3:] if item[0] != 'Write protected installation configuration to']
+    remote_questions += [(label, 'no' if label == 'Prune old backups and rehearsals daily' else answer) for label, answer in custom_questions[3:] if label != 'Write protected installation configuration to']
     remote_questions += [('Write protected installation configuration to', str(remote_output))]
     review.write_text(json.dumps({'command': arguments, 'questions': remote_questions,
                                  'transcriptFile': str(base / 'remote-transcript.log'), 'timeoutSeconds': 30}))
     subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
     remote = json.loads(remote_output.read_text())
+    assert 'retention' not in remote, 'Declined daily pruning was configured'
     assert remote['hosts']['control'] == {'target': 'deploy@hive.example.com', 'directory': '/opt/remote-proof', 'architecture': architecture, 'sshConfig': '/opt/credentials/ssh-config'}
     print('Passed: interactive directory default and writability guidance, SSH configuration for an SSH target, and continuing a saved setup.')
