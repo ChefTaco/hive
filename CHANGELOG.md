@@ -6,6 +6,19 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.9.6] - 2026-11-15
+
+### Changed
+
+- Pins Magnus 3.1.0 (server, fleet gateway and node agent). Its agent is the first with the
+  `native-snapshot` contract, so backups, upgrades and rollbacks now include the Ardent profiles of
+  the Magnus agent that the Hive installer created, once that agent runs 3.1.0 (`./hive.sh
+  post-upgrade` moves it). No flag or setting is needed. Agents installed outside the Hive
+  installer, such as fleet agents, are still not part of Hive backups and are listed as not
+  included. Every other product pin, the datastore profile, the storage recovery profile and the
+  controller are unchanged from 3.9.5, and no storage format changes, so an upgrade from 3.9.5
+  needs no flag. See `UPGRADING.md`, "Suite 3.9.6: Magnus 3.1.0 and native profile backup".
+
 ## [3.9.5] - 2026-11-15
 
 ### Added
