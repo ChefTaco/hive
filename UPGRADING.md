@@ -46,9 +46,35 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Suite 3.9.3: retention and the hive-common 0.5.0 products
+
+Suite 3.9.3 changes no storage format and needs no flag from 3.9.2. It pins HiveMem 1.7.1,
+HiveSkills 1.8.1, Cindertrace 0.7.1, Embermend 0.3.2, Emberpath 2.5.1, Ardent Project Studio 0.4.2
+and ChatterMost 0.6.4, which move to `@hivemagnus/hive-common` 0.5.0 and add no migrations
+(ChatterMost's 0.6.1 is a reviewed upgrade source); every other pin, the datastore profile and the
+storage recovery profile are those of 3.9.2. The controller changes, so the release pins a new
+controller digest: it adds `./hive.sh backups list|prune`, as described below, with automatic
+pruning off by default, accepts protected sudo password files with or without a final newline,
+recognizes the `node-MainThread` process name in fresh Magnus node enrollment, and lets the
+browser ingress pass Magnus's read-only `GET /api/v1/nodes/ID/software` route. Pass `--release
+3.9.3` to later commands, as described in [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
+
+Leave the installation file without `retention` to keep the defaults, under which an upgrade
+removes no backup; a 3.9.2 or older controller refuses the key, so remove it before rolling back.
+
+Retention protects only archives that the installation's state files name, the newest restorable
+pairs it keeps, and those newer than its age limit. It does not know which archive you plan to
+restore later. Before `./hive.sh backups prune --apply`, or before turning on `"auto": true`, copy
+any such archive, for example a pre-3.0.0 original-state backup kept for the PostgreSQL collation
+recovery, outside the installation directory.
+
+From 3.8.1, upgrade directly to 3.9.3 as described for 3.9.0 below, with 3.9.3 and Magnus 3.0.3 in
+place of 3.9.0 and 3.0.1; managed agents still cross the major from 2.10.3, with `magnus-server
+agents upgrade --to 3.0.3 --allow-major` or the HiveXUI option.
+
 ## Backup and rehearsal retention
 
-The unreleased controller adds [retention rules](deployment/BACKUPS.md#retention) for old
+From suite 3.9.3, the controller has [retention rules](deployment/BACKUPS.md#retention) for old
 pre-change backups and their restore rehearsals. Automatic pruning is **off by default**.
 Single-host installations can review `./hive.sh backups prune` (a dry run), remove eligible pairs
 with `--apply`, or explicitly opt into pruning after successful upgrades with
@@ -62,9 +88,8 @@ any host action, including when `auto` is explicitly enabled, until selection an
 coordinated locking across all hosts. A change in protection on one host must not leave a restore
 point without its counterpart elsewhere. A pruning refusal never fails a completed upgrade.
 
-Retention is not in suite 3.9.2. Its controller rejects an installation file with `retention`:
-do not add the key to that release, and remove it before rolling back to any older controller
-without retention support.
+Retention is not in suite 3.9.2 or earlier. Their controllers reject an installation file with
+`retention`: remove the key before rolling back to one of them.
 
 ## Suite 3.9.2: Magnus 3.0.3, HiveXUI 0.9.1, ingress 2.0.6
 
