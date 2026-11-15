@@ -13,8 +13,9 @@ hive_action() {
 
 hive_all() {
   local host
+  HIVE_FAILED_HOST=''
   while IFS= read -r host; do
-    hive_action "$host" "$1" || return 1
+    hive_action "$host" "$1" || { HIVE_FAILED_HOST=$host; return 1; }
   done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
 }
 
@@ -71,6 +72,31 @@ hive_abort() {
   done
   [[ "$aborted" == true ]] || hive_die "$message"
   hive_die "$message. Nothing was changed, so the transaction is closed as aborted; fix the cause, then run this or any other command"
+}
+
+# Native preparation stops native writers before the backup. A host that fails it before writing
+# its session record has reserved and stopped nothing, so when it is the first host the whole
+# transaction closes as aborted, like a failed stage, and the suite keeps serving. A failure after
+# that, or on a later host (an earlier one has reserved), holds the suite for recovery.
+hive_native_begin_all() {
+  local host other aborted
+  hive_all native-backup-begin && return 0
+  host=${HIVE_FAILED_HOST:-}
+  if [[ -n "$host" && "$host" == "$(jq -r '.hosts|keys[0]' "$HIVE_CONFIG")" ]] && ! jq -e '.nativeMigration!=null' "$HIVE_CONFIG" >/dev/null 2>&1 &&
+     HIVE_ABORT_STEP=native-backup-begin hive_action "$host" abort >/dev/null 2>&1; then
+    aborted=true
+    # Every other host was prepared and has run nothing since.
+    while IFS= read -r other; do
+      [[ "$other" != "$host" ]] || continue
+      if ! HIVE_ABORT_STEP=native-backup-begin hive_action "$other" abort >/dev/null 2>&1; then
+        aborted=false
+        printf 'Hive: the transaction on %s stays open; repeat the same command to recover\n' "$other" >&2
+      fi
+    done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
+    [[ "$aborted" == true ]] || hive_die "Native profile preparation failed on $host"
+    hive_die "Native profile preparation failed on $host before it reserved or stopped anything; see above. Nothing was changed, so the transaction is closed as aborted and the suite keeps serving; fix the cause, then run this or any other command"
+  fi
+  hive_hold
 }
 
 # Recovery is a separately reviewed operation, never an implicit retry of work.
@@ -138,7 +164,7 @@ hive_lifecycle() {
       fi
       if [[ "$operation" != install ]]; then
         HIVE_ARCHIVE=${HIVE_ARCHIVE:-"pre-$operation-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 4)"}
-        hive_all native-backup-begin || hive_hold
+        hive_native_begin_all
         hive_all quiesce || hive_hold
         hive_all backup || hive_hold
         # The candidate, rather than the archived binary, runs on restored copies.
@@ -164,7 +190,7 @@ hive_lifecycle() {
       hive_all prepare || hive_die 'Backup transaction could not be prepared'
       if [[ "${HIVE_BACKUP_STOPPED:-false}" == true ]]; then
         # The original backup: every container stops while its state is archived.
-        hive_all native-backup-begin || hive_hold
+        hive_native_begin_all
         hive_all quiesce || hive_hold
         hive_all backup || hive_hold
         hive_all resume-current || hive_hold

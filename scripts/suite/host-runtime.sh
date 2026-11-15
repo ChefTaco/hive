@@ -548,8 +548,15 @@ case "$action" in
     # further keeps the transaction open for recovery.
     assert_transaction
     step=$(jq -r '.abortStep // ""' <<< "$input")
-    [[ "$step" =~ ^(stage|compatibility|adapters-preflight)$ ]] || die 'Only a failed stage, compatibility check or preflight can abort a transaction'
+    [[ "$step" =~ ^(stage|compatibility|adapters-preflight|native-backup-begin)$ ]] || die 'Only a failed stage, compatibility check, preflight or native preparation can abort a transaction'
     [[ $(phase) == prepared ]] || die "The transaction is in phase $(phase), past its read-only checks; it needs recovery: repeat the same command"
+    # Native preparation aborts only before it wrote its session record, that is before any
+    # admission was reserved or native service stopped. After that it holds for recovery.
+    if [[ "$step" == native-backup-begin ]]; then
+      declare -F native_backup_context >/dev/null && native_backup_context || die 'Native preparation cannot be checked; it needs recovery: repeat the same command'
+      [[ ! -e "$NATIVE_BACKUP_META" && ! -L "$NATIVE_BACKUP_META" && ! -e "$NATIVE_BACKUP_SESSION" && ! -L "$NATIVE_BACKUP_SESSION" ]] || die "Native preparation reserved its session; it needs recovery: $NATIVE_BACKUP_SESSION"
+      [[ ! -e "$directory/native-capture.$plan.$archive" && ! -L "$directory/native-capture.$plan.$archive" ]] || die 'Native preparation staged a capture; it needs recovery: repeat the same command'
+    fi
     [[ ! -e "$directory/bootstrap.$plan.json" ]] || die 'This plan initialized data; it needs recovery: repeat the same command'
     [[ -z $(find "$directory/agents" -mindepth 2 -maxdepth 2 \( -name "candidate.$plan.json" -o -name "run.$plan*" -o -name "preflight.$plan.log" \) -print -quit 2>/dev/null) ]] || die 'This plan staged native agents; it needs recovery: repeat the same command'
     [[ ! -f "$directory/receipt.json" || $(jq -r .plan "$directory/receipt.json") != "$plan" ]] || die 'This plan is already active; it needs recovery: repeat the same command'

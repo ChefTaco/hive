@@ -43,6 +43,43 @@ fleet_agent() {
   printf 'CONTROL_API_URL=https://magnus.example.com:7443\nHOST_FQDN=node-1.example.com\n' > "$1/.env"; chmod 600 "$1/.env"
 }
 
+# An installer-owned agent needs root-owned files and the installer's account; this fixture
+# runs unprivileged, so ownership, the account and the agent CLI are simulated, keyed by the
+# FIXTURE_* variables, and otherwise behave as usual.
+cat > "$temporary/installer-stubs.sh" <<'STUBS'
+native_backup_storage_root() { printf '%s\n' "${FIXTURE_STORAGE:-$FIXTURE_TEMPORARY/storage}"; }
+stat() {
+  if [[ -n "${FIXTURE_ROOT_OWNED:-}" && "$1" == -c && "$2" == %u && "$3" == "$FIXTURE_ROOT_OWNED"* ]]; then printf '0\n'; else command stat "$@"; fi
+}
+getent() {
+  if [[ "$1" == passwd && -n "${FIXTURE_HOME:-}" ]]; then printf '%s:x:%s:%s::%s:/bin/sh\n' "$2" "$(id -u)" "$(id -g)" "$FIXTURE_HOME"; else command getent "$@"; fi
+}
+# FIXTURE_CLI: old (Magnus 3.0.3: no native-snapshot), snapshot (has it, but its inspect fails), broken.
+native_backup_cli() {
+  shift
+  [[ "${FIXTURE_CLI:-old}" != broken ]] || return 1
+  case "$1" in
+    --help) printf 'Usage:\n  magnus-agent [start] [--env-file <path>]\n  magnus-agent check\n'
+      [[ "${FIXTURE_CLI:-old}" != snapshot ]] || printf '  magnus-agent native-snapshot inspect --json\n';;
+    --version) printf '3.0.3\n';;
+    identity) printf '{"state":"bound","nodeId":"node-one"}\n';;
+    native-snapshot) printf 'Unknown command or failed snapshot\n' >&2; return 1;;
+    *) return 1;;
+  esac
+}
+STUBS
+export FIXTURE_TEMPORARY=$temporary
+# An agent the Hive installer created and recorded, with one Ardent profile.
+installer_agent() {
+  fleet_agent "$1"
+  local home="$temporary/owner-home"
+  rm -rf -- "$home"; mkdir -p "$home/.ardent/profiles/one"
+  printf 'ARDENT_OWNER_USER=%s\nCONTROL_API_URL=https://hive.example.com:7443\nHOST_FQDN=node-1.example.com\n' "$(id -un)" > "$1/.env"
+  jq -n --arg user "$(id -un)" --argjson uid "$(id -u)" '{schema:1,phase:"complete",username:$user,uid:$uid}' > "$1.native-owner.json"
+  chmod 600 "$1.native-owner.json"
+  export FIXTURE_ROOT_OWNED=$1 FIXTURE_HOME=$home
+}
+
 # ---- Discovery itself, with the real definitions. ----
 (
   source "$ROOT/scripts/suite/native-backup-host.sh"
@@ -99,6 +136,7 @@ printf 'Passed: native discovery skips hosts without Magnus, excludes non-instal
 script=$(cat "$ROOT/scripts/suite/ownership-host.sh" "$ROOT/scripts/suite/integrity-host.sh" "$ROOT/scripts/suite/adapters-host.sh" "$ROOT/scripts/suite/native-backup-host.sh")
 # Root transport is the production setting; this fixture runs unprivileged.
 script+=$'\nnative_backup_guard() { :; }\n'
+script+=$(cat "$temporary/installer-stubs.sh")$'\n'
 script+=$(cat "$ROOT/scripts/suite/restore-recovery-host.sh" "$ROOT/scripts/suite/host-runtime.sh")
 printf '%s\n' "$script" > "$temporary/host-script.sh"
 plan=$(printf '%064d' 1)
@@ -153,3 +191,85 @@ fixture installer-broken upgrade
 if run native-backup-begin upgrade '{"magnus":{"host":"control"}}'; then fail 'A broken installer-owned root was accepted by the upgrade'; fi
 grep -q 'must be a root-owned directory' "$temporary/error" || fail 'A broken installer-owned root failed silently in the upgrade'
 printf 'Passed: upgrade preparation, stopped backup and restore check continue beside non-installer agents, record "not included", and still stop on a broken installer-owned root.\n'
+
+# ---- An installer-owned agent without the native-snapshot contract (Magnus 3.0.3 and earlier). ----
+(
+  source "$ROOT/scripts/suite/native-backup-host.sh"
+  native_backup_guard() { :; }
+  source "$temporary/installer-stubs.sh"
+  installation=example-suite host=control plan=$(printf 'a%.0s' {1..64}) archive=first directory="$temporary/unused"
+  input='{"operation":"backup","placements":{"magnus":{"host":"control"}},"origin":"https://hive.example.com","console":{"nativeListeners":[{"component":"magnus","port":7443}]},"agents":[]}'
+  export FIXTURE_AGENT="$temporary/installer-agent"; installer_agent "$FIXTURE_AGENT"
+  export FIXTURE_CLI=old
+  found=$(native_backup_discover) || fail 'An agent without native-snapshot failed discovery'
+  jq -e '.included==false and .present==false and .reason=="no-native-snapshot" and .agentVersion=="3.0.3" and .profilesFound==true' <<< "$found" >/dev/null || fail "Unexpected discovery without native-snapshot: $found"
+  jq -e '.included==false and .reason=="no-native-snapshot" and .agentVersion=="3.0.3"' <<< "$(native_backup_coverage)" >/dev/null || fail 'Coverage without native-snapshot is wrong'
+  native_backup_begin 2> "$temporary/notice" || fail 'Backup preparation failed with an agent without native-snapshot'
+  grep -q 'the installed Magnus agent 3.0.3 has no native-snapshot; upgrade Magnus to include agent profiles in backups' "$temporary/notice" || fail 'A missing native-snapshot was silent'
+  [[ $(native_backup_space_kib) == 0 && ! -e "$temporary/storage" ]] || fail 'An agent without native-snapshot got a session'
+  if native_backup_discover true > /dev/null 2> "$temporary/refused"; then fail 'A native archive was accepted by an agent without native-snapshot'; fi
+  grep -q 'has no native-snapshot; upgrade Magnus first' "$temporary/refused" || fail 'A required discovery without native-snapshot was not explained'
+  # The contract is there, and fails: that stops the backup.
+  export FIXTURE_CLI=snapshot
+  jq -e '.included==true and .present==true and .nodeId=="node-one"' <<< "$(native_backup_discover)" >/dev/null || fail 'An agent with native-snapshot was not included'
+  if native_backup_begin 2> "$temporary/refused"; then fail 'A failing native snapshot was accepted'; fi
+  grep -q 'native-snapshot CLI' "$temporary/refused" || fail 'A failing native snapshot was silent'
+  export FIXTURE_CLI=broken
+  if native_backup_discover > /dev/null 2> "$temporary/refused"; then fail 'An agent that does not run was accepted'; fi
+  grep -q 'did not run' "$temporary/refused" || fail 'An agent that does not run failed silently'
+) || exit 1
+export FIXTURE_AGENT="$temporary/installer-agent"; installer_agent "$FIXTURE_AGENT"
+export FIXTURE_CLI=old
+magnus='{"magnus":{"host":"control"}}'
+fixture installer-old upgrade
+run native-backup-begin upgrade "$magnus" || { cat "$temporary/error" >&2; fail 'The upgrade failed with an agent without native-snapshot'; }
+grep -q 'has no native-snapshot' "$temporary/error" || fail 'The upgrade did not say profiles are not included'
+run quiesce upgrade "$magnus" && run backup upgrade "$magnus" || { cat "$temporary/error" >&2; fail 'The backup failed with an agent without native-snapshot'; }
+jq -e '.nativeProfiles.included==false and .nativeProfiles.reason=="no-native-snapshot" and .nativeProfiles.agentVersion=="3.0.3"' "$directory/backups/fixture/receipt.json" >/dev/null || fail 'The receipt does not record the missing native-snapshot'
+run resume-current upgrade "$magnus" || fail 'resume-current failed'
+sha=$(jq -r .sha256 "$directory/backups/fixture/receipt.json"); mkdir -p "$directory/rehearsals/fixture"
+jq -nc --arg sha "$sha" '{schema:1,result:"passed",archiveSHA256:$sha,installationUUID:"fixture-uuid",isolated:true,portsPublished:false}' > "$directory/rehearsals/fixture/result.json"
+jq -nc --arg sha "$sha" '{hosts:{control:{installationUUID:"fixture-uuid",archiveSHA256:$sha,currentDataSHA256:("0"*64),subsequentWritesReconciled:true}}}' > "$directory/reconciliation.$plan.json"
+run restore-check restore "$magnus" || { cat "$temporary/error" >&2; fail 'restore-check failed with an agent without native-snapshot'; }
+grep -q 'has no native-snapshot' "$temporary/error" || fail 'restore-check did not report native coverage'
+printf 'Passed: an installer-owned agent without native-snapshot is listed as not included; one whose snapshot fails, or that does not run, still stops the backup.\n'
+
+# ---- A native preparation that fails before its session record aborts; after it, it holds. ----
+export FIXTURE_CLI=snapshot FIXTURE_STORAGE="$temporary/storage-abort"
+fixture abort-before upgrade
+if run native-backup-begin upgrade "$magnus"; then fail 'A failing native snapshot passed native preparation'; fi
+jq -nc --arg directory "$directory" --arg plan "$plan" '{directory:$directory,installation:"example",host:"control",plan:$plan,operation:"upgrade",action:"abort",abortStep:"native-backup-begin",version:"0.1.0",archive:"fixture",placements:{magnus:{}},agents:[],inference:[]}' |
+  bash "$temporary/host-script.sh" > "$temporary/result" 2> "$temporary/error" || { cat "$temporary/error" >&2; fail 'A pre-reservation native failure could not abort'; }
+[[ $(jq -r .phase "$directory/transaction.json") == aborted && -f "$directory/aborted-transaction.$plan.json" ]] || fail 'The transaction was not closed as aborted'
+! grep -q ' stop' "$FIXTURE_DOCKER" || fail 'Aborting stopped the suite'
+fixture abort-after upgrade
+session=$(cd "$temporary" && bash -c 'installation=example host=control plan=$1 archive=fixture input="{\"operation\":\"upgrade\"}"; source "$2"; source "$3"; native_backup_context; printf "%s" "$NATIVE_BACKUP_SESSION"' _ "$plan" "$ROOT/scripts/suite/native-backup-host.sh" "$temporary/installer-stubs.sh")
+mkdir -p "$session"; printf '{"phase":"reserved"}\n' > "$session/coordinator.json"
+if jq -nc --arg directory "$directory" --arg plan "$plan" '{directory:$directory,installation:"example",host:"control",plan:$plan,operation:"upgrade",action:"abort",abortStep:"native-backup-begin",version:"0.1.0",archive:"fixture",placements:{magnus:{}},agents:[],inference:[]}' |
+  bash "$temporary/host-script.sh" > "$temporary/result" 2> "$temporary/error"; then fail 'A reserved native session was aborted'; fi
+grep -q 'reserved its session; it needs recovery' "$temporary/error" && [[ $(jq -r .phase "$directory/transaction.json") == prepared ]] || fail 'A reserved native session did not stay open for recovery'
+# The controller: abort when the first host fails before reserving, hold otherwise.
+lifecycle_begin() { # FAILING_HOST ABORT_RESULT
+  (
+    source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/lifecycle.sh"
+    HIVE_CONFIG=$temporary/two-hosts.json
+    hive_action() {
+      printf '%s %s\n' "$1" "$2" >> "$temporary/actions"
+      case "$2" in
+        native-backup-begin) [[ "$1" != "$FAILING" ]];;
+        abort) [[ "$ABORTS" == true ]];;
+        hold) return 0;;
+      esac
+    }
+    FAILING=$1 ABORTS=$2 hive_native_begin_all
+  ) > "$temporary/lifecycle.log" 2>&1
+}
+printf '{"hosts":{"a":{},"b":{}},"components":{},"agents":[],"inference":[]}\n' > "$temporary/two-hosts.json"
+: > "$temporary/actions"; if lifecycle_begin a true; then fail 'A failed native preparation passed'; fi
+[[ $(cat "$temporary/actions") == $'a native-backup-begin\na abort\nb abort' ]] || { cat "$temporary/actions" >&2; fail 'A pre-reservation failure did not abort every host'; }
+grep -q 'closed as aborted and the suite keeps serving' "$temporary/lifecycle.log" || fail 'The abort was not explained'
+: > "$temporary/actions"; if lifecycle_begin a false; then fail 'A reserved failure passed'; fi
+grep -q 'a hold' "$temporary/actions" && grep -q 'b hold' "$temporary/actions" || { cat "$temporary/actions" >&2; fail 'A post-reservation failure did not hold the suite'; }
+: > "$temporary/actions"; if lifecycle_begin b true; then fail 'A second-host failure passed'; fi
+! grep -q abort "$temporary/actions" && grep -q 'a hold' "$temporary/actions" || { cat "$temporary/actions" >&2; fail 'A failure after another host reserved did not hold'; }
+printf 'Passed: native preparation that fails before reserving aborts and keeps the suite serving; after a reservation, or on a later host, it holds.\n'

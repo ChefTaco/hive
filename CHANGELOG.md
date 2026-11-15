@@ -24,8 +24,8 @@ All notable changes to this project are documented in this file. The format is b
   policies, credentials, service state and ownership; capture holds managed admissions and
   native writers before suite stores are copied. Rehearsal verifies the native bundle offline,
   and restore requires exact inventory reconciliation and retains previous state without
-  replaying uncertain work. Unsupported agents fail explicitly rather than silently omitting
-  profiles. This requires a Magnus agent with the `native-snapshot` contract.
+  replaying uncertain work. This requires a Magnus agent with the `native-snapshot` contract;
+  without it the profiles are listed as not included (below).
 - Native profile backup covers only the Magnus agent that the Hive installer created and recorded
   (`ROOT.native-owner.json`), on a host where the installation places Magnus. Agents installed
   outside the Hive installer are not part of Hive backups. On a host without the Magnus
@@ -35,6 +35,18 @@ All notable changes to this project are documented in this file. The format is b
   `nativeProfiles: {"included": false, "reason": ...}`. Before this, such a host failed the
   upgrade's native preparation, which held the whole suite stopped. An installer-owned root that
   fails its checks still fails, now with a message.
+- Native profile backup needs a Magnus agent with the `native-snapshot` contract. No Magnus release
+  has it yet, and this release still pins Magnus 3.0.3. Until one does, an installer-owned agent's
+  profiles are listed as not included ("the installed Magnus agent VERSION has no native-snapshot;
+  upgrade Magnus to include agent profiles in backups") in the output and in the receipt
+  (`reason: "no-native-snapshot"`), and backups, upgrades and restore checks continue, as in 3.9.4,
+  which backed up no native profiles. They are included with no further change once a Magnus with
+  the contract is installed. An agent whose `native-snapshot` fails, or that does not run, still
+  stops the backup.
+- A native preparation that fails before it reserves anything, on the first host, now closes the
+  transaction as aborted and leaves the suite serving, like a failed stage or preflight, instead of
+  holding (stopping) the whole suite. A failure after a reservation, or on a later host, still holds
+  for recovery.
 
 ## [3.9.4] - 2026-11-15
 
