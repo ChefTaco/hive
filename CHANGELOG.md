@@ -8,6 +8,9 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- The browser ingress permits only the exact GET route for Magnus's read-only node software and
+  package-cache status. Mutating methods, extra path segments and the host-agent listener remain
+  denied. This changes the controller digest for the next signed release.
 - Protected sudo password files work with or without a final newline. Host commands and file
   transfers keep their input separate from the password, and empty or multiline password files
   fail before an action runs. This changes the controller digest for the next signed release.

@@ -411,6 +411,7 @@
 				|| {path}.matches("^/api/v1/nodes/[^/]+$")
 				|| {path}.matches("^/api/v1/nodes/[^/]+/credentials$")
 				|| {path}.matches("^/api/v1/nodes/[^/]+/gpu$")
+				|| {path}.matches("^/api/v1/nodes/[^/]+/software$")
 				|| {path}.matches("^/api/v1/nodes/[^/]+/health$")
 				|| {path}.matches("^/api/v1/nodes/[^/]+/health/history$")
 				|| {path}.matches("^/api/v1/nodes/[^/]+/health/timeseries$")
