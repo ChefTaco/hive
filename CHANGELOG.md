@@ -6,6 +6,22 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Added
+
+- Backup and rehearsal retention. `hive.sh backups list` shows each host's backups and restore
+  rehearsals and why each stays; `hive.sh backups prune [--keep N] [--keep-days D] [--apply]` is a
+  dry run unless `--apply` is given, prints what it would remove and the space that frees, and
+  removes a backup together with its rehearsal. It keeps the newest N restorable pairs (default 5)
+  and everything newer than D days (default 14), and never removes the newest restorable pair, the
+  installed release's upgrade archive, anything a transaction, receipt, recovery or supersession
+  record or reconciliation names, or a backup that has no rehearsal (such as those `hive.sh backup`
+  takes). It holds the controller lock and refuses while a transaction is open. A successful
+  upgrade prunes with the installation's new `retention` settings
+  (`{"keep":5,"keepDays":14,"auto":true}`); each prune that removes something is recorded under
+  `retention/` on the host, and copies kept elsewhere are never touched. See
+  `deployment/BACKUPS.md#retention` and `UPGRADING.md`, "Backup and rehearsal retention". The
+  controller changes, so the next release pins a new controller digest.
+
 ## [3.9.2] - 2026-11-15
 
 ### Changed

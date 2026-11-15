@@ -127,7 +127,79 @@ SQLite commit holds a lock that blocks the copy; the controller resumes it and t
 to five times. If a paused service cannot be resumed, the backup reports it and holds the
 transaction for recovery; a watchdog started with each pause also resumes it within ten minutes.
 
-`hive.sh backup` never prunes archives.
+`hive.sh backup` never prunes archives; [retention](#retention) is a separate command.
+
+## Retention
+
+Every upgrade and rollback keeps its pre-change backup in `backups/ID` and the rehearsal that
+restored it in `rehearsals/ID`. A rehearsal is a complete restored copy of the installation, so it
+is usually many times the size of its compressed backup, and `restore` accepts an archive only
+while its passed rehearsal is there: the two are one restore point. `hive.sh backups` manages
+them on every host of the installation:
+
+```bash
+./hive.sh backups list                                     # every entry, and why it stays
+./hive.sh backups prune                                    # dry run: what would go, and the space it frees
+./hive.sh backups prune --keep 5 --keep-days 14 --apply    # remove it
+```
+
+`prune` is a dry run unless `--apply` is given. It prints each entry it would remove and the space
+that frees, and removes nothing. With `--apply` it removes the same entries and prints each one.
+
+**What stays.** Retention keeps the union of:
+
+- the newest `keep` restorable pairs (default 5): a verified backup with a passed rehearsal of
+  exactly its bytes;
+- everything newer than `keepDays` days (default 14), by the time of the backup's receipt (or of
+  the rehearsal's result when it has no backup).
+
+Whatever the settings, it never removes:
+
+- the newest restorable pair;
+- the upgrade archive of the installed release: the rehearsal whose plan is the one in
+  `receipt.json`, and its backup;
+- anything a state file in the installation directory names: by name, by path under `backups/` or
+  `rehearsals/`, or by the archive's SHA-256 in any top-level JSON file (transactions, the
+  receipt, recovery and supersession records, restore reconciliations), or by its rehearsal's plan
+  in `receipt.json`, `transaction.json` or a `recovery-transaction` or `recovery-supersession`
+  record. An archive a `restore` used stays, because its reconciliation names it;
+- a backup that has no rehearsal, such as one `hive.sh backup` took or a backup whose rehearsal
+  was removed by hand. It is not restorable until rehearsed again (`./hive.sh rehearse --archive
+  ID`), and whatever takes those backups owns their retention; `list` shows them as
+  `backup-only`;
+- a rehearsal without a result (`incomplete`), and a rehearsal whose containers still exist; the
+  next upgrade's staging releases those containers;
+- anything at all while another command holds the controller lock, or while a transaction is
+  open (an upgrade, rollback, backup, restore or rehearsal between its steps, or one that needs
+  recovery). `prune` then refuses and removes nothing.
+
+On an installation with several hosts, one archive ID is one restore point on all of them: an
+entry any host keeps stays on every host.
+
+**What goes.** A pair goes as a whole: the rehearsal first, then its `rehearsal-history/ID`
+attempts, then the backup, so an interruption never leaves a rehearsal that claims a backup it no
+longer has. A failed rehearsal goes with its backup, and a rehearsal or history whose backup is
+already gone goes alone, once outside the rules above.
+
+**After an upgrade.** A successful upgrade prunes with the installation's settings once every
+host has completed it, and lists what it removed. A problem there is reported and does not fail
+the upgrade. Tune or turn it off in the installation file:
+
+```json
+"retention": { "keep": 5, "keepDays": 14, "auto": true }
+```
+
+Each key is optional: `keep` from 2 to 1000, `keepDays` from 0 to 3650, `auto` `false` to prune
+only by hand. `--keep` and `--keep-days` override the file for one run. A controller from a release
+before retention refuses an installation file with `retention`, so remove the key before running
+an older release's controller, for example for a rollback.
+
+**Records and other copies.** Each host records every prune that removed something in
+`retention/prune-TIME-ID.json` in its installation directory: when, what triggered it, the
+settings, and each removed archive with its kind, time, SHA-256 and size. Retention only removes
+entries under the host's `backups/`, `rehearsals/` and `rehearsal-history/`. Copies kept elsewhere,
+on another machine or by your own backup job, are never touched; use the record's names and
+digests to reconcile them.
 
 ## Disk
 

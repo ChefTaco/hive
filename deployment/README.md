@@ -282,6 +282,8 @@ Finished isolated rehearsals release their stopped containers and networks, reta
 files, receipts and protected diagnostics. Staging also cleans verified leftovers from earlier
 controllers before downtime. A repeated rehearsal preserves the finished prior attempt under
 `rehearsal-history/` and restores a fresh copy; incomplete or unverified attempts require review.
+`hive.sh backups prune` removes old backup and rehearsal pairs together, as a dry run unless
+`--apply` is given, and a successful upgrade runs it; see [retention](BACKUPS.md#retention).
 
 ## Hive Registry
 
