@@ -72,25 +72,38 @@ native_backup_binding() {
 }
 # Discover only the installer-owned local native account and the node already bound to this
 # suite's canonical Magnus listener. Never enumerate unrelated homes or remote fleet nodes.
+# Coverage is explicit: a host without this installation's Magnus component, or a Magnus agent
+# installed outside the Hive installer (no ROOT.native-owner.json), is "not included", never an
+# error and never silent. An installer-owned root that fails its checks still fails.
 native_backup_discover() {
   local required=${1:-false} root reported load owner uid home profile_root install_root present=false binding marker file path
+  if ! jq -e '.placements.magnus!=null' <<< "$input" >/dev/null 2>&1; then
+    [[ "$required" != true ]] || native_backup_error 'This archive holds native profiles, but this host runs no Magnus component of the installation' || return 1
+    printf '{"available":false,"present":false,"included":false,"reason":"no-magnus-component"}\n'; return
+  fi
   root=$(systemctl show magnus-agent.service --property=WorkingDirectory --value 2>/dev/null) || root=''
   reported=$root
   load=$(systemctl show magnus-agent.service --property=LoadState --value 2>/dev/null) || load=''
   root=${root:-/opt/magnus-agent}; marker="$root.native-owner.json"
   native_backup_searchable_parent "$root" || native_backup_error 'Native installation parent cannot be inspected; use root transport' || return 1
   if [[ -n "$reported" || "$load" == loaded || -d "$root" || -e "$marker" || -L "$root" || -L "$marker" ]]; then native_backup_guard || return 1; fi
-  if [[ ! -e "$root/.env" && ! -e "$marker" ]]; then printf '{"available":false,"present":false}\n'; return; fi
+  if [[ ! -e "$root/.env" && ! -e "$marker" && ! -L "$marker" ]]; then printf '{"available":false,"present":false,"included":false,"reason":"no-native-agent"}\n'; return; fi
   native_backup_guard || return 1
-  native_backup_plain_path "$root" || return 1
-  [[ -d "$root" && $(stat -c %u "$root") == 0 && $(stat -c %a "$root") == 700 ]] || return 1
+  # The installer records the account it created. A Magnus agent installed any other way, such
+  # as a fleet agent, belongs to its own tooling: Hive neither stops nor archives it.
+  if [[ ! -e "$marker" && ! -L "$marker" ]]; then
+    [[ "$required" != true ]] || native_backup_error "This archive holds native profiles, but the Magnus agent at $root was installed outside the Hive installer" || return 1
+    jq -nc --arg root "$root" '{available:false,present:false,included:false,reason:"not-installer-owned",root:$root}'; return
+  fi
+  native_backup_plain_path "$root" || native_backup_error "Installer-owned native root $root is not a plain path" || return 1
+  [[ -d "$root" && $(stat -c %u "$root") == 0 && $(stat -c %a "$root") == 700 ]] || native_backup_error "Installer-owned native root $root must be a root-owned directory with mode 700" || return 1
   for file in "$root/.env" "$marker"; do
     [[ -f "$file" && ! -L "$file" && $(stat -c %u "$file") == 0 && $(stat -c %a "$file") == 600 ]] || native_backup_error 'Native installation provenance is missing or unsafe' || return 1
   done
   owner=$(native_backup_env "$root/.env" ARDENT_OWNER_USER)
   [[ "$owner" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || return 1
   uid=$(id -u "$owner") || return 1; home=$(getent passwd "$owner" | cut -d: -f6)
-  jq -e --arg owner "$owner" --argjson uid "$uid" '.schema==1 and .phase=="complete" and .username==$owner and .uid==$uid and .uid>0' "$marker" >/dev/null || return 1
+  jq -e --arg owner "$owner" --argjson uid "$uid" '.schema==1 and .phase=="complete" and .username==$owner and .uid==$uid and .uid>0' "$marker" >/dev/null || native_backup_error "Native ownership record $marker differs from the installed account" || return 1
   native_backup_plain_path "$home" && [[ -d "$home" ]] || return 1
   profile_root=$(native_backup_env "$root/.env" ARDENT_HOME); profile_root=${profile_root:-$home/.ardent}
   install_root=$(native_backup_env "$root/.env" ARDENT_INSTALL_DIR); install_root=${install_root:-$home/.local/share/ardent}
@@ -100,10 +113,24 @@ native_backup_discover() {
   if [[ -d "$profile_root/profiles" ]] && [[ -n $(find "$profile_root/profiles" -mindepth 1 -maxdepth 1 -print -quit) ]]; then present=true; fi
   if [[ -d "$home/.config/systemd/user" ]] && [[ -n $(find "$home/.config/systemd/user" -maxdepth 1 -name 'ardent@*.service' -print -quit) ]]; then present=true; fi
   if [[ "$present" == false && "$required" != true ]]; then
-    jq -nc --arg root "$root" '{available:true,present:false,root:$root}'; return
+    jq -nc --arg root "$root" '{available:true,present:false,included:true,root:$root}'; return
   fi
   binding=$(native_backup_binding "$root") || return 1
-  jq -nc --arg root "$root" --argjson binding "$binding" --argjson present "$present" '$binding+{available:true,present:$present,root:$root}'
+  jq -nc --arg root "$root" --argjson binding "$binding" --argjson present "$present" '$binding+{available:true,present:$present,included:true,root:$root}'
+}
+# What a backup covers, for its receipt: {included, reason, root}.
+native_backup_coverage() {
+  local found
+  found=$(native_backup_discover) || return 1
+  jq -c '{included:(.available==true),reason:(.reason // null),root:(.root // null)}' <<< "$found"
+}
+# Say plainly when native profiles are left out, so an operator never assumes they are covered.
+native_backup_notice() {
+  case $(jq -r '.reason // ""' <<< "$1") in
+    no-magnus-component) printf 'Hive native backup: native profiles not included: this host runs no Magnus component of the installation. Agents installed outside the Hive installer are not part of Hive backups.\n' >&2;;
+    not-installer-owned) printf 'Hive native backup: native profiles not included: the Magnus agent at %s was installed outside the Hive installer (it has no %s.native-owner.json). Agents installed outside the Hive installer are not part of Hive backups; back them up with their own tooling.\n' "$(jq -r .root <<< "$1")" "$(jq -r .root <<< "$1")" >&2;;
+  esac
+  return 0
 }
 native_backup_present() { local found; found=$(native_backup_discover) || return 1; jq -e '.present==true' <<< "$found" >/dev/null; }
 native_backup_overlap() {
@@ -194,6 +221,7 @@ native_backup_begin() {
     esac
   fi
   found=$(native_backup_discover "$required") || return 1
+  native_backup_notice "$found"
   if [[ "$required" != true ]] && ! jq -e '.present==true' <<< "$found" >/dev/null; then return 0; fi
   jq -e '.available==true and (.root|type=="string")' <<< "$found" >/dev/null || return 1
   inventory=$(native_backup_inspect "$found") || return 1

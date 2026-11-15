@@ -529,7 +529,8 @@ snapshot_online() {
   [[ ! -d "$directory/agents" ]] || members+=(agents)
   [[ ! -d "$directory/agent-profiles" ]] || members+=(agent-profiles)
   [[ ! -f "$directory/data-formats.json" ]] || members+=(data-formats.json)
-  local data_sha config_sha
+  local data_sha config_sha native_coverage=null
+  if declare -F native_backup_coverage >/dev/null; then native_coverage=$(native_backup_coverage) || die 'Native profile coverage could not be established'; fi
   # One parallel pass hashes every staged file: the receipt digest and the file manifest.
   tree_lines "$snapshot_staging/data" > "$snapshot_staging/work/files.sha256"
   data_sha=$(sha256sum < "$snapshot_staging/work/files.sha256" | cut -d ' ' -f1); config_sha=$(tree_digest "$directory/config")
@@ -551,16 +552,16 @@ snapshot_online() {
   done | jq -s from_entries)
   jq -n --arg uuid "$identity" --arg id "$installation" --arg host "$host" --arg sha "$(digest "$part")" --arg dataSHA "$data_sha" --arg configSHA "$config_sha" \
     --arg startedAt "$captured_at" --arg finishedAt "$(date -u +%FT%T.%3NZ)" --arg seconds "$(snapshot_seconds "$started" "$(snapshot_now)")" --argjson agents "$agents" \
-    --slurpfile release "$directory/receipt.json" --slurpfile pauses <(jq -s 'map(select(.pause|length>0))' "$snapshot_staging/work/pauses.jsonl") --argjson stores "$stores" --arg manifestSHA "$(digest "$snapshot_staging/archive/snapshot.json")" \
+    --slurpfile release "$directory/receipt.json" --slurpfile pauses <(jq -s 'map(select(.pause|length>0))' "$snapshot_staging/work/pauses.jsonl") --argjson stores "$stores" --arg manifestSHA "$(digest "$snapshot_staging/archive/snapshot.json")" --argjson native "$native_coverage" \
     '{schema:1,uuid:$uuid,installation:$id,host:$host,sha256:$sha,dataSHA256:$dataSHA,configSHA256:$configSHA,verified:true,release:$release[0],
       mode:"online",snapshot:{startedAt:$startedAt,finishedAt:$finishedAt,seconds:($seconds|tonumber),
         longestPauseSeconds:([$pauses[0][].pausedSeconds]|max // 0),pauses:$pauses[0],agentStopSeconds:(if $agents==null then null else ($agents|tonumber) end),
-        stores:$stores,fileManifestSHA256:$manifestSHA}}' > "$snapshot_staging/archive/receipt.json"
+        stores:$stores,fileManifestSHA256:$manifestSHA}} + (if $native==null then {} else {nativeProfiles:$native} end)' > "$snapshot_staging/archive/receipt.json"
   chmod 600 "$snapshot_staging/archive/receipt.json" "$snapshot_staging/archive/snapshot.json"
   mv -T -- "$snapshot_staging/archive" "$backup"; snapshot_created=$backup
   sync -f "$backup/state.tar.gz"
   verify_archive
   record complete
   snapshot_succeeded=true
-  jq -c --arg archive "$archive" --argjson bytes "$(stat -c %s "$backup/state.tar.gz")" '{archive:$archive,host,mode,seconds:.snapshot.seconds,longestPauseSeconds:.snapshot.longestPauseSeconds,bytes:$bytes}' "$backup/receipt.json"
+  jq -c --arg archive "$archive" --argjson bytes "$(stat -c %s "$backup/state.tar.gz")" '{archive:$archive,host,mode,seconds:.snapshot.seconds,longestPauseSeconds:.snapshot.longestPauseSeconds,bytes:$bytes} + (if .nativeProfiles then {nativeProfiles} else {} end)' "$backup/receipt.json"
 }

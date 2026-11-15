@@ -428,9 +428,11 @@ case "$action" in
     tar --sparse --hard-dereference -czf "$backup/state.tar.gz.partial" -C "$directory" "${members[@]}" "${native_members[@]}"
     gzip -t "$backup/state.tar.gz.partial"
     mv "$backup/state.tar.gz.partial" "$backup/state.tar.gz"
+    native_coverage=null
+    if declare -F native_backup_coverage >/dev/null; then native_coverage=$(native_backup_coverage) || die 'Native profile coverage could not be established'; fi
     jq -n --arg uuid "$identity" --arg id "$installation" --arg host "$host" --arg sha "$(digest "$backup/state.tar.gz")" \
-      --arg dataSHA "$(tree_digest "$directory/data")" --arg configSHA "$(tree_digest "$directory/config")" \
-      --slurpfile release "$directory/receipt.json" '{schema:1,uuid:$uuid,installation:$id,host:$host,sha256:$sha,dataSHA256:$dataSHA,configSHA256:$configSHA,verified:true,release:$release[0]}' | atomic_json "$backup/receipt.json"
+      --arg dataSHA "$(tree_digest "$directory/data")" --arg configSHA "$(tree_digest "$directory/config")" --argjson native "$native_coverage" \
+      --slurpfile release "$directory/receipt.json" '{schema:1,uuid:$uuid,installation:$id,host:$host,sha256:$sha,dataSHA256:$dataSHA,configSHA256:$configSHA,verified:true,release:$release[0]} + (if $native==null then {} else {nativeProfiles:$native} end)' | atomic_json "$backup/receipt.json"
     verify_archive
     [[ ! -d "$native_capture" ]] || rm -rf -- "$native_capture"
     record backed-up
@@ -639,6 +641,7 @@ case "$action" in
     native_result=$(verify_native_archive)
     if [[ -z "$native_result" ]] && declare -F native_backup_discover >/dev/null; then
       native_current=$(native_backup_discover) || die 'Current native recovery coverage could not be established'
+      if declare -F native_backup_notice >/dev/null; then native_backup_notice "$native_current"; fi
       if jq -e '.present==true' <<< "$native_current" >/dev/null; then
         die 'This archive predates native profile capture; restoring its suite data would orphan current native profiles. Keep it and use a rehearsed archive with matching native coverage'
       fi

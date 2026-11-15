@@ -196,8 +196,10 @@ backup() {
   : > "$STUB_STATE/calls"
   jq -nc --arg directory "$directory" --arg plan "$plan" --arg digest "$digest" --arg archive "$archive" --argjson minimum "$minimum" \
     --arg tool "$(printf 'export {}' | base64 -w0)" --arg integrity "$(printf 'export {}' | base64 -w0)" \
+    --argjson placements "${SNAPSHOT_PLACEMENTS:-null}" \
     '{directory:$directory,installation:"synthetic",host:"control",action:"snapshot",operation:"backup",plan:$plan,version:"0.1.0",digest:$digest,archive:$archive,
-      minimumFreeMiB:$minimum,snapshotTool:$tool,integrityScript:$integrity,agents:[],inference:[]}' | bash -c "$script"
+      minimumFreeMiB:$minimum,snapshotTool:$tool,integrityScript:$integrity,agents:[],inference:[]} + (if $placements==null then {} else {placements:$placements} end)' |
+    if [[ -n "${SNAPSHOT_SCRIPT_FILE:-}" ]]; then bash "$SNAPSHOT_SCRIPT_FILE"; else bash -c "$script"; fi
 }
 calls() { cat "$STUB_STATE/calls"; }
 line() { grep -nx -- "$1" "$STUB_STATE/calls" | head -n 1 | cut -d: -f1; }
@@ -238,6 +240,29 @@ before 'pause magnus' 'pg_basebackup magnus-postgres'; before 'pg_basebackup mag
 tar -tzf "$directory/backups/online-a/state.tar.gz" > "$temporary/members"
 for member in data/oathweave/state.db data/oathweave-redis/dump.rdb data/oathweave-redis/appendonlydir/appendonly.aof.manifest data/magnus-postgres/pgdata/PG_VERSION compose.json receipt.json installation.json native-profiles/bundle/manifest.json native-profiles/bundle/profile-state; do grep -qx "$member" "$temporary/members" || fail "Archive member is missing: $member"; done
 ! grep -q 'hive-snapshot\|storage.snapshot\|\.online-' "$temporary/members" || fail 'A temporary file was archived'
+
+# ---- Beside a Magnus agent installed outside the Hive installer, with the real native discovery:
+# the online backup serves on, leaves the agent alone and records that it is not included. ----
+cat > "$temporary/bin/systemctl" <<'SYSTEMCTL'
+#!/usr/bin/env bash
+case "$*" in *WorkingDirectory*) printf '%s\n' "$FIXTURE_AGENT";; *LoadState*) printf 'loaded\n';; esac
+SYSTEMCTL
+chmod 700 "$temporary/bin/systemctl"
+export FIXTURE_AGENT=$temporary/fleet-agent
+mkdir -m 700 "$FIXTURE_AGENT"; printf 'HOST_FQDN=node-1.example.com\n' > "$FIXTURE_AGENT/.env"; chmod 600 "$FIXTURE_AGENT/.env"
+{ cat "$ROOT/scripts/suite/native-backup-host.sh"; printf '\nnative_backup_guard() { :; }\n'
+  for file in integrity-host.sh adapters-host.sh snapshot-host.sh host-runtime.sh; do cat "$ROOT/scripts/suite/$file"; printf '\n'; done; } > "$temporary/fleet-script.sh"
+for placements in '{"magnus":{"host":"control"}}:not-installer-owned' '{}:no-magnus-component'; do
+  prepared
+  SNAPSHOT_SCRIPT_FILE=$temporary/fleet-script.sh SNAPSHOT_PLACEMENTS=${placements%:*} backup "online-${placements##*:}" > "$temporary/out" 2> "$temporary/err" || { cat "$temporary/err" >&2; fail "The online backup failed beside a fleet agent (${placements##*:})"; }
+  receipt=$directory/backups/online-${placements##*:}/receipt.json
+  jq -e --arg reason "${placements##*:}" '.mode=="online" and .nativeProfiles.included==false and .nativeProfiles.reason==$reason' "$receipt" >/dev/null || { cat "$receipt" >&2; fail 'The online receipt does not record that native profiles are not included'; }
+  tail -n 1 "$temporary/out" | jq -e --arg reason "${placements##*:}" '.nativeProfiles.reason==$reason' >/dev/null || fail 'The backup summary does not show native coverage'
+  grep -q 'native profiles not included' "$temporary/err" || fail 'The online backup did not say native profiles are not included'
+  ! tar -tzf "$directory/backups/online-${placements##*:}/state.tar.gz" | grep -q '^native-profiles/' || fail 'A fleet agent was archived'
+  [[ $(phase) == complete ]] || fail 'The fleet-side online backup left its transaction open'
+done
+printf 'Passed: an online backup beside a non-installer Magnus agent serves on and records "not included".\n'
 [[ -z $(find "$directory/data/hivemem-qdrant/snapshots" -type f) && -z $(find "$directory/data/magnus-postgres" -name '.hive-snapshot-*') ]] || fail 'A store temporary stayed in the live data'
 [[ -z $(find "$directory/backups" -mindepth 1 -maxdepth 1 -name '.online-*') ]] || fail 'Staging was left behind'
 [[ -z $(ls "$STUB_STATE/paused") ]] || fail 'A service stayed paused'
