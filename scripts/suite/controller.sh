@@ -192,9 +192,12 @@ backups list shows each host's backups and restore rehearsals and what retention
 backups prune [--keep N] [--keep-days D] [--apply] is a dry run by default: it lists the backup and
 rehearsal pairs it would remove, together, and the space that frees. It keeps the newest N
 restorable pairs, everything newer than D days, the installed release's upgrade archive, anything a
-transaction, receipt or recovery record names, and backups never rehearsed. A successful upgrade
-runs it with installation.json "retention" ({"keep":5,"keepDays":14,"auto":true}). See
-deployment/BACKUPS.md#retention.
+transaction, receipt or recovery record names, and backups never rehearsed. --apply removes them
+on a single-host installation only; an installation with several hosts can list and dry-run only.
+Automatic pruning after a successful upgrade is off by default: a single-host installation turns
+it on with installation.json "retention" ({"keep":5,"keepDays":14,"auto":true}). Retention
+protects only archives that state files name: keep any archive you plan to restore later outside
+the installation directory before --apply. See deployment/BACKUPS.md#retention.
 setup [list] | setup done ID | setup skip ID shows and settles the setup checklist: the steps after an
 install or upgrade that still need a person, recorded in the Hive Registry (1.3.0 and later) and shown
 in HiveXUI. status lists the pending ones. See deployment/FULL.md#setup-checklist.

@@ -20,6 +20,11 @@ All notable changes to this project are documented in this file. The format is b
   before any host is changed until coordinated retention locking is implemented; listing and
   dry-run planning remain available. This prevents a late lock, transaction or protection change
   on one host from leaving a restore point without its counterpart on another.
+- `hive.sh --help` describes retention as it now works: `--apply` on single-host installations
+  only, list and dry run on several hosts, and automatic pruning after an upgrade off unless a
+  single-host installation sets `"auto": true`. Retention protects only archives that state files
+  name, so keep any archive you plan to restore later outside the installation directory before
+  `--apply`.
 
 ### Added
 
