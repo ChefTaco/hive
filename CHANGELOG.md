@@ -6,6 +6,24 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.9.2] - 2026-11-15
+
+### Changed
+
+- Magnus, its fleet gateway and agent 3.0.3. The node agent creates, as the owner and one level at a
+  time inside the owner home, the missing parents of the Ardent install prefix before it stages a
+  package, so installing or updating the Ardent package no longer fails on a fresh owner account
+  without `~/.local/share`. Magnus 3.0.3 adds no migrations and no settings, so an upgrade from
+  3.9.1 needs no flag. Retry a failed **Update package** once the node's agent runs 3.0.3.
+- HiveXUI 0.9.1. Upgrade agents offers ADMIN an **Allow major upgrade** option against a Magnus
+  that reports 3.0.1 or later: it asks first, explains the 2.10.3 stepping stone and the per-node
+  major-upgrade authorization the server signs, and sends `allowMajor` with the check and the run.
+  The upgrade problem codes come from the vendored Magnus 3.0.2 browser contract, and the
+  end-to-end stack binds node keys with a one-time enrollment token instead of shared node keys.
+- Every other pin, the datastore profile and the storage recovery profile are unchanged from
+  3.9.1, and so is the controller: the release pins the controller digest of 3.9.1. See
+  `UPGRADING.md`, "Suite 3.9.2: Magnus 3.0.3, HiveXUI 0.9.1, ingress 2.0.6".
+
 ### Security
 
 - The ingress is `hive-ingress` 2.0.6: the same Caddy 2.11.9 build, Go toolchain and base image as

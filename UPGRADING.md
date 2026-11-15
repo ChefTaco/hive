@@ -46,6 +46,31 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Suite 3.9.2: Magnus 3.0.3, HiveXUI 0.9.1, ingress 2.0.6
+
+Suite 3.9.2 changes no storage format and needs no flag from 3.9.1. It pins Magnus, its fleet
+gateway and agent 3.0.3, HiveXUI 0.9.1 and `hive-ingress` 2.0.6; every other pin, the datastore
+profile and the storage recovery profile are those of 3.9.1. The controller is that of 3.9.1, so
+the release pins the same controller digest; pass `--release 3.9.2` to later commands, as described
+in [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
+
+Magnus 3.0.3 changes only the node agent and adds no migrations and no settings. The agent now
+creates the missing parents of the Ardent install prefix, as the owner and one level at a time
+inside the owner home, so installing or updating the Ardent package works on a fresh owner account
+without `~/.local/share`. Move the agents to 3.0.3 as for any patch within the major: `./hive.sh
+post-upgrade` and `./hive.sh magnus-agent install --config FILE --host HOST` for the agents the suite
+installs, and `magnus-server agents upgrade --to 3.0.3` for the agents Magnus manages. Retry a
+failed **Update package** once the node's agent runs 3.0.3.
+
+HiveXUI 0.9.1 offers ADMIN an **Allow major upgrade** option in Upgrade agents against a Magnus
+that reports 3.0.1 or later, the browser counterpart of `magnus-server agents upgrade
+--allow-major`. The ingress 2.0.6 is the same Caddy build as 2.0.5 with the OpenTelemetry log SDK
+1.47.0 (CVE-2026-128085).
+
+From 3.8.1, upgrade directly to 3.9.2 as described for 3.9.0 below, with 3.9.2 and Magnus 3.0.3 in
+place of 3.9.0 and 3.0.1; managed agents still cross the major from 2.10.3, with `magnus-server
+agents upgrade --to 3.0.3 --allow-major` or the HiveXUI option.
+
 ## Suite 3.9.1: Magnus 3.0.2, retiring the shared keys
 
 Suite 3.9.1 changes no storage format and needs no flag from 3.9.0. It pins Magnus, its fleet
