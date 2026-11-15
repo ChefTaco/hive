@@ -1,7 +1,7 @@
 # Install Hive on one host
 
 This guide takes a freshly installed Ubuntu or Debian server to a running Hive suite with every
-product, signed in through the console. Each step is safe to repeat. The launcher selects the
+product, signed in through the UI. Each step is safe to repeat. The launcher selects the
 latest published suite release; you can also select an exact version. The examples use the
 console name `hive.example.com` and the installation directory `/opt/hive`; use your own values.
 
@@ -192,7 +192,7 @@ The initial operator's password is generated once, into a file only you can read
 cat /opt/hive/config/initial-credentials.env    # SEED_ADMIN_USERNAME and SEED_ADMIN_PASSWORD
 ```
 
-Open `https://hive.example.com/` and sign in with that username and password. The console shows
+Open `https://hive.example.com/` and sign in with that username and password. The UI shows
 a section for each installed product. Add a second factor, a passkey or an authenticator app,
 under **Oathweave > Account security**. Keep the file owner-only and leave it where it is: never
 edit or remove files under `/opt/hive/config`, because the installer checks their digests when a
@@ -244,7 +244,7 @@ out, naming the blockers and the ways out; see
 agents.
 
 The upgrade prints its plan, takes a verified pre-change backup and rehearses data changes on a
-copy. The console is unavailable while its services and stores are stopped or migrated; duration
+copy. The UI is unavailable while its services and stores are stopped or migrated; duration
 depends on the data and index rebuilds. After upgrading, switch to the retained checkout the
 launcher printed. `./hive.sh rollback` can return to a compatible storage format. The PostgreSQL collation
 transition introduced in 3.0.0 refuses code-only rollback: recovery requires the verified
@@ -281,11 +281,11 @@ run `console-clients add` when it hosts Oathweave and needs missing HiveXUI brow
 Full-node enrollment is a separate authorization through `magnus-agent enroll`; a package update
 must not enable commands, cron or web terminals on an intentionally limited node. See
 [Magnus host agents](FULL.md#magnus-host-agents) for enrollment review and other hosts.
-An updated agent is not re-enrolled for its node key either: with a Magnus that has per-node
-credentials it binds its own key automatically; see [node keys](FULL.md#node-keys). From a
-release that pins Magnus 3.0.0 or later, which accepts node keys only, an agent that already has a
-key keeps it, an agent without one is enrolled with a one-time token, and no fleet-wide node secret
-is copied to agents; `./hive.sh post-upgrade` then lists any blockers from Magnus's fleet summary
+With a release that pins Magnus 3.0.0 or later, such as 3.9.1, which accepts node keys only, an
+agent that already has a key keeps it and is not re-enrolled, an agent without one is enrolled with
+a one-time token, and no fleet-wide node secret is copied to agents (see
+[node keys](FULL.md#node-keys); under a release that pins Magnus 2.10.x an existing agent binds its
+own key automatically instead); `./hive.sh post-upgrade` then lists any blockers from Magnus's fleet summary
 (see [Upgrading](../UPGRADING.md#magnus-300-node-keys-only)).
 
 Update Ardent packages in HiveXUI under Magnus > Ardent > Installations: stop running profiles,

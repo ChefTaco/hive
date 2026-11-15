@@ -44,7 +44,7 @@ The optional Emberfold HTTP service stays on the console host's Compose network.
 Its API token remains in its protected backend environment. Browser configuration
 contains the installation namespace and same-origin product paths only.
 
-HiveXUI is the Magnus console. It reaches the fleet API at `/api/magnus` with a
+HiveXUI is the Magnus UI. It reaches the fleet API at `/api/magnus` with a
 short-lived Oathweave resource token (audience `magnus`), and fresh setup links the
 initial operator to Magnus as an explicit ADMIN. The ingress allows only the
 browser-facing rows of Magnus's `docs/console-api.md`, answers 404 for everything

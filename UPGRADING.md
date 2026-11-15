@@ -306,6 +306,7 @@ Magnus, Cindertrace, HiveSkills and Embermend now declare, and HiveXUI 0.6.0 rea
 inbox. Emberpath 2.3.0 and HiveSkills 1.6.0 no longer serve their own web UIs; their APIs are
 unchanged.
 
+## Suite 3.4: Emberpath and HiveSkills data formats
 
 Emberpath 2.2.0 adds its router data format `managed-format-2`: a nullable `Trace.actorId`
 column with actor and client-key time indexes. HiveSkills 1.5.0 adds `managed-format-3`: a side
