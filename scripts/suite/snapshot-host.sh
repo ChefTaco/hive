@@ -422,12 +422,16 @@ snapshot_group() {
 # Free space for the staged snapshot and the compressed archive, which can at most reach the
 # size of the data, with the configured reserve left over. Checked before anything is written.
 snapshot_space() {
-  local data minimum need free
+  local data minimum need free native=0
   minimum=$(jq -r '.minimumFreeMiB // 2048' <<< "$input")
   # A serving product may remove a file while du walks the tree: its total still counts.
   data=$({ du -sk -- "$directory/data" 2>/dev/null || true; } | cut -f1)
   [[ "$data" =~ ^[0-9]+$ ]] || die 'The data directory size could not be read'
-  need=$(( data * 3 + minimum * 1024 ))
+  if declare -F native_backup_space_kib >/dev/null; then
+    native=$(native_backup_space_kib) || die 'Native snapshot space could not be checked'
+    [[ "$native" =~ ^[0-9]+$ ]] || die 'Native snapshot size could not be read'
+  fi
+  need=$(( (data + native) * 3 + minimum * 1024 ))
   free=$(df -Pk -- "$directory/backups" | awk 'NR==2 {print $4}')
   ((free >= need)) || die "Online backup needs $((need / 1024)) MiB free for its snapshot and archive; $((free / 1024)) MiB are available. Nothing was changed; ./hive.sh backups prune lists old backups and rehearsals that can go"
   if [[ $(stat -c %d "$directory/data") != $(stat -c %d "$directory/backups") ]]; then
@@ -445,6 +449,9 @@ snapshot_finish() {
   local status=$? resumed=true name
   trap - EXIT HUP INT TERM
   if ((${#snapshot_paused[@]})); then snapshot_resume || resumed=false; fi
+  # Native writers have a separate durable product journal. A failed cleanup must
+  # retain the hold rather than report that the installation kept serving.
+  if declare -F native_backup_finish >/dev/null; then native_backup_finish || resumed=false; fi
   # Helper and verification containers, including any a timed-out capture left behind.
   for name in "${snapshot_containers[@]}" $(docker ps -aq --filter "name=^hive-snapshot-$archive-" 2>/dev/null); do docker rm -f "$name" >/dev/null 2>&1 || true; done
   for name in "$directory"/data/*/".hive-snapshot-$archive"; do [[ ! -d "$name" || -L "$name" ]] || rm -rf -- "$name"; done
@@ -461,13 +468,13 @@ snapshot_finish() {
   if [[ "$resumed" != true ]]; then
     record recovery-required
     if declare -F restore_installation_owner >/dev/null; then restore_installation_owner; fi
-    printf 'Hive host: paused services could not be resumed: run docker unpause for the installation containers\n' >&2
+    printf 'Hive host: services or native profiles could not be resumed; retain the transaction and inspect the protected recovery journals\n' >&2
     exit 1
   fi
   if [[ "$snapshot_succeeded" != true ]]; then
     # Nothing in the installation changed: the transaction closes and services keep serving.
     record complete
-    printf 'Hive host: online backup failed; every service kept serving and no archive was kept\n' >&2
+    printf 'Hive host: online backup failed; cleanup completed and no archive was kept\n' >&2
     ((status != 0)) || status=1
   fi
   if declare -F restore_installation_owner >/dev/null; then restore_installation_owner; fi
@@ -501,6 +508,12 @@ snapshot_online() {
   docker image inspect "$recovery_image" >/dev/null 2>&1 || docker pull --quiet "$recovery_image" >/dev/null
   started=$(snapshot_now)
   local captured_at; captured_at=$(date -u +%FT%T.%3NZ)
+  # Close native mutation admissions and stop their writers before any suite
+  # store is captured, including Magnus identity/configuration and HiveMem.
+  if declare -F native_backup_begin >/dev/null; then
+    native_backup_begin
+    native_backup_capture "$snapshot_staging/native-profiles"
+  fi
   for group in "${groups[@]}"; do snapshot_group "$group"; done
   # Native agent profiles are not suite stores: the agents stop only while theirs are copied.
   agents=null
@@ -522,7 +535,9 @@ snapshot_online() {
   data_sha=$(sha256sum < "$snapshot_staging/work/files.sha256" | cut -d ' ' -f1); config_sha=$(tree_digest "$directory/config")
   jq -Rs 'split("\u0000")|map(select(length>0)|{key:.[68:],value:.[0:64]})|from_entries' "$snapshot_staging/work/files.sha256" > "$snapshot_staging/archive/snapshot.json"
   # Streamed straight into the compressed archive: the staged snapshot is the only full copy.
-  tar --sparse --hard-dereference -czf "$part.partial" -C "$snapshot_staging" data -C "$directory" "${members[@]}"
+  local native_members=()
+  [[ ! -d "$snapshot_staging/native-profiles" ]] || native_members=(native-profiles)
+  tar --sparse --hard-dereference -czf "$part.partial" -C "$snapshot_staging" data "${native_members[@]}" -C "$directory" "${members[@]}"
   # The archive is read back while the suite serves: the whole compressed stream must check
   # out, and its data must hold exactly the staged files with their sizes. Rehearse and restore
   # check every byte against the receipt digest.

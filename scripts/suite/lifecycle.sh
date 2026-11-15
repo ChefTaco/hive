@@ -2,12 +2,12 @@
 
 hive_action() {
   local host=$1 file script=''
-  local -a files=(ownership-host.sh public-runtime.sh integrity-host.sh input-artifacts-host.sh native-initialization-host.sh adapters-host.sh inference-registration.sh initialize-migrations-host.sh host-runtime.sh)
-  [[ "$2" != snapshot ]] || files=(ownership-host.sh integrity-host.sh adapters-host.sh snapshot-host.sh host-runtime.sh)
+  local -a files=(ownership-host.sh public-runtime.sh integrity-host.sh input-artifacts-host.sh native-initialization-host.sh adapters-host.sh native-backup-host.sh restore-recovery-host.sh inference-registration.sh initialize-migrations-host.sh host-runtime.sh)
+  [[ "$2" != snapshot ]] || files=(ownership-host.sh integrity-host.sh adapters-host.sh native-backup-host.sh snapshot-host.sh host-runtime.sh)
   for file in "${files[@]}"; do script+=$(cat "$HIVE_ROOT/scripts/suite/$file")$'\n'; done
   # The host script travels as one command-line argument, which the kernel bounds at 128 KiB.
   # The online backup ships only the definitions it runs, compressed; it is the same code.
-  if [[ "$2" == snapshot ]]; then script="eval \"\$(printf '%s' '$(printf '%s' "$script" | gzip -9n | base64 -w0)' | base64 -d | gunzip)\""; fi
+  if [[ "$2" == snapshot || ${#script} -gt 100000 ]]; then script="eval \"\$(printf '%s' '$(printf '%s' "$script" | gzip -9n | base64 -w0)' | base64 -d | gunzip)\""; fi
   HIVE_HOST_ACTION=$2 hive_host "$host" "$script"
 }
 
@@ -73,8 +73,52 @@ hive_abort() {
   hive_die "$message. Nothing was changed, so the transaction is closed as aborted; fix the cause, then run this or any other command"
 }
 
+# Recovery is a separately reviewed operation, never an implicit retry of work.
+# It can reconcile an old controller's pre-capture pause, without adopting its plan
+# for a new backup or changing any archived/data bytes.
+hive_native_recovery() {
+  local file=$HIVE_NATIVE_RECOVERY_FILE permissions host
+  [[ -n "$HIVE_ARCHIVE" ]] || hive_die 'Native recovery requires the original --archive ID'
+  [[ -f "$file" && ! -L "$file" && $(stat -c %u "$file") == "$(id -u)" ]] || hive_die 'Native recovery approval must be an operator-owned regular file'
+  permissions=$(stat -c %a "$file")
+  (( (8#$permissions & 077)==0 && $(stat -c %s "$file") <= 65536 )) || hive_die 'Native recovery approval must be private and bounded'
+  jq -e --slurpfile config "$HIVE_CONFIG" '
+    type=="object" and keys==["hosts"] and (.hosts|type=="object" and length>0) and
+    (((.hosts|keys)-($config[0].hosts|keys))|length==0)
+  ' "$file" >/dev/null || hive_die 'Native recovery approval names an unknown host or has an invalid shape'
+  HIVE_NATIVE_RECOVERY_INPUT=$(jq -c . "$file")
+  HIVE_NATIVE_BACKUP_TOOL=$(base64 -w0 "$HIVE_ROOT/scripts/suite/native-backup-coordinator.mjs") || hive_die 'Native backup coordinator is unavailable'
+  while IFS= read -r host; do
+    hive_action "$host" native-backup-recover || hive_die 'Native recovery remains held; inspect its protected evidence'
+  done < <(jq -r '.hosts|keys[]' "$file")
+  printf 'Approved pre-capture native recovery completed. No archive was taken; run backup again with the current controller.\n' >&2
+}
+
+hive_restore_native_recovery() {
+  local file=$HIVE_NATIVE_RECOVERY_FILE permissions host
+  [[ -n "$HIVE_ARCHIVE" && "$HIVE_PREPARE_RECONCILIATION" != true && -z "$HIVE_RECONCILIATION" && "$HIVE_ALLOW_MIGRATIONS" != true && "$HIVE_RELAX_AUTH_LIMITS" != true ]] || hive_die 'Restore continuation needs the original archive and cannot prepare, reconcile or migrate a new plan'
+  [[ -f "$file" && ! -L "$file" && $(stat -c %u "$file") == "$(id -u)" ]] || hive_die 'Restore continuation approval must be an operator-owned regular file'
+  permissions=$(stat -c %a "$file")
+  (( (8#$permissions & 077)==0 && $(stat -c %h "$file")==1 && $(stat -c %s "$file")<=65536 )) || hive_die 'Restore continuation approval must be private, single-link and bounded'
+  jq -e --slurpfile config "$HIVE_CONFIG" 'type=="object" and keys==["hosts"] and (.hosts|type=="object" and length==1) and ($config[0].hosts|length)==1 and (.hosts|keys)==($config[0].hosts|keys) and ($config[0].agents|length)==0' "$file" >/dev/null || hive_die 'Restore continuation supports exactly one configured host and no static agents'
+  HIVE_NATIVE_RECOVERY_INPUT=$(jq -c . "$file")
+  HIVE_NATIVE_RECOVERY_CONFIGURATION_SHA=$(sha256sum "$HIVE_CONFIG" | cut -d ' ' -f1)
+  HIVE_NATIVE_RECOVERY_MANIFEST_SEMANTIC_SHA=$(jq -Sc 'del(.controllerSHA256,.version)' "$HIVE_MANIFEST" | sha256sum | cut -d ' ' -f1)
+  HIVE_NATIVE_BACKUP_TOOL=$(base64 -w0 "$HIVE_ROOT/scripts/suite/native-backup-coordinator.mjs") || hive_die 'Native backup coordinator is unavailable'
+  host=$(jq -er '.hosts|keys[0]' "$file")
+  hive_action "$host" restore-recovery-check || hive_die 'Restore continuation preflight failed; original state remains held'
+  hive_action "$host" restore-recovery-apply || hive_die 'Restore continuation remains held; inspect its preserved evidence'
+  hive_action "$host" restore-recovery-resume || hive_die 'Restored state remains held; inspect its continuation receipt'
+  printf 'Approved pre-promotion restore continuation completed; original failed evidence and stage are retained.\n' >&2
+}
+
 hive_lifecycle() {
   local operation=$1
+  case "$operation" in
+    backup|upgrade|rollback|restore|rehearse)
+      HIVE_NATIVE_BACKUP_TOOL=$(base64 -w0 "$HIVE_ROOT/scripts/suite/native-backup-coordinator.mjs") || hive_die 'Native backup coordinator is unavailable'
+      ;;
+  esac
   if [[ "$operation" == install ]] && jq -e '.bootstrap!=null' "$HIVE_CONFIG" >/dev/null; then hive_initialize; fi
   # Protected credentials exist before preflight and before any pre-change backup.
   case "$operation" in install|upgrade|rollback|adopt|rehearse) hive_registry_provision;; esac
@@ -94,6 +138,7 @@ hive_lifecycle() {
       fi
       if [[ "$operation" != install ]]; then
         HIVE_ARCHIVE=${HIVE_ARCHIVE:-"pre-$operation-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 4)"}
+        hive_all native-backup-begin || hive_hold
         hive_all quiesce || hive_hold
         hive_all backup || hive_hold
         # The candidate, rather than the archived binary, runs on restored copies.
@@ -119,6 +164,7 @@ hive_lifecycle() {
       hive_all prepare || hive_die 'Backup transaction could not be prepared'
       if [[ "${HIVE_BACKUP_STOPPED:-false}" == true ]]; then
         # The original backup: every container stops while its state is archived.
+        hive_all native-backup-begin || hive_hold
         hive_all quiesce || hive_hold
         hive_all backup || hive_hold
         hive_all resume-current || hive_hold
@@ -129,7 +175,7 @@ hive_lifecycle() {
           hive_transfer "$host" "$HIVE_MANIFEST" "manifest.$HIVE_PLAN_DIGEST.json"
         done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
         hive_need gzip; HIVE_SNAPSHOT_TOOL=$(base64 -w0 "$HIVE_ROOT/scripts/suite/snapshot-data.mjs")
-        hive_all snapshot || hive_die 'Online backup failed; the suite kept serving and no archive was kept on the failed host. --stopped takes the backup with the suite stopped'
+        hive_all snapshot || hive_die 'Online backup failed; inspect the protected transaction and native recovery records before retrying. --stopped takes a backup with the suite stopped'
       fi
       printf 'Verified archive ID: %s\n' "$HIVE_ARCHIVE"
       ;;
@@ -140,14 +186,25 @@ hive_lifecycle() {
       hive_all complete || hive_die 'Rehearsal receipt could not be finalized'
       ;;
     restore)
-      [[ -n "$HIVE_ARCHIVE" && -f "$HIVE_RECONCILIATION" && ! -L "$HIVE_RECONCILIATION" ]] || hive_die 'Restore requires --archive ID and --reconciliation FILE tied to the current data digest'
+      [[ -n "$HIVE_ARCHIVE" ]] || hive_die 'Restore requires --archive ID'
       local host
-      while IFS= read -r host; do
-        hive_transfer "$host" "$HIVE_RECONCILIATION" "reconciliation.$HIVE_PLAN_DIGEST.json"
-      done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
-      hive_all restore-check || hive_die 'Restore acknowledgement or archive validation failed'
+      if [[ "${HIVE_PREPARE_RECONCILIATION:-false}" == true ]]; then
+        hive_all restore-preview-check || hive_die 'Restore archive validation failed; nothing was stopped'
+      else
+        [[ -f "$HIVE_RECONCILIATION" && ! -L "$HIVE_RECONCILIATION" ]] || hive_die 'Restore requires --reconciliation FILE; --prepare-reconciliation holds services and prints a template for review'
+        while IFS= read -r host; do
+          hive_transfer "$host" "$HIVE_RECONCILIATION" "reconciliation.$HIVE_PLAN_DIGEST.json"
+        done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
+        hive_all restore-check || hive_die 'Restore acknowledgement or archive validation failed'
+      fi
       hive_all prepare || hive_die 'Restore transaction could not be prepared'
+      hive_all native-backup-begin || hive_hold
       hive_all quiesce || hive_hold
+      if [[ "${HIVE_PREPARE_RECONCILIATION:-false}" == true ]]; then
+        hive_all restore-preview || hive_hold
+        printf 'Services are held for restore review. Save the host templates in a private file, reconcile subsequent writes, then set subsequentWritesReconciled to true and repeat restore with --reconciliation FILE. No data has been replaced.\n' >&2
+        return
+      fi
       hive_all restore || hive_hold
       hive_all resume-current || hive_hold
       ;;

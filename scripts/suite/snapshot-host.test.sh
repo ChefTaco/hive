@@ -167,7 +167,29 @@ jq -n --arg uuid "$uuid" '{schema:1,installation:"synthetic",host:"control",uuid
 jq -n --arg digest "$digest" '{schema:1,installation:"synthetic",host:"control",version:"0.1.0",digest:$digest}' > "$directory/receipt.json"
 prepared() { jq -n --arg plan "$plan" '{schema:1,plan:$plan,phase:"prepared",version:"0.1.0",operation:"backup"}' > "$directory/transaction.json"; }
 phase() { jq -r .phase "$directory/transaction.json"; }
-script=''; for file in integrity-host.sh adapters-host.sh snapshot-host.sh host-runtime.sh; do script+=$(cat "$ROOT/scripts/suite/$file")$'\n'; done
+script=$(cat <<'NATIVE'
+# The product adapter owns the real bundle format. This fixture exercises its
+# lifecycle hooks with an empty static agents list and records their ordering.
+native_backup_begin() {
+  printf 'native-begin\n' >> "$STUB_STATE/calls"
+  touch "$STUB_STATE/native-held"
+}
+native_backup_capture() {
+  printf 'native-capture\n' >> "$STUB_STATE/calls"
+  [[ "${STUB_FAIL:-}" != native-capture ]] || return 1
+  mkdir -p "$1/bundle"
+  printf '{"fixture":true}\n' > "$1/bundle/manifest.json"
+  printf 'fixture native profile state\n' > "$1/bundle/profile-state"
+}
+native_backup_finish() {
+  [[ -f "$STUB_STATE/native-held" ]] || return 0
+  printf 'native-resume\n' >> "$STUB_STATE/calls"
+  [[ "${STUB_FAIL:-}" != native-resume ]] || return 1
+  rm -- "$STUB_STATE/native-held"
+}
+NATIVE
+)
+script+=$'\n'; for file in integrity-host.sh adapters-host.sh snapshot-host.sh host-runtime.sh; do script+=$(cat "$ROOT/scripts/suite/$file")$'\n'; done
 export STUB_STATE=$temporary/state STUB_COMPOSE=$directory/compose.json STUB_DATA=$directory/data PATH="$temporary/bin:$PATH"
 backup() {
   local archive=$1 minimum=${2:-1}
@@ -195,6 +217,10 @@ jq -e '.snapshot.pauses[]|select(.pause==["hivemem"])|(.steps|has("files:hivemem
 jq -e '.snapshot.pauses[]|select(.pause==["oathweave"])|.steps|has("redis:oathweave-redis")' "$receipt" >/dev/null || fail 'The Redis pause step is not recorded'
 [[ $(jq -r .sha256 "$receipt") == $(sha256sum "$directory/backups/online-a/state.tar.gz" | cut -d ' ' -f1) ]] || fail 'Archive checksum differs'
 [[ $(phase) == complete ]] || fail 'The transaction is not closed'
+before native-begin native-capture
+before native-capture 'pause hivemem'
+before 'unpause oathweave' native-resume
+[[ ! -e "$STUB_STATE/native-held" ]] || fail 'Native admission was not released'
 for service in ingress oathweave-redis hivemem-qdrant magnus-postgres hivexui; do ! calls | grep -qx "pause $service" || fail "$service was paused"; done
 for service in oathweave hivemem magnus; do
   before "precopy files-$service" "pause $service"
@@ -210,7 +236,7 @@ before 'pause hivemem' 'qdrant-capture qdrant-hivemem-qdrant'; before 'qdrant-ca
 before 'pause magnus' 'pg_basebackup magnus-postgres'; before 'pg_basebackup magnus-postgres' 'unpause magnus'
 # Stores are rebuilt as stopped stores; nothing temporary stays in the live directories.
 tar -tzf "$directory/backups/online-a/state.tar.gz" > "$temporary/members"
-for member in data/oathweave/state.db data/oathweave-redis/dump.rdb data/oathweave-redis/appendonlydir/appendonly.aof.manifest data/magnus-postgres/pgdata/PG_VERSION compose.json receipt.json installation.json; do grep -qx "$member" "$temporary/members" || fail "Archive member is missing: $member"; done
+for member in data/oathweave/state.db data/oathweave-redis/dump.rdb data/oathweave-redis/appendonlydir/appendonly.aof.manifest data/magnus-postgres/pgdata/PG_VERSION compose.json receipt.json installation.json native-profiles/bundle/manifest.json native-profiles/bundle/profile-state; do grep -qx "$member" "$temporary/members" || fail "Archive member is missing: $member"; done
 ! grep -q 'hive-snapshot\|storage.snapshot\|\.online-' "$temporary/members" || fail 'A temporary file was archived'
 [[ -z $(find "$directory/data/hivemem-qdrant/snapshots" -type f) && -z $(find "$directory/data/magnus-postgres" -name '.hive-snapshot-*') ]] || fail 'A store temporary stayed in the live data'
 [[ -z $(find "$directory/backups" -mindepth 1 -maxdepth 1 -name '.online-*') ]] || fail 'Staging was left behind'
@@ -251,6 +277,13 @@ for step in redis-bgsave redis-wait redis-check qdrant-precapture qdrant-capture
   STUB_FAIL=$step failed "fail-$(tr -c 'a-z' '-' <<< "$step" | sed 's/-*$//')" 'online backup failed'
   [[ $(phase) == complete ]] || fail "A failed backup left its transaction open: $step"
 done
+STUB_FAIL=native-capture failed fail-native-capture 'online backup failed'
+[[ ! -e "$STUB_STATE/native-held" && $(phase) == complete ]] || fail 'A native capture failure did not release its clean hold'
+prepared
+if STUB_FAIL=native-resume backup fail-native-resume > "$temporary/out" 2> "$temporary/err"; then fail 'A backup hid failed native recovery'; fi
+[[ $(phase) == recovery-required && -f "$STUB_STATE/native-held" ]] || fail 'Failed native recovery did not retain its transaction and hold'
+grep -q 'could not be resumed' "$temporary/err" || fail 'Failed native recovery was not reported'
+rm -- "$STUB_STATE/native-held"
 printf 'Passed: a failed store snapshot resumes every service, keeps no archive and changes no other archive.\n'
 
 # ---- A writer paused inside a SQLite commit: resume, then capture again. ----

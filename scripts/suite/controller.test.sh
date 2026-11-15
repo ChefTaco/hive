@@ -211,6 +211,12 @@ grep -q 'not a regular file' "$temporary/result" || fail 'A missing HIVE_INSTALL
 "$ROOT/hive.sh" --help | grep -q 'agents-accept|skills-prepare' || fail 'Usage omits agents-accept'
 "$ROOT/hive.sh" --help | grep -q 'post-upgrade \[--yes\]' || fail 'Usage omits post-upgrade'
 "$ROOT/hive.sh" --help | grep -q 'refresh-memory-token' || fail 'Usage omits migrate-native refresh-memory-token'
+"$ROOT/hive.sh" --help | grep -q 'prepare-reconciliation' || fail 'Usage omits held restore preparation'
+"$ROOT/hive.sh" --help | grep -q 'native-recovery' || fail 'Usage omits explicit native shutdown recovery'
+if "$ROOT/hive.sh" backup --prepare-reconciliation > "$temporary/result" 2>&1; then fail 'Restore preparation was accepted for backup'; fi
+grep -q 'applies only to restore' "$temporary/result" || fail 'Wrong-command restore preparation was not explained'
+if "$ROOT/hive.sh" upgrade --native-recovery example.json > "$temporary/result" 2>&1; then fail 'Native recovery was accepted for upgrade'; fi
+grep -q 'applies only to backup' "$temporary/result" || fail 'Wrong-command native recovery was not explained'
 # One consent rule for every prompt: y or yes in any case; anything else, or no input, declines.
 for answer in y Y yes YES; do hive_confirm 'Question?' <<< "$answer" 2>/dev/null || fail "Consent $answer was refused"; done
 for answer in '' n no yess 'y es' ja; do if hive_confirm 'Question?' <<< "$answer" 2>/dev/null; then fail "Answer '$answer' was taken as consent"; fi; done

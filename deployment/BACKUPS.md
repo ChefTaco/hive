@@ -56,11 +56,143 @@ on a production host, so it never relies on its own ownership.
 The ingress is never paused. Its files (certificates and their locks) are written by atomic
 rename, so each copy is one complete version. Static UI services hold no state.
 
-The archive has the same layout and members as a stopped archive: every store in it is the
-store it would be after a clean stop. `hive.sh rehearse` and `hive.sh restore` treat both alike,
-and an earlier controller can restore an online archive. Old stopped archives keep restoring.
+Online and stopped archives share the same layout: every store in one is the store it would be
+after a clean stop. `hive.sh rehearse` and `hive.sh restore` treat both alike. Suite-only online
+archives remain compatible with earlier controllers. Archives containing `native-profiles/`
+require this controller and a Magnus agent with native snapshot support; older controllers refuse
+the additional member instead of silently dropping it. Old stopped archives retain their original
+coverage, subject to the native inventory check below.
 The receipt records `"mode": "online"`, each pause, and how each store was captured and
 verified; a stopped archive's receipt has no `mode`.
+
+### Magnus-managed native profiles
+
+Backups also discover the local, installer-owned Magnus agent's Ardent profiles. These include
+profiles created through **New Agent** even when the installation file has `"agents": []`.
+Discovery is limited to installation hosts and the canonical native account attached to this
+installation's Magnus. It does not traverse unrelated fleet machines or adopt other accounts.
+
+Native recovery needs root on the owning host. For a local installation, run these commands
+through `sudo` with an explicit `--config` path. For SSH hosts, use the installation's reviewed
+privileged transport (a root SSH account or its protected `hosts.HOST.sudoPasswordFile`). An
+unprivileged or inaccessible discovery result fails explicitly; it is not treated as an empty
+profile inventory. Keep password files outside version control.
+
+The product's `native-snapshot` contract captures the complete managed Ardent home and shared
+installed runtime, including profile databases and journals, credentials, identities, skills,
+artifacts, shared policies, runtime/extension receipts, and the generated user-service definitions
+and enablement. Original file owners, groups and modes are recorded. Node identity, command
+evidence keys and host TLS remain under their existing owner; their binding is checked rather
+than regenerated or replaced. Backup archives therefore contain credentials and must remain
+private.
+
+Before capturing any suite store, Hive closes this node's reversible Control API admission
+reservation, verifies that managed work has settled, and asks the product to stop its manager and
+native services. It checks stopped processes and freezes the complete profile inventory through
+the suite capture. Suite containers keep serving during an online backup; native profiles stop
+for the capture window. Only services that were running before the backup are resumed, with their
+enablement preserved. Both online and `--stopped` archives include the product bundle under
+`native-profiles/`. The agent must support `native-snapshot`; an unsupported agent with existing
+profiles fails explicitly instead of producing an incomplete backup.
+
+Rehearsal verifies every bundled file, runtime receipt, ownership record and profile SQLite
+database offline, before starting any isolated suite container. It never starts restored native
+services or delivers their pending work. A corrupt or incomplete bundle fails rehearsal even if
+the outer archive checksum is valid. Older archives without this bundle remain usable for their
+original suite-only coverage; they cannot recover native state they never captured. Restoring
+one onto an installation that now has Magnus-owned profiles is refused before stopping anything,
+because replacing Magnus's older inventory would orphan those profiles.
+
+### Preparing a restore approval
+
+Restore first needs a successful rehearsal of the exact archive. To obtain current digests
+without racing live writes, prepare a held restore:
+
+```bash
+./hive.sh restore --config installation.json --archive BACKUP_ID --prepare-reconciliation --yes
+```
+
+This verifies the archive, stops the installation and native writers, and prints a JSON template
+for each host. It replaces no data and deliberately leaves services held for review. Save the
+templates as one private JSON document with a `hosts` object; retain every printed field. Review
+and reconcile writes made since the backup, including any profiles added or changed since then.
+Only after that review, set each host's `subsequentWritesReconciled` to `true` and apply:
+
+```bash
+./hive.sh restore --config installation.json --archive BACKUP_ID --reconciliation approval.json --yes
+```
+
+For native bundles the template includes `nativeProfiles.archiveManifestSHA256` and
+`nativeProfiles.currentInventorySHA256`, binding approval to both the archive and the stopped
+current inventory. Restore rechecks them, the canonical account, host/manager identity and all
+staged bytes before replacing any native profile. Missing profile directories can be recovered;
+the approved account and manager binding must still exist. Previous profile/runtime state is
+retained in the protected product recovery journal. After the suite database is restored, Hive
+releases only the admission reservation recorded by that exact backup, then returns services to
+their archived state.
+
+Pending or uncertain work is preserved as evidence. It is never marked complete, cleared, or
+replayed to make a restore pass; unsafe activation stays held for explicit reconciliation.
+Interrupted preparation or promotion also remains held, with its exact state directory reported.
+Do not remove those journals or a held admission reservation to force progress.
+
+### Continuing a restore before promotion
+
+If a controller error stops a restore before the product has promoted any files, a newer trusted
+controller can continue that exact held operation with:
+
+```bash
+./hive.sh restore --config ORIGINAL_CONFIG --archive BACKUP_ID --native-recovery APPROVAL.json --yes
+```
+
+This narrow operation supports one installation host with no static `agents` entries. It does not
+prepare another restore, acquire another reservation or rerun a rehearsal. Do not combine it with
+`--prepare-reconciliation`, `--reconciliation`, `--allow-migrations` or changed authentication limits.
+Use the original installation configuration bytes and selected release version. The newly trusted
+manifest must retain the same component, network and profile definitions; its controller digest
+may differ.
+
+The private approval has a `hosts` object containing that one host. Its fields are:
+
+| Field | Required evidence |
+| --- | --- |
+| `sessionDirectory` | The exact retained native session directory |
+| `prePromotionRestoreReviewed` | `true`, only after reviewing the held operation |
+| `transactionSHA256`, `coordinatorSHA256`, `journalSHA256` | Raw-file hashes of the failed suite transaction, native coordinator record and product journal |
+| `reconciliationSHA256` | Raw-file hash of the original approved reconciliation |
+| `archiveSHA256`, `archiveReceiptSHA256`, `rehearsalSHA256` | Raw-file hashes of the archive, its receipt and its successful rehearsal result |
+| `stagedTreeSHA256`, `currentDataSHA256` | The controller's `tree_digest` of the failed extracted stage and current suite data |
+| `expectedCurrentInventorySHA256` | The product's unchanged stopped native inventory digest |
+| `configurationSHA256`, `manifestSHA256`, `oldControllerSourceSHA256` | The original configuration's raw-file hash, original manifest's raw-file hash and original controller source digest |
+
+The controller verifies these pins, the original plan calculation, clean stopped services and the
+exact reservation. The product journal must still say `stopped`, with no source manifest, restored
+inventory or promotions recorded. Any restore source or previous promotion marker refuses this
+operation. A held or uncertain product operation needs its own recovery instead.
+
+Before continuing, Hive retains the failed transaction and journals and moves the verified old
+extraction into private recovery history. It then freshly extracts the same pinned archive and runs
+the ordinary restore and startup paths under the old plan. The new controller's provenance and
+explicit delegation remain recorded. Startup verifies and releases the fence restored from that
+archive; it never substitutes a new reservation or clears uncertain work.
+
+### Recovering a pre-capture native shutdown
+
+If a backup stops during native quiescence, it retains the product reservation, admission hold
+and exact failed journals. `backup --native-recovery FILE --archive ID --yes` is an explicit,
+recovery-only operation for that narrow phase. It requires a private approval document with a
+`hosts` object. Each selected host supplies its reported `sessionDirectory`,
+`expectedCurrentInventorySHA256`, `coordinatorSHA256`, `journalSHA256`, and
+`quiescenceEffectsReviewed: true`. Obtain and review these digests from the protected stopped
+inventory and failed-session records; they are not authorization to discard uncertain work.
+
+Recovery verifies the old failed transaction and exact session, requires clean empty native
+services and settled work, and keeps the prior failure evidence. The product rechecks the approved
+stopped inventory without reading live SQLite sidecars, then returns services to their original
+states and releases only that session's admission hold. No archive or restore is performed.
+After it succeeds, take a fresh backup with the current controller. Captures, restores, promotions,
+foreign sessions and uncertain work are outside this recovery action and remain held for their
+owning reconciliation workflow. Never edit a journal to force it through.
 
 ## Consistency
 
@@ -99,8 +231,10 @@ verified; a stopped archive's receipt has no `mode`.
   seconds of writes. Restore already requires every write after the backup to be reconciled
   first (`--reconciliation`), which covers these too.
 - **Between hosts:** each host is captured on its own, one after another.
-- **Native agents** are not suite services. When a host has native agent profiles, those agents
-  stop while their profiles are copied, and start again.
+- **Native agents** are not suite containers. Magnus-managed profiles and their manager remain
+  stopped from frozen inventory through the suite capture, so profile creation and identity
+  changes cannot race the Magnus/HiveMem stores. Declared standalone agents retain their own
+  adapter contract. Independent manual writers remain outside the reservation's coverage.
 - Old Qdrant snapshot files in the live snapshot directory are not archived; they are not live
   data.
 

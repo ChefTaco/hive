@@ -6,6 +6,27 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Added
+
+- `restore --prepare-reconciliation` verifies a rehearsed archive, holds services, and prints
+  current suite and native inventory digests for operator review before a destructive restore.
+- `backup --native-recovery FILE` explicitly reconciles an approved pre-capture native shutdown,
+  preserves the failed session's evidence, and resumes only its original clean services. It
+  exits without taking a backup or replaying work.
+- `restore --native-recovery FILE` lets a newer trusted controller continue an unchanged,
+  approved restore that stopped before any file promotion. It retains the failed evidence and
+  staging copy, uses the original reservation, and refuses partial promotions.
+
+### Fixed
+
+- Include Magnus-created native Ardent profiles in online and stopped backups even when the
+  installation's `agents` list is empty. The product bundle preserves the shared runtime,
+  policies, credentials, service state and ownership; capture holds managed admissions and
+  native writers before suite stores are copied. Rehearsal verifies the native bundle offline,
+  and restore requires exact inventory reconciliation and retains previous state without
+  replaying uncertain work. Unsupported agents fail explicitly rather than silently omitting
+  profiles. This requires a Magnus agent with the `native-snapshot` contract.
+
 ## [3.9.4] - 2026-11-15
 
 ### Added

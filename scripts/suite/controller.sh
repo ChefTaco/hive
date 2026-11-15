@@ -48,7 +48,7 @@ hive_runtime_files() {
     scripts/suite/adapters.sh scripts/suite/native-initialization-host.sh scripts/suite/adapters-host.sh scripts/suite/inference-registration.sh \
     scripts/suite/public-runtime.sh scripts/suite/preflight-host.sh scripts/suite/initialize.sh \
     scripts/suite/initialize-host.sh scripts/suite/initialize-full-host.sh scripts/suite/initialize-migrations-host.sh scripts/suite/integrity-host.sh scripts/suite/input-artifacts-host.sh scripts/suite/check-data.mjs \
-    scripts/suite/snapshot-host.sh scripts/suite/snapshot-data.mjs \
+    scripts/suite/snapshot-host.sh scripts/suite/snapshot-data.mjs scripts/suite/native-backup-host.sh scripts/suite/native-backup-coordinator.mjs scripts/suite/restore-recovery-host.sh \
     scripts/suite/registry.sh scripts/suite/registry-host.sh \
     scripts/suite/memory-credential.sh scripts/suite/memory-credential-host.sh \
     scripts/suite/audit-collection.sh scripts/suite/audit-collection-host.sh \
@@ -145,6 +145,9 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollb
                          Part of the plan digest; omitting it on a later upgrade restores
                          normal limits. plan and status report the state as authLimits.
   --reconciliation FILE  Protected acknowledgement of writes before restore
+  --prepare-reconciliation  Hold services and print a restore approval template; restore only
+  --native-recovery FILE  Explicit approved recovery: a pre-capture backup shutdown,
+                         or a single-host restore before any promotion
   --keep N               backups prune: keep the newest N restorable pairs (default 5)
   --keep-days D          backups prune: keep everything newer than D days (default 14)
   --apply                backups prune: remove what the dry run lists
@@ -645,8 +648,9 @@ hive_host() {
     --argjson serviceUsers "$bootstrap_users" --argjson images "$bootstrap_images" --argjson identityIds "${HIVE_BOOTSTRAP_IDENTITIES:-null}" --arg ingressTemplate "${HIVE_BOOTSTRAP_INGRESS:-}" --argjson magnusNodeKeysOnly "${HIVE_MAGNUS_NODE_KEYS_ONLY:-false}" --arg integrityScript "$(base64 -w0 "$HIVE_ROOT/scripts/suite/check-data.mjs")" --arg snapshotTool "${HIVE_SNAPSHOT_TOOL:-}" \
     --arg skillsManifest "${HIVE_SKILLS_MANIFEST:-}" --arg skillsSignature "${HIVE_SKILLS_SIGNATURE:-}" --arg skillsTrust "${HIVE_SKILLS_TRUST:-}" --arg skillsTokenSHA "${HIVE_SKILLS_TOKEN_SHA:-}" \
     --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" --argjson registry "${HIVE_REGISTRY_INPUT:-null}" --argjson memoryCredential "${HIVE_MEMORY_CREDENTIAL_INPUT:-null}" --argjson auditCollection "${HIVE_AUDIT_COLLECTION_INPUT:-null}" --argjson magnusTrust "${HIVE_MAGNUS_TRUST_INPUT:-null}" --argjson cindertrace "${HIVE_CINDERTRACE_INPUT:-null}" --argjson magnusAgent "${HIVE_MAGNUS_AGENT_INPUT:-null}" --argjson consoleClients "${HIVE_CONSOLE_CLIENTS_INPUT:-null}" --argjson retention "${HIVE_RETENTION_INPUT:-null}" --arg abortStep "${HIVE_ABORT_STEP:-}" \
+    --arg nativeBackupTool "${HIVE_NATIVE_BACKUP_TOOL:-}" --argjson nativeRecovery "${HIVE_NATIVE_RECOVERY_INPUT:-null}" --arg recoveryConfig "${HIVE_NATIVE_RECOVERY_CONFIGURATION_SHA:-}" --arg recoverySemantic "${HIVE_NATIVE_RECOVERY_MANIFEST_SEMANTIC_SHA:-}" \
     --arg dataTool "${HIVE_NATIVE_DATA_TOOL:-}" --arg adminScript "${HIVE_NATIVE_ADMIN_SCRIPT:-}" --argjson reviewedLinks "${HIVE_NATIVE_LINKS:-null}" --arg tokenDigest "${HIVE_NATIVE_TOKEN_DIGEST:-}" --argjson tokenTtlSeconds "${HIVE_NATIVE_TOKEN_TTL:-null}" \
-    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,memoryCredential:$memoryCredential,auditCollection:$auditCollection,magnusTrust:$magnusTrust,cindertrace:$cindertrace,magnusAgent:$magnusAgent,abortStep:$abortStep,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,magnusMemoryIdentity:(.components.magnus!=null and .components.hivemem!=null and .components.oathweave!=null and .components.magnus.host==.components.oathweave.host),ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,snapshotTool:$snapshotTool,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,nativeMigration:(.nativeMigration // null),dataTool:$dataTool,adminScript:$adminScript,reviewedLinks:$reviewedLinks,tokenDigest:$tokenDigest,tokenTtlSeconds:$tokenTtlSeconds,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]} + (if .external then {external:.external} else {} end) + (if $consoleClients!=null then {consoleClients:$consoleClients} else {} end) + (if $retention!=null then {retention:$retention} else {} end) + (if $magnusNodeKeysOnly==true then {magnusNodeKeysOnly:true} else {} end)' "$HIVE_CONFIG") ||
+    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,memoryCredential:$memoryCredential,auditCollection:$auditCollection,magnusTrust:$magnusTrust,cindertrace:$cindertrace,magnusAgent:$magnusAgent,abortStep:$abortStep,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,magnusMemoryIdentity:(.components.magnus!=null and .components.hivemem!=null and .components.oathweave!=null and .components.magnus.host==.components.oathweave.host),ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,snapshotTool:$snapshotTool,nativeBackupTool:$nativeBackupTool,nativeRecovery:($nativeRecovery.hosts[$host] // null),nativeRecoveryConfigurationSHA256:$recoveryConfig,nativeRecoveryManifestSemanticSHA256:$recoverySemantic,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,nativeMigration:(.nativeMigration // null),dataTool:$dataTool,adminScript:$adminScript,reviewedLinks:$reviewedLinks,tokenDigest:$tokenDigest,tokenTtlSeconds:$tokenTtlSeconds,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]} + (if .external then {external:.external} else {} end) + (if $consoleClients!=null then {consoleClients:$consoleClients} else {} end) + (if $retention!=null then {retention:$retention} else {} end) + (if $magnusNodeKeysOnly==true then {magnusNodeKeysOnly:true} else {} end)' "$HIVE_CONFIG") ||
     hive_die "The request for host $host could not be prepared"
   # A secret travels only in the payload, on standard input: it is read here from an owner-only
   # file, never placed in an argument.
@@ -809,7 +813,7 @@ hive_discover_config() {
 hive_main() {
   local command=install confirmed=false interactive=true hold_on_failure=false
   HIVE_RETENTION_KEEP='' HIVE_RETENTION_KEEP_DAYS='' HIVE_RETENTION_APPLY=false HIVE_RETENTION_AT='' HIVE_RETENTION_CONTROLLER='' HIVE_RETENTION_TRIGGER='' HIVE_OPERATOR_CONFIG=''
-  HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_ALLOW_MIGRATIONS=false HIVE_RELAX_AUTH_LIMITS=false HIVE_BACKUP_STOPPED=false
+  HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_NATIVE_RECOVERY_FILE='' HIVE_NATIVE_RECOVERY_INPUT=null HIVE_NATIVE_RECOVERY_CONFIGURATION_SHA='' HIVE_NATIVE_RECOVERY_MANIFEST_SEMANTIC_SHA='' HIVE_NATIVE_BACKUP_TOOL='' HIVE_ALLOW_MIGRATIONS=false HIVE_RELAX_AUTH_LIMITS=false HIVE_BACKUP_STOPPED=false HIVE_PREPARE_RECONCILIATION=false
   HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY='' HIVE_CINDERTRACE_SOURCES='' HIVE_AGENT_TARGET='' HIVE_AGENT_SSH_CONFIG='' HIVE_AGENT_SUDO_FILE='' HIVE_AGENT_INSTALL_NODE=false HIVE_AGENT_TRUST=false
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
   HIVE_RELEASE_SUMMARY='' HIVE_REGISTRY_FILE='' HIVE_REGISTRY_ORIGINAL_CONFIG='' HIVE_REGISTRY_TEMPORARY='' HIVE_OPERATION='' HIVE_CHECKLIST=''
@@ -835,6 +839,11 @@ hive_main() {
         HIVE_RETENTION_AT=$2; shift 2;;
       --apply) [[ "$command" == backups ]] || hive_die '--apply applies only to backups prune'; HIVE_RETENTION_APPLY=true; shift;;
       --stopped) [[ "$command" == backup ]] || hive_die '--stopped applies only to backup'; HIVE_BACKUP_STOPPED=true; shift;;
+      --prepare-reconciliation) [[ "$command" == restore ]] || hive_die '--prepare-reconciliation applies only to restore'; HIVE_PREPARE_RECONCILIATION=true; shift;;
+      --native-recovery)
+        [[ "$command" == backup || "$command" == restore ]] || hive_die '--native-recovery applies only to backup or restore'
+        (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die 'Missing value: --native-recovery'
+        HIVE_NATIVE_RECOVERY_FILE=$2; shift 2;;
       --sources)
         [[ "$command" == cindertrace-collector ]] || hive_die '--sources applies only to cindertrace-collector'
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
@@ -877,6 +886,7 @@ hive_main() {
     esac
   done
   case "$command" in init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|console-clients) ;; *) hive_die 'Unknown command';; esac
+  [[ "$HIVE_PREPARE_RECONCILIATION" != true || -z "$HIVE_RECONCILIATION" ]] || hive_die 'Choose --prepare-reconciliation or --reconciliation, not both'
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
     case "$command" in plan|install|upgrade) ;; *) hive_die '--relax-auth-limits applies only to plan, install and upgrade';; esac
   fi
@@ -967,9 +977,11 @@ hive_main() {
     hive_confirm 'Apply this exact installation plan?' || hive_die 'Cancelled'
   fi
   case "$command" in
+    backup) if [[ -n "$HIVE_NATIVE_RECOVERY_FILE" ]]; then hive_native_recovery; else hive_lifecycle backup; fi;;
     skills-prepare) hive_skills_prepare;;
     init) hive_initialize;;
-    install|upgrade|rollback|backup|adopt|restore|rehearse|agents-accept) hive_lifecycle "$command";;
+    restore) if [[ -n "$HIVE_NATIVE_RECOVERY_FILE" ]]; then hive_restore_native_recovery; else hive_lifecycle restore; fi;;
+    install|upgrade|rollback|adopt|rehearse|agents-accept) hive_lifecycle "$command";;
   esac
   if [[ "$command" == install ]]; then hive_setup_finish; fi
   if [[ "$command" == upgrade ]]; then hive_setup_refresh_certificate; fi

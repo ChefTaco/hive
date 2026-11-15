@@ -144,7 +144,7 @@ verify_archive() {
     die 'Obsolete managed-inference archive: preserve the original archive and prepare a reviewed suite-only recovery export without model assets; Hive will not extract or store model weights'
   fi
   while IFS= read -r member; do
-    [[ "$member" =~ ^(data|config|releases|agents|agent-profiles)(/|$)|^(compose.json|receipt.json|installation.json|data-formats.json)$ ]] || die 'Unexpected archive member'
+    [[ "$member" =~ ^(data|config|releases|agents|agent-profiles|native-profiles)(/|$)|^(compose.json|receipt.json|installation.json|data-formats.json)$ ]] || die 'Unexpected archive member'
     [[ "$member" != /* && "$member" != *'..'* && "$member" != *\\* ]] || die 'Unsafe archive path'
   done < <(tar -tzf "$backup/state.tar.gz")
 }
@@ -153,6 +153,26 @@ check_reconciliation() {
     '.hosts[$host] | .installationUUID==$uuid and .archiveSHA256==$sha and .subsequentWritesReconciled==true and (.currentDataSHA256|test("^[a-f0-9]{64}$"))' \
     "$directory/reconciliation.$plan.json" >/dev/null || die 'Restore requires installation-bound write reconciliation'
 }
+# A native bundle is verified offline by its owning product before a rehearsal can
+# start any restored service. Old archives have no native bundle and keep working.
+verify_native_archive() (
+  local target="$directory/native-check.$plan" result
+  if ! tar -tzf "$backup/state.tar.gz" | awk '$0 ~ /^native-profiles\// {found=1} END {exit !found}'; then return 0; fi
+  declare -F native_backup_verify >/dev/null || die 'This archive requires native profile recovery support'
+  [[ ! -e "$target" && ! -L "$target" ]] || die 'An interrupted native archive check needs inspection'
+  install -d -m 700 "$target"
+  trap 'rm -rf -- "$target"' EXIT
+  tar -xzf "$backup/state.tar.gz" -C "$target" --same-owner --same-permissions --wildcards 'native-profiles/*'
+  result=$(native_backup_verify "$target/native-profiles") || die 'Native profile archive verification failed'
+  if [[ "$action" == restore-check ]]; then
+    jq -e --arg host "$host" --arg manifest "$(jq -er .manifestSHA256 <<< "$result")" '
+      .hosts[$host].nativeProfiles | .archiveManifestSHA256==$manifest and
+      (.currentInventorySHA256|type=="string" and test("^[a-f0-9]{64}$"))
+    ' "$directory/reconciliation.$plan.json" >/dev/null || die 'Restore requires native profile inventory reconciliation for this exact bundle'
+  fi
+  rm -rf -- "$target"
+  printf '%s\n' "$result"
+)
 # Rehearsal resources are disposable; their bind-mounted files and evidence are retained.
 hive_release_rehearsal_resources() (
   local restored=$1 name spec result backup_receipt archive_sha running path diagnostics
@@ -255,6 +275,18 @@ hive_unchanged_failed_rehearsal() (
   done
   return 1
 )
+RESTORE_RECOVERY_MODE=''
+case "$action" in
+  restore-recovery-check)
+    (restore_recovery_preflight "$(jq -ce .nativeRecovery <<< "$input")") || die 'Restore continuation preflight refused; original state remains held'
+    printf '{"verified":true,"prePromotion":true}\n'; exit 0;;
+  restore-recovery-apply)
+    restore_recovery_apply "$(jq -ce .nativeRecovery <<< "$input")" || die 'Restore continuation refused; retain its protected evidence'
+    RESTORE_RECOVERY_MODE=apply; action=restore; input=$(jq -c '.action="restore"' <<< "$input");;
+  restore-recovery-resume)
+    restore_recovery_resume "$(jq -ce .nativeRecovery <<< "$input")" || die 'Restore continuation activation refused; retain its protected evidence'
+    RESTORE_RECOVERY_MODE=resume; action=resume-current; input=$(jq -c '.action="resume-current"' <<< "$input");;
+esac
 case "$action" in
   adapters-preflight) assert_transaction; adapter_preflight;;
   adapters-stage) assert_transaction; adapter_stage_agents;;
@@ -353,6 +385,23 @@ case "$action" in
     if [[ -f "$directory/compose.json" ]]; then compose stop --timeout 45; assert_stopped; fi
     record quiesced
     ;;
+  native-backup-begin)
+    assert_transaction
+    if [[ $(jq -r .operation <<< "$input") == restore ]] && tar -tzf "$directory/backups/$archive/state.tar.gz" | awk '$0 ~ /^native-profiles\// {found=1} END {exit !found}'; then
+      native_backup_begin true
+    else native_backup_begin; fi
+    # A stopped backup cannot call its coordinator after Magnus stops. Capture
+    # and verify the frozen native bundle now; the backup action only archives it.
+    if [[ $(jq -r .operation <<< "$input") != restore ]]; then
+      native_capture="$directory/native-capture.$plan.$archive"
+      [[ ! -L "$native_capture" ]] || die 'Native capture staging cannot be a symlink'
+      install -d -m 700 "$native_capture"
+      native_backup_capture "$native_capture/native-profiles"
+    fi
+    ;;
+  native-backup-recover)
+    native_backup_recover "$(jq -ce '.nativeRecovery|select(type=="object")' <<< "$input")"
+    ;;
   backup)
     assert_transaction
     assert_stopped
@@ -360,6 +409,14 @@ case "$action" in
     backup="$directory/backups/$archive"
     if [[ -e "$backup" ]]; then verify_archive; exit 0; fi
     adapter_snapshot_profiles
+    native_capture="$directory/native-capture.$plan.$archive"
+    native_members=()
+    if declare -F native_backup_capture >/dev/null; then
+      [[ ! -L "$native_capture" ]] || die 'Native capture staging cannot be a symlink'
+      install -d -m 700 "$native_capture"
+      native_backup_capture "$native_capture/native-profiles"
+      [[ ! -d "$native_capture/native-profiles" ]] || native_members=(-C "$native_capture" native-profiles)
+    fi
     [[ -z $(find "$directory/data" "$directory/config" "$directory/releases" ! -type f ! -type d -print -quit) ]] || die 'Backup tree contains unsupported links or special files'
     install -d -m 700 "$backup"
     members=(data config releases compose.json receipt.json installation.json)
@@ -368,13 +425,14 @@ case "$action" in
     [[ ! -f "$directory/data-formats.json" ]] || members+=(data-formats.json)
     # Preserve sparse datastore/WAL extents; expanding them during recovery can
     # consume far more disk than the live store or its compressed archive.
-    tar --sparse --hard-dereference -czf "$backup/state.tar.gz.partial" -C "$directory" -- "${members[@]}"
+    tar --sparse --hard-dereference -czf "$backup/state.tar.gz.partial" -C "$directory" "${members[@]}" "${native_members[@]}"
     gzip -t "$backup/state.tar.gz.partial"
     mv "$backup/state.tar.gz.partial" "$backup/state.tar.gz"
     jq -n --arg uuid "$identity" --arg id "$installation" --arg host "$host" --arg sha "$(digest "$backup/state.tar.gz")" \
       --arg dataSHA "$(tree_digest "$directory/data")" --arg configSHA "$(tree_digest "$directory/config")" \
       --slurpfile release "$directory/receipt.json" '{schema:1,uuid:$uuid,installation:$id,host:$host,sha256:$sha,dataSHA256:$dataSHA,configSHA256:$configSHA,verified:true,release:$release[0]}' | atomic_json "$backup/receipt.json"
     verify_archive
+    [[ ! -d "$native_capture" ]] || rm -rf -- "$native_capture"
     record backed-up
     ;;
   # The default backup: every store is captured while the suite serves (snapshot-host.sh).
@@ -476,7 +534,11 @@ case "$action" in
     jq --slurpfile inputs "$directory/deployment-inputs.$plan.json" '{schema:1,installation,host,version,digest,plan,controllerSourceSHA256,controllerArchiveSHA256,deploymentInputSHA256:$inputs[0].sha256}' <<< "$input" | atomic_json "$directory/receipt.json"
     record ready
     ;;
-  complete) assert_transaction; record complete;;
+  complete)
+    assert_transaction
+    if declare -F native_backup_finish >/dev/null; then native_backup_finish; fi
+    record complete
+    ;;
   abort)
     # Only a transaction that failed in its read-only checks (stage, compatibility, preflight)
     # closes as aborted. Those steps verify, pull images and pin this plan's inputs; nothing has
@@ -504,6 +566,7 @@ case "$action" in
     assert_transaction
     compose up -d --wait --wait-timeout 180
     adapter_agents_service start
+    if declare -F native_backup_finish >/dev/null; then native_backup_finish; fi
     record complete
     ;;
   rehearse)
@@ -514,6 +577,10 @@ case "$action" in
     fi
     install -d -m 700 "$rehearsal"
     tar --extract --gzip --file "$backup/state.tar.gz" --directory "$rehearsal" --same-owner --same-permissions
+    native_result=null
+    if [[ -d "$rehearsal/native-profiles" ]]; then
+      native_result=$(native_backup_verify "$rehearsal/native-profiles") || die 'Native profile rehearsal verification failed; no restored service was started'
+    fi
     candidate="$directory/candidate.$plan.json"
     [[ -f "$candidate" ]] || candidate="$rehearsal/compose.json"
     # An archive from before the mandatory Hive Registry has nothing of it to restore.
@@ -562,14 +629,39 @@ case "$action" in
     if [[ "$result" == passed ]] && ! docker compose -f "$rehearsal/isolated.json" up -d --wait --wait-timeout 180; then result=failed; fi
     docker compose -f "$rehearsal/isolated.json" stop --timeout 45
     if ! check_data "$rehearsal" "$rehearsal/isolated.json"; then result=failed; fi
-    jq -n --arg result "$result" --arg sha "$(digest "$backup/state.tar.gz")" --arg uuid "$identity" --arg plan "$plan" '{schema:1,result:$result,archiveSHA256:$sha,installationUUID:$uuid,candidatePlan:$plan,isolated:true,portsPublished:false}' | atomic_json "$rehearsal/result.json"
+    jq -n --arg result "$result" --arg sha "$(digest "$backup/state.tar.gz")" --arg uuid "$identity" --arg plan "$plan" --argjson native "$native_result" '{schema:1,result:$result,archiveSHA256:$sha,installationUUID:$uuid,candidatePlan:$plan,isolated:true,portsPublished:false,nativeProfiles:$native}' | atomic_json "$rehearsal/result.json"
     hive_release_rehearsal_resources "$rehearsal" || die 'Rehearsal resource cleanup failed; protected files and evidence retained'
     [[ "$result" == passed ]] || die 'Rehearsal readiness failed; isolated state and evidence retained'
     ;;
-  restore-check)
+  restore-check|restore-preview-check)
     verify_archive
-    check_reconciliation
+    [[ "$action" != restore-check ]] || check_reconciliation
+    native_result=$(verify_native_archive)
+    if [[ -z "$native_result" ]] && declare -F native_backup_discover >/dev/null; then
+      native_current=$(native_backup_discover) || die 'Current native recovery coverage could not be established'
+      if jq -e '.present==true' <<< "$native_current" >/dev/null; then
+        die 'This archive predates native profile capture; restoring its suite data would orphan current native profiles. Keep it and use a rehearsed archive with matching native coverage'
+      fi
+    fi
     jq -e --arg sha "$(digest "$backup/state.tar.gz")" '.result=="passed" and .isolated==true and .archiveSHA256==$sha' "$directory/rehearsals/$archive/result.json" >/dev/null || die 'Restore needs a successful rehearsal of these exact archive bytes'
+    ;;
+  restore-preview)
+    assert_transaction
+    assert_stopped
+    verify_archive
+    native_result=$(verify_native_archive)
+    native_reconciliation=null
+    if [[ -n "$native_result" ]]; then
+      native_reconciliation=$(native_backup_reconciliation "$(jq -er .manifestSHA256 <<< "$native_result")")
+    fi
+    profile_digests=$(while IFS= read -r item; do
+      id=$(jq -er .id <<< "$item")
+      jq -nc --arg id "$id" --arg sha "$(adapter_profile_digest "$(jq -er .profileDirectory <<< "$item")")" '{($id):$sha}'
+    done < <(jq -c '.agents[]' <<< "$input") | jq -s 'add // {}')
+    jq -n --arg host "$host" --arg uuid "$identity" --arg sha "$(digest "$backup/state.tar.gz")" \
+      --arg data "$(tree_digest "$directory/data")" --argjson profiles "$profile_digests" --argjson native "$native_reconciliation" \
+      '{hosts:{($host):({installationUUID:$uuid,archiveSHA256:$sha,currentDataSHA256:$data,subsequentWritesReconciled:false,currentProfileSHA256:$profiles} +
+        (if $native==null then {} else {nativeProfiles:$native} end))}}'
     ;;
   restore)
     assert_transaction
@@ -584,6 +676,7 @@ case "$action" in
     tar -xzf "$backup/state.tar.gz" -C "$restored" --same-owner --same-permissions
     [[ $(tree_digest "$restored/data") == "$(jq -er .dataSHA256 "$backup/receipt.json")" ]] || die 'Restored data verification failed'
     record restoring
+    if declare -F native_backup_restore >/dev/null; then native_backup_restore "$restored"; fi
     adapter_restore_profiles "$restored"
     # Each original is retained. A crash after the first rename is a held restore,
     # never a reason to start a partly replaced installation automatically.
@@ -624,3 +717,5 @@ case "$action" in
     ;;
   *) die 'Unknown host action';;
 esac
+if [[ "$RESTORE_RECOVERY_MODE" == apply ]]; then restore_recovery_record_restored || die 'Restored state requires continuation receipt recovery'; fi
+if [[ "$RESTORE_RECOVERY_MODE" == resume ]]; then restore_recovery_record_complete || die 'Completed restore requires continuation receipt recovery'; fi
