@@ -6,7 +6,7 @@ source "$ROOT/scripts/suite/magnus-agent.sh"
 temporary=$(mktemp -d); trap 'rm -rf -- "$temporary"' EXIT
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 mkdir -p "$temporary/bin" "$temporary/scripts/suite"
-printf '%s\n' 'obviously-fake-sudo-password' > "$temporary/password"; chmod 600 "$temporary/password"
+printf '%s' 'obviously-fake-sudo-password' > "$temporary/password"; chmod 600 "$temporary/password"
 export HIVE_SUDO_FIXTURE=$temporary
 cat > "$temporary/bin/sudo" <<'SUDO'
 #!/usr/bin/env bash
@@ -33,6 +33,7 @@ HIVE_HOST_LOCAL_SUDO=true hive_magnus_agent_action control fixture '{"probe":tru
 grep -qx ROOT_ACTION_OK "$temporary/result" || fail 'The explicit file did not reach the local root action'
 ! grep -q obviously-fake-sudo-password "$temporary/arguments" || fail 'Sudo password entered command arguments'
 HIVE_AGENT_SUDO_FILE=''
+printf '\n' >> "$temporary/password"
 jq --arg file "$temporary/password" '.hosts.control.sudoPasswordFile=$file' "$HIVE_CONFIG" > "$temporary/next.json"; mv "$temporary/next.json" "$HIVE_CONFIG"
 HIVE_HOST_LOCAL_SUDO=true hive_magnus_agent_action control fixture '{"probe":true}' true > "$temporary/result"
 grep -qx ROOT_ACTION_OK "$temporary/result" || fail 'The configured host file was ignored'

@@ -144,7 +144,17 @@ them on every host of the installation:
 ```
 
 `prune` is a dry run unless `--apply` is given. It prints each entry it would remove and the space
-that frees, and removes nothing. With `--apply` it removes the same entries and prints each one.
+that frees, and removes nothing. On a single-host installation, `--apply` removes the eligible
+entries and prints each one. Automatic pruning is off by default.
+Each run uses one private snapshot of its installation configuration through planning and
+deletion; edits to the operator's configuration file take effect on the next command.
+
+**Several hosts.** `list` and dry runs are available, but `--apply` and automatic pruning are
+disabled for installations with more than one host. The current controller cannot hold every
+host's lock continuously from selection through deletion. Another controller could protect an
+archive on one host after the plan was read, leaving an incomplete restore point if its
+counterpart were deleted elsewhere. Destructive pruning refuses before contacting any host;
+an explicit `"auto": true` does not override this protection.
 
 **What stays.** Retention keeps the union of:
 
@@ -173,26 +183,30 @@ Whatever the settings, it never removes:
   open (an upgrade, rollback, backup, restore or rehearsal between its steps, or one that needs
   recovery). `prune` then refuses and removes nothing.
 
-On an installation with several hosts, one archive ID is one restore point on all of them: an
-entry any host keeps stays on every host.
+On an installation with several hosts, the dry-run plan treats one archive ID as one restore
+point: an entry any host keeps is shown as kept on every host. This snapshot is advisory and
+does not authorize deletion.
 
 **What goes.** A pair goes as a whole: the rehearsal first, then its `rehearsal-history/ID`
 attempts, then the backup, so an interruption never leaves a rehearsal that claims a backup it no
 longer has. A failed rehearsal goes with its backup, and a rehearsal or history whose backup is
 already gone goes alone, once outside the rules above.
 
-**After an upgrade.** A successful upgrade prunes with the installation's settings once every
-host has completed it, and lists what it removed. A problem there is reported and does not fail
-the upgrade. Tune or turn it off in the installation file:
+**After an upgrade.** Automatic pruning is off unless a single-host installation explicitly
+enables it. With that opt-in, a successful upgrade prunes with the installation's settings once
+it has completed, and lists what it removed. A problem there is reported and does not fail the
+upgrade. Configure it in the installation file:
 
 ```json
-"retention": { "keep": 5, "keepDays": 14, "auto": true }
+"retention": { "keep": 5, "keepDays": 14, "auto": false }
 ```
 
-Each key is optional: `keep` from 2 to 1000, `keepDays` from 0 to 3650, `auto` `false` to prune
-only by hand. `--keep` and `--keep-days` override the file for one run. A controller from a release
-before retention refuses an installation file with `retention`, so remove the key before running
-an older release's controller, for example for a rollback.
+Each key is optional: `keep` from 2 to 1000, `keepDays` from 0 to 3650, and `auto` defaults to
+`false`. On a single-host installation, set `auto` to `true` to prune after successful upgrades,
+or leave it off and use `--apply` after reviewing a dry run. `--keep` and `--keep-days` override
+the file for one run. Retention is unreleased and is not available in suite 3.9.2; that older
+controller refuses an installation file with `retention`. Do not add the key to 3.9.2, and remove
+it before running an older release's controller, for example for a rollback.
 
 **Records and other copies.** Each host records every prune that removed something in
 `retention/prune-TIME-ID.json` in its installation directory: when, what triggered it, the

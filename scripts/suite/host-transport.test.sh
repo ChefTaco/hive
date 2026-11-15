@@ -35,25 +35,45 @@ SSH
 chmod 700 "$temporary/bin/ssh" "$temporary/bin/sudo"
 export PATH="$temporary/bin:$PATH"
 printf 'obviously-fake-sudo-password\n' > "$temporary/password"
+printf 'obviously-fake-sudo-password' > "$temporary/password-no-newline"
 printf '{"token":"obviously-fake-token"}\n' > "$temporary/secret.json"
 printf 'export {};\n' > "$temporary/scripts/suite/check-data.mjs"
 HIVE_ROOT=$temporary HIVE_CONFIG=$temporary/config.json HIVE_VERSION=0.1.0 HIVE_ID=example-suite
 HIVE_HOST_SECRET_FILE=$temporary/secret.json
 script=$(printf '# HOST_CODE_MUST_STAY_ON_STDIN\n#'; head -c 524288 /dev/zero | tr '\0' x; printf '\nIFS= read -r packet\njq -e '\''.secret.token=="obviously-fake-token" and .installation=="example-suite"'\'' <<< "$packet" >/dev/null\nprintf "LARGE_HOST_OK\\n"\n')
-for mode in local local-password local-cached remote remote-password; do
+for mode in local local-password local-password-no-newline local-cached remote remote-password remote-password-no-newline; do
   target=local; password=''; HIVE_HOST_LOCAL_SUDO=false
   case $mode in
-    local-password) HIVE_HOST_LOCAL_SUDO=true; password=$temporary/password;;
+    local-password*) HIVE_HOST_LOCAL_SUDO=true; password=$temporary/password;;
     local-cached) HIVE_HOST_LOCAL_SUDO=true;;
     remote) target=deploy@node.example.com;;
-    remote-password) target=deploy@node.example.com; password=$temporary/password;;
+    remote-password*) target=deploy@node.example.com; password=$temporary/password;;
   esac
+  [[ "$mode" != *-no-newline ]] || password=$temporary/password-no-newline
   jq -nc --arg target "$target" --arg password "$password" '{origin:"https://hive.example.com",hosts:{control:({target:$target,directory:"/opt/example"}+(if $password=="" then {} else {sudoPasswordFile:$password} end))},components:{},agents:[],inference:[]}' > "$HIVE_CONFIG"
   hive_host control "$script" > "$temporary/result" || fail "Large program failed: $mode"
   grep -qx LARGE_HOST_OK "$temporary/result" || fail "JSON input was lost: $mode"
 done
 ! grep -Eq 'HOST_CODE_MUST_STAY_ON_STDIN|obviously-fake-(sudo-password|token)' "$temporary/arguments" || fail 'Program or secret appeared in process arguments'
 [[ $(wc -L < "$temporary/arguments") -lt 4096 ]] || fail 'Transport still places a large value in argv'
+# The password boundary must not consume or add any transferred bytes, including
+# a binary file that has no final newline.
+printf '\000protected fixture\377' > "$temporary/payload"
+for password in "$temporary/password" "$temporary/password-no-newline"; do
+  jq --arg password "$password" --arg directory "$temporary" '.hosts.control.sudoPasswordFile=$password | .hosts.control.directory=$directory' "$HIVE_CONFIG" > "$temporary/next.json"
+  mv "$temporary/next.json" "$HIVE_CONFIG"
+  hive_transfer control "$temporary/payload" transferred || fail 'Password framing broke a transfer'
+  cmp -s "$temporary/payload" "$temporary/transferred" || fail 'Transfer bytes changed at the password boundary'
+done
+# Invalid file contents must fail before sudo or a host program runs.
+for contents in '' $'obviously-fake-sudo-password\nextra-line'; do
+  printf '%s' "$contents" > "$temporary/invalid-password"
+  jq --arg password "$temporary/invalid-password" '.hosts.control.sudoPasswordFile=$password' "$HIVE_CONFIG" > "$temporary/next.json"
+  mv "$temporary/next.json" "$HIVE_CONFIG"
+  if ( hive_host control "$script" ) > "$temporary/refused" 2>&1; then fail 'Invalid password lines were accepted'; fi
+  grep -q 'exactly one non-empty line' "$temporary/refused" || fail 'The content refusal was unclear'
+  ! grep -Eq 'LARGE_HOST_OK|obviously-fake-sudo-password' "$temporary/refused" || fail 'Invalid password contents reached execution or output'
+done
 # A refused password file stops the action in a conditional context too, where errexit is off:
 # it must never continue as the SSH account without sudo.
 jq --arg password "$temporary/password" '.hosts.control.sudoPasswordFile=$password' "$HIVE_CONFIG" > "$temporary/exposed.json"; mv "$temporary/exposed.json" "$HIVE_CONFIG"

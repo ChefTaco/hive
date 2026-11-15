@@ -637,7 +637,7 @@ source <(printf "%s\n" "$hive_program")'
   if [[ "$target" == local && "${HIVE_HOST_LOCAL_SUDO:-false}" == true ]]; then
     # Root on this host, as the sudo password prompt allows; the payload follows on stdin.
     if [[ -n "$sudo_file" ]]; then
-      { cat -- "$sudo_file"; printf '%s\n%s\n' "$encoded" "$payload"; } | sudo -k -S -p '' bash -c "$launcher"
+      { hive_sudo_password "$sudo_file"; printf '%s\n%s\n' "$encoded" "$payload"; } | sudo -k -S -p '' bash -c "$launcher"
     else
       sudo -v || hive_die 'This step needs root through sudo; use --sudo-password-file for unattended agent commands'
       printf '%s\n%s\n' "$encoded" "$payload" | sudo -n bash -c "$launcher"
@@ -648,7 +648,7 @@ source <(printf "%s\n" "$hive_program")'
     # The remote command is fixed; the program and JSON travel only on stdin.
     if [[ -n "$sudo_file" ]]; then
       # sudo reads exactly its password line from standard input; the payload follows it.
-      { cat -- "$sudo_file"; printf '%s\n%s\n' "$encoded" "$payload"; } | ssh "${ssh_options[@]}" -- "$target" "sudo -k -S -p '' bash -c '$launcher'"
+      { hive_sudo_password "$sudo_file"; printf '%s\n%s\n' "$encoded" "$payload"; } | ssh "${ssh_options[@]}" -- "$target" "sudo -k -S -p '' bash -c '$launcher'"
     else
       printf '%s\n%s\n' "$encoded" "$payload" | ssh "${ssh_options[@]}" -- "$target" "bash -c '$launcher'"
     fi
@@ -664,7 +664,16 @@ hive_sudo_file() {
   [[ -n "$file" ]] || return 0
   [[ -f "$file" && ! -L "$file" && -r "$file" && $(stat -c %u "$file") == "$(id -u)" ]] || hive_die 'The sudo password file must be an operator-owned regular file'
   (( (8#$(stat -c %a "$file") & 077)==0 )) || hive_die 'The sudo password file must be owner-only'
+  awk 'NR!=1 || length($0)==0 {exit 1} END {if (NR!=1) exit 1}' "$file" || hive_die 'The sudo password file must contain exactly one non-empty line'
   printf '%s\n' "$file"
+}
+
+# sudo consumes one line before the host program or transferred bytes. Editors and
+# secret managers do not always end files with a newline; emit exactly one here.
+hive_sudo_password() {
+  local password=''
+  IFS= read -r password < "$1" || [[ -n "$password" ]]
+  printf '%s\n' "$password"
 }
 
 hive_ssh_options() {
@@ -728,7 +737,7 @@ hive_transfer() {
   if [[ "$target" == local ]]; then
     install -m 600 -- "$file" "$directory/$relative"
   elif [[ -n "$sudo_file" ]]; then
-    { cat -- "$sudo_file"; cat -- "$file"; } | ssh "${ssh_options[@]}" -- "$target" "sudo -k -S -p '' sh -c 'umask 077; cat > \"$directory/$relative\"'"
+    { hive_sudo_password "$sudo_file"; cat -- "$file"; } | ssh "${ssh_options[@]}" -- "$target" "sudo -k -S -p '' sh -c 'umask 077; cat > \"$directory/$relative\"'"
   else
     scp -q -p "${ssh_options[@]}" -- "$file" "$target:$directory/$relative"
   fi

@@ -6,18 +6,33 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Fixed
+
+- Protected sudo password files work with or without a final newline. Host commands and file
+  transfers keep their input separate from the password, and empty or multiline password files
+  fail before an action runs. This changes the controller digest for the next signed release.
+- Fresh Magnus node enrollment recognizes both Node.js main-thread process names while retaining
+  the exact process count and parent checks. Current Node.js releases no longer fail full-node
+  review solely because they report `node-MainThread` instead of `MainThread`. Read-only process
+  sampling briefly waits for transient container health checks to finish; persistent extra
+  processes or changing process identities still hold enrollment for review.
+- Automatic backup pruning defaults to off. Destructive pruning across multiple hosts is refused
+  before any host is changed until coordinated retention locking is implemented; listing and
+  dry-run planning remain available. This prevents a late lock, transaction or protection change
+  on one host from leaving a restore point without its counterpart on another.
+
 ### Added
 
 - Backup and rehearsal retention. `hive.sh backups list` shows each host's backups and restore
   rehearsals and why each stays; `hive.sh backups prune [--keep N] [--keep-days D] [--apply]` is a
   dry run unless `--apply` is given, prints what it would remove and the space that frees, and
-  removes a backup together with its rehearsal. It keeps the newest N restorable pairs (default 5)
+  removes a backup together with its rehearsal on single-host installations. It keeps the newest N restorable pairs (default 5)
   and everything newer than D days (default 14), and never removes the newest restorable pair, the
   installed release's upgrade archive, anything a transaction, receipt, recovery or supersession
   record or reconciliation names, or a backup that has no rehearsal (such as those `hive.sh backup`
-  takes). It holds the controller lock and refuses while a transaction is open. A successful
-  upgrade prunes with the installation's new `retention` settings
-  (`{"keep":5,"keepDays":14,"auto":true}`); each prune that removes something is recorded under
+  takes). It holds the controller lock and refuses while a transaction is open. Automatic
+  pruning after a successful upgrade requires explicit single-host opt-in through the new
+  `retention` settings (`{"keep":5,"keepDays":14,"auto":false}` by default); each prune that removes something is recorded under
   `retention/` on the host, and copies kept elsewhere are never touched. See
   `deployment/BACKUPS.md#retention` and `UPGRADING.md`, "Backup and rehearsal retention". The
   controller changes, so the next release pins a new controller digest.

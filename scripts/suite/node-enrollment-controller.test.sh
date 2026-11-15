@@ -74,3 +74,30 @@ if hive_magnus_agent_enroll '{"mode":"inspect","gatewaySelected":true}' > "$temp
 if hive_magnus_agent_enroll '{"mode":"inspect","gatewaySelected":true}' > "$temporary/result" 2>&1; then exit 1; fi
 [[ $(cat "$temporary/calls") == $'status\nrelease\nresume\nterminal-preflight' ]]
 printf 'Passed: discovery preparation, exact final-snapshot approval, pause/review/apply/resume, failed-review recovery and enrolled maintenance recovery.\n'
+
+# Exercise the actual host collector with transient and persistent health-check
+# processes. No Docker daemon or sleeps are used by this fixture.
+source <(sed -n '/^gateway_processes() {$/,/^}$/p' "$HIVE_ROOT/scripts/suite/magnus-agent-host.sh")
+die() { printf '%s\n' "$*" >&2; return 1; }
+docker() {
+  local count=0
+  [[ ! -f "$temporary/gateway-reads" ]] || count=$(cat "$temporary/gateway-reads")
+  count=$((count+1)); printf '%s\n' "$count" > "$temporary/gateway-reads"
+  printf 'PID PPID COMMAND\n1 0 docker-init\n6 1 node-MainThread\n'
+  if [[ ${gateway_busy:-false} == true || "$count" == 1 || "$count" == 3 ]]; then
+    printf '7 0 node-MainThread\n'
+  fi
+}
+sleep() { printf 'wait\n' >> "$temporary/gateway-waits"; }
+gateway_processes example-gateway > "$temporary/gateway-snapshot"
+[[ $(cat "$temporary/gateway-reads") == 5 ]]
+[[ $(wc -l < "$temporary/gateway-waits") == 4 ]]
+jq -e 'length==2 and .[1].ppid==.[0].pid' "$temporary/gateway-snapshot" >/dev/null
+rm "$temporary/gateway-reads" "$temporary/gateway-waits"
+gateway_busy=true
+if gateway_processes example-gateway > "$temporary/gateway-snapshot" 2> "$temporary/gateway-refused"; then exit 1; fi
+[[ $(cat "$temporary/gateway-reads") == 24 ]]
+[[ $(wc -l < "$temporary/gateway-waits") == 23 ]]
+[[ ! -s "$temporary/gateway-snapshot" ]]
+grep -q 'pause unrelated work and retry' "$temporary/gateway-refused"
+printf 'Passed: gateway process inventory waits for two identical read-only snapshots, and refuses persistent extra processes within a bounded window.\n'

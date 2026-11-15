@@ -653,6 +653,23 @@ upgrade_readiness() {
     '{installed:($release!=""),release:(if $release=="" then null else $release end),pinned:(if $pinned=="" then null else $pinned end),running:$running,mode:$mode,fleet:$fleet,error:(if $error=="" then null else $error end)}'
 }
 
+# Docker health checks briefly add a process outside the application tree. Wait
+# only for two identical read-only snapshots; the review still checks both exact
+# names and their parent relationship and never approves an extra descendant.
+gateway_processes() {
+  local container=$1 previous='' snapshot attempt
+  for attempt in {1..24}; do
+    snapshot=$(docker top "$container" -eo pid,ppid,comm |
+      awk '$1 ~ /^[0-9]+$/ {print $1, $2, $3}' | jq -Rsc 'split("\n")|map(select(length>0)|split(" ")|{pid:(.[0]|tonumber),ppid:(.[1]|tonumber),name:.[2]})') || return 1
+    if jq -e 'length==2' <<< "$snapshot" >/dev/null && [[ "$snapshot" == "$previous" ]]; then
+      printf '%s\n' "$snapshot"; return 0
+    fi
+    previous=$snapshot
+    if (( attempt < 24 )); then sleep 0.25; fi
+  done
+  die 'Gateway processes did not settle; pause unrelated work and retry the enrollment review'
+}
+
 ardent_review() {
   need_root
   local owner uid home native_home profiles processes gateway=null config code mode proof initializer container maintenance=""
@@ -673,8 +690,7 @@ ardent_review() {
   if jq -e '.gatewaySelected==true' <<< "$request" >/dev/null; then
     container=$(docker compose -f "$(jq -er .compose <<< "$request")" ps -q magnus-gateway)
     [[ -n "$container" ]] || die 'The selected web terminal gateway is not running'
-    gateway=$(docker top "$container" -eo pid,ppid,comm |
-      awk '$1 ~ /^[0-9]+$/ {print $1, $2, $3}' | jq -Rsc 'split("\n")|map(select(length>0)|split(" ")|{pid:(.[0]|tonumber),ppid:(.[1]|tonumber),name:.[2]})')
+    gateway=$(gateway_processes "$container") || return 1
   fi
   mode=$(jq -er .mode <<< "$request")
   proof=$(jq -nc --arg mode "$mode" --arg fqdn "$(jq -er .hostFqdn <<< "$request")" --arg owner "$owner" --argjson uid "$uid" \

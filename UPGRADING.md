@@ -48,18 +48,23 @@ products.
 
 ## Backup and rehearsal retention
 
-From suite 3.9.3, a successful upgrade ends by pruning old pre-change backups and their restore
-rehearsals with the [retention rules](deployment/BACKUPS.md#retention): it keeps the newest 5
-restorable pairs and everything from the last 14 days, and always the installed release's own
-upgrade archive, the newest restorable pair, anything a transaction, receipt, recovery record or
-reconciliation names, and every backup without a rehearsal. Before that release's first upgrade,
-see what it would remove with `./hive.sh backups prune` (a dry run) from its checkout, and set
-`"retention": {"keep": N, "keepDays": D}` in the installation file to change the rules, or
-`"auto": false` to prune only by hand with `./hive.sh backups prune --apply`. A controller from
-before 3.9.3 refuses an installation file with `retention`: remove the key before rolling back to
-an older release. The upgrade itself does not change: retention runs only after every host has
-completed it, removes nothing while a transaction is open, and a problem in it is reported
-without failing the upgrade.
+The unreleased controller adds [retention rules](deployment/BACKUPS.md#retention) for old
+pre-change backups and their restore rehearsals. Automatic pruning is **off by default**.
+Single-host installations can review `./hive.sh backups prune` (a dry run), remove eligible pairs
+with `--apply`, or explicitly opt into pruning after successful upgrades with
+`"retention": {"keep":5,"keepDays":14,"auto":true}`. The defaults keep the newest 5 restorable
+pairs and everything from the last 14 days, plus the installed release's upgrade archive,
+anything a transaction, receipt, recovery record or reconciliation names, and every backup
+without a rehearsal.
+
+Multi-host installations support listing and dry runs only. Destructive pruning refuses before
+any host action, including when `auto` is explicitly enabled, until selection and deletion have
+coordinated locking across all hosts. A change in protection on one host must not leave a restore
+point without its counterpart elsewhere. A pruning refusal never fails a completed upgrade.
+
+Retention is not in suite 3.9.2. Its controller rejects an installation file with `retention`:
+do not add the key to that release, and remove it before rolling back to any older controller
+without retention support.
 
 ## Suite 3.9.2: Magnus 3.0.3, HiveXUI 0.9.1, ingress 2.0.6
 

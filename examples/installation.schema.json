@@ -145,7 +145,7 @@
     "retention": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Backup and rehearsal retention (deployment/BACKUPS.md#retention). hive.sh backups prune and the prune after a successful upgrade keep the newest keep restorable pairs and everything newer than keepDays days.",
+      "description": "Backup and rehearsal retention (deployment/BACKUPS.md#retention). Pruning is supported only on single-host installations. Automatic pruning is off by default; list and dry runs are available on every installation.",
       "properties": {
         "keep": {
           "type": "integer",
@@ -161,8 +161,8 @@
         },
         "auto": {
           "type": "boolean",
-          "default": true,
-          "description": "Prune after each successful upgrade."
+          "default": false,
+          "description": "Opt a single-host installation into pruning after each successful upgrade. Multi-host pruning remains disabled."
         }
       }
     }

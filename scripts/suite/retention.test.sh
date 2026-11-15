@@ -176,6 +176,114 @@ export HIVE_ROOT=$ROOT
   jq -e '.[0].entries[0].remove==false and .[0].entries[0].reasons==["kept on host b"] and .[0].entries[1].remove==true and .[1].entries[1].remove==true' <<< "$merged" >/dev/null
 ) || fail 'A name kept on one host was removed on another'
 
+# A plan is only a snapshot. Another controller can protect a restore point after
+# all hosts were planned, on either the first or the last host in apply order.
+# Until selection and deletion share coordinated locks, refuse multi-host writes.
+multi_host_change() (
+  source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/retention.sh"
+  local changed=$1 change=$2 host base name days input plans status=0 lock_pid=''
+  local multi="$temporary/multi-$changed-$change"
+  trap 'if [[ -n "$lock_pid" ]]; then touch "$multi/release"; wait "$lock_pid" || true; fi' EXIT
+  mkdir -p "$multi"
+  HIVE_CONFIG=$multi/config.json HIVE_ROOT=$ROOT HIVE_VERSION=0.1.0 HIVE_ID=example-suite
+  jq -nc --arg base "$multi" '{origin:"https://hive.example.com",hosts:{a:{target:"local",directory:($base+"/a")},b:{target:"local",directory:($base+"/b")}},components:{},agents:[],inference:[]}' > "$HIVE_CONFIG"
+  for host in a b; do
+    base="$multi/$host"; mkdir -p "$base"
+    jq -nc --arg host "$host" '{installation:"example-suite",host:$host,uuid:"fixture-uuid"}' > "$base/installation.json"
+    printf '{"version":"0.1.0"}\n' > "$base/receipt.json"
+    printf '{"phase":"complete"}\n' > "$base/transaction.json"
+    for name in old middle newest; do
+      case "$name" in old) days=30;; middle) days=20;; newest) days=10;; esac
+      mkdir -p "$base/backups/$name" "$base/rehearsals/$name"
+      printf 'synthetic archive\n' > "$base/backups/$name/state.tar.gz"
+      jq -nc --arg host "$host" '{installation:"example-suite",host:$host,uuid:"fixture-uuid",verified:true,sha256:("a"*64)}' > "$base/backups/$name/receipt.json"
+      jq -nc '{result:"passed",archiveSHA256:("a"*64),installationUUID:"fixture-uuid",isolated:true}' > "$base/rehearsals/$name/result.json"
+      touch -d "$(ago "$days")" "$base/backups/$name/receipt.json"
+    done
+  done
+  input=$(hive_retention_input 2 0)
+  plans=$(hive_retention_plans "$input") || exit 1
+  jq -e 'length==2 and all(.[]; [.entries[]|select(.remove)|.name]==["old"])' <<< "$plans" >/dev/null || exit 1
+  if [[ "$changed:$change" == a:lock ]]; then
+    for command in list prune; do
+      hive_backups_command "$command" > "$multi/preview-$command" || exit 1
+      grep -q 'Multi-host preview:.*Destructive pruning is disabled' "$multi/preview-$command" || exit 1
+    done
+  fi
+  hive_retention_action() {
+    printf '%s %s\n' "$1" "$2" >> "$multi/actions"
+    HIVE_HOST_ACTION=$2 HIVE_RETENTION_INPUT=$3 hive_host "$1" "$(cat "$ROOT/scripts/suite/ownership-host.sh" "$ROOT/scripts/suite/retention-host.sh")"
+  }
+  # These changes happen in an independent process after the merged selection.
+  case "$change" in
+    lock)
+      (exec 8>"$multi/$changed/controller.lock"; flock -x 8; touch "$multi/ready"; while [[ ! -f "$multi/release" ]]; do sleep 0.05; done) &
+      lock_pid=$!
+      for _ in {1..100}; do [[ ! -f "$multi/ready" ]] || break; sleep 0.05; done
+      [[ -f "$multi/ready" ]] || exit 1;;
+    transaction) (printf '{"phase":"recovery-required"}\n' > "$multi/$changed/transaction.json");;
+    reference) (printf '{"archive":"old"}\n' > "$multi/$changed/reconciliation.fixture.json");;
+  esac
+  hive_retention_apply "$input" "$plans" prune > "$multi/result" 2> "$multi/error" || status=$?
+  [[ "$status" != 0 ]] && grep -q 'Multi-host backup pruning is disabled' "$multi/error" || exit 1
+  [[ ! -e "$multi/actions" ]] || { printf 'Multi-host apply contacted a host\n' >&2; exit 1; }
+  if HIVE_RETENTION_APPLY=true hive_backups_command prune > "$multi/command" 2>&1; then exit 1; fi
+  grep -q 'Multi-host backup pruning is disabled' "$multi/command" || exit 1
+  jq '.retention={auto:true}' "$HIVE_CONFIG" > "$multi/next.json"; mv "$multi/next.json" "$HIVE_CONFIG"
+  hive_retention_after_upgrade > "$multi/upgrade" 2>&1 || exit 1
+  grep -q 'Multi-host backup pruning is disabled' "$multi/upgrade" || exit 1
+  [[ ! -e "$multi/actions" ]] || { printf 'Multi-host manual or automatic pruning contacted a host\n' >&2; exit 1; }
+  for host in a b; do
+    if [[ ! -f "$multi/$host/backups/old/state.tar.gz" || ! -f "$multi/$host/rehearsals/old/result.json" ]]; then
+      printf 'Unsafe retention: %s on host %s after %s changed on host %s\n' old "$host" "$change" "$changed" >&2
+      exit 1
+    fi
+  done
+  return 0
+)
+for changed in a b; do
+  for change in lock transaction reference; do
+    multi_host_change "$changed" "$change" || fail "Cross-host retention was not held after $change on $changed"
+  done
+done
+
+# Editing the operator's file while the first host action runs must not redirect
+# subsequent actions or expand the run to a newly added host. All phases and the
+# final transport read the same private configuration snapshot.
+(
+  source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/retention.sh"
+  original=$temporary/config-mutation.json
+  jq -nc '{hosts:{a:{target:"deploy@node.example.com",directory:"/opt/original"}}}' > "$original"
+  HIVE_CONFIG=$original
+  mkdir -p "$temporary/config-snapshots"
+  export TMPDIR=$temporary/config-snapshots
+  previous_trap=$(trap -p EXIT)
+  hive_retention_action() {
+    local selected
+    selected=$(jq -r --arg host "$1" '.hosts[$host] | .target+" "+.directory' "$HIVE_CONFIG")
+    printf '%s %s %s\n' "$1" "$2" "$selected" >> "$temporary/config-actions"
+    case "$2" in
+      retention-plan)
+        jq '.hosts.a={target:"deploy@other.example.com",directory:"/opt/changed"} | .hosts.b={target:"deploy@extra.example.com",directory:"/opt/extra"}' "$original" > "$temporary/changed-config"
+        mv "$temporary/changed-config" "$original"
+        printf '{"host":"a","directory":"/opt/original","keep":5,"keepDays":14,"entries":[{"name":"old","remove":true,"kind":"restorable","createdAt":1,"backupKiB":1,"rehearsalKiB":1,"historyKiB":0,"reasons":[]}]}\n';;
+      retention-apply) printf '{"host":"a","removed":[]}\n';;
+      *) return 1;;
+    esac
+  }
+  HIVE_RETENTION_APPLY=true hive_backups_command prune > "$temporary/config-mutation-result"
+  [[ $(cat "$temporary/config-actions") == $'a retention-plan deploy@node.example.com /opt/original\na retention-apply deploy@node.example.com /opt/original' ]] || exit 1
+  jq -e '(.hosts|length)==2 and .hosts.a.directory=="/opt/changed"' "$original" >/dev/null || exit 1
+  [[ $(trap -p EXIT) == "$previous_trap" && -z $(find "$TMPDIR" -type f -print -quit) ]] || exit 1
+
+  # A directly supplied plan must still match the frozen placement before writes.
+  jq -nc '{hosts:{a:{target:"deploy@node.example.com",directory:"/opt/changed"}}}' > "$original"
+  : > "$temporary/config-actions"
+  if hive_retention_apply '{"keep":5,"keepDays":14}' '[{"host":"a","directory":"/opt/original","entries":[]}]' prune > "$temporary/config-mismatch" 2>&1; then exit 1; fi
+  grep -q 'host placement differs' "$temporary/config-mismatch" && [[ ! -s "$temporary/config-actions" ]] || exit 1
+  [[ -z $(find "$TMPDIR" -type f -print -quit) ]] || exit 1
+) || fail 'Retention used an edited configuration or changed its caller cleanup trap'
+
 # After a successful upgrade, and only then, retention runs with the installation's settings.
 lifecycle() { # OPERATION [FAILING_STEP]
   (
@@ -210,15 +318,21 @@ after_upgrade() { # CONFIG
   ) > "$temporary/after.log" 2>&1
 }
 fixture; before=$(snapshot)
+after_upgrade "$temporary/config.json" || fail 'Default retention failed the upgrade'
+grep -q 'off by default' "$temporary/after.log" && [[ $(snapshot) == "$before" ]] || { cat "$temporary/after.log" >&2; fail 'Automatic retention was enabled by default'; }
+after_upgrade "$temporary/configured.json" || fail 'Configured rules enabled automatic retention'
+grep -q 'off by default' "$temporary/after.log" && [[ $(snapshot) == "$before" ]] || fail 'Retention rules implicitly enabled automatic pruning'
 jq '.retention={auto:false}' "$temporary/config.json" > "$temporary/off.json"
 after_upgrade "$temporary/off.json" || fail 'Retention switched off failed the upgrade'
 grep -q 'retention.auto' "$temporary/after.log" && [[ $(snapshot) == "$before" ]] || { cat "$temporary/after.log" >&2; fail 'Retention ran although retention.auto is false'; }
 exec 8>"$directory/controller.lock"; flock -n 8
-after_upgrade "$temporary/config.json" || fail 'A retention problem failed the completed upgrade'
+jq '.retention={auto:true}' "$temporary/config.json" > "$temporary/auto.json"
+after_upgrade "$temporary/auto.json" || fail 'A retention problem failed the completed upgrade'
 exec 8>&-
 grep -q 'the upgrade is complete; backup retention did not run' "$temporary/after.log" && grep -q '^continued$' "$temporary/after.log" && [[ $(snapshot) == "$before" ]] || { cat "$temporary/after.log" >&2; fail 'A locked host was not reported as a warning'; }
-after_upgrade "$temporary/configured.json" || { cat "$temporary/after.log" >&2; fail 'Retention after the upgrade failed'; }
+jq '.retention.auto=true' "$temporary/configured.json" > "$temporary/configured-auto.json"
+after_upgrade "$temporary/configured-auto.json" || { cat "$temporary/after.log" >&2; fail 'Retention after the upgrade failed'; }
 grep -q 'Removed 5 entries' "$temporary/after.log" || { cat "$temporary/after.log" >&2; fail 'Retention after the upgrade did not use the installation settings'; }
 [[ ! -e "$directory/backups/pre-failed" && ! -e "$directory/rehearsals/pre-30" && -d "$directory/backups/pre-29" ]] || fail 'Retention after the upgrade removed the wrong entries'
 jq -e '.trigger=="upgrade" and .keep==3 and .keepDays==30' "$directory"/retention/prune-*.json >/dev/null || fail 'The upgrade audit record is wrong'
-printf 'Passed: retention keeps the newest restorable pairs, recent entries and every protected archive, removes pairs together only with --apply under the controller lock, records each prune, and runs after a successful upgrade only.\n'
+printf 'Passed: retention preserves protected archives, removes single-host pairs only with explicit apply or automatic opt-in, records each prune, and refuses every multi-host write before contacting a host despite late protection changes.\n'

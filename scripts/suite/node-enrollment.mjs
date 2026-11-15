@@ -6,6 +6,33 @@ import { readFile, readdir } from 'node:fs/promises';
 
 const OS_SOURCES = new Set(['SYSTEM_ANACRON', 'SYSTEM_CRONTAB', 'SYSTEM_CRON_SOURCE',
   'SYSTEM_TIMER_DEFINITION', 'USER_TIMER_DEFINITION', 'USER_TIMER_OFFLINE_ENABLED']);
+export function assertServiceProcesses(processes) {
+  assert.equal(processes.length, 2, 'API or gateway descendants need independent review');
+  const init = processes.find(p => p.name === 'docker-init');
+  // Node's /proc name changed across runtime releases. Both exact main-thread
+  // names describe the one application child; no other process is approved.
+  const main = processes.find(p => p.name === 'MainThread' || p.name === 'node-MainThread');
+  assert(init && main, 'API or gateway must contain only its init and Node main thread');
+  assert(processes.every(p => Number.isSafeInteger(p.pid) && p.pid > 0 && Number.isSafeInteger(p.ppid))
+    && init.pid !== main.pid, 'API or gateway process identities need independent review');
+  assert.equal(main.ppid, init.pid, 'API or gateway Node process must be a direct child of its init');
+}
+export async function stableServiceProcesses(read, wait = () => new Promise(resolve => setTimeout(resolve, 250))) {
+  let previous = null;
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const processes = await read();
+    try { assertServiceProcesses(processes); }
+    catch {
+      previous = null;
+      if (attempt === 23) throw new Error('API processes did not settle; pause unrelated work and retry the enrollment review');
+      await wait(); continue;
+    }
+    if (JSON.stringify(processes) === JSON.stringify(previous)) return processes;
+    previous = processes;
+    if (attempt < 23) await wait();
+  }
+  throw new Error('API processes keep changing; pause unrelated work and retry the enrollment review');
+}
 export function assertFullNodeReview(review) {
   assert.equal(review.freshInstallation, true, 'Completed installer provenance is required');
   assert.match(review.initializerSHA256, /^[a-f0-9]{64}$/);
@@ -23,9 +50,7 @@ export function assertFullNodeReview(review) {
     'Foreign cron, native schedules or unknown sources require independent review');
   for (const processes of [review.apiProcesses, review.gatewayProcesses]) {
     if (processes === null) continue;
-    assert.equal(processes.length, 2, 'API or gateway descendants need independent review');
-    assert.deepEqual(processes.map(p => p.name).sort(), ['MainThread', 'docker-init']);
-    assert.equal(processes.find(p => p.name === 'MainThread').ppid, processes.find(p => p.name === 'docker-init').pid);
+    assertServiceProcesses(processes);
   }
 }
 // The agent's managed scheduler inventory, read by the server. Before Magnus 3.0.0 with the shared
@@ -112,7 +137,7 @@ export async function enrollFullNode(input) {
     assert(stable, 'Scheduler sources keep changing; review again');
     const review = { nodeId: node.id, nodeFqdn: node.hostname, freshInstallation: input.freshInstallation,
       initializerSHA256: input.initializerSHA256, agentRuntime: input.agentRuntime, maintenanceId: input.maintenanceId, owner: input.owner, ardentScopeActive: previousScope.scope.state === 'active',
-      history, scheduler, apiProcesses: await apiProcesses(), gatewayProcesses: input.gatewayProcesses,
+      history, scheduler, apiProcesses: await stableServiceProcesses(apiProcesses), gatewayProcesses: input.gatewayProcesses,
       unsettled: enrollment.commandOwners + enrollment.api.activeCount + enrollment.api.unknownCount
         + enrollment.dashboard.activeCount + enrollment.dashboard.unknownCount + enrollment.schedulerUnsettled
         + await db.managedCronDefinition.count({ where: { nodeId: node.id } }) };

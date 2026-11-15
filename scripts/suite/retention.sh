@@ -3,8 +3,9 @@
 # backups/ID and its rehearsal, the restored copy that makes it restorable, in rehearsals/ID. A
 # rehearsal is a full restored installation, so these add up. `backups list` shows them with what
 # the retention rules decide; `backups prune` removes, only with --apply, the backup and
-# rehearsal pairs the rules let go, together, on every host; a successful upgrade runs it with
-# the installation's settings. See deployment/BACKUPS.md#retention.
+# rehearsal pairs the rules let go on a single-host installation. Automatic pruning is opt-in;
+# multi-host pruning is held until selection and deletion have coordinated locks.
+# See deployment/BACKUPS.md#retention.
 
 hive_retention_default_keep=5
 hive_retention_default_keep_days=14
@@ -16,8 +17,8 @@ hive_retention_validate() {
     .retention|type=="object" and (keys-["keep","keepDays","auto"]|length==0) and
     ((.keep // 5)|type=="number" and floor==. and .>=2 and .<=1000) and
     ((.keepDays // 14)|type=="number" and floor==. and .>=0 and .<=3650) and
-    ((.auto // true)|type=="boolean")
-  ' "$HIVE_CONFIG" >/dev/null || hive_die 'retention is {"keep":N,"keepDays":D,"auto":true|false}: keep the newest N restorable backup and rehearsal pairs (2 to 1000, default 5) and everything newer than D days (0 to 3650, default 14); auto (default true) prunes after each successful upgrade. See deployment/BACKUPS.md#retention'
+    ((.auto // false)|type=="boolean")
+  ' "$HIVE_CONFIG" >/dev/null || hive_die 'retention is {"keep":N,"keepDays":D,"auto":true|false}: keep the newest N restorable backup and rehearsal pairs (2 to 1000, default 5) and everything newer than D days (0 to 3650, default 14); auto (default false) opts a single-host installation into pruning after each successful upgrade. See deployment/BACKUPS.md#retention'
 }
 
 # The settings this run uses: the command line, then the installation file, then the defaults.
@@ -70,9 +71,29 @@ hive_retention_print() {
 
 hive_retention_total() { jq -r '[.[].entries[]|select(.remove)|(.backupKiB+.rehearsalKiB+.historyKiB)]|add // 0' <<< "$1"; }
 
-# Removes the merged plan's entries on every host; prints the hosts' reports with what each removed.
-hive_retention_apply() {
+# A merged plan releases each host's lock before the next one is read. It cannot
+# authorize distributed deletion: protection may change on any host meanwhile.
+# Refuse before contacting a host, even if this run would remove entries on only one.
+hive_retention_writable() {
+  [[ $(jq '.hosts|length' "$HIVE_CONFIG") == 1 ]] || {
+    printf 'Hive: Multi-host backup pruning is disabled until selection and deletion use coordinated locks; list and dry runs remain available. Nothing was removed.\n' >&2
+    return 1
+  }
+}
+
+# Removes the plan's entries on the single host; prints its removal report.
+hive_retention_apply() (
   local input=$1 plans=$2 trigger=$3 host request result results='[]' status=0
+  local configuration
+  configuration=$(hive_retention_snapshot_configuration) || { printf '[]\n'; return 1; }
+  trap 'rm -f -- "$configuration"' EXIT
+  local HIVE_CONFIG=$configuration
+  hive_retention_writable || { printf '[]\n'; return 1; }
+  if ! jq -e --slurpfile config "$HIVE_CONFIG" 'length==($config[0].hosts|length) and all(.[]; . as $plan | $config[0].hosts[$plan.host]!=null and $config[0].hosts[$plan.host].directory==$plan.directory)' <<< "$plans" >/dev/null; then
+    printf 'Hive: backup retention host placement differs from its plan; nothing was removed.\n' >&2
+    printf '[]\n'
+    return 1
+  fi
   while IFS= read -r host; do
     request=$(jq -c --argjson plans "$plans" --arg host "$host" --arg trigger "$trigger" '.remove=[$plans[]|select(.host==$host)|.entries[]|select(.remove)|.name] | .trigger=$trigger' <<< "$input")
     if [[ $(jq '.remove|length' <<< "$request") == 0 ]]; then continue; fi
@@ -81,7 +102,7 @@ hive_retention_apply() {
   done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
   printf '%s\n' "$results"
   return "$status"
-}
+)
 hive_retention_print_removed() {
   local host name kind created bytes
   while IFS=$'\t' read -r host name kind created bytes; do
@@ -93,16 +114,42 @@ hive_retention_input() {
   jq -nc --argjson keep "$1" --argjson days "$2" '{keep:$keep,keepDays:$days}'
 }
 
+# The operator may edit the installation file while a command runs. Keep planning,
+# the final write guard and host transport bound to one private parsed snapshot.
+# Callers own the returned file and install their cleanup trap in a subshell.
+hive_retention_snapshot_configuration() {
+  local snapshot
+  snapshot=$(mktemp) || return 1
+  if ! jq -ce 'if type=="object" then . else error("Installation configuration must be an object") end' "$HIVE_CONFIG" > "$snapshot"; then
+    rm -f -- "$snapshot"
+    printf 'Hive: backup retention could not snapshot the installation configuration; nothing was removed.\n' >&2
+    return 1
+  fi
+  printf '%s\n' "$snapshot"
+}
+
 # backups list | backups prune [--keep N] [--keep-days D] [--apply]
-hive_backups_command() {
+hive_backups_command() (
   local subcommand=${1:-list} keep days settings input plans total results removed
+  local configuration
+  configuration=$(hive_retention_snapshot_configuration) || return 1
+  trap 'rm -f -- "$configuration"' EXIT
+  local HIVE_CONFIG=$configuration
   (($# <= 1)) || hive_die 'Usage: hive.sh backups list|prune [--keep N] [--keep-days D] [--apply]'
   case "$subcommand" in list|prune) ;; *) hive_die 'Usage: hive.sh backups list|prune [--keep N] [--keep-days D] [--apply]';; esac
   [[ "$subcommand" == prune || "${HIVE_RETENTION_APPLY:-false}" != true ]] || hive_die '--apply applies only to backups prune'
+  if [[ "${HIVE_RETENTION_APPLY:-false}" == true ]]; then hive_retention_writable || return 1; fi
   settings=$(hive_retention_settings "${HIVE_RETENTION_KEEP:-}" "${HIVE_RETENTION_KEEP_DAYS:-}"); read -r keep days <<< "$settings"
   input=$(hive_retention_input "$keep" "$days")
   plans=$(hive_retention_plans "$input") || hive_die 'Backup retention could not read every host; nothing was removed. See above'
   total=$(hive_retention_total "$plans")
+  if [[ $(jq '.hosts|length' "$HIVE_CONFIG") != 1 ]]; then
+    if [[ "$subcommand" == list ]]; then hive_retention_print "$plans" all
+    else hive_retention_print "$plans" remove; fi
+    printf 'Multi-host preview: %s entries match the pruning rules, totaling %s. Destructive pruning is disabled until selection and deletion use coordinated locks. Nothing was removed.\n' \
+      "$(jq '[.[].entries[]|select(.remove)]|length' <<< "$plans")" "$(hive_retention_size "$total")"
+    return 0
+  fi
   if [[ "$subcommand" == list ]]; then
     hive_retention_print "$plans" all
     printf 'The rules above remove %s entries, freeing %s: ./hive.sh backups prune shows them, and --apply removes them.\n' "$(jq '[.[].entries[]|select(.remove)]|length' <<< "$plans")" "$(hive_retention_size "$total")"
@@ -128,16 +175,21 @@ hive_backups_command() {
   removed=$(jq '[.[].removed[]]|length' <<< "$results")
   printf 'Removed %s entries, freeing %s. Each host recorded them under retention/ in its installation directory; copies kept on other machines were not touched.\n' \
     "$removed" "$(hive_retention_size "$(jq '[.[].removed[].bytes]|add // 0|./1024|floor' <<< "$results")")"
-}
+)
 
-# After a successful upgrade: prune with the installation's settings unless retention.auto is
-# false. The upgrade has already completed, so a retention problem is reported, never fatal.
-hive_retention_after_upgrade() {
+# After a successful upgrade: prune only with explicit single-host opt-in. The
+# upgrade has already completed, so a retention problem is reported, never fatal.
+hive_retention_after_upgrade() (
   local settings keep days input plans results removed
-  if jq -e '.retention.auto==false' "$HIVE_CONFIG" >/dev/null; then
-    printf 'Hive: backup retention after upgrades is off (retention.auto); ./hive.sh backups prune removes old backups and rehearsals\n' >&2
+  local configuration
+  configuration=$(hive_retention_snapshot_configuration) || return 0
+  trap 'rm -f -- "$configuration"' EXIT
+  local HIVE_CONFIG=$configuration
+  if ! jq -e '.retention.auto==true' "$HIVE_CONFIG" >/dev/null; then
+    printf 'Hive: backup retention after upgrades is off by default (retention.auto); ./hive.sh backups prune previews old backups and rehearsals\n' >&2
     return 0
   fi
+  hive_retention_writable || return 0
   if ! settings=$( (hive_retention_settings '' '') 2>&1); then printf 'Hive: backup retention skipped: %s\n' "$settings" >&2; return 0; fi
   read -r keep days <<< "$settings"
   input=$(hive_retention_input "$keep" "$days")
@@ -158,4 +210,4 @@ hive_retention_after_upgrade() {
   removed=$(jq '[.[].removed[]]|length' <<< "$results")
   printf 'Removed %s entries, freeing %s; recorded under retention/ on each host. Copies kept on other machines were not touched.\n' \
     "$removed" "$(hive_retention_size "$(jq '[.[].removed[].bytes]|add // 0|./1024|floor' <<< "$results")")"
-}
+)

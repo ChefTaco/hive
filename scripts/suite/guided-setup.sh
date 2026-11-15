@@ -140,7 +140,7 @@ hive_setup_refresh_certificate() {
     cmp -s "$unit" <(printf '%s\n' "$planned") && return 0
     if [[ $(id -u) != 0 ]]; then sudo_file=$(hive_sudo_file "$(jq -r .console.host "$config")") || return 1; fi
     if [[ -n "$sudo_file" ]]; then
-      { cat -- "$sudo_file"; printf '\n'; } | sudo -k -S -p '' bash "$HIVE_ROOT/scripts/console-certificate.sh" schedule --config "$config" --hive "$HIVE_ROOT" --refresh-existing
+      hive_sudo_password "$sudo_file" | sudo -k -S -p '' bash "$HIVE_ROOT/scripts/console-certificate.sh" schedule --config "$config" --hive "$HIVE_ROOT" --refresh-existing
     else
       hive_setup_sudo bash "$HIVE_ROOT/scripts/console-certificate.sh" schedule --config "$config" --hive "$HIVE_ROOT" --refresh-existing
     fi

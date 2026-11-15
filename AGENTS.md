@@ -84,6 +84,29 @@ Registry's dependencies and the git hooks with `npm run bootstrap`.
 - Note user-facing changes in `CHANGELOG.md`.
 - Use Conventional Commits (`feat:`, `fix(suite):`, `docs:` and so on).
 
+## Fresh-install end-to-end testing
+
+- Test the user entry point on the fresh target host: run `./hive.sh --release latest` (or an
+  explicitly selected signed release) in a real interactive terminal as the intended operator.
+  An SSH session with a PTY is fine. Follow [the guided setup](deployment/QUICKSTART.md#guided-local-setup).
+- Let the installer offer and perform prerequisite installation, Docker group activation,
+  installation-directory creation, HTTPS certificate setup and renewal, optional terminal
+  account/key preparation, and Magnus host-agent installation. When the agent needs Node.js,
+  exercise the installer's Node.js installation path too. Do not install these beforehand or
+  invoke the preparation helpers separately to make the end-to-end run pass.
+- Start with only the access/bootstrap requirements needed to reach and launch the installer
+  (such as SSH, a sudo-capable account and Git). Tailscale is optional and its installation/login
+  is external to Hive; automatic certificate setup requires an existing eligible Tailscale
+  connection. For other HTTPS sources, supply the certificate and key as documented. Record
+  pre-existing dependencies so they are not mistaken for installer coverage.
+- A saved `--config`, `--non-interactive`, or custom manifest/signature/trust-key arguments bypass
+  guided preparation. Test those paths separately; they do not replace a fresh interactive run.
+  If setup fails, retain its protected evidence, fix the installer, and repeat the affected path
+  on a fresh lab baseline when authorized. Do not conceal a failure with manual preparation.
+- Verify the resulting browser sign-in, selected products and Magnus node workflows, including
+  the setup checklist. Keep credentials and private transcripts outside tracked files. Report
+  which setup steps the installer actually performed and any steps that remain untested.
+
 ## Gates
 
 Run these before every commit or pull request:

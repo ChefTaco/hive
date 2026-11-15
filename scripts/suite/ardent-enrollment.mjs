@@ -4,6 +4,34 @@ import assert from 'node:assert/strict';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 
+export function assertServiceProcesses(processes) {
+  assert.equal(processes.length, 2, 'API or gateway descendants need independent review');
+  const init = processes.find(p => p.name === 'docker-init');
+  // Node's /proc name changed across runtime releases. Both exact main-thread
+  // names describe the one application child; no other process is approved.
+  const main = processes.find(p => p.name === 'MainThread' || p.name === 'node-MainThread');
+  assert(init && main, 'API or gateway must contain only its init and Node main thread');
+  assert(processes.every(p => Number.isSafeInteger(p.pid) && p.pid > 0 && Number.isSafeInteger(p.ppid))
+    && init.pid !== main.pid, 'API or gateway process identities need independent review');
+  assert.equal(main.ppid, init.pid, 'API or gateway Node process must be a direct child of its init');
+}
+export async function stableServiceProcesses(read, wait = () => new Promise(resolve => setTimeout(resolve, 250))) {
+  let previous = null;
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const processes = await read();
+    try { assertServiceProcesses(processes); }
+    catch {
+      previous = null;
+      if (attempt === 23) throw new Error('API processes did not settle; pause unrelated work and retry the enrollment review');
+      await wait(); continue;
+    }
+    if (JSON.stringify(processes) === JSON.stringify(previous)) return processes;
+    previous = processes;
+    if (attempt < 23) await wait();
+  }
+  throw new Error('API processes keep changing; pause unrelated work and retry the enrollment review');
+}
+
 export function assertFreshArdentReview(review) {
   assert.equal(review.freshInstallation, true, 'A completed fresh installation is required');
   assert.match(review.initializerSHA256, /^[a-f0-9]{64}$/, 'Fresh initializer evidence is required');
@@ -14,10 +42,7 @@ export function assertFreshArdentReview(review) {
   assert(['commands', 'leases', 'participantWork', 'schedulerDefinitions'].every((key) => review.counts[key] === 0), 'Existing command, participant or scheduler history requires independent review');
   for (const processes of [review.apiProcesses, review.gatewayProcesses]) {
     if (processes === null) continue; // The product verifies its declared-absent gateway itself.
-    assert.equal(processes.length, 2, 'A service has processes that require independent review');
-    assert.deepEqual(processes.map((process) => process.name).sort(), ['MainThread', 'docker-init']);
-    assert(processes.every((process) => Number.isSafeInteger(process.pid) && Number.isSafeInteger(process.ppid)));
-    assert.equal(processes.find((process) => process.name === 'MainThread').ppid, processes.find((process) => process.name === 'docker-init').pid);
+    assertServiceProcesses(processes);
   }
 }
 
@@ -56,7 +81,7 @@ export async function prepareArdentScope(input) {
     };
     const review = { nodeId: node.id, nodeFqdn: node.hostname, createdAt: node.createdAt,
       freshInstallation: input.freshInstallation, initializerSHA256: input.initializerSHA256,
-      owner: input.owner, counts, apiProcesses: await apiProcesses(), gatewayProcesses: input.gatewayProcesses };
+      owner: input.owner, counts, apiProcesses: await stableServiceProcesses(apiProcesses), gatewayProcesses: input.gatewayProcesses };
     assertFreshArdentReview(review);
     const reviewSHA256 = sha(review);
     if (input.mode === 'inspect') return { state: 'review', reviewSHA256, evidence: review,

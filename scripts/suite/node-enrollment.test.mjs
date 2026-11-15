@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assertFullNodeReview, managedInventoryRequest } from './node-enrollment.mjs';
+import { assertFullNodeReview, managedInventoryRequest, stableServiceProcesses } from './node-enrollment.mjs';
+import { assertServiceProcesses as assertArdentServiceProcesses,
+  stableServiceProcesses as stableArdentServiceProcesses } from './ardent-enrollment.mjs';
 const fresh = () => ({ freshInstallation: true, initializerSHA256: 'a'.repeat(64),
   owner: { uid: 1001, profileCount: 0, processes: ['systemd', '(sd-pam)', 'dbus-daemon'] },
   ardentScopeActive: false, history: [], unsettled: 0,
@@ -9,6 +11,53 @@ const fresh = () => ({ freshInstallation: true, initializerSHA256: 'a'.repeat(64
   apiProcesses: [{ pid: 1, ppid: 0, name: 'docker-init' }, { pid: 6, ppid: 1, name: 'MainThread' }], gatewayProcesses: null });
 test('reviews fresh full nodes with observed OS maintenance left outside Magnus', () => {
   assert.doesNotThrow(() => assertFullNodeReview(fresh()));
+});
+test('reviews both released Node main-thread names for the API and gateway without allowing other descendants', () => {
+  for (const apiName of ['MainThread', 'node-MainThread']) {
+    for (const gatewayName of ['MainThread', 'node-MainThread']) {
+      const review = fresh();
+      review.apiProcesses[1].name = apiName;
+      review.gatewayProcesses = [{ pid: 201, ppid: 200, name: 'docker-init' },
+        { pid: 206, ppid: 201, name: gatewayName }];
+      assert.doesNotThrow(() => assertFullNodeReview(review));
+      assert.doesNotThrow(() => assertArdentServiceProcesses(review.apiProcesses));
+      assert.doesNotThrow(() => assertArdentServiceProcesses(review.gatewayProcesses));
+      for (const participant of ['apiProcesses', 'gatewayProcesses']) {
+        for (const patch of [
+          rows => rows[1].name = 'node',
+          rows => rows[1].name = 'node-MainThread-extra',
+          rows => rows[0].name = 'MainThread',
+          rows => rows[1].ppid++,
+          rows => rows[1].pid = rows[0].pid,
+          rows => rows[0].pid = 0,
+          rows => rows[1].pid = '206',
+          rows => rows.push({ pid: 207, ppid: rows[1].pid, name: 'sh' }),
+        ]) {
+          const unsafe = structuredClone(review); patch(unsafe[participant]);
+          assert.throws(() => assertFullNodeReview(unsafe));
+          assert.throws(() => assertArdentServiceProcesses(unsafe[participant]));
+        }
+      }
+    }
+  }
+});
+test('read-only process sampling waits for exited health checks and requires two matching strict inventories', async () => {
+  for (const collect of [stableServiceProcesses, stableArdentServiceProcesses]) {
+    const clean = fresh().apiProcesses;
+    const busy = [...clean, { pid: 7, ppid: 0, name: 'node-MainThread' }];
+    const samples = [busy, clean, busy, clean, clean];
+    let reads = 0; let waits = 0;
+    assert.deepEqual(await collect(async () => samples[reads++], async () => { waits++; }), clean);
+    assert.equal(reads, 5); assert.equal(waits, 4);
+    for (const sample of [busy, [{ ...clean[0] }, { ...clean[1], ppid: 0 }]]) {
+      reads = 0; waits = 0;
+      await assert.rejects(collect(async () => { reads++; return sample; }, async () => { waits++; }), /pause unrelated work and retry/);
+      assert.equal(reads, 24); assert.equal(waits, 23);
+    }
+    reads = 0;
+    await assert.rejects(collect(async () => [{ ...clean[0] }, { ...clean[1], pid: 100 + reads++ }], async () => {}), /keep changing/);
+    assert.equal(reads, 24);
+  }
 });
 test('permits reviewed Ardent continuation without removing its completed history or profiles', () => {
   const review = fresh(); review.ardentScopeActive = true; review.owner.profileCount = 1;
