@@ -48,6 +48,12 @@ products.
 
 ## Suite 3.9.4: daily backup pruning
 
+Suite 3.9.4 changes no storage format and needs no flag from 3.9.3: every product pin, the datastore
+profile and the storage recovery profile are those of 3.9.3. The controller changes, so the release
+pins a new controller digest. Pass `--release 3.9.4` to later commands, as described in
+[the upgrade procedure](deployment/QUICKSTART.md#8-upgrade). From 3.8.1, upgrade directly to 3.9.4
+as described for 3.9.0 below, with 3.9.4 and Magnus 3.0.3 in place of 3.9.0 and 3.0.1.
+
 The 3.9.4 controller can prune old backup and rehearsal pairs every day on a single-host
 installation: `./hive.sh backups schedule enable [--at HH:MM]` adds one line to the crontab of the
 controller's user that runs `backups prune --apply` with the installation file's retention settings,
