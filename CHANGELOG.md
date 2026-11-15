@@ -6,6 +6,25 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Added
+
+- Daily backup pruning: `hive.sh backups schedule enable [--at HH:MM] | disable | status`. `enable`
+  adds one line, marked with the installation file's path, to the crontab of the user who runs the
+  controller and keeps every other line byte for byte; repeating it changes nothing. The line runs
+  `backups schedule run`, which is `backups prune --apply` with the installation file's `keep` and
+  `keepDays`, non-interactively and with the configured SSH and sudo password files. Each run takes
+  the host lock, refuses while a transaction is open, and removes nothing unless the host's receipt
+  names the digest of the controller the line runs. It appends its time, outcome and output to
+  `~/.local/state/hive/INSTALLATION/retention-schedule.log`. Installations with several hosts refuse
+  enabling and every run with the multi-host message, before contacting a host. A successful
+  `upgrade`, `rollback` or `adopt` moves the line to the controller it ran with. The installation
+  file's new `retention.schedule` (`"HH:MM"`) has `install` add the line. Guided setup of a
+  single-host installation offers it, defaulting to yes at 03:40. Existing installations change
+  nothing until their operator enables it. The 3.9.3 controller refuses `retention.schedule`, so
+  before rolling back to it, disable the schedule and remove the key. See
+  `deployment/BACKUPS.md#daily-pruning` and `UPGRADING.md`. The controller changes, so the next
+  release pins a new controller digest.
+
 ## [3.9.3] - 2026-11-15
 
 ### Added

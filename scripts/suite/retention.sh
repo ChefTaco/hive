@@ -10,15 +10,17 @@
 hive_retention_default_keep=5
 hive_retention_default_keep_days=14
 
-# installation.json "retention": {"keep": N, "keepDays": D, "auto": true|false}, all optional.
+# installation.json "retention": {"keep": N, "keepDays": D, "auto": true|false, "schedule": "HH:MM"},
+# all optional. schedule is the daily prune that install sets up (retention-schedule.sh).
 hive_retention_validate() {
   jq -e 'has("retention")' "$HIVE_CONFIG" >/dev/null || return 0
   jq -e '
-    .retention|type=="object" and (keys-["keep","keepDays","auto"]|length==0) and
+    .retention|type=="object" and (keys-["keep","keepDays","auto","schedule"]|length==0) and
     ((.keep // 5)|type=="number" and floor==. and .>=2 and .<=1000) and
     ((.keepDays // 14)|type=="number" and floor==. and .>=0 and .<=3650) and
-    ((.auto // false)|type=="boolean")
-  ' "$HIVE_CONFIG" >/dev/null || hive_die 'retention is {"keep":N,"keepDays":D,"auto":true|false}: keep the newest N restorable backup and rehearsal pairs (2 to 1000, default 5) and everything newer than D days (0 to 3650, default 14); auto (default false) opts a single-host installation into pruning after each successful upgrade. See deployment/BACKUPS.md#retention'
+    ((.auto // false)|type=="boolean") and
+    ((has("schedule")|not) or (.schedule|type=="string" and test("^([01][0-9]|2[0-3]):[0-5][0-9]$")))
+  ' "$HIVE_CONFIG" >/dev/null || hive_die 'retention is {"keep":N,"keepDays":D,"auto":true|false,"schedule":"HH:MM"}: keep the newest N restorable backup and rehearsal pairs (2 to 1000, default 5) and everything newer than D days (0 to 3650, default 14); auto (default false) opts a single-host installation into pruning after each successful upgrade; schedule (24-hour local time, for example "03:40") has install set up a daily prune on a single-host installation. See deployment/BACKUPS.md#retention'
 }
 
 # The settings this run uses: the command line, then the installation file, then the defaults.
@@ -110,8 +112,11 @@ hive_retention_print_removed() {
   done < <(jq -r '.[] | .host as $host | .removed[] | [$host,.name,.kind,.createdAt[0:10],(.bytes|tostring)] | @tsv' <<< "$1")
 }
 
+# A scheduled prune adds the digest of the controller it runs; each host refuses unless its
+# receipt names that controller.
 hive_retention_input() {
-  jq -nc --argjson keep "$1" --argjson days "$2" '{keep:$keep,keepDays:$days}'
+  jq -nc --argjson keep "$1" --argjson days "$2" --arg controller "${HIVE_RETENTION_CONTROLLER:-}" \
+    '{keep:$keep,keepDays:$days} + (if $controller!="" then {controller:$controller} else {} end)'
 }
 
 # The operator may edit the installation file while a command runs. Keep planning,
@@ -128,15 +133,17 @@ hive_retention_snapshot_configuration() {
   printf '%s\n' "$snapshot"
 }
 
-# backups list | backups prune [--keep N] [--keep-days D] [--apply]
+# backups list | backups prune [--keep N] [--keep-days D] [--apply] | backups schedule ...
 hive_backups_command() (
   local subcommand=${1:-list} keep days settings input plans total results removed
   local configuration
+  if [[ "$subcommand" == schedule ]]; then shift; hive_retention_schedule_command "$@"; return; fi
+  [[ -z "${HIVE_RETENTION_AT:-}" ]] || hive_die '--at applies only to backups schedule enable'
   configuration=$(hive_retention_snapshot_configuration) || return 1
   trap 'rm -f -- "$configuration"' EXIT
   local HIVE_CONFIG=$configuration
-  (($# <= 1)) || hive_die 'Usage: hive.sh backups list|prune [--keep N] [--keep-days D] [--apply]'
-  case "$subcommand" in list|prune) ;; *) hive_die 'Usage: hive.sh backups list|prune [--keep N] [--keep-days D] [--apply]';; esac
+  (($# <= 1)) || hive_die 'Usage: hive.sh backups list|prune [--keep N] [--keep-days D] [--apply] | backups schedule enable|disable|status [--at HH:MM]'
+  case "$subcommand" in list|prune) ;; *) hive_die 'Usage: hive.sh backups list|prune [--keep N] [--keep-days D] [--apply] | backups schedule enable|disable|status [--at HH:MM]';; esac
   [[ "$subcommand" == prune || "${HIVE_RETENTION_APPLY:-false}" != true ]] || hive_die '--apply applies only to backups prune'
   if [[ "${HIVE_RETENTION_APPLY:-false}" == true ]]; then hive_retention_writable || return 1; fi
   settings=$(hive_retention_settings "${HIVE_RETENTION_KEEP:-}" "${HIVE_RETENTION_KEEP_DAYS:-}"); read -r keep days <<< "$settings"
@@ -167,7 +174,7 @@ hive_backups_command() (
     return
   fi
   if [[ $(jq '[.[].entries[]|select(.remove)]|length' <<< "$plans") == 0 ]]; then printf 'Nothing to remove.\n'; return; fi
-  if results=$(hive_retention_apply "$input" "$plans" prune); then :; else
+  if results=$(hive_retention_apply "$input" "$plans" "${HIVE_RETENTION_TRIGGER:-prune}"); then :; else
     hive_retention_print_removed "$results"
     hive_die 'Backup retention stopped on a host; see above. What it removed is recorded in that host'"'"'s retention/ directory'
   fi

@@ -145,7 +145,8 @@ them on every host of the installation:
 
 `prune` is a dry run unless `--apply` is given. It prints each entry it would remove and the space
 that frees, and removes nothing. On a single-host installation, `--apply` removes the eligible
-entries and prints each one. Automatic pruning is off by default.
+entries and prints each one. Automatic pruning is off by default; from 3.9.4 a single-host
+installation can [prune every day](#daily-pruning).
 Each run uses one private snapshot of its installation configuration through planning and
 deletion; edits to the operator's configuration file take effect on the next command.
 
@@ -198,15 +199,17 @@ it has completed, and lists what it removed. A problem there is reported and doe
 upgrade. Configure it in the installation file:
 
 ```json
-"retention": { "keep": 5, "keepDays": 14, "auto": false }
+"retention": { "keep": 5, "keepDays": 14, "auto": false, "schedule": "03:40" }
 ```
 
 Each key is optional: `keep` from 2 to 1000, `keepDays` from 0 to 3650, and `auto` defaults to
 `false`. On a single-host installation, set `auto` to `true` to prune after successful upgrades,
 or leave it off and use `--apply` after reviewing a dry run. `--keep` and `--keep-days` override
-the file for one run. Retention is available from suite 3.9.3; the controller of 3.9.2 or earlier
-refuses an installation file with `retention`, so remove the key before running an older release's
-controller, for example for a rollback.
+the file for one run. `schedule`, a 24-hour local time, has `install` set up the
+[daily prune](#daily-pruning). Retention is available from suite 3.9.3, and `schedule` from 3.9.4.
+The controller of 3.9.2 or earlier refuses an installation file with `retention`, and that of 3.9.3
+refuses one with `retention.schedule`: remove the key before running an older release's controller,
+for example for a rollback.
 
 **Records and other copies.** Each host records every prune that removed something in
 `retention/prune-TIME-ID.json` in its installation directory: when, what triggered it, the
@@ -214,6 +217,67 @@ settings, and each removed archive with its kind, time, SHA-256 and size. Retent
 entries under the host's `backups/`, `rehearsals/` and `rehearsal-history/`. Copies kept elsewhere,
 on another machine or by your own backup job, are never touched; use the record's names and
 digests to reconcile them.
+
+### Daily pruning
+
+From suite 3.9.4, a single-host installation can run `backups prune --apply` every day from cron:
+
+```bash
+./hive.sh backups schedule enable --at 03:40    # add or replace the line; the default time is 03:40
+./hive.sh backups schedule status               # the line, its controller, the rules and the last run
+./hive.sh backups schedule disable              # remove the line
+```
+
+`enable` writes one line into the crontab of the user who runs it, the controller's user. The line
+ends with `# hive-retention-schedule config=FILE`, naming the installation file, so each
+installation file has at most one line. `enable` and `disable` read the crontab, replace only that
+line and install the result with `crontab FILE`, which replaces the table in one step. Every other
+line stays byte for byte; a crontab whose last line has no final newline gains only that newline.
+Repeating a command changes nothing. The line looks like this, with `$HOME` expanded:
+
+```text
+40 3 * * * PATH=/usr/local/bin:/usr/bin:/bin /opt/hive-controller/hive.sh backups schedule run --config $HOME/.config/hive/hive/installation.json >> $HOME/.local/state/hive/hive/retention-schedule.log 2>&1 # hive-retention-schedule config=$HOME/.config/hive/hive/installation.json
+```
+
+It names the controller that enabled it, the installation file and the log, as absolute paths of
+letters, digits and `._/@+-` (cron passes the line to `/bin/sh`; `enable` refuses other paths), and
+the `PATH` that controller had, so cron finds the same `jq`, `ssh` and `flock`. The time is the
+controller machine's local time; choose one away from that installation's backups and upgrades.
+
+**Each run** is `backups prune --apply` with the installation file's `keep` and `keepDays`
+(defaults 5 and 14); `--keep`, `--keep-days` and `--at` are refused. It needs no terminal: an SSH
+host uses the configuration's `sshConfig` and `sudoPasswordFile`, as every other command does. It
+takes each host's controller lock and refuses, removing nothing, while another command holds it,
+while a transaction is open, and unless the host's `receipt.json` names this controller's digest
+(`controllerSourceSHA256`, which install, upgrade, rollback and adoption record). That check runs on
+the host under the lock, so a line left on an older or newer controller never prunes with
+different code. Each run appends a start line and an end line, each with its UTC time and the
+outcome (`succeeded`, or `refused or failed` with its exit status), and the prune's own output to
+`$XDG_STATE_HOME/hive/INSTALLATION/retention-schedule.log` (by default under
+`~/.local/state/hive/`), which `enable` creates owner-only. Nothing secret is written there. A prune
+that removes something records it under `retention/` with the trigger `schedule`. A refused run
+is retried the next day.
+
+**Several hosts.** `enable` and every run refuse with the same message as `prune --apply`, before
+any host is contacted; cron does not change that. `status` and `disable` work on every installation.
+
+**Controller changes.** A successful `upgrade`, `rollback` or `adopt` rewrites the installation's
+line to the controller that ran it, keeping its time and log, and prints the new line; a line
+edited by hand is reported and kept. `install` adds the line when the installation file sets
+`retention.schedule` (guided setup asks, defaulting to yes at 03:40). Otherwise an upgrade never
+adds a line; when the file sets `retention.schedule` without one, it says how to enable it. A
+problem with the crontab is reported with the command that fixes it and never fails the completed
+operation. A `restore` or `migrate-native` step does not rewrite the line: if the receipt then names
+another controller, runs refuse until `enable` is run with that controller. If the controller
+directory a line names is removed, runs fail in the log and `status` says so: enable it again from
+the controller in use. A per-release checkout, or a controller run with `--manifest` and
+`--trust-key`, works the same way: pruning reads no release manifest, so the line names only the
+controller and the installation file, and the upgrade run from the next checkout moves it there.
+
+**Rolling back to 3.9.3 or earlier.** Those controllers do not know the line. First, with the
+current controller, run `./hive.sh backups schedule disable` and remove `retention.schedule` from
+the installation file, which they refuse; then roll back. A line left behind refuses every run,
+because the installation then runs another controller: remove it with `crontab -e`.
 
 ## Disk
 

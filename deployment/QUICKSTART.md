@@ -148,6 +148,7 @@ questions. Press Enter to accept the default shown in brackets.
 | Port for Magnus host agents | blank for none. Give a port, such as `4000`, to let hosts join the Magnus fleet; see [Magnus host agents](FULL.md#magnus-host-agents) |
 | Existing external inference HTTPS endpoint | blank to skip; see [external inference](INFERENCE.md) |
 | Native agent runtime | Release 3.9.3 skips this question because it pins no native runtime artifacts; the guided local setup offers a Magnus host agent after installation, as in [Magnus host agents](FULL.md#magnus-host-agents) |
+| Prune old backups and rehearsals daily | the default, `yes`: from 3.9.4, a line in your crontab removes old backup and rehearsal pairs every day at 03:40, local time, keeping the newest 5 restorable pairs, everything from the last 14 days and anything a recovery needs. Give another time such as `04:15`, or `no`. Asked only for a single-host installation; see [daily pruning](BACKUPS.md#daily-pruning) |
 | Write protected installation configuration to | the default, `~/.config/hive/hive/installation.json` |
 
 `hive.sh` then prints the plan: every product, image digest and host path. Answer `y` to apply
@@ -212,6 +213,14 @@ The archive is written to `/opt/hive/backups/first-backup` and verified. From 2.
 the suite serving; `--stopped` stops every service while it runs instead, which is what 2.0.0 and
 2.0.1 always do. Copy archives off the host. See [backups](BACKUPS.md) for what is captured,
 restores and rehearsals.
+
+Each upgrade keeps its own backup and a restored rehearsal copy. If setup's daily pruning was
+declined, enable it later from 3.9.4, and check it at any time:
+
+```bash
+./hive.sh backups schedule enable --config ~/.config/hive/hive/installation.json --at 03:40
+./hive.sh backups schedule status --config ~/.config/hive/hive/installation.json
+```
 
 ## 8. Upgrade
 

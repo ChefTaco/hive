@@ -135,7 +135,10 @@ or HiveSkills from a release before 3.4.0, one with Embermend from a release bef
 that runs Magnus from a release before 3.8.0. Code-only rollback across the 3.0.0 PostgreSQL
 collation change is refused; recovery uses the original-state backup and write reconciliation. An
 installation that runs Magnus moves to 3.9.0 or later, which pin Magnus 3 (node keys only), from
-3.8.1 only, after every Magnus node has its key.
+3.8.1 only, after every Magnus node has its key. Each upgrade keeps a backup and a restored
+rehearsal: `./hive.sh backups list|prune` reviews and removes old pairs, and from 3.9.4
+`./hive.sh backups schedule enable|disable|status` prunes them daily on a single-host installation
+(see [retention](deployment/BACKUPS.md#retention)).
 See [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade),
 [deployment/README.md](deployment/README.md) and [UPGRADING.md](UPGRADING.md). Existing native
 installations move onto the suite with [`hive.sh migrate-native`](deployment/MIGRATE_NATIVE.md);

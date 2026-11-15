@@ -57,7 +57,7 @@ hive_runtime_files() {
     scripts/suite/cindertrace.sh scripts/suite/cindertrace-host.sh scripts/suite/ownership-host.sh \
     scripts/suite/magnus-agent.sh scripts/suite/magnus-agent-host.sh scripts/suite/ardent-enrollment.mjs scripts/suite/node-enrollment.mjs scripts/suite/terminal-authority.mjs \
     scripts/suite/console-clients.sh scripts/suite/console-clients-host.sh scripts/suite/post-upgrade.sh scripts/suite/setup-checklist.sh \
-    scripts/suite/retention.sh scripts/suite/retention-host.sh
+    scripts/suite/retention.sh scripts/suite/retention-host.sh scripts/suite/retention-schedule.sh
 }
 hive_controller_digest() {
   local file
@@ -148,6 +148,8 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollb
   --keep N               backups prune: keep the newest N restorable pairs (default 5)
   --keep-days D          backups prune: keep everything newer than D days (default 14)
   --apply                backups prune: remove what the dry run lists
+  --at HH:MM             backups schedule enable: the daily prune's local time (default
+                         retention.schedule, else 03:40)
   --file FILE            Entry for registry add/update; entries never contain credentials
   --help                 Show this help
 
@@ -198,6 +200,15 @@ Automatic pruning after a successful upgrade is off by default: a single-host in
 it on with installation.json "retention" ({"keep":5,"keepDays":14,"auto":true}). Retention
 protects only archives that state files name: keep any archive you plan to restore later outside
 the installation directory before --apply. See deployment/BACKUPS.md#retention.
+backups schedule enable [--at HH:MM] | disable | status runs backups prune --apply every day on a
+single-host installation, with the installation file's settings, from one marked line in the crontab
+of the user who runs the controller; other crontab lines are kept unchanged. Each run takes the host
+lock, refuses while a transaction is open or another controller runs, removes nothing unless the
+installation runs that line's controller, and is logged under ~/.local/state/hive/INSTALLATION/.
+upgrade, rollback and adopt point the line at the controller they ran; install creates it when
+installation.json sets "retention": {"schedule":"HH:MM"}. Before rolling back to a controller older
+than 3.9.4, run backups schedule disable and remove retention.schedule from the file.
+See deployment/BACKUPS.md#daily-pruning.
 setup [list] | setup done ID | setup skip ID shows and settles the setup checklist: the steps after an
 install or upgrade that still need a person, recorded in the Hive Registry (1.3.0 and later) and shown
 in HiveXUI. status lists the pending ones. See deployment/FULL.md#setup-checklist.
@@ -229,7 +240,7 @@ hive_configure() {
   local inference='[]' agents='[]' temporary config selected_json runtime version agent_id agent_profile agent_environment agent_service authorized
   local external_ca enrollment_endpoint enrollment_prefix enrollment_credential enrollment_ca provider_slug provider_aliases
   local product product_host product_origin product_bind product_certificate product_key product_inference trust_bundle ssh_config magnus_console
-  local gateway_deploy='' gateway_username='' gateway_key='' gateway_grant=no agent_port='' external_magnus='' embermend_deploy='' studio_deploy=''
+  local gateway_deploy='' gateway_username='' gateway_key='' gateway_grant=no agent_port='' external_magnus='' embermend_deploy='' studio_deploy='' prune_schedule=''
   if [[ -z "$HIVE_VERSION" ]]; then hive_prompt HIVE_VERSION 'Exact suite release version'; fi
   if [[ -z "$HIVE_MANIFEST" ]]; then
     HIVE_MANIFEST="$HIVE_ROOT/releases/$HIVE_VERSION.json"
@@ -412,6 +423,20 @@ hive_configure() {
       if [[ "$product" == emberpath ]]; then hive_prompt product_inference 'Distinct native model API HTTPS origin for Emberpath'; fi
       jq --arg product "$product" --arg origin "$product_origin" --arg bind "$product_bind" --arg certificate "$product_certificate" --arg key "$product_key" --arg inference "$product_inference" '.bootstrap.productEndpoints[$product]={origin:$origin,bindAddress:$bind,certificateFile:$certificate,privateKeyFile:$key} + (if $product=="emberpath" then {inferenceOrigin:$inference} else {} end)' "$config" > "$temporary/next.json"; mv "$temporary/next.json" "$config"
     done
+  fi
+  # A single-host installation can prune old backup and rehearsal pairs every day; install
+  # writes the crontab line from retention.schedule.
+  if [[ $(jq '.hosts|length' "$config") == 1 ]]; then
+    printf 'Each upgrade keeps a backup and a full restored copy of the installation, which add up. Hive can remove old ones every day at %s, local time on this machine, from a line in your crontab: it keeps the newest 5 restorable pairs, everything from the last 14 days, and anything a recovery needs.\n' "${hive_retention_default_schedule:-03:40}"
+    hive_prompt prune_schedule 'Prune old backups and rehearsals daily (yes/no, or another time such as 04:15)' yes
+    case "$prune_schedule" in
+      yes) prune_schedule=${hive_retention_default_schedule:-03:40};;
+      no) prune_schedule='';;
+      *) [[ "$prune_schedule" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || { rm -rf -- "$temporary"; hive_die 'Answer yes, no or a 24-hour time such as 04:15'; };;
+    esac
+    if [[ -n "$prune_schedule" ]]; then
+      jq --arg time "$prune_schedule" '.retention={schedule:$time}' "$config" > "$temporary/next.json"; mv "$temporary/next.json" "$config"
+    fi
   fi
   HIVE_CONFIG=$config
   if ! (hive_validate; hive_manifest); then rm -rf -- "$temporary"; hive_die 'Setup values do not match the release; no configuration or host changes were applied'; fi
@@ -783,7 +808,7 @@ hive_discover_config() {
 
 hive_main() {
   local command=install confirmed=false interactive=true hold_on_failure=false
-  HIVE_RETENTION_KEEP='' HIVE_RETENTION_KEEP_DAYS='' HIVE_RETENTION_APPLY=false
+  HIVE_RETENTION_KEEP='' HIVE_RETENTION_KEEP_DAYS='' HIVE_RETENTION_APPLY=false HIVE_RETENTION_AT='' HIVE_RETENTION_CONTROLLER='' HIVE_RETENTION_TRIGGER='' HIVE_OPERATOR_CONFIG=''
   HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_ALLOW_MIGRATIONS=false HIVE_RELAX_AUTH_LIMITS=false HIVE_BACKUP_STOPPED=false
   HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY='' HIVE_CINDERTRACE_SOURCES='' HIVE_AGENT_TARGET='' HIVE_AGENT_SSH_CONFIG='' HIVE_AGENT_SUDO_FILE='' HIVE_AGENT_INSTALL_NODE=false HIVE_AGENT_TRUST=false
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
@@ -804,6 +829,10 @@ hive_main() {
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
         if [[ "$1" == --keep ]]; then HIVE_RETENTION_KEEP=$2; else HIVE_RETENTION_KEEP_DAYS=$2; fi
         shift 2;;
+      --at)
+        [[ "$command" == backups ]] || hive_die '--at applies only to backups schedule enable'
+        (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
+        HIVE_RETENTION_AT=$2; shift 2;;
       --apply) [[ "$command" == backups ]] || hive_die '--apply applies only to backups prune'; HIVE_RETENTION_APPLY=true; shift;;
       --stopped) [[ "$command" == backup ]] || hive_die '--stopped applies only to backup'; HIVE_BACKUP_STOPPED=true; shift;;
       --sources)
@@ -860,6 +889,8 @@ hive_main() {
     hive_configure
     case "$command" in install|init) hive_setup_hosts_ready;; esac
   fi
+  # The file the operator named, before any private copy replaces it: the daily prune refers to it.
+  HIVE_OPERATOR_CONFIG=$(realpath -e -- "$HIVE_CONFIG" 2>/dev/null || printf '%s' "$HIVE_CONFIG")
   # A renewal timer outlives the release in the configuration file; it runs this checkout's release.
   if [[ "$command" == tls-refresh && -z "$HIVE_VERSION" && -z "$HIVE_MANIFEST" ]]; then HIVE_VERSION=$(hive_checkout_release); fi
   HIVE_OPERATION=$command
