@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Security
+
+- The ingress is `hive-ingress` 2.0.6: the same Caddy 2.11.9 build, Go toolchain and base image as
+  2.0.5, with `go.opentelemetry.io/otel/sdk/log` 1.47.0 instead of 0.22.0, which fixes
+  CVE-2026-128085 (GHSA-q7gw-24fr-5p69, moderate: the attribute value length limit could be
+  bypassed). A suite release adopts it by naming the tag in its inputs.
+
 ## [3.9.1] - 2026-11-15
 
 ### Changed
