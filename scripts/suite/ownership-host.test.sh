@@ -27,13 +27,18 @@ fixture() {
   printf 'key\n' > "$root/config/ingress/console.key"; printf 'certificate\n' > "$root/config/ingress/console.crt"
   chown "$service:$service" "$root/config/ingress/console.key" "$root/config/ingress/console.crt"; chmod 600 "$root/config/ingress/console.key" "$root/config/ingress/console.crt"
   printf '{}\n' > "$root/config/runtime.json"; chown 101:101 "$root/config/runtime.json"
+  # What a root copy release writes: its record, the audit record and an unfinished trash directory.
+  printf '{}\n' > "$root/rehearsals/first/copy-released.json"; chmod 600 "$root/rehearsals/first/copy-released.json"
+  install -d -m 700 "$root/retention" "$root/rehearsals/first/.releasing.fixture"
+  printf '{}\n' > "$root/retention/release-fixture.json"; chmod 600 "$root/retention/release-fixture.json"
 }
 mkdir -p "$base"
 
 # An installation an ordinary account owns.
 fixture "$base/user"; chown "$owner:$group" "$base/user"
 restore_installation_owner "$base/user"
-for path in transaction.json backups backups/first backups/first/state.tar.gz rehearsals rehearsals/first data config config/link; do
+for path in transaction.json backups backups/first backups/first/state.tar.gz rehearsals rehearsals/first data config config/link \
+  rehearsals/first/copy-released.json rehearsals/first/.releasing.fixture retention retention/release-fixture.json; do
   [[ $(stat -c %u:%g -- "$base/user/$path") == "$owner:$group" ]] || fail "$path was not given back to the installation owner"
 done
 [[ $(stat -c %a "$base/user/backups/first/state.tar.gz") == 600 && $(stat -c %a "$base/user/backups/first") == 700 && $(stat -c %a "$base/user/transaction.json") == 600 ]] || fail 'Modes changed'

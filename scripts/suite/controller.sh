@@ -57,7 +57,7 @@ hive_runtime_files() {
     scripts/suite/cindertrace.sh scripts/suite/cindertrace-host.sh scripts/suite/ownership-host.sh \
     scripts/suite/magnus-agent.sh scripts/suite/magnus-agent-host.sh scripts/suite/ardent-enrollment.mjs scripts/suite/node-enrollment.mjs scripts/suite/terminal-authority.mjs \
     scripts/suite/console-clients.sh scripts/suite/console-clients-host.sh scripts/suite/post-upgrade.sh scripts/suite/setup-checklist.sh \
-    scripts/suite/retention.sh scripts/suite/retention-host.sh scripts/suite/retention-schedule.sh
+    scripts/suite/retention.sh scripts/suite/retention-host.sh scripts/suite/retention-schedule.sh scripts/suite/rehearsal-copy-host.sh
 }
 hive_controller_digest() {
   local file
@@ -150,6 +150,8 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollb
                          or a single-host restore before any promotion
   --keep N               backups prune: keep the newest N restorable pairs (default 5)
   --keep-days D          backups prune: keep everything newer than D days (default 14)
+  --keep-full N          backups prune: the newest N passed rehearsals keep their full restored
+                         copy (default 1); the others keep only their evidence
   --apply                backups prune: remove what the dry run lists
   --at HH:MM             backups schedule enable: the daily prune's local time (default
                          retention.schedule, else 03:40)
@@ -194,11 +196,17 @@ than the release, adds missing HiveXUI browser clients to Oathweave, and lists t
 steps, such as updating Ardent packages in HiveXUI. Each change is shown and confirmed first. It
 marks the setup checklist items it finishes as done.
 backups list shows each host's backups and restore rehearsals and what retention decides for them.
-backups prune [--keep N] [--keep-days D] [--apply] is a dry run by default: it lists the backup and
-rehearsal pairs it would remove, together, and the space that frees. It keeps the newest N
-restorable pairs, everything newer than D days, the installed release's upgrade archive, anything a
-transaction, receipt or recovery record names, and backups never rehearsed. --apply removes them
-on a single-host installation only; an installation with several hosts can list and dry-run only.
+backups prune [--keep N] [--keep-days D] [--keep-full N] [--apply] is a dry run by default: it lists
+the backup and rehearsal pairs it would remove, together, and the space that frees. It keeps the
+newest N restorable pairs, everything newer than D days, the installed release's upgrade archive,
+anything a transaction, receipt or recovery record names, and backups never rehearsed. --apply
+removes them on a single-host installation only. It also lists the restored copies it would
+release ("release copy"): a passed rehearsal is a full restored copy of the installation, and only
+the newest --keep-full (default 1) keep theirs. The others keep their evidence (result, isolated
+Compose definition, container logs), and their backups stay restorable; ./hive.sh rehearse
+--archive ID rebuilds a full copy for inspection. Each rehearse step, including the one in every
+upgrade and rollback, releases the earlier copies first. On an installation with several hosts,
+--apply releases only copies; pair removal stays disabled there.
 Automatic pruning after a successful upgrade is off by default: a single-host installation turns
 it on with installation.json "retention" ({"keep":5,"keepDays":14,"auto":true}). Retention
 protects only archives that state files name: keep any archive you plan to restore later outside
@@ -812,7 +820,7 @@ hive_discover_config() {
 
 hive_main() {
   local command=install confirmed=false interactive=true hold_on_failure=false
-  HIVE_RETENTION_KEEP='' HIVE_RETENTION_KEEP_DAYS='' HIVE_RETENTION_APPLY=false HIVE_RETENTION_AT='' HIVE_RETENTION_CONTROLLER='' HIVE_RETENTION_TRIGGER='' HIVE_OPERATOR_CONFIG=''
+  HIVE_RETENTION_KEEP='' HIVE_RETENTION_KEEP_DAYS='' HIVE_RETENTION_KEEP_FULL='' HIVE_RETENTION_APPLY=false HIVE_RETENTION_AT='' HIVE_RETENTION_CONTROLLER='' HIVE_RETENTION_TRIGGER='' HIVE_OPERATOR_CONFIG=''
   HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_NATIVE_RECOVERY_FILE='' HIVE_NATIVE_RECOVERY_INPUT=null HIVE_NATIVE_RECOVERY_CONFIGURATION_SHA='' HIVE_NATIVE_RECOVERY_MANIFEST_SEMANTIC_SHA='' HIVE_NATIVE_BACKUP_TOOL='' HIVE_ALLOW_MIGRATIONS=false HIVE_RELAX_AUTH_LIMITS=false HIVE_BACKUP_STOPPED=false HIVE_PREPARE_RECONCILIATION=false
   HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY='' HIVE_CINDERTRACE_SOURCES='' HIVE_AGENT_TARGET='' HIVE_AGENT_SSH_CONFIG='' HIVE_AGENT_SUDO_FILE='' HIVE_AGENT_INSTALL_NODE=false HIVE_AGENT_TRUST=false
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
@@ -828,10 +836,10 @@ hive_main() {
       --relax-auth-limits) HIVE_RELAX_AUTH_LIMITS=true; shift;;
       --non-interactive) interactive=false; shift;;
       --hold-on-failure) hold_on_failure=true; shift;;
-      --keep|--keep-days)
+      --keep|--keep-days|--keep-full)
         [[ "$command" == backups ]] || hive_die "$1 applies only to backups prune"
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
-        if [[ "$1" == --keep ]]; then HIVE_RETENTION_KEEP=$2; else HIVE_RETENTION_KEEP_DAYS=$2; fi
+        case "$1" in --keep) HIVE_RETENTION_KEEP=$2;; --keep-days) HIVE_RETENTION_KEEP_DAYS=$2;; *) HIVE_RETENTION_KEEP_FULL=$2;; esac
         shift 2;;
       --at)
         [[ "$command" == backups ]] || hive_die '--at applies only to backups schedule enable'

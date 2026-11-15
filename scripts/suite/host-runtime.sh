@@ -584,6 +584,15 @@ case "$action" in
     if [[ -e "$rehearsal" || -L "$rehearsal" ]]; then
       hive_archive_rehearsal_attempt "$rehearsal" || die 'Existing rehearsal is incomplete or unverified; retain it for independent recovery'
     fi
+    # Before this copy is extracted, so the disk never holds both: earlier passed rehearsals give
+    # up their restored copies and keep their evidence, leaving this one as the full copy. Their
+    # backups stay restorable. Best effort: a failure is reported and never fails this step.
+    if declare -F hive_release_rehearsal_copies >/dev/null; then
+      if copies=$(hive_release_rehearsal_copies 0 rehearse true); then :; else printf 'Hive host: an earlier restored copy could not be released; it is kept, and backups prune retries it\n' >&2; fi
+      [[ -n "$copies" ]] || copies='[]'
+      jq -r '[.[]|select(.status=="released")] | select(length>0) | "Hive host: released \(length) earlier restored rehearsal copies, freeing \((map(.releasedKiB)|add)/1024|floor) MiB; their evidence is kept and their backups stay restorable"' <<< "$copies" >&2 || true
+      jq -r '.[]|select(.status=="refused" or .status=="failed" or .status=="kept")|"Hive host: kept the restored copy of \(.path // "earlier rehearsals"): \(.reason)"' <<< "$copies" >&2 || true
+    fi
     install -d -m 700 "$rehearsal"
     tar --extract --gzip --file "$backup/state.tar.gz" --directory "$rehearsal" --same-owner --same-permissions
     native_result=null

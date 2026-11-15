@@ -2,7 +2,7 @@
 
 hive_action() {
   local host=$1 file script=''
-  local -a files=(ownership-host.sh public-runtime.sh integrity-host.sh input-artifacts-host.sh native-initialization-host.sh adapters-host.sh native-backup-host.sh restore-recovery-host.sh inference-registration.sh initialize-migrations-host.sh host-runtime.sh)
+  local -a files=(ownership-host.sh public-runtime.sh integrity-host.sh input-artifacts-host.sh native-initialization-host.sh adapters-host.sh native-backup-host.sh restore-recovery-host.sh inference-registration.sh initialize-migrations-host.sh rehearsal-copy-host.sh host-runtime.sh)
   [[ "$2" != snapshot ]] || files=(ownership-host.sh integrity-host.sh adapters-host.sh native-backup-host.sh snapshot-host.sh host-runtime.sh)
   for file in "${files[@]}"; do script+=$(cat "$HIVE_ROOT/scripts/suite/$file")$'\n'; done
   # The host script travels as one command-line argument, which the kernel bounds at 128 KiB.
