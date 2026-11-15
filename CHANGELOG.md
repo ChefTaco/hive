@@ -6,8 +6,20 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.9.1] - 2026-11-15
+
 ### Changed
 
+- Magnus, its fleet gateway and agent 3.0.2. The Magnus server signs the console drain finding it
+  records for itself with its server key instead of `RESULT_SIGNING_SECRET`, and fetches the
+  agents' writer proofs, which they sign with their node keys, whether or not that key is set. The new
+  verify-only `RESULT_SIGNING_PREVIOUS_SECRET` (server) and `COMMAND_RECONCILIATION_PREVIOUS_SECRET`
+  (agent) keep stored records verifying, and the agent CLI adds `magnus-agent
+  historical-settlements list|reseal|prune` to move stored settlements to the node-local keys, so
+  the last shared keys can be retired. Magnus 3.0.2 adds no migrations, so an upgrade from 3.9.0
+  needs no flag. Every other pin, the datastore profile and the storage recovery profile are
+  unchanged from 3.9.0; the controller changes as below, so the release pins a new controller
+  digest. See `UPGRADING.md`, "Suite 3.9.1: Magnus 3.0.2, retiring the shared keys".
 - The `ardent-packages-updated` setup item settles itself. `hive.sh post-upgrade` asks Magnus, read
   only, for its Ardent installations (`GET /api/v1/ardent/installations`): when every one runs the
   Ardent version its node agent stages, the item is done; otherwise it names each installation that
@@ -15,7 +27,7 @@ All notable changes to this project are documented in this file. The format is b
   suite-managed Magnus is read on its host with its API secret, after `post-upgrade` moves the host
   agent; an external Magnus is read through Ardent Project Studio's service identity, also at the
   upgrade itself. Nothing is installed or restarted: Update package stays in HiveXUI. The
-  controller changes, so the next release pins a new controller digest.
+  controller changes, so this release pins a new controller digest.
 
 ## [3.9.0] - 2026-11-14
 
