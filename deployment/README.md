@@ -1,15 +1,15 @@
-# Console ingress candidate
+# Deployment reference
 
 > **New installation?** Start with [Install Hive on one host](QUICKSTART.md): prerequisites,
 > console certificate, setup answers, first sign-in, backups and upgrades, step by step. This page
 > is the reference for what the controller assembles.
 
-The shell controller assembles ingress and the static console in the console
+The shell controller assembles ingress and the static UI (HiveXUI) in the console
 host's Compose project. The signed manifest identifies their `ingress` and
 `static-ui` service kinds; installation JSON supplies the console host, explicit
 bind address/port and public runtime file. See `examples/installation.schema.json`
 and `examples/installation.json`. `console.compose.json` remains a standalone
-reference fragment. The candidate checks below switch no production entrypoint.
+reference fragment. The local `candidate` image checks below change no installation.
 
 ## Published releases
 
@@ -146,9 +146,6 @@ security `/api/v1/security-fusion` paths are explicit. Existing independent prod
 origins must remain available during migration. Verify all native URLs, streaming,
 WebSockets and attachment paths before changing an installation's public ingress.
 
-Use the preserved product release/recovery tooling until suite lifecycle adapters
-and restore rehearsals pass. This fragment does not claim frontend workflow parity.
-
 Build the ingress candidate with `docker build -f deployment/ingress.Dockerfile
 -t hive-ingress:candidate deployment`. The derived image removes Caddy's
 privileged-port file capability before running it with all capabilities dropped.
@@ -187,8 +184,9 @@ native agent profiles. It never asks for a password on the command line. Provide
 authorization remains an explicit operator step. Inventory defaults to a protected
 configuration directory outside the checkout.
 
-The current fresh initializer supports a co-located core and its private Redis and
-Qdrant stores. Configure `bootstrap` in installation JSON using the initial
+This section covers a co-located core and its private Redis and Qdrant stores; the
+[full](FULL.md), [distributed](DISTRIBUTED.md) and [custom](CUSTOM.md) guides cover the other
+placements. Configure `bootstrap` in installation JSON using the initial
 operator labels and existing console TLS file references. `./hive.sh init` can
 prepare and review configuration separately; `install` performs this step when
 requested. Per-product secrets, initial identities and internal transport keys are
@@ -204,7 +202,7 @@ restarts only the ingress. An installation moved with `migrate-native` uses its 
 
 Only private backends and datastores run during first initialization. After
 readiness, they stop and the normal release starts with automatic migrations and
-upgrades disabled. Ingress, the console and agents wait for that boundary. Initial
+upgrades disabled. Ingress, the UI and agents wait for that boundary. Initial
 Oathweave browser clients and resource grants come from its own bootstrap contract;
 Emberpath and HiveMem retain explicit, independently allocated local account IDs.
 Recovery delivery still needs the operator's trusted out-of-band delivery consumer.

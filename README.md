@@ -17,7 +17,7 @@ openssl and Docker Compose on the controller; no Node.js runtime.
 | [**Emberpath**](https://github.com/ChefTaco/Emberpath) | OpenAI-compatible model gateway with routing, failover, quotas and tracing |
 | [**HiveMem**](https://github.com/ChefTaco/HiveMem) | Long-term memory API for agents, persisted to Qdrant |
 | [**HiveSkills**](https://github.com/ChefTaco/HiveSkills) | Registry of versioned, checksummed skills for agents |
-| [**HiveXUI**](https://github.com/ChefTaco/HiveXUI) | The web console for the whole suite, Magnus included |
+| [**HiveXUI**](https://github.com/ChefTaco/HiveXUI) | The web UI for the whole suite, Magnus included |
 | [**Magnus**](https://github.com/ChefTaco/magnus) | Fleet management for agent hosts, with an optional web terminal gateway |
 | [**Embermend**](https://github.com/ChefTaco/Embermend) | Optional security assessment, recommendations and authorized remediation through compatible Magnus; [setup](deployment/EMBERMEND.md) |
 | [**Cindertrace**](https://github.com/ChefTaco/cindertrace) | Security event collection and response |
@@ -128,15 +128,14 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 ## Upgrading
 
 A suite installation upgrades to a newer signed release with `./hive.sh upgrade --config FILE
---release X.Y.Z`; the launcher selects its verified controller. Upgrades from 2.x to 3.6.0 with existing
-PostgreSQL stores also require `--allow-migrations`: the installer takes a verified backup,
-rehearses on a copy and rebuilds indexes before activation. Upgrades from a release before 3.4.0
-of an installation with Emberpath or HiveSkills require `--allow-migrations` too: both products
-changed their data format in 3.4.0, and the installer runs each product's own migration on the
-rehearsal copy and then on the stopped live store. Upgrades to 3.6.0 of an installation with
-Embermend require it as well, for Embermend's own database migration; an upgrade from 3.5.0 to
-3.6.0 without Embermend changes no data format and needs no flag. Code-only rollback across that
-collation change is refused; recovery uses the original-state backup and write reconciliation.
+--release X.Y.Z`; the launcher selects its verified controller. The installer takes a verified
+backup and rehearses data changes on a copy before activation. Moving from 2.x to 3.x with existing
+PostgreSQL stores requires `--allow-migrations`, and so does moving an installation with Emberpath
+or HiveSkills from a release before 3.4.0, one with Embermend from a release before 3.6.0, and one
+that runs Magnus from a release before 3.8.0. Code-only rollback across the 3.0.0 PostgreSQL
+collation change is refused; recovery uses the original-state backup and write reconciliation. An
+installation that runs Magnus moves to 3.9.0 or later, which pin Magnus 3 (node keys only), from
+3.8.1 only, after every Magnus node has its key.
 See [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade),
 [deployment/README.md](deployment/README.md) and [UPGRADING.md](UPGRADING.md). Existing native
 installations move onto the suite with [`hive.sh migrate-native`](deployment/MIGRATE_NATIVE.md);
