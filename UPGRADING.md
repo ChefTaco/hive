@@ -46,6 +46,53 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Suite 3.9.5: restored copies and native profile backup
+
+Suite 3.9.5 changes no storage format and needs no flag from 3.9.4: every product pin (including
+Magnus 3.0.3), the datastore profile and the storage recovery profile are those of 3.9.4. The
+controller changes, so the release pins a new controller digest. Pass `--release 3.9.5` to later
+commands, as described in [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade). From
+3.8.1, upgrade directly to 3.9.5 as described for 3.9.0 below, with 3.9.5 and Magnus 3.0.3 in
+place of 3.9.0 and 3.0.1.
+
+**Restored copies.** Only the newest passed rehearsal keeps its full restored copy. The rehearse
+step of the upgrade releases the restored files (`data/`, `config/`, `releases/`, `agents/`,
+`agent-profiles/`, `native-profiles/`) of every earlier passed rehearsal before it extracts its
+own, so the upgrade needs less free space than before. Each one keeps `result.json`,
+`isolated.json`, `resources-released.json`, its container diagnostics and its small records, and
+gains `copy-released.json`. Their backups stay restorable, also by the 3.9.4 and earlier
+controllers. Rehearsals made by older controllers keep their copies until
+`./hive.sh backups prune --apply` or the [daily prune](deployment/BACKUPS.md#daily-pruning)
+releases them; the dry run lists them as `release copy, frees X`. `--keep-full N` keeps more full
+copies for one run. `./hive.sh rehearse --archive ID` rebuilds one to inspect it. On an
+installation with several hosts, `prune --apply` now releases copies on each host; removing
+pairs stays refused there. See [restored copies](deployment/BACKUPS.md#restored-copies).
+
+**Native profiles in backups.** From 3.9.5, backups, upgrades and rollbacks also capture the
+Ardent profiles of the Magnus agent that the Hive installer created, even when the installation
+file has `"agents": []`; see [Magnus-managed native profiles](deployment/BACKUPS.md#magnus-managed-native-profiles).
+This needs a Magnus agent with the `native-snapshot` contract, and **no Magnus release has it
+yet**: with Magnus 3.0.3, those profiles are listed as not included ("the installed Magnus agent
+3.0.3 has no native-snapshot"), in the output and in the backup receipt, and the backup and the
+upgrade continue, as in 3.9.4, which backed up no native profiles. **Agents installed outside the
+Hive installer are not part of Hive backups**: a host without the installation's Magnus
+component, or a Magnus agent without the installer's ownership record (such as a fleet agent
+owned by an ordinary account), is also listed as not included. The receipt's `nativeProfiles`
+field says which. An installer-owned agent that fails its ownership checks, or whose
+`native-snapshot` fails, stops the backup. If that happens in an upgrade before anything was
+reserved or stopped, the transaction closes as aborted and the suite keeps serving.
+
+An archive that does contain `native-profiles/` (only possible with a Magnus agent that has the
+contract) needs the 3.9.5 or later controller to rehearse or restore: older controllers refuse
+the member. Restoring a suite-only archive onto an installation whose installer-owned agent now
+has backed-up profiles is refused, because it would orphan them. 3.9.5 also adds
+`restore --prepare-reconciliation` and the narrow `backup --native-recovery` and
+`restore --native-recovery` operations; see [backups](deployment/BACKUPS.md).
+
+**Rolling back to 3.9.4.** Nothing to change first. The 3.9.4 controller accepts rehearsals whose
+copies were released, and its rollback takes and rehearses its own backup. If the daily prune is
+enabled, the rollback points it back at the 3.9.4 controller.
+
 ## Suite 3.9.4: daily backup pruning
 
 Suite 3.9.4 changes no storage format and needs no flag from 3.9.3: every product pin, the datastore
