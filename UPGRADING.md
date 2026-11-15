@@ -46,6 +46,33 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Suite 3.9.7: HiveXUI 0.9.2 and the read-only software status
+
+Suite 3.9.7 pins HiveXUI 0.9.2. Every other product pin, including Magnus 3.1.0, the datastore
+profile, the storage recovery profile and the controller are those of 3.9.6, and no storage format
+changes, so an upgrade from 3.9.6 needs no flag. Pass `--release 3.9.7` to later commands, as
+described in [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade). From 3.8.1, upgrade
+directly to 3.9.7 as described for 3.9.0 below, with 3.9.7 and Magnus 3.1.0 in place of 3.9.0 and
+3.0.1.
+
+**The node software card reads a read-only endpoint.** In HiveXUI, **Magnus > Fleet > Nodes**, node
+detail's Software revisions card reads Magnus 3.1.0's `GET /api/v1/nodes/:nodeId/software` when
+you press **Check versions** or **Read update cache**: the installed versions (Node.js, npm,
+Python, Redis, Docker, Tailscale and the Magnus agent) and the pending updates in the node's
+existing APT cache, with the time of its last repository refresh. It no longer dispatches shell
+commands, refreshes no repository and runs nothing on the node, and node viewers can use it. The
+suite ingress already passes this route. **APT upgrade** stays an explicit operator command.
+
+**Mixed fleets.** A node whose agent is older than 3.1.0 answers `SOFTWARE_STATUS_UNAVAILABLE`;
+the card then says that the software status is unavailable and to update Magnus and the node agent,
+instead of showing an error, and it never falls back to a shell command. The same applies to an
+external Magnus server older than 3.1.0, which does not have the route. Move agents that Magnus
+manages with `magnus-server agents upgrade --to 3.1.0`, and the agents the suite installs with
+`./hive.sh post-upgrade` or `./hive.sh magnus-agent install --config FILE --host HOST`.
+
+**Rolling back to 3.9.6.** Nothing to change first; the card then dispatches its earlier shell
+probes again.
+
 ## Suite 3.9.6: Magnus 3.1.0 and native profile backup
 
 Suite 3.9.6 pins Magnus 3.1.0: the server, the fleet gateway and the node agent. Every other
