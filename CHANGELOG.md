@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.9.5] - 2026-11-15
+
 ### Added
 
 - Only the newest passed rehearsal keeps its full restored copy of the installation.
@@ -63,6 +65,13 @@ All notable changes to this project are documented in this file. The format is b
   transaction as aborted and leaves the suite serving, like a failed stage or preflight, instead of
   holding (stopping) the whole suite. A failure after a reservation, or on a later host, still holds
   for recovery.
+
+### Changed
+
+- Every product pin (Magnus stays 3.0.3), the datastore profile and the storage recovery profile
+  are unchanged from 3.9.4, and no storage format changes, so an upgrade from 3.9.4 needs no flag.
+  The controller changes, so this release pins a new controller digest. See `UPGRADING.md`,
+  "Suite 3.9.5: restored copies and native profile backup".
 
 ## [3.9.4] - 2026-11-15
 
