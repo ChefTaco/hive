@@ -72,6 +72,16 @@ profiles created through **New Agent** even when the installation file has `"age
 Discovery is limited to installation hosts and the canonical native account attached to this
 installation's Magnus. It does not traverse unrelated fleet machines or adopt other accounts.
 
+**Agents installed outside the Hive installer are not part of Hive backups.** Hive includes only
+the agent its installer created and recorded in `ROOT.native-owner.json` (normally
+`/opt/magnus-agent.native-owner.json`), and only on a host where the installation places Magnus.
+On a host without the Magnus component, discovery does not run. A Magnus agent installed by
+other tooling, such as a fleet agent owned by an ordinary account, is neither stopped nor
+archived. The backup, upgrade or restore check continues and prints `native profiles not
+included` with the reason. The receipt records it as `"nativeProfiles": {"included": false,
+"reason": "no-magnus-component" | "not-installer-owned" | "no-native-agent"}`. Back such agents up
+with their own tooling. An installer-owned root that fails its ownership checks is an error.
+
 Native recovery needs root on the owning host. For a local installation, run these commands
 through `sudo` with an explicit `--config` path. For SSH hosts, use the installation's reviewed
 privileged transport (a root SSH account or its protected `hosts.HOST.sudoPasswordFile`). An

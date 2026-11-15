@@ -26,6 +26,15 @@ All notable changes to this project are documented in this file. The format is b
   and restore requires exact inventory reconciliation and retains previous state without
   replaying uncertain work. Unsupported agents fail explicitly rather than silently omitting
   profiles. This requires a Magnus agent with the `native-snapshot` contract.
+- Native profile backup covers only the Magnus agent that the Hive installer created and recorded
+  (`ROOT.native-owner.json`), on a host where the installation places Magnus. Agents installed
+  outside the Hive installer are not part of Hive backups. On a host without the Magnus
+  component, discovery does not run; a Magnus agent installed by other tooling (such as a fleet
+  agent owned by an ordinary account) is left alone. Backups, upgrades and restore checks continue,
+  print "native profiles not included" with the reason, and record it in the backup receipt as
+  `nativeProfiles: {"included": false, "reason": ...}`. Before this, such a host failed the
+  upgrade's native preparation, which held the whole suite stopped. An installer-owned root that
+  fails its checks still fails, now with a message.
 
 ## [3.9.4] - 2026-11-15
 
