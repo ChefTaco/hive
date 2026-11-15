@@ -72,11 +72,12 @@ native_backup_binding() {
 }
 # Discover only the installer-owned local native account and the node already bound to this
 # suite's canonical Magnus listener. Never enumerate unrelated homes or remote fleet nodes.
-# Coverage is explicit: a host without this installation's Magnus component, or a Magnus agent
-# installed outside the Hive installer (no ROOT.native-owner.json), is "not included", never an
-# error and never silent. An installer-owned root that fails its checks still fails.
+# Coverage is explicit: a host without this installation's Magnus component, a Magnus agent
+# installed outside the Hive installer (no ROOT.native-owner.json), or an installed agent without
+# the native-snapshot contract is "not included", never an error and never silent. An
+# installer-owned root that fails its checks, or a native-snapshot CLI that fails, still fails.
 native_backup_discover() {
-  local required=${1:-false} root reported load owner uid home profile_root install_root present=false binding marker file path
+  local required=${1:-false} root reported load owner uid home profile_root install_root present=false binding marker file path agent_version capability=0
   if ! jq -e '.placements.magnus!=null' <<< "$input" >/dev/null 2>&1; then
     [[ "$required" != true ]] || native_backup_error 'This archive holds native profiles, but this host runs no Magnus component of the installation' || return 1
     printf '{"available":false,"present":false,"included":false,"reason":"no-magnus-component"}\n'; return
@@ -115,19 +116,38 @@ native_backup_discover() {
   if [[ "$present" == false && "$required" != true ]]; then
     jq -nc --arg root "$root" '{available:true,present:false,included:true,root:$root}'; return
   fi
+  # An agent from before the native-snapshot contract cannot capture its profiles. Suite 3.9.4
+  # and earlier backed up none, so that is reported, not a reason to stop a backup or upgrade.
+  agent_version=$(native_backup_capability "$root") || capability=$?
+  ((capability != 2)) || native_backup_error "The installed Magnus agent at $root did not run; repair it before backing up its profiles" || return 1
+  if ((capability == 1)); then
+    [[ "$required" != true ]] || native_backup_error "This archive holds native profiles, but the installed Magnus agent $agent_version has no native-snapshot; upgrade Magnus first" || return 1
+    jq -nc --arg root "$root" --arg version "$agent_version" '{available:false,present:false,included:false,reason:"no-native-snapshot",root:$root,agentVersion:$version,profilesFound:true}'; return
+  fi
   binding=$(native_backup_binding "$root") || return 1
   jq -nc --arg root "$root" --argjson binding "$binding" --argjson present "$present" '$binding+{available:true,present:$present,included:true,root:$root}'
+}
+# The installed agent's version; 0 when its CLI has the native-snapshot contract, 1 when it does
+# not, 2 when the CLI did not run.
+native_backup_capability() {
+  local root=$1 usage version
+  usage=$(native_backup_cli "$root" --help 2>/dev/null) || return 2
+  version=$(native_backup_cli "$root" --version 2>/dev/null | head -n 1) || version=''
+  [[ "$version" =~ ^[0-9A-Za-z.+-]{1,64}$ ]] || version=unknown
+  printf '%s\n' "$version"
+  grep -q 'native-snapshot' <<< "$usage"
 }
 # What a backup covers, for its receipt: {included, reason, root}.
 native_backup_coverage() {
   local found
   found=$(native_backup_discover) || return 1
-  jq -c '{included:(.available==true),reason:(.reason // null),root:(.root // null)}' <<< "$found"
+  jq -c '{included:(.available==true),reason:(.reason // null),root:(.root // null)} + (if .agentVersion then {agentVersion} else {} end)' <<< "$found"
 }
 # Say plainly when native profiles are left out, so an operator never assumes they are covered.
 native_backup_notice() {
   case $(jq -r '.reason // ""' <<< "$1") in
     no-magnus-component) printf 'Hive native backup: native profiles not included: this host runs no Magnus component of the installation. Agents installed outside the Hive installer are not part of Hive backups.\n' >&2;;
+    no-native-snapshot) printf 'Hive native backup: native profiles not included: the installed Magnus agent %s has no native-snapshot; upgrade Magnus to include agent profiles in backups.\n' "$(jq -r .agentVersion <<< "$1")" >&2;;
     not-installer-owned) printf 'Hive native backup: native profiles not included: the Magnus agent at %s was installed outside the Hive installer (it has no %s.native-owner.json). Agents installed outside the Hive installer are not part of Hive backups; back them up with their own tooling.\n' "$(jq -r .root <<< "$1")" "$(jq -r .root <<< "$1")" >&2;;
   esac
   return 0

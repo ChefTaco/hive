@@ -82,6 +82,14 @@ included` with the reason. The receipt records it as `"nativeProfiles": {"includ
 "reason": "no-magnus-component" | "not-installer-owned" | "no-native-agent"}`. Back such agents up
 with their own tooling. An installer-owned root that fails its ownership checks is an error.
 
+The installer-owned agent must support the product's `native-snapshot` contract. No Magnus release
+has it yet: until one does, its profiles are listed as not included, with `"reason":
+"no-native-snapshot"` and the agent's version, and backups, upgrades and restore checks continue.
+They are included with no further change once a Magnus with the contract is installed. An agent
+whose `native-snapshot` fails, or that does not run, stops the backup. If native preparation fails
+before it has reserved or stopped anything, the upgrade or `--stopped` backup closes its
+transaction as aborted and the suite keeps serving; after that point it holds for recovery.
+
 Native recovery needs root on the owning host. For a local installation, run these commands
 through `sudo` with an explicit `--config` path. For SSH hosts, use the installation's reviewed
 privileged transport (a root SSH account or its protected `hosts.HOST.sudoPasswordFile`). An
@@ -102,8 +110,9 @@ native services. It checks stopped processes and freezes the complete profile in
 the suite capture. Suite containers keep serving during an online backup; native profiles stop
 for the capture window. Only services that were running before the backup are resumed, with their
 enablement preserved. Both online and `--stopped` archives include the product bundle under
-`native-profiles/`. The agent must support `native-snapshot`; an unsupported agent with existing
-profiles fails explicitly instead of producing an incomplete backup.
+`native-profiles/`. The agent must support `native-snapshot`; an agent without it is listed as not
+included (above), and one whose `native-snapshot` fails stops the backup instead of producing an
+incomplete archive.
 
 Rehearsal verifies every bundled file, runtime receipt, ownership record and profile SQLite
 database offline, before starting any isolated suite container. It never starts restored native
