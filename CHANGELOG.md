@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.9.4] - 2026-11-15
+
 ### Added
 
 - Daily backup pruning: `hive.sh backups schedule enable [--at HH:MM] | disable | status`. `enable`
@@ -22,8 +24,14 @@ All notable changes to this project are documented in this file. The format is b
   single-host installation offers it, defaulting to yes at 03:40. Existing installations change
   nothing until their operator enables it. The 3.9.3 controller refuses `retention.schedule`, so
   before rolling back to it, disable the schedule and remove the key. See
-  `deployment/BACKUPS.md#daily-pruning` and `UPGRADING.md`. The controller changes, so the next
+  `deployment/BACKUPS.md#daily-pruning` and `UPGRADING.md`. The controller changes, so this
   release pins a new controller digest.
+
+### Changed
+
+- Every product pin, the datastore profile and the storage recovery profile are unchanged from
+  3.9.3, and no storage format changes, so an upgrade from 3.9.3 needs no flag. See `UPGRADING.md`,
+  "Suite 3.9.4: daily backup pruning".
 
 ## [3.9.3] - 2026-11-15
 
