@@ -48,7 +48,12 @@ stub node 'if [[ "$1" == --input-type=module && -n "${HIVE_AGENT_ENTRY:-}" ]]; t
 if [[ "$1" == --input-type=module ]]; then cat >/dev/null; [[ ! -f "'"$temporary"'/fail-terminal-preflight" ]]; exit; fi
 if [[ "$1" == --version ]]; then [[ -f "'"$temporary"'/node-version" ]] || exit 127; cat "'"$temporary"'/node-version"; exit; fi
 case "$2" in
-  --help) echo "Usage:"; [[ ! -f "'"$temporary"'/agent-node-credentials" ]] || printf "  magnus-agent enroll --token <token>\n  magnus-agent identity show [--json]\n";;
+  --help) echo "Usage:"; [[ ! -f "'"$temporary"'/agent-node-credentials" ]] || printf "  magnus-agent enroll --token <token>\n  magnus-agent identity show [--json]\n"
+    [[ ! -f "'"$temporary"'/agent-token-file" ]] || printf "  magnus-agent enroll --token-file <path|->\n";;
+  enroll) [[ "$3 $4" == "--token-file -" ]] || exit 2; token=$(cat); printf "%s" "$token" > "'"$temporary"'/received-token"; printf "%s %s\n" "$(id -u)" "$AGENT_INSTALL_DIR" > "'"$temporary"'/enroll-context"
+    [[ "$token" =~ ^mne_[A-Za-z0-9_-]{43}$ ]] || exit 2
+    mkdir -p "$AGENT_INSTALL_DIR/identity"; printf "fixture key\n" > "$AGENT_INSTALL_DIR/identity/node.key"; chmod 600 "$AGENT_INSTALL_DIR/identity/node.key"
+    echo "Enrolled as node node-1.";;
   identity) if [[ -f "$AGENT_INSTALL_DIR/identity/node.key" ]]; then echo "{\"state\":\"bound\",\"nodeId\":\"node-1\",\"keyFingerprint\":\"SHA256:fixture-node-key\"}"; else echo "{\"state\":\"none\"}"; fi;;
   check) [[ -f "$4" ]];;
   install-service) dir=$4 unit=$6; v=$(jq -r .version "$dir/node_modules/@hivemagnus/magnus-agent/package.json")
@@ -197,6 +202,7 @@ post_upgrade_host() (
   jq -n '{components:{magnus:{host:"control"}},console:{host:"control"},bootstrap:{},hosts:{control:{target:"local"}}}' > "$temporary/post-upgrade.json"
   HIVE_CONFIG=$temporary/post-upgrade.json HIVE_CONFIRMED=true
   hive_magnus_agent_release() { jq -nc --arg version "$fixture_target_version" '{version:$version}'; }
+  hive_magnus_node_keys_only() { return 1; }
   hive_post_upgrade_run() {
     [[ "$HIVE_CONFIRMED" == true ]] || fail 'The fixture lost --yes'
     case "$*" in
@@ -414,4 +420,59 @@ HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install || { ca
 /usr/bin/grep -q 'cannot enroll with a token' "$temporary/controller.log" || { cat "$temporary/controller.log" >&2; fail 'The unused token was not explained'; }
 no_token "$log" "$temporary/controller.log" "$temporary/controller-tmp"
 
-printf 'Passed: Magnus agent Node.js range and NodeSource key, pinned package integrity, root-only credentials never in arguments or output, idempotent repair and upgrade, removal with revocation, the web terminal approval kept out of the terminal, controller refusals, and one-time token enrollment of new agents (token never an argument or output, removed on failure and interrupt, no re-enrollment on rerun, legacy flow without node credentials).\n'
+# Magnus 3.0.0 pinned: node keys only. No fleet-wide secret reaches an agent, every agent without a
+# key is enrolled with a one-time token (read with enroll --token-file -), and an existing agent
+# keeps the secret lines it has.
+no_secret_in() { if /usr/bin/grep -rlF -e "$node_secret" -e "$result_secret" -e "$reconcile_secret" "$@" >&2; then fail "A secret appeared under $*"; fi; }
+secret_lines() { /usr/bin/grep -E '^(NODE_MANAGER_SECRET|RESULT_SIGNING_SECRET|COMMAND_RECONCILIATION_SECRET)=' "$agent/.env" || true; }
+host magnus-agent-remove "$(jq -nc --arg root "$agent" '{root:$root}')" || fail 'remove failed'
+# The host refuses a new agent without a token, and writes no secret even when a request carries one.
+if host magnus-agent-install "$(request 2.1.1 | jq -c '.nodeKeysOnly=true')"; then fail 'A keys-only agent was installed without a token or key'; fi
+grep -q 'needs a one-time enrollment token, and none was given' "$temporary/err" || fail 'The missing token refusal is unclear'
+[[ ! -e "$agent/.env" && ! -e "$MAGNUS_AGENT_UNIT" ]] || fail 'A refused keys-only install changed the host'
+touch "$temporary/agent-node-credentials" "$temporary/agent-token-file"; rm -f "$temporary/received-token"; : > "$log"
+/usr/bin/jq -nc --arg action magnus-agent-install --argjson request "$(request 2.1.1 | jq -c '.nodeKeysOnly=true | .nodeCredentials="token"')" --arg node "$node_secret" --arg result "$result_secret" --arg reconcile "$reconcile_secret" --arg token "$token" \
+  '{action:$action,magnusAgent:$request,secret:{NODE_MANAGER_SECRET:$node,RESULT_SIGNING_SECRET:$result,COMMAND_RECONCILIATION_SECRET:$reconcile,enrollmentToken:$token}}' |
+  bash "$ROOT/scripts/suite/magnus-agent-host.sh" > "$temporary/out" 2> "$temporary/err" || { cat "$temporary/err" >&2; fail 'A keys-only install with a token failed'; }
+[[ -z $(secret_lines) ]] || fail 'A keys-only install wrote a fleet-wide node secret'
+[[ $(cat "$temporary/received-token") == "$token" && -f "$agent/identity/node.key" ]] || fail 'The keys-only agent was not enrolled'
+/usr/bin/grep -q 'enroll --token-file -' "$log" && ! /usr/bin/grep -q 'HIVE_AGENT_ENTRY\|--input-type=module -e import' "$log" || fail 'The enrollment did not use enroll --token-file - without the wrapper'
+no_token "$log" "$temporary/out" "$temporary/err" "$agent"; no_secret "$log" "$temporary/out" "$temporary/err"; no_secret_in "$agent"
+host magnus-agent-remove "$(jq -nc --arg root "$agent" '{root:$root}')" || fail 'remove failed'
+# The controller with a release pinning Magnus 3.0.0: a new fleet agent.
+cp "$temporary/release.json" "$temporary/release-2.json"
+jq '.components.magnus.version="3.0.0"' "$temporary/release-2.json" > "$temporary/release.json"
+rm -f "$temporary/received-token"; : > "$log"
+HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install || { cat "$temporary/controller.log" >&2; fail 'A keys-only fleet agent was not installed'; }
+[[ -z $(secret_lines) && $(cat "$temporary/received-token") == "$token" ]] || fail 'The keys-only fleet agent got a secret or no token'
+/usr/bin/grep -q 'Node key fingerprint: SHA256:fixture-node-key' "$temporary/controller.log" || { cat "$temporary/controller.log" >&2; fail 'The keys-only key was not reported'; }
+no_token "$log" "$temporary/controller.log" "$temporary/controller-tmp" "$agent"; no_secret "$log" "$temporary/controller.log"; no_secret_in "$temporary/controller-tmp" "$agent"
+[[ -z $(ls -A "$temporary/controller-tmp") ]] || fail 'A keys-only install left temporary files'
+# An existing agent (installed before, with the secrets) without a key: enrolled with a token, its secret lines kept as they are.
+printf 'NODE_MANAGER_SECRET=%s\nRESULT_SIGNING_SECRET=%s\nCOMMAND_RECONCILIATION_SECRET=%s\n' "$node_secret" "$result_secret" "$reconcile_secret" >> "$agent/.env"
+secret_lines > "$temporary/secret-lines.before"
+rm -rf "$agent/identity" "$temporary/received-token"; : > "$log"
+HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install || { cat "$temporary/controller.log" >&2; fail 'A keys-only update of an existing agent failed'; }
+/usr/bin/grep -q 'no longer binds keys automatically' "$temporary/controller.log" && /usr/bin/grep -q 'HIVE_NODE_CREDENTIAL_MODE=issue' "$log" && [[ -f "$agent/identity/node.key" ]] || { cat "$temporary/controller.log" >&2; fail 'An existing keyless agent was not enrolled with a token'; }
+secret_lines | cmp -s - "$temporary/secret-lines.before" || fail 'A keys-only update changed or removed the existing secret lines'
+# A rerun keeps the key and the lines, and issues nothing.
+: > "$log"
+HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install || { cat "$temporary/controller.log" >&2; fail 'A keys-only rerun failed'; }
+! /usr/bin/grep -q 'HIVE_NODE_CREDENTIAL_MODE=issue' "$log" || fail 'A keys-only rerun issued a token'
+secret_lines | cmp -s - "$temporary/secret-lines.before" || fail 'A keys-only rerun changed the existing secret lines'
+# A running Magnus without per-node credentials cannot serve a keys-only release.
+mv "$temporary/credential-inspect" "$temporary/credential-inspect.saved"; cp "$agent/.env" "$temporary/environment.before"
+if HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install; then fail 'A keys-only release used a Magnus without node credentials'; fi
+/usr/bin/grep -q 'issues no enrollment tokens' "$temporary/controller.log" || { cat "$temporary/controller.log" >&2; fail 'The missing token path is unclear'; }
+cmp -s "$agent/.env" "$temporary/environment.before" || fail 'The refused keys-only install changed the agent'
+mv "$temporary/credential-inspect.saved" "$temporary/credential-inspect"
+# An agent version that cannot enroll: refused before its service starts.
+host magnus-agent-remove "$(jq -nc --arg root "$agent" '{root:$root}')" || fail 'remove failed'
+rm -f "$temporary/agent-node-credentials" "$temporary/agent-token-file"
+if HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install; then fail 'A keys-only release installed an agent that cannot enroll'; fi
+/usr/bin/grep -q 'accepts node keys only; the service was not started' "$temporary/controller.log" || { cat "$temporary/controller.log" >&2; fail 'The enroll-less agent refusal is unclear'; }
+[[ ! -e "$MAGNUS_AGENT_UNIT" ]] || fail 'An agent that cannot enroll got a service'
+no_token "$log" "$temporary/controller.log" "$temporary/controller-tmp"
+cp "$temporary/release-2.json" "$temporary/release.json"
+
+printf 'Passed: Magnus agent Node.js range and NodeSource key, pinned package integrity, root-only credentials never in arguments or output, idempotent repair and upgrade, removal with revocation, the web terminal approval kept out of the terminal, controller refusals, and one-time token enrollment of new agents (token never an argument or output, removed on failure and interrupt, no re-enrollment on rerun, legacy flow without node credentials); with Magnus 3.0.0 pinned, no fleet-wide secret written, the token required and read with --token-file -, existing secret lines kept.\n'

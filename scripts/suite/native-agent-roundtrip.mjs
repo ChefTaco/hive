@@ -84,13 +84,26 @@ for (const path of [
   join(output, 'redis-data'),
 ])
   mkdirSync(path, { mode: 0o700 });
+// From Magnus 3.0.0 nodes authenticate with their own keys only (NODE_AUTH_MODE enforce by
+// default): the server and the agent get no shared node secret or result key, and the agent binds
+// its key with a one-time enrollment token. An older server keeps the shared secrets.
+const serverVersion = docker(
+  'run',
+  '--rm',
+  '--entrypoint',
+  'node',
+  options['server-image'],
+  '-p',
+  "require('/opt/magnus-server/node_modules/@hivemagnus/magnus-server/package.json').version",
+);
+assert(/^[0-9]+\.[0-9]+\.[0-9]+/.test(serverVersion), 'The server image does not report its version');
+const nodeKeysOnly = Number(serverVersion.split('.')[0]) >= 3;
 const secrets = Object.fromEntries(
   [
     'API_SECRET',
     'JWT_SECRET',
-    'NODE_MANAGER_SECRET',
+    ...(nodeKeysOnly ? [] : ['NODE_MANAGER_SECRET', 'RESULT_SIGNING_SECRET']),
     'AUDIT_HMAC_SECRET',
-    'RESULT_SIGNING_SECRET',
     'LOG_INGEST_SIGNING_SECRET',
     'CREDENTIAL_ROTATION_KEY',
     'METRICS_TOKEN',
@@ -379,8 +392,12 @@ try {
     AGENT_INSTALL_DIR: profile,
     CONTROL_API_URL: apiOrigin,
     CONTROL_API_CA_PATH: join(profile, 'ca.pem'),
-    NODE_MANAGER_SECRET: secrets.NODE_MANAGER_SECRET,
-    RESULT_SIGNING_SECRET: secrets.RESULT_SIGNING_SECRET,
+    ...(nodeKeysOnly
+      ? {}
+      : {
+          NODE_MANAGER_SECRET: secrets.NODE_MANAGER_SECRET,
+          RESULT_SIGNING_SECRET: secrets.RESULT_SIGNING_SECRET,
+        }),
     HOST_FQDN: 'synthetic-agent.example.com',
     NODE_MANAGER_PORT: String(agentPort),
     NODE_MANAGER_BIND_HOST: gateway,
@@ -497,6 +514,33 @@ try {
   await action('adapters-preflight');
   await action('adapters-stage');
   await action('adapters-stage');
+  if (nodeKeysOnly) {
+    // The staged agent binds its node key before it first starts, with a one-time token on its
+    // standard input only, as `hive.sh magnus-agent install` enrolls it.
+    const issued = await request(
+      '/api/v1/nodes/' + encodeURIComponent(enrollment.body.data.nodeId) + '/enrollment-token',
+      { ttlSeconds: 900 },
+    );
+    assert.equal(issued.status, 201);
+    assert.match(issued.body.data.token, /^mne_[A-Za-z0-9_-]{43}$/);
+    const executable = join(
+      installation,
+      'agents/native-magnus/artifacts',
+      metadata.sha256,
+      metadata.executable,
+    );
+    put(
+      'enroll.log',
+      execFileSync(executable, ['--env-file', envFile, 'enroll', '--token-file', '-'], {
+        cwd: profile,
+        env: environment,
+        input: issued.body.data.token,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }),
+    );
+    assert.deepEqual(readFileSync(envFile), originalEnv, 'Enrollment must not change the agent environment');
+  }
   let supervisedPID;
   if (userService) {
     await action('adapters-accept');
@@ -597,6 +641,26 @@ try {
   );
   assert.equal(selectedNodes.length, 1, 'Repeated startup must not enroll duplicate hosts');
   const node = selectedNodes[0];
+  if (nodeKeysOnly) {
+    // Enforce mode accepted this agent only by its key; its evidence is signed with it.
+    const environmentText = readFileSync(envFile, 'utf8');
+    assert(!/^(NODE_MANAGER_SECRET|RESULT_SIGNING_SECRET)=/m.test(environmentText));
+    assert.equal(node.nodeCredential?.state, 'active');
+    // The agent says that it signs its evidence in a later heartbeat (every 30 seconds); then the
+    // fleet has nothing left that Magnus 3's start-up guard would refuse.
+    const ready = Date.now() + 120000;
+    let summary;
+    do {
+      summary = await request('/api/v1/node-credentials/summary');
+      assert.equal(summary.status, 200);
+      put('node-credentials.json', summary.body);
+      if (summary.body.data.enforceReady === true) break;
+      await new Promise((done) => setTimeout(done, 2000));
+    } while (Date.now() < ready);
+    assert.equal(summary.body.data.mode, 'enforce');
+    assert.equal(summary.body.data.enforceReady, true, 'The enrolled agent did not sign its evidence');
+    assert.equal(summary.body.data.nodes.evidenceSigning, 1);
+  }
   const dispatched = await request('/api/v1/commands', {
     nodeIds: [node.id],
     command: 'printf',
@@ -645,6 +709,8 @@ try {
     result: 'passed',
     productionCutover: false,
     nativeAgentVersion: metadata.version,
+    serverVersion,
+    nodeCredentials: nodeKeysOnly ? 'node keys only' : 'shared node secret',
     nodeVersion: metadata.nodeVersion,
     artifactSHA256: metadata.sha256,
     supervision: userService ? 'systemd-user' : 'manual',
@@ -653,6 +719,9 @@ try {
       'immutable artifact and protected environment preserved on retry',
       'authenticated agent health and recent accepted heartbeat',
       'one native enrollment',
+      ...(nodeKeysOnly
+        ? ['node key bound with a one-time enrollment token; no shared node secret on either side']
+        : []),
       'real authenticated read-only command, durable result and duplicate dispatch refusal',
       'private launcher umask and no inherited installer credentials',
       'status exposes acceptance without infrastructure credentials',

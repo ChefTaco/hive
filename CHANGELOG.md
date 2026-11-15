@@ -6,6 +6,127 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.9.1] - 2026-11-15
+
+### Changed
+
+- Magnus, its fleet gateway and agent 3.0.2. The Magnus server signs the console drain finding it
+  records for itself with its server key instead of `RESULT_SIGNING_SECRET`, and fetches the
+  agents' writer proofs, which they sign with their node keys, whether or not that key is set. The new
+  verify-only `RESULT_SIGNING_PREVIOUS_SECRET` (server) and `COMMAND_RECONCILIATION_PREVIOUS_SECRET`
+  (agent) keep stored records verifying, and the agent CLI adds `magnus-agent
+  historical-settlements list|reseal|prune` to move stored settlements to the node-local keys, so
+  the last shared keys can be retired. Magnus 3.0.2 adds no migrations, so an upgrade from 3.9.0
+  needs no flag. Every other pin, the datastore profile and the storage recovery profile are
+  unchanged from 3.9.0; the controller changes as below, so the release pins a new controller
+  digest. See `UPGRADING.md`, "Suite 3.9.1: Magnus 3.0.2, retiring the shared keys".
+- The `ardent-packages-updated` setup item settles itself. `hive.sh post-upgrade` asks Magnus, read
+  only, for its Ardent installations (`GET /api/v1/ardent/installations`): when every one runs the
+  Ardent version its node agent stages, the item is done; otherwise it names each installation that
+  is behind, did not answer or has no checked staged package, and the item stays pending. A
+  suite-managed Magnus is read on its host with its API secret, after `post-upgrade` moves the host
+  agent; an external Magnus is read through Ardent Project Studio's service identity, also at the
+  upgrade itself. Nothing is installed or restarted: Update package stays in HiveXUI. The
+  controller changes, so this release pins a new controller digest.
+
+## [3.9.0] - 2026-11-14
+
+### Changed
+
+- Magnus, its fleet gateway and agent 3.0.1, and HiveXUI 0.9.0. Magnus 3 accepts node keys only
+  (`NODE_AUTH_MODE` enforce by default) and refuses to start while a real node lacks its key; it
+  adds no migrations to 2.10.2, so the storage formats are unchanged and an upgrade from 3.8.1
+  needs no flag. Upgrade the Magnus server first, then the agents. HiveXUI 0.9.0 reads the
+  Magnus 3 contract. Every other pin, the datastore profile and the storage recovery profile are
+  unchanged from 3.8.1; the controller changes as below, so the release pins a new controller
+  digest. See `UPGRADING.md`, "Suite 3.9.0: Magnus 3.0.1, node keys only".
+- Magnus 3.0.0 support, gated on the pinned Magnus version: a release that pins Magnus 3.0.0 or
+  later (node keys only, `enforce` by default) changes the controller as follows, and a release
+  that pins Magnus 2.10.x behaves exactly as before. See `UPGRADING.md`, "Magnus 3.0.0: node keys
+  only".
+  - `hive.sh magnus-agent install` reads and writes no `NODE_MANAGER_SECRET`,
+    `RESULT_SIGNING_SECRET` or `COMMAND_RECONCILIATION_SECRET` for an agent. A new agent, and an
+    existing agent without a node key (Magnus 3.0.0 closes the automatic binding), is enrolled
+    with a one-time token, which is required: the install stops before any change when the
+    running Magnus issues none or the agent cannot enroll. An existing agent's secret lines are
+    kept unchanged, never removed.
+  - Fresh setup generates none of the three secrets for Magnus; an existing `config/magnus.env`
+    is never changed.
+  - The ingress no longer relays `x-node-token` on the Magnus host agent port. The controller
+    derives this `Caddyfile` from `deployment/Caddyfile`, which a 2.10.x release installs as it is.
+  - Full-node enrollment signs its scheduler inventory request to the agent with Magnus's server
+    key, and the managed terminal route preflight no longer sends a shared secret.
+  - `hive.sh post-upgrade` reads Magnus's fleet summary and lists its node-key blockers, and the
+    upgrade's setup checklist gains a `magnus-node-keys` step, done when there are none.
+  - `hive.sh upgrade` checks a suite-managed Magnus that runs 2.x before it changes anything, the
+    way Magnus 3's start-up guard checks its fleet: with `NODE_AUTH_MODE` unset in
+    `config/magnus.env`, it refuses while a real node has no active key, an agent does not sign
+    its evidence, or an agent runs 2.10.0 or 2.10.1, and names the blockers with the two ways out
+    (enroll or upgrade them, or set `NODE_AUTH_MODE=compat` explicitly). An explicit `compat` or
+    `warn` passes with a deprecation note, an explicit `enforce` passes with what it will refuse,
+    and a Magnus older than 2.10.2 is refused (Magnus 3 upgrades from 2.10.2 only). An external
+    Magnus only gets a warning; `hive.sh plan`, which contacts no host, prints a note.
+- The agent install reads the enrollment token with `magnus-agent enroll --token-file -` when the
+  agent offers it (2.10.0 and later), and keeps the in-memory wrapper only for an agent that does
+  not.
+- The native agent and Skills developer round trips (`native-agent-roundtrip.mjs`,
+  `skills-native-roundtrip.mjs`) read the server image's Magnus version: against Magnus 3.x the
+  synthetic server and agent get no shared node secret or result key, the agent binds its node key
+  with a one-time enrollment token, and the proof waits until the fleet summary has no blockers.
+  Against 2.x they run as before.
+- The controller runtime changes, so this release pins a new controller digest.
+
+## [3.8.1] - 2026-11-14
+
+### Fixed
+
+- Magnus, its fleet gateway and agent 2.10.2. A 2.10.0 agent with a node key refused every signed
+  managed request from the server on an enrolled node as a replay, which blocked agent upgrades and
+  other managed changes of that node; 2.10.2 authenticates each request once and reaches 2.10.0
+  and 2.10.1 agents with a key without upgrading them first. It also includes 2.10.1's Hermes
+  health check, which no longer waits on a slow version probe. Every other pin, the datastore
+  profile, the storage recovery profile and the controller are unchanged from 3.8.0. Magnus
+  2.10.1 and 2.10.2 add no migrations, so an upgrade from 3.8.0 needs no flag.
+
+## [3.8.0] - 2026-11-14
+
+### Changed
+
+- Product update with a new controller: Oathweave 2.3.0, Emberpath 2.5.0, HiveMem 1.7.0,
+  HiveSkills 1.8.0, HiveXUI 0.8.0, Magnus and its fleet gateway and agent 2.10.0, Cindertrace 0.7.0,
+  Chattermost and its migrator 0.6.1, Emberfold 0.4.0, Ardent Project Studio 0.4.1, Embermend 0.3.1
+  and the Hive Registry 1.3.1 (image 2.0.8), with the `runtime-2026-11-pg1712-xslt` datastore
+  profile (`hive-postgres` 17.12-2 and 18.7-2, under Security). The ingress image (2.0.5), Redis,
+  Qdrant and the storage recovery profile are unchanged from 3.7.0. No storage format changes.
+  Magnus 2.10.0 adds two additive database migrations, so an upgrade of an installation that runs
+  Magnus needs `--allow-migrations`. The controller changes (below), so an installation upgrades
+  with the 3.8.0 controller, which `./hive.sh upgrade --release 3.8.0` selects, and the upgrade
+  installs the new ingress `Caddyfile`. Every pinned image passes the full HIGH/CRITICAL policy on
+  both architectures.
+- Oathweave 2.3.0 requires a confidential client to send its client secret when it exchanges an
+  authorization code, and reads `X-Forwarded-For` from the right. Suite browser clients (public,
+  with PKCE) are unaffected; a Magnus console registered as a confidential client needs
+  `HIVE_OAUTH_CLIENT_SECRET`. A deployment with several proxy tiers lists every tier in
+  `TRUSTED_PROXY_IPS`.
+- Emberpath 2.5.0 binds a stored provider credential to the origin of the provider's `baseUrl`: an
+  update that moves a provider to another scheme, host or port must send the secret again. Provider
+  requests no longer follow redirects, and provider reads redact credential header values.
+- HiveMem 1.7.0 requires workspace write access to edit or move a memory, lets only an
+  administrator create the `default` workspace record, and limits other agents' profiles to what
+  the caller can read. Private memories of an agent ID that Qdrant cannot use in a collection name
+  get an encoded collection name; every other collection keeps its exact name.
+- Chattermost 0.6.1 ends a WebSocket with its credential and tightens channel, post and team
+  permissions. Its `v0.6.0` tag is not a release.
+- Magnus 2.10.0 gives each host agent its own node key (per-node credentials, `compat` mode by
+  default) and keeps the shared node secret working for older agents. `hive.sh magnus-agent
+  install` enrolls a new agent with a one-time token (see Added). Back up Magnus's server signing
+  key with its data; see Magnus's `docs/NODE_CREDENTIALS.md`.
+- Every yes-or-no prompt of `hive.sh` accepts `y` or `yes` in any case. The final "Apply this
+  exact installation plan?" prompt accepted only a lowercase `y` and cancelled on `yes`.
+- Host preflight (`hive.sh doctor` and the lifecycle commands) names the file, directory or port
+  behind each refusal; several checks failed with only "Host preflight failed".
+- `hive.sh --help` lists `migrate-native refresh-memory-token`.
+
 ### Added
 
 - `hive.sh magnus-agent install` gives a new Magnus agent its own node key when the running
@@ -24,6 +145,12 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Security
 
+- PostgreSQL runtime images `hive-postgres` 17.12-2 and 18.7-2 with libxslt 1.1.45-r8, which fixes
+  CVE-2026-9947 and CVE-2026-87636 (HIGH) in the 1.1.45-r6 of 17.12-1 and 18.7-1. The new
+  `runtime-2026-11-pg1712-xslt` datastore profile selects them; the PostgreSQL versions, collation
+  receipt and storage formats are those of `runtime-2026-11-pg1712`, so an upgrade replaces only the
+  images. Suite releases after 3.7.0 can no longer select `runtime-2026-11-pg1712`. See
+  [the advisory record](docs/ADVISORY_REMEDIATION.md#postgresql-libxslt-1145-r8-2026-11-14).
 - The ingress sends every product exactly one forwarded client address, the one it resolved, on
   every route (`deployment/Caddyfile`). This was already the effective behaviour with the default
   settings; it is now explicit and holds when the ingress itself is behind another proxy.
@@ -43,11 +170,23 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- The ingress routes Magnus 2.10's node credentials. The host agent port passes the five
+  `x-magnus-*` headers of a request signed with the node key, and routes the agent's public server
+  key, enrollment with a one-time token and key rotation (`/api/v1/node-enrollment/server-key`,
+  `enroll`, `rotate`). Without them `hive.sh magnus-agent install` of a new agent through that port
+  failed at enrollment, and an agent with a key would have been refused. The automatic first
+  binding with the shared node secret (`legacy-upgrade`) stays unrouted there, because Magnus checks
+  the caller's address and every agent on the port has the ingress address; existing agents on the
+  port keep the shared secret until they are enrolled with a token. The browser allowlist adds
+  Magnus's new ADMIN routes for node keys (`GET /api/v1/nodes/{id}/credentials`, its `revoke` and
+  `reset`, and `/api/v1/node-credentials/summary`, `pending-bindings` with `approve` and `reject`,
+  and `downgrade-check`), which HiveXUI 0.8.0 uses.
+
 - `hive.sh migrate-native`: the Redis export, import and comparison helper now fails when the
   store ends the connection before answering a command. It used to end with status 0 and no
   result, so the failure surfaced later as a missing export file.
 - Hive Registry: a request target that is not a path (such as `GET //`) answers 404 `not_found`
-  instead of 500 `internal` with an error log line. The next Hive Registry image carries the fix.
+  instead of 500 `internal` with an error log line. Hive Registry 1.3.1 (image 2.0.8) carries the fix.
 - A refused sudo password file (wrong owner or permissions) now stops a host action in every case.
   In lifecycle steps the refusal was printed and the action then continued over SSH without sudo.
 - `scripts/install-prerequisites.sh --check` reports readiness on other Linux distributions, as
@@ -63,14 +202,6 @@ All notable changes to this project are documented in this file. The format is b
   whose `useradd` default is elsewhere, so a repeat no longer refuses the account it created.
 - Interactive setup refuses an HTTPS listener port that is not a number from 1 to 65535 with a
   clear message.
-
-### Changed
-
-- Every yes-or-no prompt of `hive.sh` accepts `y` or `yes` in any case. The final "Apply this
-  exact installation plan?" prompt accepted only a lowercase `y` and cancelled on `yes`.
-- Host preflight (`hive.sh doctor` and the lifecycle commands) names the file, directory or port
-  behind each refusal; several checks failed with only "Host preflight failed".
-- `hive.sh --help` lists `migrate-native refresh-memory-token`.
 
 ## [3.7.0] - 2026-11-13
 

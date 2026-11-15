@@ -170,7 +170,7 @@ gateway.listen(4310,'0.0.0.0');
   writeFileSync(join(temporary, 'native-listeners-magnus-agents.caddy'), ':4000 {\n\ttls /config/console.crt /config/console.key\n\timport magnus_agent_listener\n}\n', { mode: 0o600 });
   // The gateway is optional: this ingress has it, and a second one below does not.
   let agentPort;
-  async function startIngress(name, environment, state, extraPorts = [], mounts = []) {
+  async function startIngress(name, environment, state, extraPorts = [], mounts = [], config = '/config/Caddyfile') {
     mkdirSync(state, { recursive: true, mode: 0o700 });
     docker(
       'run',
@@ -193,7 +193,7 @@ gateway.listen(4310,'0.0.0.0');
       'caddy',
       'run',
       '--config',
-      '/config/Caddyfile',
+      config,
       '--adapter',
       'caddyfile',
     );
@@ -365,6 +365,15 @@ gateway.listen(4310,'0.0.0.0');
     ['/api/magnus/notifications/preferences', '/api/v1/notifications/preferences', 'PUT', '{"synthetic":true}'],
     ['/api/magnus/nodes/node-1', '/api/v1/nodes/node-1', 'PATCH', '{"synthetic":true}'],
     ['/api/magnus/nodes/node-1', '/api/v1/nodes/node-1', 'DELETE'],
+    // Magnus 2.10 node credentials: ADMIN browser routes (the role is checked by Magnus).
+    ['/api/magnus/nodes/node-1/credentials', '/api/v1/nodes/node-1/credentials'],
+    ['/api/magnus/node-credentials/summary', '/api/v1/node-credentials/summary'],
+    ['/api/magnus/node-credentials/pending-bindings', '/api/v1/node-credentials/pending-bindings'],
+    ['/api/magnus/node-credentials/downgrade-check?nodeId=node-1&to=2.9.1', '/api/v1/node-credentials/downgrade-check?nodeId=node-1&to=2.9.1'],
+    ['/api/magnus/nodes/node-1/credentials/revoke', '/api/v1/nodes/node-1/credentials/revoke', 'POST', '{"synthetic":true}'],
+    ['/api/magnus/nodes/node-1/credentials/reset', '/api/v1/nodes/node-1/credentials/reset', 'POST', '{"synthetic":true}'],
+    ['/api/magnus/node-credentials/pending-bindings/binding-1/approve', '/api/v1/node-credentials/pending-bindings/binding-1/approve', 'POST', '{"synthetic":true}'],
+    ['/api/magnus/node-credentials/pending-bindings/binding-1/reject', '/api/v1/node-credentials/pending-bindings/binding-1/reject', 'POST', '{"synthetic":true}'],
   ]) {
     const result = await request(input, magnusHeaders, method, payload);
     assert.equal(result.status, 200, input);
@@ -386,6 +395,17 @@ gateway.listen(4310,'0.0.0.0');
   assert.equal((await request('/api/magnus/console/session', { Authorization: 'Basic b2JfdmlvdXNseQ==' })).status, 401, 'Non-bearer Authorization reached Magnus');
   for (const [input, method] of [
     ['/api/magnus/heartbeat', 'POST'],
+    // The agent-facing enrollment routes and token issuing are not browser routes.
+    ['/api/magnus/node-enrollment/server-key'],
+    ['/api/magnus/node-enrollment/enroll', 'POST'],
+    ['/api/magnus/node-enrollment/legacy-upgrade', 'POST'],
+    ['/api/magnus/node-enrollment/rotate', 'POST'],
+    ['/api/magnus/nodes/node-1/enrollment-token', 'POST'],
+    ['/api/magnus/nodes/node-1/credentials', 'POST'],
+    ['/api/magnus/nodes/node-1/credentials/revoke'],
+    ['/api/magnus/nodes/node-1/credentials/rotate', 'POST'],
+    ['/api/magnus/node-credentials/summary', 'POST'],
+    ['/api/magnus/node-credentials/pending-bindings/binding-1/approve'],
     ['/api/magnus/ardent/agents'],
     ['/api/magnus/ardent/agents/operations'],
     ['/api/magnus/ardent/agents/operations/op-1', 'POST'],
@@ -737,6 +757,11 @@ gateway.listen(4310,'0.0.0.0');
     'X-Node-Token': 'obviously-fake-node-token',
     'X-Log-Token': 'obviously-fake-log-token',
     'X-Hermes-Registry-Token': 'obviously-fake-registry-token',
+    'X-Magnus-Node-Id': 'node-1',
+    'X-Magnus-Key-Id': 'a'.repeat(64),
+    'X-Magnus-Timestamp': '1700000000000',
+    'X-Magnus-Nonce': 'obviously-fake-nonce-1',
+    'X-Magnus-Signature': 'b'.repeat(86),
     Authorization: 'Bearer obviously-fake-operator-token',
     'X-Api-Secret': 'obviously-fake-system-secret',
     'X-Fleet-Gateway-Token': 'obviously-fake-gateway-token',
@@ -776,6 +801,9 @@ gateway.listen(4310,'0.0.0.0');
     ['POST', '/api/v1/hermes-registry/capture'],
     ['POST', '/api/v1/hermes-registry/receipts'],
     ['POST', '/api/v1/hermes-registry/inventory'],
+    ['GET', '/api/v1/node-enrollment/server-key'],
+    ['POST', '/api/v1/node-enrollment/enroll'],
+    ['POST', '/api/v1/node-enrollment/rotate'],
   ];
   for (const [method, path] of agentRoutes) {
     const payload = method === 'POST' ? '{"synthetic":true}' : undefined;
@@ -788,6 +816,12 @@ gateway.listen(4310,'0.0.0.0');
     assert.equal(body.headers['x-node-token'], 'obviously-fake-node-token');
     assert.equal(body.headers['x-log-token'], 'obviously-fake-log-token');
     assert.equal(body.headers['x-hermes-registry-token'], 'obviously-fake-registry-token');
+    // A request signed with the node key (Magnus 2.10) keeps its five signature headers.
+    assert.equal(body.headers['x-magnus-node-id'], 'node-1', path + ' dropped the node signature');
+    assert.equal(body.headers['x-magnus-key-id'], 'a'.repeat(64));
+    assert.equal(body.headers['x-magnus-timestamp'], '1700000000000');
+    assert.equal(body.headers['x-magnus-nonce'], 'obviously-fake-nonce-1');
+    assert.equal(body.headers['x-magnus-signature'], 'b'.repeat(86));
     for (const name of ['authorization', 'x-api-secret', 'x-fleet-gateway-token', 'x-resource-drain-key', 'cookie', 'x-real-ip', 'x-forwarded-user', 'x-hive-user', 'x-hive-roles', 'x-magnus-work-id', 'origin'])
       assert.equal(body.headers[name], undefined, path + ' forwarded ' + name + ' from an agent port client');
     assert.notEqual(body.headers['x-forwarded-for'], '203.0.113.9', 'The agent port trusted a client X-Forwarded-For');
@@ -833,6 +867,15 @@ gateway.listen(4310,'0.0.0.0');
     ['POST', '/api/v1/%2e%2e/users'],
     ['POST', '/api/v1/heartbeat%2f..%2fusers'],
     ['POST', '/api/v1/resource-leases/enrollment/work/a/b/node-receipt'],
+    // The automatic first binding checks the caller's address, which is the ingress here.
+    ['POST', '/api/v1/node-enrollment/legacy-upgrade'],
+    ['GET', '/api/v1/node-enrollment/enroll'],
+    ['POST', '/api/v1/node-enrollment/server-key'],
+    ['POST', '/api/v1/node-enrollment/other'],
+    ['POST', '/api/v1/nodes/node-1/enrollment-token'],
+    ['GET', '/api/v1/nodes/node-1/credentials'],
+    ['POST', '/api/v1/nodes/node-1/credentials/revoke'],
+    ['GET', '/api/v1/node-credentials/summary'],
   ]) {
     const result = await request(path, forged, method, method === 'POST' ? '{}' : undefined, agents);
     assert.equal(result.status, 404, method + ' ' + path + ' passed the agent port allowlist: ' + result.body.slice(0, 200));
@@ -843,9 +886,28 @@ gateway.listen(4310,'0.0.0.0');
   assert.equal(consoleHeartbeat.status, 404, 'The console port served an agent route');
   const consoleSession = JSON.parse((await request('/api/magnus/console/session', { Authorization: headers.Authorization, 'X-Node-Token': 'obviously-fake-node-token' })).body);
   assert.equal(consoleSession.headers['x-node-token'], undefined, 'The console port forwarded x-node-token');
+  // A release pinning Magnus 3.0.0 or later: the controller's ingress for it no longer relays the
+  // shared node secret on the agent port; signatures, token enrollment and the server key still pass.
+  writeFileSync(join(temporary, 'magnus-3-release.json'), JSON.stringify({ components: { magnus: { version: '3.0.0' } } }), { mode: 0o600 });
+  const keysOnlyTemplate = execFileSync('bash', ['-c', 'source "$1/scripts/suite/controller.sh"; HIVE_ROOT=$1 HIVE_MANIFEST=$2; hive_ingress_template', 'ingress', root, join(temporary, 'magnus-3-release.json')], { encoding: 'utf8' });
+  writeFileSync(join(temporary, 'Caddyfile-magnus-3'), Buffer.from(keysOnlyTemplate, 'base64'), { mode: 0o600 });
+  const keysOnlyName = network + '-edge-node-keys';
+  containers.push(keysOnlyName);
+  await waitReady({ ...options, port: await startIngress(keysOnlyName, env, join(temporary, 'state-node-keys'), [4000], [], '/config/Caddyfile-magnus-3') });
+  const keysOnly = { ...options, port: agentPort };
+  for (const [method, path] of [['POST', '/api/v1/heartbeat'], ['POST', '/api/v1/resource-leases/enrollment/terminal-claim'], ['GET', '/api/v1/node-enrollment/server-key'], ['POST', '/api/v1/node-enrollment/enroll'], ['POST', '/api/v1/node-enrollment/rotate']]) {
+    const result = await request(path, forged, method, method === 'POST' ? '{}' : undefined, keysOnly);
+    assert.equal(result.status, 200, method + ' ' + path + ' did not reach Magnus on the Magnus 3 agent port');
+    const body = JSON.parse(result.body);
+    assert.equal(body.headers['x-node-token'], undefined, path + ' relayed x-node-token for Magnus 3');
+    assert.equal(body.headers['x-magnus-signature'], 'b'.repeat(86), path + ' dropped the node signature for Magnus 3');
+    assert.equal(body.headers['x-magnus-node-id'], 'node-1');
+    assert.equal(body.headers['x-log-token'], 'obviously-fake-log-token');
+  }
+  assert.equal((await request('/api/v1/node-enrollment/legacy-upgrade', forged, 'POST', '{}', keysOnly)).status, 404, 'The Magnus 3 agent port routed the legacy upgrade');
   passed = true;
   console.log(
-    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming, WebSocket transport, the Magnus route allowlist with machine credentials and acting subjects stripped, the optional Ardent Project Studio route with its prefix kept, no cookies and unbuffered streams, the exact fleet gateway browser routes with Origin and Sec-Fetch-Site intact, an external Magnus verified against the system trust store on its own name while every other product keeps the suite authority, and the Magnus host agent port with its own allowlist and no client-asserted identity.',
+    'PASS: non-root static UI/Caddy, verified upstream TLS rejection, explicit mappings, product cookie isolation, native sessions, streaming, WebSocket transport, the Magnus route allowlist with machine credentials and acting subjects stripped, the optional Ardent Project Studio route with its prefix kept, no cookies and unbuffered streams, the exact fleet gateway browser routes with Origin and Sec-Fetch-Site intact, an external Magnus verified against the system trust store on its own name while every other product keeps the suite authority, and the Magnus host agent port with its own allowlist and no client-asserted identity, without the shared node secret for Magnus 3.',
   );
 } catch (error) {
   for (const container of containers) {

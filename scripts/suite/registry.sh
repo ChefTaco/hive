@@ -95,7 +95,7 @@ hive_registry_provision() {
   local host user
   host=$(hive_registry_host)
   user=$(jq -er '.components["hive-registry"].service.user' "$HIVE_MANIFEST")
-  HIVE_BOOTSTRAP_INGRESS=${HIVE_BOOTSTRAP_INGRESS:-$(base64 -w0 "$HIVE_ROOT/deployment/Caddyfile")}
+  HIVE_BOOTSTRAP_INGRESS=${HIVE_BOOTSTRAP_INGRESS:-$(hive_ingress_template)}
   hive_registry_action "$host" registry-provision "$(jq -nc --arg user "$user" '{serviceUser:$user}')" || hive_die 'Hive Registry credentials and configuration could not be prepared; no service was changed'
 }
 
@@ -103,7 +103,7 @@ hive_registry_provision() {
 # controller's, such as one without the registry route, and retains the previous file beside it.
 hive_registry_refresh_ingress() {
   hive_registry_placed || return 0
-  HIVE_BOOTSTRAP_INGRESS=${HIVE_BOOTSTRAP_INGRESS:-$(base64 -w0 "$HIVE_ROOT/deployment/Caddyfile")}
+  HIVE_BOOTSTRAP_INGRESS=${HIVE_BOOTSTRAP_INGRESS:-$(hive_ingress_template)}
   hive_registry_action "$(hive_registry_host)" registry-refresh-ingress || hive_die 'The ingress route for the Hive Registry could not be installed; no service was changed'
 }
 

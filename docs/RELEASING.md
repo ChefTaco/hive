@@ -34,7 +34,7 @@ release's bytes only from the controller source of that release's tag.
 1. **Release the products.** Each product repository publishes its own multi-architecture image
    from its own version tag. Record the exact tags in `releases/X.Y.Z.inputs.json`. The input file
    lists the platforms each image must provide. Releases that adopt the patched datastore
-   runtime set `"datastoreProfile": "runtime-2026-11-pg1712"`. This selects the reviewed Redis,
+   runtime set `"datastoreProfile": "runtime-2026-11-pg1712-xslt"`. This selects the reviewed Redis,
    Qdrant and PostgreSQL tags in `release-contracts.mjs`; older inputs retain their
    historical pins. PostgreSQL receives a new storage format and the explicit offline
    collation migration, so adoption requires the normal backup and rehearsal workflow.
@@ -142,3 +142,9 @@ transition. Only the image and its recorded version change. The image workflow c
 starting data written by the previous image (`upgradeFrom` in `deployment/images.json`) directly on
 the candidate. `runtime-2026-11-xslt` remains selectable up to suite 3.6.1, and its signed
 manifests keep their pins.
+
+Suite 3.8.0 and later select `runtime-2026-11-pg1712-xslt`: the same PostgreSQL 17.12 and 18.7 as
+`hive-postgres` 17.12-2 and 18.7-2 with libxslt 1.1.45-r8. A library patch keeps the major, the
+runtime and its collation receipt, so an upgrade from `runtime-2026-11-pg1712` has no storage
+transition; the image workflow starts data written by 17.12-1 and 18.7-1 on the candidate.
+`runtime-2026-11-pg1712` remains selectable up to suite 3.7.0.

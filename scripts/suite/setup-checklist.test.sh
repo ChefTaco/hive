@@ -15,8 +15,8 @@ source "$ROOT/scripts/suite/setup-checklist.sh"
 core=$temporary/core.json full=$temporary/full.json
 jq . "$ROOT/examples/installation.json" > "$core"
 jq '.profile="full" | .components.magnus={host:"control"} | .console.nativeListeners=[{component:"magnus",port:4100}]' "$core" > "$full"
-items() { # CONFIG OPERATION [PREVIOUS] [PREVIOUS_RELEASE] [CERTIFICATE]
-  HIVE_CONFIG=$1 HIVE_VERSION=${HIVE_VERSION:-3.6.0} hive_checklist_items "$2" "${3:-null}" "${4:-}" "${5:-false}"
+items() { # CONFIG OPERATION [PREVIOUS] [PREVIOUS_RELEASE] [CERTIFICATE] [NODE_KEYS] [ARDENT]
+  HIVE_CONFIG=$1 HIVE_VERSION=${HIVE_VERSION:-3.6.0} hive_checklist_items "$2" "${3:-null}" "${4:-}" "${5:-false}" "${6:-absent}" "${7:-null}"
 }
 ids() { items "$@" | jq -c 'map([.id,.status])'; }
 expect() { # ACTUAL EXPECTED MESSAGE
@@ -61,6 +61,24 @@ expect "$(items "$full" upgrade "$retried" 3.6.0 | jq -c 'map(select(.status=="d
 expect "$(items "$full" upgrade "$previous" 3.6.0 true | jq -r '.[]|select(.id=="certificate-renewal").status')" skipped 'A skipped renewal'
 expect "$(items "$full" upgrade "$(items "$full" install)" 3.6.0 true | jq -r '.[]|select(.id=="certificate-renewal").status')" done 'A renewal scheduled since'
 expect "$(items "$core" upgrade "$previous" 3.5.0 | jq -c 'map(.id)')" '["certificate-renewal","first-admin","some-future-step"]' 'Magnus left the configuration'
+# Ardent: done by itself when Magnus reports every installation current, also after it was done
+# for an earlier release; pending when one is behind or Magnus was not asked. Skipped stays skipped.
+ardent() { items "$@" | jq -r '.[]|select(.id=="ardent-packages-updated").status'; }
+expect "$(ardent "$full" upgrade null '' false absent true)" done 'Ardent installations all current'
+expect "$(ardent "$full" upgrade null '' false absent false)" pending 'An Ardent installation behind'
+expect "$(ardent "$full" upgrade null '' false absent null)" pending 'Ardent installations not read'
+expect "$(ardent "$full" upgrade "$retried" 3.5.0 false absent true)" done 'Ardent current again after a new release'
+expect "$(ardent "$full" upgrade "$(jq -c 'map(if .id=="ardent-packages-updated" then .status="skipped" else . end)' <<< "$upgraded")" 3.5.0 false absent true)" skipped 'A skipped Ardent item'
+expect "$(items "$full" install null '' false absent true | jq -c 'map(.id)|index("ardent-packages-updated")')" null 'Ardent on a fresh install'
+items "$full" upgrade null '' false absent true | jq -e 'all(.[]; has("detected")|not)' >/dev/null || fail 'The internal detection leaked into a recorded item'
+# The decision on what Magnus read: an installation is current only when it answered and runs
+# the version its node agent stages; anything unreadable is null, never current.
+lagging() { hive_checklist_ardent_lagging "$1" | jq -c 'if type=="array" then map(.name) else . end'; }
+expect "$(lagging '{"supported":true,"installations":[]}')" '[]' 'No Ardent installations'
+expect "$(lagging '{"supported":true,"installations":[{"name":"a","version":"3.1.3","staged":"3.1.3","stagedError":false,"reachable":true},{"name":"b","version":"3.1.2","staged":"3.1.3","stagedError":false,"reachable":true},{"name":"c","version":"3.1.3","staged":"3.1.3","stagedError":false,"reachable":false},{"name":"d","version":"3.1.3","staged":null,"stagedError":false,"reachable":true},{"name":"e","version":"3.1.3","staged":"3.1.3","stagedError":true,"reachable":true}]}')" '["b","c","d","e"]' 'Installations behind'
+for unreadable in '' 'not json' '{"supported":false}' '{"supported":true}' '[]'; do
+  expect "$(lagging "$unreadable")" null "Unreadable Ardent summary '$unreadable'"
+done
 
 # Every item the controller can record passes the registry's rules, and every docs link resolves
 # to a heading in this repository.
@@ -102,6 +120,18 @@ HIVE_MANIFEST=$temporary/old.json; jq -n '{components:{"hive-registry":{version:
 [[ -z "$HIVE_CHECKLIST" && ! -s "$reads" ]] || fail 'A registry before 1.3.0 was sent a checklist'
 touch "$temporary/unavailable"; prepare upgrade 2> "$temporary/err"; rm "$temporary/unavailable"
 [[ -z "$HIVE_CHECKLIST" ]] && grep -q 'checklist was not updated' "$temporary/err" || fail 'An unanswered read replaced the recorded checklist'
+# Ardent at upgrade time: read for an external Magnus, whose agents this upgrade does not change;
+# with a suite-managed Magnus post-upgrade reads it after moving the host agent.
+ardent_reads=$temporary/ardent-reads
+hive_magnus_ardent_installations() { printf 'read\n' >> "$ardent_reads"; printf '{"supported":true,"installations":[{"name":"a","version":"3.1.3","staged":"3.1.3","stagedError":false,"reachable":true}]}\n'; }
+: > "$ardent_reads"; prepare upgrade
+[[ ! -s "$ardent_reads" ]] && [[ $(jq -r '.[]|select(.id=="ardent-packages-updated").status' <<< "$HIVE_CHECKLIST") == pending ]] || fail 'A suite-managed Magnus was settled before post-upgrade'
+jq '.components.ardentstudio={host:"control"}' "$temporary/external.json" > "$temporary/external-studio.json"
+: > "$ardent_reads"; HIVE_CONFIG=$temporary/external-studio.json HIVE_MANIFEST=$temporary/manifest.json HIVE_VERSION=3.6.0 HIVE_OPERATION=upgrade hive_checklist_prepare
+grep -qx read "$ardent_reads" && [[ $(jq -r '.[]|select(.id=="ardent-packages-updated").status' <<< "$HIVE_CHECKLIST") == done ]] || fail 'An external Magnus with current installations was not settled'
+: > "$ardent_reads"; HIVE_CONFIG=$temporary/external-studio.json HIVE_MANIFEST=$temporary/manifest.json HIVE_VERSION=3.6.0 HIVE_OPERATION=install hive_checklist_prepare
+[[ ! -s "$ardent_reads" ]] || fail 'An install read the Ardent installations'
+unset -f hive_magnus_ardent_installations
 # The sync body carries the prepared list, and nothing when there is none.
 jq -n '{schema:1,version:"3.6.0",components:{"hive-registry":{image:("example.com/hive-registry@sha256:"+("a"*64)),version:"1.3.0",catalog:{displayName:"Registry",connection:{nativeApis:{},internalEndpoints:{}}}}}}' > "$temporary/release.json"
 body() { HIVE_CONFIG=$temporary/body-config.json HIVE_MANIFEST=$temporary/release.json HIVE_VERSION=3.6.0 HIVE_MANIFEST_DIGEST=d HIVE_PLAN_DIGEST=p hive_registry_body complete installed; }
@@ -164,3 +194,26 @@ refused 'older than 1.3.0' done first-admin
 refused 'older than 1.3.0' list
 "$ROOT/hive.sh" --help | grep -q 'setup \[list\] | setup done ID | setup skip ID' || fail 'Usage omits setup'
 printf 'Passed: hive.sh setup lists the checklist and settles one recorded item at a time.\n'
+
+# Magnus 3.0.0 or later accepts node keys only: an upgrade lists the node-key step, found done when
+# Magnus's fleet summary has no blockers, and nothing changes for a release pinning an older Magnus.
+node_ids() { HIVE_CONFIG=$full HIVE_VERSION=3.9.0 hive_checklist_items upgrade null 3.8.1 false "$1" | jq -c 'map(select(.id=="magnus-node-keys"))|map([.id,.status,.docs])'; }
+expect "$(node_ids absent)" '[]' 'Node keys before Magnus 3'
+expect "$(node_ids blocked)" '[["magnus-node-keys","pending","UPGRADING.md#magnus-300-node-keys-only"]]' 'Node keys with blockers'
+expect "$(node_ids unknown)" '[["magnus-node-keys","pending","UPGRADING.md#magnus-300-node-keys-only"]]' 'Node keys not readable'
+expect "$(node_ids ready)" '[["magnus-node-keys","done","UPGRADING.md#magnus-300-node-keys-only"]]' 'Node keys without blockers'
+expect "$(HIVE_CONFIG=$full hive_checklist_items install null '' false ready | jq -c 'map(select(.id=="magnus-node-keys"))')" '[]' 'Node keys on a fresh install'
+# Which readiness the controller finds: from the summary of a Magnus it runs, for a 3.x pin only.
+jq -n '{components:{magnus:{version:"3.0.0"}}}' > "$temporary/magnus3.json"; jq -n '{components:{magnus:{version:"2.10.2"}}}' > "$temporary/magnus2.json"
+summary_fixture=''
+hive_magnus_node_summary() { [[ -n "$summary_fixture" ]] && printf '%s\n' "$summary_fixture"; }
+node_keys() { HIVE_CONFIG=$1 HIVE_MANIFEST=$2 hive_checklist_node_keys; }
+summary_fixture='{"supported":true,"mode":"compat","modeDeprecated":true,"enforceReady":false,"blockers":[{"code":"NODES_WITHOUT_KEY","count":2}]}'
+expect "$(node_keys "$full" "$temporary/magnus2.json")" absent 'A Magnus 2 pin'
+expect "$(node_keys "$core" "$temporary/magnus3.json")" absent 'No Magnus of its own'
+expect "$(node_keys "$full" "$temporary/magnus3.json")" blocked 'A summary with blockers'
+summary_fixture='{"supported":true,"mode":"enforce","modeDeprecated":false,"enforceReady":true,"blockers":[]}'
+expect "$(node_keys "$full" "$temporary/magnus3.json")" ready 'A summary without blockers'
+summary_fixture=''
+expect "$(node_keys "$full" "$temporary/magnus3.json")" unknown 'No summary'
+printf 'Passed: the Magnus node-key step for releases pinning Magnus 3.0.0 or later.\n'

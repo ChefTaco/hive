@@ -62,7 +62,9 @@ hive_initialize() {
   ' "$HIVE_CONFIG" >/dev/null || hive_die 'Fresh suite initialization requires the Hive Registry, Oathweave, its private Redis, HiveXUI and ingress, locally placed selected-product datastores, explicit HTTPS endpoints across hosts and standard protected config paths. Ardent Project Studio needs Magnus and HiveMem (Magnus as the magnus component or an external Magnus), and runs on the console host with Oathweave. Existing or separately configured products must use their owning setup workflow; this command never adopts or overwrites their state.'
   HIVE_BOOTSTRAP_USERS=$(hive_release_selected .service.user)
   HIVE_BOOTSTRAP_IMAGES=$(hive_release_selected .image)
-  HIVE_BOOTSTRAP_INGRESS=$(base64 -w0 "$HIVE_ROOT/deployment/Caddyfile")
+  HIVE_BOOTSTRAP_INGRESS=$(hive_ingress_template)
+  # Magnus 3.0.0 or later: a fresh Magnus gets no fleet-wide node secrets (initialize-full-host.sh).
+  HIVE_MAGNUS_NODE_KEYS_ONLY=false; if hive_magnus_node_keys_only; then HIVE_MAGNUS_NODE_KEYS_ONLY=true; fi
   local host identity_host
   identity_host=$(jq -r .components.oathweave.host "$HIVE_CONFIG")
   HIVE_BOOTSTRAP_IDENTITIES=null

@@ -92,9 +92,14 @@
 # The published port for Magnus host agents, on a fresh installation whose console.nativeListeners
 # names magnus. It goes around the browser allowlist below, so it has its own: only the routes
 # the Magnus agent and its Hermes sync call, with their own credentials (x-node-token,
-# x-log-token, x-hermes-registry-token). No Authorization, cookie, x-api-secret, gateway token
-# or other header passes, so no operator, browser or system request can be served here, and
+# x-log-token, x-hermes-registry-token, and from Magnus 2.10 the five x-magnus-* headers of a
+# request signed with the node key). No Authorization, cookie, x-api-secret, gateway token or
+# other header passes, so no operator, browser or system request can be served here, and
 # X-Forwarded-For is the client's address, never one the client sent. Everything else is 404.
+# Of Magnus's node enrollment routes, the agent reaches the public server key, enrollment with a
+# one-time token and key rotation signed with the current key. The automatic first binding with
+# the shared node secret (legacy-upgrade) is not routed: Magnus checks the caller's address for
+# it, and through this port every agent has the ingress address. Agents here enroll with tokens.
 (magnus_agent_listener) {
 	@magnus_agent_unsafe_path expression <<CEL
 		{http.request.orig_uri}.matches(r"(?i)^[^?]*(//|/\.\.?(/|\?|$)|\\|%(2f|5c|2e|25|[01][0-9a-f]|7f))")
@@ -109,6 +114,7 @@
 			|| {path} == "/api/v1/hermes-registry/profiles"
 			|| {path} == "/api/v1/hermes-registry/policy"
 			|| {path}.matches("^/api/v1/hermes-registry/artifacts/[^/]+/[^/]+/[^/]+$")
+			|| {path} == "/api/v1/node-enrollment/server-key"
 		))
 		|| ({method} == "POST" && (
 			{path} == "/api/v1/heartbeat"
@@ -130,6 +136,8 @@
 			|| {path} == "/api/v1/hermes-registry/capture"
 			|| {path} == "/api/v1/hermes-registry/receipts"
 			|| {path} == "/api/v1/hermes-registry/inventory"
+			|| {path} == "/api/v1/node-enrollment/enroll"
+			|| {path} == "/api/v1/node-enrollment/rotate"
 		))
 		CEL
 	handle @magnus_agent {
@@ -141,6 +149,11 @@
 			header_up X-Node-Token {http.request.header.X-Node-Token}
 			header_up X-Log-Token {http.request.header.X-Log-Token}
 			header_up X-Hermes-Registry-Token {http.request.header.X-Hermes-Registry-Token}
+			header_up X-Magnus-Node-Id {http.request.header.X-Magnus-Node-Id}
+			header_up X-Magnus-Key-Id {http.request.header.X-Magnus-Key-Id}
+			header_up X-Magnus-Timestamp {http.request.header.X-Magnus-Timestamp}
+			header_up X-Magnus-Nonce {http.request.header.X-Magnus-Nonce}
+			header_up X-Magnus-Signature {http.request.header.X-Magnus-Signature}
 			header_up X-Forwarded-For {client_ip}
 		}
 	}
@@ -391,8 +404,12 @@
 				|| {path} == "/api/v1/library/files"
 				|| {path}.matches("^/api/v1/library/files/[^/]+$")
 				|| {path} == "/api/v1/logs/stream"
+				|| {path} == "/api/v1/node-credentials/downgrade-check"
+				|| {path} == "/api/v1/node-credentials/pending-bindings"
+				|| {path} == "/api/v1/node-credentials/summary"
 				|| {path} == "/api/v1/nodes"
 				|| {path}.matches("^/api/v1/nodes/[^/]+$")
+				|| {path}.matches("^/api/v1/nodes/[^/]+/credentials$")
 				|| {path}.matches("^/api/v1/nodes/[^/]+/gpu$")
 				|| {path}.matches("^/api/v1/nodes/[^/]+/health$")
 				|| {path}.matches("^/api/v1/nodes/[^/]+/health/history$")
@@ -455,6 +472,10 @@
 				|| {path} == "/api/v1/library/files"
 				|| {path} == "/api/v1/library/files/move"
 				|| {path} == "/api/v1/logs/query"
+				|| {path}.matches("^/api/v1/node-credentials/pending-bindings/[^/]+/approve$")
+				|| {path}.matches("^/api/v1/node-credentials/pending-bindings/[^/]+/reject$")
+				|| {path}.matches("^/api/v1/nodes/[^/]+/credentials/reset$")
+				|| {path}.matches("^/api/v1/nodes/[^/]+/credentials/revoke$")
 				|| {path}.matches("^/api/v1/nodes/[^/]+/system-updates/enable$")
 				|| {path} == "/api/v1/nodes/register"
 				|| {path} == "/api/v1/notifications/read"

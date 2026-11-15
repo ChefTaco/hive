@@ -28,6 +28,13 @@ export function assertFullNodeReview(review) {
     assert.equal(processes.find(p => p.name === 'MainThread').ppid, processes.find(p => p.name === 'docker-init').pid);
   }
 }
+// The agent's managed scheduler inventory, read by the server. Before Magnus 3.0.0 with the shared
+// node secret; with node keys only (3.0.0 or later), signed with the server key for this node.
+export function managedInventoryRequest(url, nodeId, nodeKeysOnly, { agentFetch, nodeSecret, fetch: plain = fetch }) {
+  const init = { redirect: 'error', signal: AbortSignal.timeout(25000) };
+  if (nodeKeysOnly) return agentFetch({ nodeId }, url + '/api/v1/cron/managed-inventory', init);
+  return plain(url + '/api/v1/cron/managed-inventory', { ...init, headers: { 'x-node-token': nodeSecret() } });
+}
 async function apiProcesses() {
   const rows = [];
   for (const pid of (await readdir('/proc')).filter(value => /^\d+$/.test(value) && Number(value) !== process.pid)) {
@@ -45,6 +52,8 @@ export async function enrollFullNode(input) {
   const { reconciliationSecret } = await import(base + '/services/resource-participant-work.js');
   const { getNodeBaseUrl } = await import(base + '/utils/node-url.js');
   const { getNodeManagerSecret } = await import(base + '/utils/env.js');
+  // Magnus 3.0.0 or later (node keys only): requests to the agent are signed with the server key.
+  const { agentFetch } = input.nodeKeysOnly === true ? await import(base + '/services/node-agent-auth.js') : {};
   const fence = await import(base + '/services/admission-fence.js');
   const { logAuditEvent } = await import(base + '/services/audit-service.js');
   const db = getDb(); const sha = value => createHash('sha256').update(service.canonical(value)).digest('hex');
@@ -82,8 +91,7 @@ export async function enrollFullNode(input) {
       assert.equal((await ping.json()).data?.features?.managedTerminal, 1, 'Configure the released agent managed terminal capability before full enrollment');
     }
     const inventory = async () => {
-      const response = await fetch(url + '/api/v1/cron/managed-inventory', { redirect: 'error', signal: AbortSignal.timeout(25000),
-        headers: { 'x-node-token': getNodeManagerSecret() } });
+      const response = await managedInventoryRequest(url, node.id, input.nodeKeysOnly === true, { agentFetch, nodeSecret: getNodeManagerSecret });
       const envelope = await service.readParticipantReceipt(response, 256 * 1024);
       assert.equal(envelope.success, true); const value = envelope.data;
       return { sources: value.sources, blockers: value.blockers, issues: value.issues,

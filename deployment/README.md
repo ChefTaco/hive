@@ -57,7 +57,7 @@ never rebuilt; a change takes a new version.
 | `hive-registry` | `services/hive-registry/Dockerfile`, built with Node 24.22.3 and run on the shared hardened Node 26.13.1 image | Only runtime dependencies and compiled registry artifacts; no npm, yarn or apt |
 | `hive-node-runtime` 26.13.1-1 | `deployment/runtime/node.Dockerfile` | Digest-pinned official Node security binary on the hardened glibc base, with native-addon libraries and package metadata; verified TLS/HTTP2 and embedded SQLite on both architectures |
 | `hive-ingress` | `deployment/ingress.Dockerfile` | Caddy 2.11.9 compiled from its module with Go 1.26.10, `golang.org/x/net` v0.62.0 and go-jose v4.1.9 (`deployment/caddy/go.mod` and `go.sum`), on the official Caddy 2.11.9 Alpine image with curl removed and Alpine packages upgraded |
-| `hive-postgres` 17.12-1, 18.7-1 | `deployment/datastores/postgres.Dockerfile` | gosu and apt removed. The suite runs PostgreSQL as its non-root service owner, so the entrypoint never reaches its root-only gosu step; initdb and data checksums are unchanged |
+| `hive-postgres` 17.12-2, 18.7-2 | `deployment/datastores/postgres.Dockerfile` | gosu and apt removed. The suite runs PostgreSQL as its non-root service owner, so the entrypoint never reaches its root-only gosu step; initdb and data checksums are unchanged |
 | `hive-redis` 8.2.10-1 | `deployment/datastores/redis.Dockerfile` | pending Debian security updates applied, apt removed |
 | `hive-qdrant` 1.18.3-2 | `deployment/datastores/qdrant.Dockerfile` | pending Debian security updates applied, apt and the unused web dashboard (`/qdrant/static`) removed; the Qdrant binary and its storage format are upstream's |
 

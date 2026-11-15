@@ -24,3 +24,20 @@ test('missing routes, credentials, unexpected success and transport failures ref
   await assert.rejects(verifyTerminalAuthorityRoutes('https://hive.example.com:4100', '', async () => { called = true; }));
   assert.equal(called, false);
 });
+test('with node keys only, the preflight sends no shared secret and needs Magnus node authentication on both routes', async () => {
+  const calls = [];
+  const magnus = { status: 401, headers: new Headers({ 'x-magnus-server-time': '1700000000000' }) };
+  await verifyTerminalAuthorityRoutes('https://hive.example.com:4100/', '', async (url, options) => {
+    calls.push(url);
+    assert.equal(options.method, 'POST'); assert.equal(options.redirect, 'error');
+    assert.equal(options.headers['x-node-token'], undefined);
+    assert.equal(options.body, '{}');
+    return magnus;
+  }, { nodeKeysOnly: true });
+  assert.deepEqual(calls, ['https://hive.example.com:4100/api/v1/resource-leases/enrollment/terminal-claim',
+    'https://hive.example.com:4100/api/v1/resource-leases/enrollment/terminal-receipt']);
+  // The ingress's own 404, a refusal without Magnus's server time, or anything else is not Magnus's route.
+  for (const response of [{ status: 404, headers: new Headers() }, { status: 401, headers: new Headers() }, { status: 400, headers: magnus.headers }, { status: 200, headers: magnus.headers }]) {
+    await assert.rejects(verifyTerminalAuthorityRoutes('https://hive.example.com:4100', '', async () => response, { nodeKeysOnly: true }), /repair the native ingress/);
+  }
+});

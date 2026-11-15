@@ -103,5 +103,7 @@ test('versions compare numerically, part by part', () => {
   assert.doesNotThrow(() => assertDatastoreProfileCurrent('3.2.10', 'runtime-2026-11-xslt'));
   assert.throws(() => assertDatastoreProfileCurrent('3.6.2', 'runtime-2026-11-xslt'), /superseded/);
   assert.throws(() => assertDatastoreProfileCurrent('3.10.0', 'runtime-2026-11'), /superseded/);
-  assert.doesNotThrow(() => assertDatastoreProfileCurrent('9.9.9', 'runtime-2026-11-pg1712'));
+  assert.doesNotThrow(() => assertDatastoreProfileCurrent('3.7.0', 'runtime-2026-11-pg1712'));
+  assert.throws(() => assertDatastoreProfileCurrent('3.8.0', 'runtime-2026-11-pg1712'), /superseded/);
+  assert.doesNotThrow(() => assertDatastoreProfileCurrent('9.9.9', 'runtime-2026-11-pg1712-xslt'));
 });
