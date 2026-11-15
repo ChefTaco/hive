@@ -6,6 +6,24 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.9.7] - 2026-11-15
+
+### Changed
+
+- Pins HiveXUI 0.9.2. On Magnus node detail, the Software revisions card's **Check versions** and
+  **Read update cache** now read Magnus 3.1.0's read-only software status
+  (`GET /api/v1/nodes/:nodeId/software`) instead of dispatching shell commands to the node:
+  installed versions, and the pending updates in the node's existing APT cache with its refresh
+  time. Any node reader can use them; nothing runs on the node. In a mixed fleet, a node whose
+  agent is older than 3.1.0 (Magnus answers `SOFTWARE_STATUS_UNAVAILABLE`), or a Magnus server
+  without the route, shows the status as unavailable with update guidance instead of an error,
+  and the card never falls back to a shell command. HiveXUI 0.9.2 also refreshes the Ardent
+  profile list when **New Agent** finishes and corrects accessible labels in Studio and
+  Recommendations. The ingress already passes the route. Every other product pin, the datastore
+  profile, the storage recovery profile and the controller are unchanged from 3.9.6, and no
+  storage format changes, so an upgrade from 3.9.6 needs no flag. See `UPGRADING.md`, "Suite
+  3.9.7: HiveXUI 0.9.2 and the read-only software status".
+
 ## [3.9.6] - 2026-11-15
 
 ### Changed
