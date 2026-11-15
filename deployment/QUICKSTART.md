@@ -29,7 +29,7 @@ cd hive
 ```
 
 Run the preparation commands from this checkout. `--release latest` resolves the published
-release once and runs its matching tagged controller; an exact `--release 3.9.1` selects that
+release once and runs its matching tagged controller; an exact `--release 3.9.2` selects that
 version instead. The launcher prints the version and retained checkout path, under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`. The signed release still pins the exact
 controller source. After setup, switch to the retained release checkout printed by the launcher
@@ -147,7 +147,7 @@ questions. Press Enter to accept the default shown in brackets.
 | Deploy the Magnus web terminal gateway | `no`. For `yes`, first create the restricted account and key in [preparing nodes](FULL.md#preparing-nodes-and-the-gateway-key) |
 | Port for Magnus host agents | blank for none. Give a port, such as `4000`, to let hosts join the Magnus fleet; see [Magnus host agents](FULL.md#magnus-host-agents) |
 | Existing external inference HTTPS endpoint | blank to skip; see [external inference](INFERENCE.md) |
-| Native agent runtime | Release 3.9.1 skips this question because it pins no native runtime artifacts; the guided local setup offers a Magnus host agent after installation, as in [Magnus host agents](FULL.md#magnus-host-agents) |
+| Native agent runtime | Release 3.9.2 skips this question because it pins no native runtime artifacts; the guided local setup offers a Magnus host agent after installation, as in [Magnus host agents](FULL.md#magnus-host-agents) |
 | Write protected installation configuration to | the default, `~/.config/hive/hive/installation.json` |
 
 `hive.sh` then prints the plan: every product, image digest and host path. Answer `y` to apply
@@ -156,10 +156,10 @@ it. The first install pulls the images and takes a few minutes; later commands t
 If it stops after writing the configuration file, fix the cause and run `./hive.sh --release
 X.Y.Z` again, replacing `X.Y.Z` with the exact version it reported: after the installation name
 it offers to continue with the saved file instead of asking everything again. Use that exact version for retries and for planning then applying,
-so a new release cannot change the plan between commands. Unattended, for example with 3.9.1:
+so a new release cannot change the plan between commands. Unattended, for example with 3.9.2:
 
 ```bash
-./hive.sh install --config ~/.config/hive/hive/installation.json --release 3.9.1
+./hive.sh install --config ~/.config/hive/hive/installation.json --release 3.9.2
 ```
 
 After setup, change to the retained release checkout path printed by the launcher before
@@ -232,14 +232,14 @@ installation that runs Magnus when moving from a release before 3.8.0 (see
 [UPGRADING](../UPGRADING.md#suite-380-magnus-node-credentials-and-product-security-updates)):
 
 ```bash
-./hive.sh plan --config ~/.config/hive/hive/installation.json --release 3.9.1 --allow-migrations
-./hive.sh upgrade --config ~/.config/hive/hive/installation.json --release 3.9.1 --allow-migrations
+./hive.sh plan --config ~/.config/hive/hive/installation.json --release 3.9.2 --allow-migrations
+./hive.sh upgrade --config ~/.config/hive/hive/installation.json --release 3.9.2 --allow-migrations
 ```
 
 An installation that runs Magnus moves to 3.9.0 or later, which pin Magnus 3 (node keys only), from
-3.8.1 and needs no flag for it, nor from 3.9.0 to 3.9.1; first give every Magnus node its key. The
-upgrade checks the running Magnus before it changes anything and stops while a node would be locked
-out, naming the blockers and the ways out; see
+3.8.1 and needs no flag for it, nor from 3.9.0 to 3.9.1 or from 3.9.1 to 3.9.2; first give every
+Magnus node its key. The upgrade checks the running Magnus before it changes anything and stops
+while a node would be locked out, naming the blockers and the ways out; see
 [UPGRADING](../UPGRADING.md#suite-390-magnus-301-node-keys-only) for the order, server first, then
 agents.
 
@@ -263,16 +263,16 @@ existing local Hive certificate-renewal service to its verified controller check
 
 When two releases share the same controller source, the checkout retains the compatible release
 named in the installation file. Pass the new exact version to later commands to keep using its
-product pins, for example `./hive.sh doctor --config FILE --release 3.9.1`. Certificate renewal
+product pins, for example `./hive.sh doctor --config FILE --release 3.9.2`. Certificate renewal
 uses a unique matching release tag in this case, so its receipt follows that checkout.
 
 Then finish maintenance from the retained release checkout with the individual commands:
 
 ```bash
-./hive.sh magnus-agent status --config ~/.config/hive/hive/installation.json --release 3.9.1
-./hive.sh magnus-agent install --config ~/.config/hive/hive/installation.json --release 3.9.1
-./hive.sh console-clients add --config ~/.config/hive/hive/installation.json --release 3.9.1
-./hive.sh doctor --config ~/.config/hive/hive/installation.json --release 3.9.1
+./hive.sh magnus-agent status --config ~/.config/hive/hive/installation.json --release 3.9.2
+./hive.sh magnus-agent install --config ~/.config/hive/hive/installation.json --release 3.9.2
+./hive.sh console-clients add --config ~/.config/hive/hive/installation.json --release 3.9.2
+./hive.sh doctor --config ~/.config/hive/hive/installation.json --release 3.9.2
 ```
 
 Run the Magnus commands only when this installation hosts Magnus and has a host agent to update;
@@ -281,7 +281,7 @@ run `console-clients add` when it hosts Oathweave and needs missing HiveXUI brow
 Full-node enrollment is a separate authorization through `magnus-agent enroll`; a package update
 must not enable commands, cron or web terminals on an intentionally limited node. See
 [Magnus host agents](FULL.md#magnus-host-agents) for enrollment review and other hosts.
-With a release that pins Magnus 3.0.0 or later, such as 3.9.1, which accepts node keys only, an
+With a release that pins Magnus 3.0.0 or later, such as 3.9.2, which accepts node keys only, an
 agent that already has a key keeps it and is not re-enrolled, an agent without one is enrolled with
 a one-time token, and no fleet-wide node secret is copied to agents (see
 [node keys](FULL.md#node-keys); under a release that pins Magnus 2.10.x an existing agent binds its
