@@ -12,8 +12,8 @@ Moving from 2.x to 3.x with existing PostgreSQL stores also needs `--allow-migra
 below, and so does moving an installation with Emberpath or HiveSkills from a release before
 3.4.0 to 3.4.0 or later, an installation with Embermend from a release before 3.6.0 to 3.6.0 or
 later, and an installation that runs Magnus from a release before 3.8.0 to 3.8.0 or later. An
-installation that runs Magnus moves to 3.9.0 (Magnus 3) from 3.8.1 only, after its nodes have
-their keys; see [Suite 3.9.0](#suite-390-magnus-301-node-keys-only). A failed or uncertain step
+installation that runs Magnus moves to 3.9.0 or later (Magnus 3) from 3.8.1 only, after its nodes
+have their keys; see [Suite 3.9.0](#suite-390-magnus-301-node-keys-only). A failed or uncertain step
 holds its transaction for recovery, as described in
 [when a command stops](deployment/README.md#when-a-command-stops-transactions-and-recovery); never
 delete transaction or runtime receipts to force another attempt. See also
@@ -45,6 +45,39 @@ An older Cindertrace does not know the new sources and refuses to start with the
 credential. Before rolling back to a release whose Cindertrace predates them, run
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
+
+## Suite 3.9.1: Magnus 3.0.2, retiring the shared keys
+
+Suite 3.9.1 changes no storage format and needs no flag from 3.9.0. It pins Magnus, its fleet
+gateway and agent 3.0.2, which add no migrations; every other pin, the datastore profile and the
+storage recovery profile are those of 3.9.0. The controller changes, so the release pins a new
+controller digest: `./hive.sh post-upgrade` now settles the `ardent-packages-updated` setup item
+itself, read only, when Magnus reports every Ardent installation on the version its node agent
+stages, and otherwise names the installations that are behind.
+
+Magnus 3.0.2 removes the last uses of the shared keys that Magnus 3.0.0 kept. The server signs the
+console drain finding it records for itself with its server key instead of `RESULT_SIGNING_SECRET`,
+and fetches the agents' writer proofs whether or not that key is set. The new verify-only
+`RESULT_SIGNING_PREVIOUS_SECRET` (server) and `COMMAND_RECONCILIATION_PREVIOUS_SECRET` (agent) keep
+records stored with the shared keys verifying, and `magnus-agent historical-settlements
+list|reseal|prune` moves an agent's stored historical settlements to its node-local keys. Nothing
+changes until an operator moves a key: the upgrade changes no existing `config/magnus.env` or agent
+`.env`.
+
+To retire the keys, first move the server and every agent to 3.0.2: the suite upgrade moves a
+suite-managed Magnus, `./hive.sh post-upgrade` and `./hive.sh magnus-agent install --config FILE
+--host HOST` the agents the suite installs, and `magnus-server agents upgrade --to 3.0.2` (within
+the major, no `--allow-major`) the agents Magnus manages. Then follow Magnus's
+`docs/NODE_CREDENTIALS.md`, "Retiring the shared keys": on the server, rename
+`RESULT_SIGNING_SECRET=` to `RESULT_SIGNING_PREVIOUS_SECRET=` in `config/magnus.env` and restart
+Magnus; on each agent, rename `COMMAND_RECONCILIATION_SECRET=` to
+`COMMAND_RECONCILIATION_PREVIOUS_SECRET=`, restart it, run `magnus-agent historical-settlements
+reseal --apply` as root, check with `historical-settlements list --check`, then remove the previous
+slot.
+
+From 3.8.1, upgrade directly to 3.9.1 as described for 3.9.0 below, with 3.9.1 and Magnus 3.0.2 in
+place of 3.9.0 and 3.0.1; managed agents still cross the major from 2.10.3, with `magnus-server
+agents upgrade --to 3.0.2 --allow-major`.
 
 ## Suite 3.9.0: Magnus 3.0.1, node keys only
 
