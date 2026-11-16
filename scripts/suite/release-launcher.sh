@@ -80,12 +80,15 @@ hive_release_launch() {
         case "$option" in --manifest|--signature|--trust-key) explicit_manifest=true;; esac
         index=$((index+2));;
       --yes|--non-interactive|--hold-on-failure|--stopped|--allow-migrations|--relax-auth-limits|--install-node|--trust) index=$((index+1));;
-      *) return 0;; # Let the controller validate other commands and unknown options.
+      --) [[ "$command" == admin-access ]] && break; return 0;;
+      *)
+        if [[ "$command" == admin-access && "$option" != --* ]]; then index=$((index+1)); continue; fi
+        return 0;; # Let the controller validate other commands and unknown options.
     esac
   done
   [[ -n "$requested" ]] || return 0
-  case "$command" in install|init|plan|upgrade) ;;
-    *) [[ $requested != latest ]] || hive_die 'latest applies only to install, init, plan and upgrade'; return 0;;
+  case "$command" in install|init|plan|upgrade|admin-access) ;;
+    *) [[ $requested != latest ]] || hive_die 'latest applies only to install, init, plan, upgrade and admin-access'; return 0;;
   esac
   if [[ $explicit_manifest == true ]]; then
     [[ $requested != latest ]] || hive_die 'Use an exact --release with --manifest, --signature or --trust-key'

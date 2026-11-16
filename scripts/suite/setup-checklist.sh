@@ -89,6 +89,9 @@ hive_checklist_items() {
       # Done by itself when Magnus reports every installation on the Ardent its agent stages.
       (if $magnus or $c.external.magnus!=null then item("ardent-packages-updated"; "Update the Ardent packages in HiveXUI (Magnus > Ardent > Installations)";
         "./hive.sh setup done ardent-packages-updated"; "deployment/QUICKSTART.md#8-upgrade"; {product:"magnus"}; "release"; ["upgrade"]) + {detected:$ardent} else empty end),
+      # Identity roles alone do not create the separate native product accounts and grants.
+      (if $c.bootstrap!=null and $identity and (($release|if length==0 then "0.0.0" else . end|split("-")[0]|split(".")|map(tonumber? // 0)) >= [3,11,0]) then item("administrator-product-access"; "Set up product access for your administrator";
+        "./hive.sh admin-access setup"; "deployment/QUICKSTART.md#administrator-product-access"; {product:"oathweave"}; "installation"; ["install","upgrade"]) else empty end),
       # A certificate renewal timer on a local console host.
       (if $localConsole then item("certificate-renewal"; "Schedule the HTTPS certificate renewal"; "sudo ./scripts/console-certificate.sh schedule --config FILE";
         "deployment/QUICKSTART.md#9-keep-the-certificate-current"; {product:"ingress"}; "installation"; ["install","upgrade"]) + {detected:$certificate} else empty end),
@@ -96,7 +99,7 @@ hive_checklist_items() {
       (if $c.bootstrap!=null and $c.components.oathweave!=null then item("first-admin"; "Create your own administrator account and stop using the initial operator";
         "./hive.sh setup done first-admin"; "deployment/QUICKSTART.md#6-sign-in"; {product:"oathweave",check:"iam.first-admin"}; "installation"; ["install"]) else empty end)
     ] as $candidates |
-    ["magnus-agent-enrolled","magnus-node-keys","oathweave-console-clients","ardent-packages-updated","certificate-renewal","first-admin"] as $known |
+    ["magnus-agent-enrolled","magnus-node-keys","oathweave-console-clients","ardent-packages-updated","certificate-renewal","first-admin","administrator-product-access"] as $known |
     (($previous // [])|map({key:.id,value:.})|from_entries) as $old |
     ($previousRelease != "" and $previousRelease != $release) as $newRelease |
     [ $candidates[] | . as $candidate | $old[$candidate.item.id] as $recorded |

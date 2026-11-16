@@ -80,6 +80,10 @@ the certificate renewal timer. The Hive Registry records them as the
 `status` lists the pending ones, `post-upgrade` marks those it completes, and
 `./hive.sh setup done ID` or `./hive.sh setup skip ID` settles one by hand.
 
+After creating your own administrator in Oathweave, run `./hive.sh admin-access setup --release latest`.
+Choose the account and review its products; Hive uses sudo to set up separate product identities
+and access grants. See [administrator product access](deployment/QUICKSTART.md#administrator-product-access).
+
 See the [deployment guide](deployment/README.md) for fresh setup, the [full profile](deployment/FULL.md),
 [distributed](deployment/DISTRIBUTED.md) and [custom](deployment/CUSTOM.md) placements, existing
 installations ([`hive.sh migrate-native`](deployment/MIGRATE_NATIVE.md)) and native agents. Suite

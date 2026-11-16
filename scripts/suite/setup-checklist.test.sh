@@ -80,6 +80,12 @@ for unreadable in '' 'not json' '{"supported":false}' '{"supported":true}' '[]';
   expect "$(lagging "$unreadable")" null "Unreadable Ardent summary '$unreadable'"
 done
 
+# Product access is an explicit installation step from the release that owns its guided flow.
+HIVE_VERSION=3.11.0 items "$full" install | jq -e 'any(.[]; .id=="administrator-product-access" and .status=="pending" and .command=="./hive.sh admin-access setup" and (has("check")|not))' >/dev/null || fail 'Guided product access is not discoverable'
+HIVE_VERSION=3.11.0 items "$full" upgrade | jq -e 'any(.[]; .id=="administrator-product-access" and .status=="pending")' >/dev/null || fail 'Existing installations need the access step'
+access_done=$(HIVE_VERSION=3.11.0 items "$full" install | jq -c 'map(if .id=="administrator-product-access" then .status="done" else . end)')
+HIVE_VERSION=3.11.1 items "$full" upgrade "$access_done" 3.11.0 | jq -e 'any(.[]; .id=="administrator-product-access" and .status=="done")' >/dev/null || fail 'Completed identity access should stay settled'
+
 # Every item the controller can record passes the registry's rules, and every docs link resolves
 # to a heading in this repository.
 anchor() { sed -n 's/^#\{1,6\} //p' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 -]//g; s/ /-/g'; }

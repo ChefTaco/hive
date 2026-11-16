@@ -204,19 +204,37 @@ under **Oathweave > Account security**. Keep the file owner-only and leave it wh
 edit or remove files under `/opt/hive/config`, because the installer checks their digests when a
 command is repeated.
 
-Then create your own administrator account and use it from then on, keeping the initial operator
-for recovery. HiveXUI's setup checklist confirms this item once such an account exists; record it
-with `./hive.sh setup done first-admin`.
+Create your own administrator account, then complete the product access step below before using
+it for the installation. Keep the initial operator for recovery. The guided command records the
+completed administrator steps in the setup checklist.
 
-Creating an Oathweave administrator completes identity setup. Assign **Suite Administrator** for
-the console's product permissions, then sign out and back in. Product access can also require a
-separately reviewed identity link or scoped grant: see [Magnus authentication](https://github.com/ChefTaco/magnus/blob/main/docs/console-api.md#authentication),
-[Embermend permissions](https://github.com/ChefTaco/Embermend/blob/main/docs/OPERATIONS.md#starting-permissions)
-and [ChatterMost account links](https://github.com/ChefTaco/ChatterMost/blob/main/docs/oathweave.md#oathweave-sign-in-for-hivexui).
-Keep the initial operator available for product administration until the installation owner has
-configured those grants. The first-admin checklist checks for another active administrator; it
-does not confirm access to every product. Do not copy the initial operator's product identity to
-another person or edit installer-managed files to bypass their integrity checks.
+### Administrator product access
+
+After creating your administrator in **Oathweave > Users**, run:
+
+```bash
+./hive.sh admin-access setup --release latest
+```
+
+Choose the account from the list and review the products it will administer. Hive asks for sudo
+when needed, adds the Suite Administrator role, creates separate product accounts and installs
+their identity grants. It preserves the initial operator, existing accounts and service identities,
+then reconnects only the affected services. Sign out of HiveXUI and sign in with your own account.
+The setup checklist records both administrator identity setup and product access as done.
+
+For a named account, use `./hive.sh admin-access setup alice --release latest`.
+`admin-access list` lists active administrators; `admin-access status alice` reads the retained
+operation. An unattended setup needs `--yes` after reviewing the exact account and products.
+If the installation's existing administrator role includes web terminal access, the review says so;
+Magnus still requires its normal recent-authentication check. The command does not expand native
+agent enrollment, service permissions, or Embermend's application and target scopes.
+
+Upgrade an existing installation to the current release first. This flow manages products owned
+by this installation; an external Magnus needs its own installation owner. Conflicting identities,
+locked or disabled accounts and changed recovery evidence are refused. Repeat the same setup
+command after an interruption to follow its original operation and account IDs. Keep the protected
+receipts under the installation's `config/.admin-access`; backups include them. No identity-file
+editing or copying the initial operator's product identity is needed.
 
 ## 7. Back up
 

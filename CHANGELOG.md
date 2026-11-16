@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Added
+
+- Guided `hive.sh admin-access setup` selects an existing administrator and uses sudo to provision
+  distinct identities across installed products, maintain their reviewed grants and verify service
+  restarts. Durable receipts, safe continuation and exact native account ownership checks preserve
+  existing accounts and prevent duplicate or conflicting grants. The setup checklist links the flow.
+
 ### Changed
 
 - Clarifies that a new Oathweave administrator also needs the console's Suite Administrator role

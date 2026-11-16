@@ -83,12 +83,15 @@ bash "$TEST_ROOT/hive.sh" plan --config 'relative config.json' --release latest 
 jq -e '.cwd|endswith("work dir")' "$TEST_RESULT" >/dev/null || fail 'Working directory changed'
 jq -e '.args==["plan","--config","relative config.json","--release","2.0.5","--non-interactive"]' "$TEST_RESULT" >/dev/null || fail 'Arguments were not preserved'
 grep -q 'latest resolved to 2.0.5' "$temporary/error" || fail 'Resolved version was not reported'
+bash "$TEST_ROOT/hive.sh" admin-access setup alice --release latest --yes >/dev/null 2> "$temporary/error"
+jq -e '.args==["admin-access","setup","alice","--release","2.0.5","--yes"]' "$TEST_RESULT" >/dev/null || fail 'Guided access did not use the signed latest controller'
+bash "$TEST_ROOT/hive.sh" plan --config 'relative config.json' --release latest --non-interactive > "$temporary/output" 2> "$temporary/error"
 [[ ! -s "$temporary/output" ]] || fail 'Launcher polluted controller stdout'
 [[ $(stat -c %a "$XDG_DATA_HOME/hive/releases") == 700 ]] || fail 'Release directory is not private'
 # Exact versions work offline and reuse the release controller.
 TEST_API_FAIL=true bash "$TEST_ROOT/hive.sh" --release 2.0.5 2>/dev/null
 [[ $(grep -c clone "$TEST_LOG") == 1 ]] || fail 'A cached version was downloaded again'
-[[ $(grep -c api "$TEST_LOG") == 1 ]] || fail 'An exact version contacted the API'
+[[ $(grep -c api "$TEST_LOG") == 3 ]] || fail 'An exact version contacted the API'
 bash "$TEST_ROOT/hive.sh" --release 2.0.4 2>/dev/null
 jq -e '.args==["--release","2.0.4"]' "$TEST_RESULT" >/dev/null || fail 'Explicit older release was ignored'
 # stdin remains the terminal/input stream; exit status belongs to the selected controller.

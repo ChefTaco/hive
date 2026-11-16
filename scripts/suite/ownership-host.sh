@@ -9,5 +9,5 @@ restore_installation_owner() {
   [[ -n "$root" && $(id -u) == 0 && -d "$root" && ! -L "$root" ]] || return 0
   owner=$(stat -c %u -- "$root"); group=$(stat -c %g -- "$root")
   [[ "$owner" != 0 ]] || return 0
-  find "$root" -xdev -path "$root/data/*" -prune -o -uid 0 -print0 2>/dev/null | xargs -0 -r chown -h -- "$owner:$group" 2>/dev/null || true
+  find "$root" -xdev \( -path "$root/data/*" -o -path "$root/config/.admin-access" \) -prune -o -uid 0 -print0 2>/dev/null | xargs -0 -r chown -h -- "$owner:$group" 2>/dev/null || true
 }

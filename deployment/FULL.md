@@ -98,10 +98,11 @@ Setup checklist: 2 pending (settle one by hand with ./hive.sh setup done ID or .
 | `oathweave-console-clients` | Upgrade, with Oathweave, the console and Magnus (or an external Magnus), Embermend or Ardent Project Studio | Upgrade | `post-upgrade` runs `./hive.sh console-clients add`. Check `oathweave.console-client` |
 | `ardent-packages-updated` | Upgrade, with Magnus or an external Magnus | Upgrade | Magnus lists every Ardent installation on the Ardent version its node agent stages (`GET /api/v1/ardent/installations`), so Magnus > Ardent > Installations offers no Update package: found by `post-upgrade`, or at the upgrade for an external Magnus read through Ardent Project Studio. Until then `post-upgrade` names the installations behind; you update them in HiveXUI and rerun it, or record it with `./hive.sh setup done ardent-packages-updated`. See [Ardent packages](QUICKSTART.md#8-upgrade) |
 | `certificate-renewal` | Install and upgrade, on a fresh installation whose console host is this machine | Install, upgrade | A renewal timer exists (`sudo ./scripts/console-certificate.sh schedule --config FILE`, see [QUICKSTART](QUICKSTART.md#9-keep-the-certificate-current)); found at the next upgrade or `post-upgrade`. Skip it when you renew another way |
-| `first-admin` | Fresh install with Oathweave | Install | You sign in with the initial operator, create your own administrator account and use it from then on, then `./hive.sh setup done first-admin`. Check `iam.first-admin` |
+| `first-admin` | Fresh install with Oathweave | Install | Create your administrator in Oathweave, then run `./hive.sh admin-access setup`. The wizard records identity setup when it completes product access. Check `iam.first-admin` |
+| `administrator-product-access` | Fresh setup with Oathweave, from suite 3.11.0 | Install or upgrade | `./hive.sh admin-access setup` selects the administrator, uses sudo to provision separate product accounts and reviewed grants, reconnects changed services and records completion. |
 
 The Magnus agent, browser client and Ardent items belong to a release: after an upgrade to
-another release, one that was done is pending again. The certificate and first administrator are
+another release, one that was done is pending again. The certificate, first administrator and product access are
 settled once. A skipped item stays skipped. Settle any item by hand:
 
 ```bash
