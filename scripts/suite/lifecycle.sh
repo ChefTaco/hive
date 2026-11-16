@@ -2,6 +2,22 @@
 
 hive_action() {
   local host=$1 file script=''
+  local HIVE_HOST_LOCAL_SUDO=${HIVE_HOST_LOCAL_SUDO:-false}
+  # Native discovery and recovery read root-private product state. Use the same
+  # interactive sudo transport as host-agent installation, only for these known
+  # lifecycle actions on the host that actually places Magnus. Remote privilege
+  # remains an explicit property of its reviewed SSH transport.
+  case "${HIVE_OPERATION:-}" in
+    backup|upgrade|rollback|restore|rehearse)
+      case "$2" in
+        snapshot|native-backup-begin|backup|rehearse|restore-check|restore-preview-check|restore-preview|restore|resume-current|complete|abort|native-backup-recover|restore-recovery-check|restore-recovery-apply|restore-recovery-resume)
+          if [[ $(id -u) != 0 ]] && jq -e --arg host "$host" '.hosts[$host].target=="local" and .components.magnus.host==$host' "$HIVE_CONFIG" >/dev/null; then
+            HIVE_HOST_LOCAL_SUDO=true
+          fi
+          ;;
+      esac
+      ;;
+  esac
   local -a files=(ownership-host.sh public-runtime.sh integrity-host.sh input-artifacts-host.sh native-initialization-host.sh adapters-host.sh native-backup-host.sh restore-recovery-host.sh inference-registration.sh initialize-migrations-host.sh rehearsal-copy-host.sh host-runtime.sh)
   [[ "$2" != snapshot ]] || files=(ownership-host.sh integrity-host.sh adapters-host.sh native-backup-host.sh snapshot-host.sh host-runtime.sh)
   for file in "${files[@]}"; do script+=$(cat "$HIVE_ROOT/scripts/suite/$file")$'\n'; done

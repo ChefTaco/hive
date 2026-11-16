@@ -29,7 +29,8 @@ bash() {
       printf 'reviewed helper: %s\\n' "$*"
       if [[ "$*" == *hive.sh* ]]; then printf '%s\\n' "$*" >> "$TEST_LOG"; fi
       if [[ "$*" == *'magnus-agent install'* && ${TEST_FAIL_HELPER:-} == agent ]]; then return 42; fi
-      if [[ "$*" == *'magnus-agent enroll'* && ${TEST_FAIL_HELPER:-} == enroll ]]; then return 42; fi;;
+      if [[ "$*" == *'magnus-agent enroll'* && ${TEST_FAIL_HELPER:-} == enroll ]]; then return 42; fi
+      if [[ "$*" == *'ardent setup'* && ${TEST_FAIL_HELPER:-} == ardent ]]; then return 42; fi;;
   esac
 }
 docker() { return 0; }
@@ -60,7 +61,7 @@ case "$1" in
     hive_setup_terminal
     printf 'account=%s key=%s\\n' "$HIVE_SETUP_TERMINAL_USER" "$HIVE_SETUP_TERMINAL_KEY";;
   finish)
-    HIVE_GUIDED_SETUP=true HIVE_SETUP_LOCAL=yes HIVE_SETUP_TAILSCALE=${TEST_TAILSCALE:-false}
+    HIVE_GUIDED_SETUP=${TEST_GUIDED:-true} HIVE_SETUP_LOCAL=${TEST_LOCAL_SETUP:-yes} HIVE_SETUP_TAILSCALE=${TEST_TAILSCALE:-false}
     HIVE_CONFIG=$2
     HIVE_VERSION=0.1.0 HIVE_MANIFEST=/opt/reviewed/release.json HIVE_SIGNATURE=/opt/reviewed/release.json.sig HIVE_TRUST_KEY=/opt/reviewed/publisher.pub
     hive_setup_finish;;
@@ -150,5 +151,51 @@ esac
     transcript, calls = run('finish-old-registry', ['finish', str(config)], finish_questions,
                             environment={'TEST_TAILSCALE': 'true', 'TEST_OLD_REGISTRY': 'true'})
     assert 'recorded ' not in calls and 'its checklist could not be updated' not in transcript
+    # Default Ardent provisioning follows successful native enrollment and keeps
+    # the exact signed release context. The API lifecycle has separate shell/Node
+    # regressions; these PTY cases exercise the actual guided offer and consent.
+    ardent_config = base / 'finish-ardent-config.json'
+    ardent_config.write_text(json.dumps({
+        'components': {'magnus': {'host': 'control'}, 'hivemem': {'host': 'control'},
+                       'oathweave': {'host': 'control'}},
+        'console': {'nativeListeners': [{'component': 'magnus'}]},
+    }))
+    enroll_questions = [('Install the Magnus host agent', 'yes'),
+                        ('Review this host for full Magnus capabilities', 'yes')]
+    ardent_question = 'Set up Ardent and create its default assistant profile?'
+    transcript, calls = run('finish-ardent-accepted', ['finish', str(ardent_config)],
+                            [*enroll_questions, (ardent_question, 'yes')])
+    child_calls = [line for line in calls.splitlines() if 'hive.sh' in line]
+    assert len(child_calls) == 3 and 'ardent setup' in child_calls[-1]
+    assert calls.index('magnus-agent enroll') < calls.index('ardent setup')
+    assert '--config ' + str(ardent_config) in child_calls[-1]
+    assert '--release 0.1.0 --manifest /opt/reviewed/release.json --signature /opt/reviewed/release.json.sig --trust-key /opt/reviewed/publisher.pub' in child_calls[-1]
+    assert '--yes' not in child_calls[-1] and '--non-interactive' not in child_calls[-1]
+    transcript, calls = run('finish-ardent-declined', ['finish', str(ardent_config)],
+                            [*enroll_questions, (ardent_question, 'no')])
+    assert 'ardent setup' not in calls
+    for name, questions in [
+        ('no-agent', [('Install the Magnus host agent', 'no')]),
+        ('no-enrollment', [('Install the Magnus host agent', 'yes'),
+                           ('Review this host for full Magnus capabilities', 'no')]),
+    ]:
+        transcript, calls = run('finish-ardent-' + name, ['finish', str(ardent_config)], questions)
+        assert ardent_question not in transcript and 'ardent setup' not in calls
+    transcript, calls = run('finish-ardent-without-memory', ['finish', str(config)], enroll_questions)
+    assert ardent_question not in transcript and 'ardent setup' not in calls
+    for name, environment in [('saved-mode', {'TEST_GUIDED': 'false'}),
+                              ('remote-mode', {'TEST_LOCAL_SETUP': 'no'})]:
+        transcript, calls = run('finish-ardent-' + name, ['finish', str(ardent_config)],
+                                environment=environment)
+        assert ardent_question not in transcript and not calls
+    for helper, questions in [('enroll', enroll_questions),
+                               ('ardent', [*enroll_questions, (ardent_question, 'yes')])]:
+        transcript, calls = run('finish-ardent-failed-' + helper,
+                                ['finish', str(ardent_config)], questions, expected=42,
+                                environment={'TEST_FAIL_HELPER': helper})
+        assert ('ardent setup' in calls) == (helper == 'ardent')
+        if helper == 'enroll':
+            assert ardent_question not in transcript
+    print('Passed: guided Ardent setup follows successful enrollment and forwards signed release arguments, respects skips/consent, and propagates failures.')
     print('Passed: guided local and remote preparation, consent, TLS selection, terminal setup, and no changes for saved, planning or unattended commands.')
     print('Passed: guided completion records only successful preparation steps, retains personal setup and failures, and tolerates unavailable or older registries.')

@@ -640,6 +640,9 @@ Docker publishes bypass ufw.
 
 ### Installing the agent
 
+For a new Ardent assistant after the host agent is enrolled, see
+[Create an Ardent assistant](#create-an-ardent-assistant).
+
 One command installs the agent on the Magnus host, from the release checkout:
 
 ```bash
@@ -936,3 +939,47 @@ separately injects migration and host-activation interruptions before resuming.
 For authenticated peer restores, a loopback-only raw TCP relay forwards TLS bytes
 to the isolated ingress. It does not terminate TLS or add credentials; backend
 containers retain internal-only networks and certificate verification.
+
+## Create an Ardent assistant
+
+From a controller release that includes Ardent setup, run:
+
+```bash
+./hive.sh ardent setup
+```
+
+This uses the installation's enrolled Magnus host agent. The guided local installer also offers
+it after full-node enrollment when HiveMem and Oathweave are selected. It installs only the Ardent
+package already staged and verified by the signed host agent, then asks for your OpenAI-compatible
+model API base URL (including `/v1`) and the model name it advertises. The model runs on that
+external endpoint; Hive does not install a model server. This path supports endpoints without an
+API key. Credentials in URLs and separate model API keys are refused.
+
+The new profile is named `assistant`, with a general-purpose identity, the default skills and a
+separate Magnus-managed HiveMem identity. Magnus creates and starts it through **New Agent**,
+retains each step's receipt, and verifies readiness. Hive waits for completion and makes a real
+model request before reporting success. The profile belongs to the host agent's dedicated
+non-root native owner and appears in Magnus → Ardent and Studio. Dynamic Magnus profiles are
+included in native suite backups; do not add them a second time to installation.json `agents`.
+
+For an additional new profile, supply `--profile NAME`. Unattended setup needs all model settings
+and consent:
+
+```bash
+./hive.sh ardent setup --profile assistant --model-url https://models.example.com/v1 --model example-model --yes
+./hive.sh ardent status --profile assistant
+./hive.sh ardent check --profile assistant
+```
+
+Use `--config FILE` when this controller manages several installations. The current flow selects
+Magnus on the console host, with HiveMem and Oathweave configured. It never grants enrollment
+capabilities itself: use the host-agent enrollment workflow first.
+
+An existing profile without this controller's setup receipt is preserved and refused; choose a
+new name or manage it in Magnus. Repeating completed setup reads its receipt and does not recreate
+or reconfigure the profile. Interrupted deployments with an operation ID follow that same operation.
+A failed operation needs review, then explicit `./hive.sh ardent resume OPERATION_ID --profile NAME`;
+Magnus skips steps it already completed and refuses unresolved command owners. A request interrupted
+before its operation ID was retained remains held for independent review. Do not delete its
+protected `ardent-setup/NAME.json` beside the owning installation file to force another creation.
+The `check` command performs a new real inference probe; it does not resume or replay a failed task.

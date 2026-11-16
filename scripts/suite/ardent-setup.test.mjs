@@ -1,0 +1,207 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { ardentSetupDeployPayload, validateArdentSetupRequest, runArdentSetup, ardentSetupMain, ardentSetupCLI } from './ardent-setup.mjs';
+
+const secret = 'fixture-api-secret-never-return-this-value';
+const operationId = '11111111-1111-4111-8111-111111111111';
+const model = { base_url: 'https://inference.example.com/v1', model: 'fixture-model' };
+const request = mode => ({ mode, nodeId: 'fixture-node', profile: 'assistant',
+  ...(['plan', 'create'].includes(mode) ? { model } : {}),
+  ...(['operation', 'resume'].includes(mode) ? { operationId } : {}) });
+const state = () => ({ nodeId: 'fixture-node', installed: true, reachable: true, version: '3.1.3', owner: 'operator',
+  profiles: [], stagedPackage: { version: '3.1.3', sha256: 'a'.repeat(64) }, stagedPackageError: null,
+  capabilities: { studio: 3 }, commandOwners: [] });
+const op = () => ({ id: operationId, nodeId: 'fixture-node', profile: 'assistant', kind: 'deploy', status: 'running', attempts: 1,
+  steps: [{ name: 'profile-create', status: 'succeeded', receipt: { token: secret } }, { name: 'config-save', status: 'running' }],
+  error: secret, request: { token: secret } });
+const reply = (data, status = 200) => new Response(JSON.stringify({ success: true, data }), { status, headers: { 'content-type': 'application/json' } });
+function fake(responses) {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, ...options });
+    assert.equal(options.redirect, 'error'); assert.equal(options.headers['x-api-secret'], secret);
+    assert(options.signal instanceof AbortSignal);
+    const next = responses.shift();
+    if (next instanceof Error) throw next;
+    assert(next, 'Unexpected additional HTTP request');
+    return typeof next === 'function' ? next(url, options) : next;
+  };
+  return { calls, options: { apiSecret: secret, fetchImpl } };
+}
+async function rejectsWithoutNetwork(input) {
+  let calls = 0;
+  await assert.rejects(runArdentSetup(input, { apiSecret: secret, fetchImpl: () => { calls++; } }), { code: 'ARDENT_SETUP_REQUEST_INVALID' });
+  assert.equal(calls, 0);
+}
+
+test('strict request validation rejects unknown fields, IDs, modes and misplaced operation/model fields', async () => {
+  for (const input of [null, [], {}, { ...request('inspect'), mode: 'delete' }, { ...request('inspect'), apiSecret: secret },
+    { ...request('inspect'), nodeId: '../other' }, { ...request('inspect'), profile: '../other' },
+    { ...request('inspect'), profile: 'a'.repeat(65) }, { ...request('inspect'), operationId },
+    { ...request('inspect'), model }, { ...request('operation'), operationId: '../../x' },
+    { ...request('operation'), operationId: undefined }, { ...request('create'), model: undefined }]) await rejectsWithoutNetwork(input);
+});
+test('models allow only credential-free explicit OpenAI URLs/models or the exact alias shape', async () => {
+  for (const value of [{ base_url: 'https://user:password@inference.example.com/v1', model: 'x' },
+    { base_url: 'https://inference.example.com/v1?token=fake', model: 'x' },
+    { base_url: 'https://inference.example.com/v1#fragment', model: 'x' },
+    { base_url: 'https://inference.example.com/v1?', model: 'x' }, { base_url: 'https://inference.example.com/v1#', model: 'x' },
+    { base_url: 'file:///tmp/model', model: 'x' }, { base_url: 'http:\\inference.example.com', model: 'x' },
+    { ...model, api_key: secret }, { ...model, api_key_env: 'FAKE_KEY' }, { ...model, model: ' ' },
+    { emberpath_alias: 'alias', base_url: model.base_url }, { emberpath_alias: '../bad alias' }])
+    await rejectsWithoutNetwork({ ...request('plan'), model: value });
+  assert.deepEqual(validateArdentSetupRequest({ ...request('plan'), model: { emberpath_alias: 'lab:assistant' } }).model, { emberpath_alias: 'lab:assistant' });
+  assert.equal(validateArdentSetupRequest({ ...request('plan'), model: { base_url: 'http://inference.example.com:8000/v1', model: 'x' } }).model.model, 'x');
+});
+test('plan performs no HTTP request and binds exactly the immutable default deployment payload', async () => {
+  const f = fake([]); const plan = await runArdentSetup(request('plan'), f.options);
+  const payload = ardentSetupDeployPayload(request('plan'));
+  assert.equal(plan.requestSHA256, createHash('sha256').update(JSON.stringify(payload)).digest('hex'));
+  assert.deepEqual(plan.model, model); assert.equal(f.calls.length, 0);
+  assert.equal(payload.profile, 'assistant'); assert.equal(payload.hivemem, true); assert.deepEqual(payload.skills, []);
+  assert(payload.soul_md.length > 0 && payload.identity_md.includes('Assistant'));
+});
+test('inspect retains bounded ownership metadata and strips raw errors, credentials and arbitrary fields', async () => {
+  const data = state(); data.error = secret; data.stagedPackageError = secret; data.environment = { secret };
+  data.profiles = [{ id: 'existing', apiPort: 9910, running: false, backend: 'llamacpp', error: secret, hivemem: { state: 'ok', token: secret } }];
+  data.commandOwners = [{ commandId: 'native-one', state: 'unknown', profile: 'existing', action: 'service-start', ardent: true, label: secret }];
+  const f = fake([reply(data)]); const result = await runArdentSetup(request('inspect'), f.options);
+  assert.equal(f.calls[0].url, 'https://localhost:4000/api/v1/ardent/installations/fixture-node');
+  assert.equal(result.commandOwners[0].state, 'unknown'); assert.equal(result.profiles[0].error, true);
+  assert.equal(result.stagedPackageError, true); assert(!JSON.stringify(result).includes(secret));
+});
+test('create refuses existing profiles or held work before any POST', async () => {
+  for (const update of [s => s.profiles.push({ id: 'assistant', apiPort: 9910, running: true, backend: 'llamacpp' }),
+    s => s.commandOwners.push({ commandId: 'native-one', state: 'unknown', profile: null, action: null, ardent: false }),
+    s => { s.reachable = false; }, s => { s.installed = false; }]) {
+    const s = state(); update(s); const f = fake([reply(s)]);
+    await assert.rejects(runArdentSetup(request('create'), f.options)); assert.equal(f.calls.length, 1);
+  }
+});
+test('create dispatches exactly once through New Agent and returns the planned request hash', async () => {
+  const f = fake([reply(state()), reply({ operationId }, 202)]);
+  const result = await runArdentSetup(request('create'), f.options);
+  assert.equal(result.operationId, operationId); assert.equal(f.calls[1].url, 'https://localhost:4000/api/v1/ardent/agents');
+  assert.equal(f.calls[1].method, 'POST'); assert.deepEqual(JSON.parse(f.calls[1].body), ardentSetupDeployPayload(request('create')));
+  const plan = await runArdentSetup(request('plan'), fake([]).options); assert.equal(result.requestSHA256, plan.requestSHA256);
+});
+test('package install uses only the owning fixed action and requires the verified staged artifact', async () => {
+  const f = fake([reply(state()), reply({ installed: true, version: '3.1.3', changed: false, token: secret })]);
+  assert.deepEqual(await runArdentSetup(request('package-install'), f.options), { schema: 1, mode: 'package-install', nodeId: 'fixture-node', profile: 'assistant', installed: true, version: '3.1.3', changed: false });
+  assert.deepEqual(JSON.parse(f.calls[1].body), { action: 'package-install' });
+  const s = state(); s.stagedPackage = null; const refused = fake([reply(s)]);
+  await assert.rejects(runArdentSetup(request('package-install'), refused.options), { code: 'ARDENT_SETUP_PACKAGE_UNAVAILABLE' });
+  assert.equal(refused.calls.length, 1);
+});
+test('operation output preserves only durable state and verifies exact node/profile/operation ownership', async () => {
+  const f = fake([reply(op())]); const result = await runArdentSetup(request('operation'), f.options);
+  assert.deepEqual(result.steps, [{ name: 'profile-create', status: 'succeeded' }, { name: 'config-save', status: 'running' }]);
+  assert.equal(result.failedStep, null); assert(!JSON.stringify(result).includes(secret));
+  for (const patch of [{ nodeId: 'foreign' }, { profile: 'foreign' }, { id: '22222222-2222-4222-8222-222222222222' }]) {
+    const x = fake([reply({ ...op(), ...patch })]);
+    await assert.rejects(runArdentSetup(request('resume'), x.options), { code: 'ARDENT_SETUP_RESPONSE_INVALID' }); assert.equal(x.calls.length, 1);
+  }
+});
+test('explicit resume reads the bound operation and sends one POST, never resumes completed operations', async () => {
+  const operation = { ...op(), status: 'failed' }; const f = fake([reply(operation), reply({ operationId }, 202)]);
+  assert.equal((await runArdentSetup(request('resume'), f.options)).operationId, operationId);
+  assert.equal(f.calls[1].url, 'https://localhost:4000/api/v1/ardent/agents/operations/' + operationId + '/resume');
+  assert.equal(f.calls[1].method, 'POST'); assert.equal(f.calls[1].body, undefined);
+  const done = fake([reply({ ...op(), status: 'succeeded' })]);
+  await assert.rejects(runArdentSetup(request('resume'), done.options), { code: 'ARDENT_SETUP_OPERATION_NOT_RESUMABLE' }); assert.equal(done.calls.length, 1);
+});
+test('check reads runtime/memory and executes one real provider test without returning model text', async () => {
+  const f = fake([reply({ version: '3.1.3', profile: 'assistant', backend: 'llamacpp', token: secret }), reply({ status: 'ready', token: secret }), reply({ backend: 'llamacpp', answer: 'READY', usage: { private: secret } })]);
+  const result = await runArdentSetup(request('check'), f.options);
+  assert.equal(result.ready, true); assert.equal(result.provider.expectedReady, true); assert(!JSON.stringify(result).includes(secret));
+  assert.equal(f.calls.length, 3); assert.deepEqual(JSON.parse(f.calls[2].body), { action: 'provider-test' });
+  assert.equal(f.calls.filter(call => call.method === 'POST').length, 1);
+});
+test('unsupported provider probes and degraded memory never claim readiness', async () => {
+  const f = fake([reply({ version: '3.1.3', profile: 'assistant', backend: 'llamacpp' }), reply({ status: 'ready' }), new Response('', { status: 404 })]);
+  const result = await runArdentSetup(request('check'), f.options); assert.equal(result.ready, false); assert.equal(result.provider.supported, false);
+  const degraded = fake([reply({ version: '3.1.3', profile: 'assistant', backend: 'llamacpp' }), reply({ status: 'degraded', reason: secret }), reply({ backend: 'llamacpp', answer: 'READY' })]);
+  assert.equal((await runArdentSetup(request('check'), degraded.options)).ready, false);
+});
+test('HTTP refusal exposes only allowlisted code/status, never raw API errors or secrets', async () => {
+  for (const code of ['COMMAND_OWNER_UNSETTLED', secret]) {
+    const f = fake([reply(state()), new Response(JSON.stringify({ success: false, error: { code, message: secret, token: secret } }), { status: 409 })]);
+    await assert.rejects(runArdentSetup(request('create'), f.options), error => {
+      assert.equal(error.code, 'ARDENT_SETUP_API_REFUSED'); assert.equal(error.httpStatus, 409); assert.equal(error.ambiguous, true);
+      assert.equal(error.apiCode, code === secret ? undefined : code); assert(!JSON.stringify(error).includes(secret)); return true;
+    }); assert.equal(f.calls.length, 2);
+  }
+});
+test('POST timeouts, redirects, malformed bodies and malformed accepted IDs remain ambiguous without retries', async () => {
+  for (const response of [new Error(secret), new Response(secret, { status: 302 }), new Response(secret, { status: 200 }), reply({ operationId: 'invalid' }, 202)]) {
+    const f = fake([reply(state()), response]);
+    await assert.rejects(runArdentSetup(request('create'), f.options), error => { assert.equal(error.ambiguous, true); assert(!JSON.stringify(error).includes(secret)); return true; });
+    assert.equal(f.calls.length, 2);
+  }
+});
+test('bounded responses refuse declared and streamed oversize before returning contents', async () => {
+  for (const response of [new Response('{}', { headers: { 'content-length': String(1024 * 1024) } }), new Response('x'.repeat(600 * 1024))]) {
+    const f = fake([response]); await assert.rejects(runArdentSetup(request('inspect'), f.options), { code: 'ARDENT_SETUP_RESPONSE_INVALID' });
+  }
+});
+test('empty secret, invalid port, unsupported timeout and absent environment fail without HTTP', async () => {
+  for (const options of [{ apiSecret: '' }, { apiSecret: '  ' }, { apiSecret: secret, port: 'https://foreign.example.com' }, { apiSecret: secret, timeoutMs: 180001 }]) {
+    let calls = 0;
+    await assert.rejects(runArdentSetup(request('plan'), { ...options, fetchImpl: () => { calls++; } })); assert.equal(calls, 0);
+  }
+  await assert.rejects(ardentSetupMain({}), { code: 'ARDENT_SETUP_REQUEST_INVALID' });
+  await assert.rejects(ardentSetupMain({ HIVE_ARDENT_SETUP: '{', API_SECRET: secret }), { code: 'ARDENT_SETUP_REQUEST_INVALID' });
+});
+test('entrypoint is inert on import and direct execution returns safe JSON/nonzero for invalid environment', async () => {
+  const child = spawnSync(process.execPath, [new URL('./ardent-setup.mjs', import.meta.url).pathname], { encoding: 'utf8', env: { PATH: process.env.PATH, HIVE_ARDENT_SETUP: 'invalid', API_SECRET: secret } });
+  assert.equal(child.status, 1); assert.equal(child.stderr, ''); assert(!child.stdout.includes(secret));
+  assert.equal(JSON.parse(child.stdout).error.code, 'ARDENT_SETUP_REQUEST_INVALID');
+  const previous = process.exitCode; const lines = [];
+  await ardentSetupCLI({ HIVE_ARDENT_SETUP: 'invalid', API_SECRET: secret }, line => lines.push(line));
+  assert.equal(JSON.parse(lines[0]).success, false); process.exitCode = previous;
+});
+
+test('check refuses a foreign profile, wrong backend or malformed runtime before provider POST', async () => {
+  for (const patch of [{ profile: 'foreign' }, { backend: 'codex' }, { version: 'invalid' }]) {
+    const f = fake([reply({ version: '3.1.3', profile: 'assistant', backend: 'llamacpp', ...patch }), reply({ status: 'ready' })]);
+    await assert.rejects(runArdentSetup(request('check'), f.options), { code: 'ARDENT_SETUP_RESPONSE_INVALID', ambiguous: false });
+    assert(f.calls.every(call => call.method === 'GET'));
+  }
+});
+test('a package result cannot silently claim a version other than the inspected staged release', async () => {
+  const f = fake([reply(state()), reply({ installed: true, version: '3.1.2', changed: true })]);
+  await assert.rejects(runArdentSetup(request('package-install'), f.options), { code: 'ARDENT_SETUP_RESPONSE_INVALID', ambiguous: true });
+});
+test('an actual AbortSignal deadline terminates the one POST attempt and retains uncertainty', async () => {
+  let calls = 0;
+  const fetchImpl = async (_url, options) => {
+    calls++;
+    if (calls === 1) return reply(state());
+    return new Promise((_resolve, reject) => {
+      const guard = setTimeout(() => reject(new Error('fixture-deadline-missed')), 1000);
+      options.signal.addEventListener('abort', () => { clearTimeout(guard); reject(new Error(secret)); }, { once: true });
+    });
+  };
+  await assert.rejects(runArdentSetup(request('create'), { apiSecret: secret, fetchImpl, timeoutMs: 5 }),
+    { code: 'ARDENT_SETUP_TRANSPORT_FAILED', ambiguous: true });
+  assert.equal(calls, 2);
+});
+test('CLI rejects disabled TLS verification and suppresses unexpected environment/parser errors', async () => {
+  await assert.rejects(ardentSetupMain({ HIVE_ARDENT_SETUP: JSON.stringify(request('plan')), API_SECRET: secret, NODE_TLS_REJECT_UNAUTHORIZED: '0' }), { code: 'ARDENT_SETUP_TLS_UNAVAILABLE' });
+  const old = process.exitCode; const lines = [];
+  await ardentSetupCLI({ HIVE_ARDENT_SETUP: JSON.stringify({ ...request('create'), token: secret }), API_SECRET: secret }, value => lines.push(value));
+  assert.equal(JSON.parse(lines[0]).error.code, 'ARDENT_SETUP_REQUEST_INVALID'); assert(!lines[0].includes(secret)); process.exitCode = old;
+});
+
+test('operation reads never adopt a HiveMem backfill as a New Agent deployment', async () => {
+  const f = fake([reply({ ...op(), kind: 'hivemem', status: 'succeeded' })]);
+  await assert.rejects(runArdentSetup(request('operation'), f.options), { code: 'ARDENT_SETUP_RESPONSE_INVALID', ambiguous: false });
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].method, 'GET');
+});
+test('explicit resume never repurposes a different operation kind on the same profile', async () => {
+  const f = fake([reply({ ...op(), kind: 'hivemem', status: 'failed' })]);
+  await assert.rejects(runArdentSetup(request('resume'), f.options), { code: 'ARDENT_SETUP_RESPONSE_INVALID', ambiguous: false });
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].method, 'GET');
+});

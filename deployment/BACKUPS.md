@@ -93,9 +93,11 @@ whose `native-snapshot` fails, or that does not run, stops the backup. If native
 before it has reserved or stopped anything, the upgrade or `--stopped` backup closes its
 transaction as aborted and the suite keeps serving; after that point it holds for recovery.
 
-Native recovery needs root on the owning host. For a local installation, run these commands
-through `sudo` with an explicit `--config` path. For SSH hosts, use the installation's reviewed
-privileged transport (a root SSH account or its protected `hosts.HOST.sudoPasswordFile`). An
+Native recovery needs root on the owning host. For a local installation, run these commands as
+the installation operator; Hive asks for ordinary `sudo` authorization when it needs native
+profile access. An existing protected `hosts.HOST.sudoPasswordFile` can supply unattended
+authorization. For SSH hosts, use the installation's reviewed privileged transport (a root SSH
+account or its protected `hosts.HOST.sudoPasswordFile`). An
 unprivileged or inaccessible discovery result fails explicitly; it is not treated as an empty
 profile inventory. Keep password files outside version control.
 

@@ -127,6 +127,10 @@ hive_setup_finish() {
     hive_setup_record_done magnus-agent-enrolled
     if hive_setup_ask 'Review this host for full Magnus capabilities: commands, cron and web terminals?'; then
       bash "$HIVE_ROOT/hive.sh" magnus-agent enroll --config "$HIVE_CONFIG" "${release_arguments[@]}"
+      if jq -e '.components.hivemem!=null and .components.oathweave!=null' "$HIVE_CONFIG" >/dev/null &&
+          hive_setup_ask 'Set up Ardent and create its default assistant profile?'; then
+        bash "$HIVE_ROOT/hive.sh" ardent setup --config "$HIVE_CONFIG" "${release_arguments[@]}"
+      fi
     fi
   fi
   local recorded

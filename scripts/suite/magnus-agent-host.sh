@@ -727,6 +727,16 @@ ardent_review() {
     -e "HIVE_ARDENT_REVIEW=$proof" magnus node --input-type=module
 }
 
+ardent_setup() {
+  local compose code setup
+  compose=$(jq -er .compose <<< "$request")
+  code=$(jq -er .setupScript <<< "$request")
+  setup=$(jq -ce .setup <<< "$request")
+  # The API secret and its trusted localhost TLS connection stay inside Magnus.
+  { printf '%s' "$code" | base64 -d; printf '\nawait ardentSetupCLI();\n'; } |
+    docker compose -f "$compose" exec -T -e "HIVE_ARDENT_SETUP=$setup" magnus node --input-type=module
+}
+
 terminal_authority_preflight() {
   need_root
   jq -er '.terminalRouteScript' <<< "$request" | base64 -d |
@@ -793,6 +803,7 @@ case "$action" in
   magnus-agent-node-credential) node_credential;;
   magnus-agent-node-summary) node_summary;;
   magnus-agent-ardent-installations) ardent_installations;;
+  magnus-agent-ardent-setup) ardent_setup;;
   magnus-agent-upgrade-readiness) upgrade_readiness;;
   magnus-agent-ardent-review) ardent_review;;
   magnus-agent-node-maintenance) node_maintenance;;

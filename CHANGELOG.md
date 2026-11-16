@@ -6,6 +6,21 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Added
+
+- `hive.sh ardent setup` installs the Ardent package staged by the signed Magnus host agent and
+  creates its default `assistant` profile through Magnus's durable New Agent workflow. Guided local
+  setup offers it after full-node enrollment. It asks for an OpenAI-compatible model endpoint and
+  model, configures HiveMem, starts the profile and tests real inference. `--profile` selects a
+  different new profile; `ardent status`, `check` and explicit `resume OPERATION_ID` keep deployment
+  progress reviewable. Protected operation receipts prevent duplicate creation after interruption;
+  existing profiles and uncertain work are preserved.
+
+### Fixed
+
+- Local native backup, rehearsal and restore request ordinary sudo authorization, so installation
+  operators can run recovery commands without a manual root or configuration workaround.
+
 ## [3.9.8] - 2026-11-15
 
 ### Changed

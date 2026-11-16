@@ -419,6 +419,18 @@ installation directory is owned by root:
 "sudoPasswordFile": "/path/to/sudo-password"
 ```
 
+## Create an Ardent assistant
+
+With a controller that includes Ardent setup, finish host-agent enrollment, then run
+`./hive.sh ardent setup`. Guided local setup offers this too. Provide your OpenAI-compatible
+model endpoint and model name; the endpoint must not require an API key. Hive installs the
+verified staged Ardent package and creates the default `assistant` profile with HiveMem, starts
+it and tests a real model response. It does not install a model server.
+
+Use `./hive.sh ardent status` to see progress, `./hive.sh ardent check` to test the connection
+again, or `--profile NAME` for a different new profile. Existing profiles are preserved. See
+[the full setup and recovery instructions](FULL.md#create-an-ardent-assistant).
+
 ## When something goes wrong
 
 | Message | What to do |

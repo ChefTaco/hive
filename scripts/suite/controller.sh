@@ -55,7 +55,7 @@ hive_runtime_files() {
     scripts/suite/magnus-gateway.sh scripts/suite/magnus-gateway-host.sh \
     scripts/suite/migrate-native.sh scripts/suite/migrate-native-host.sh scripts/suite/migrate-native-data.mjs scripts/suite/set-admin-password.sh \
     scripts/suite/cindertrace.sh scripts/suite/cindertrace-host.sh scripts/suite/ownership-host.sh \
-    scripts/suite/magnus-agent.sh scripts/suite/magnus-agent-host.sh scripts/suite/ardent-enrollment.mjs scripts/suite/node-enrollment.mjs scripts/suite/terminal-authority.mjs \
+    scripts/suite/magnus-agent.sh scripts/suite/magnus-agent-host.sh scripts/suite/ardent-setup.sh scripts/suite/ardent-setup.mjs scripts/suite/ardent-enrollment.mjs scripts/suite/node-enrollment.mjs scripts/suite/terminal-authority.mjs \
     scripts/suite/console-clients.sh scripts/suite/console-clients-host.sh scripts/suite/post-upgrade.sh scripts/suite/setup-checklist.sh \
     scripts/suite/retention.sh scripts/suite/retention-host.sh scripts/suite/retention-schedule.sh scripts/suite/rehearsal-copy-host.sh
 }
@@ -126,7 +126,7 @@ hive_setup_hosts_ready() {
 
 hive_usage() {
   cat <<'EOF'
-Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|console-clients]
+Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients]
   --config FILE          Installation JSON. Commands other than install, init and plan find
                          it themselves when there is exactly one under ~/.config/hive (or
                          $XDG_CONFIG_HOME/hive), or when HIVE_INSTALLATION names it
@@ -168,6 +168,16 @@ single-host node and, with approval, enables commands, managed cron and selected
 web terminals. It retains completed Ardent history and restores paused profile units.
 magnus-agent prepare-ardent remains available for deliberately limited Ardent-only nodes.
 See deployment/FULL.md.
+ardent setup installs the host agent's verified staged Ardent package and creates the default
+assistant profile through Magnus, including its identity, HiveMem, model connection and readiness.
+It asks for an OpenAI-compatible model API URL and model name; --model-url URL --model NAME
+supplies them unattended. --profile NAME chooses another new profile. Existing profiles are
+preserved. Repeating setup follows its retained operation; uncertain requests are never repeated.
+ardent status shows the profile and retained setup, check tests its real model connection, and
+resume OPERATION_ID explicitly resumes a reviewed failed operation without repeating completed steps.
+The setup needs Magnus, HiveMem and Oathweave, an enrolled host agent and a model endpoint that
+does not require a separate API key. API keys and authenticated model endpoints are not accepted
+by this guided path.
 cindertrace-collector provisions the credential a Cindertrace collector signs events with:
 cindertrace-collector add ID --sources SOURCE[,SOURCE]|list|remove ID. The credential is generated
 on the Cindertrace host into an owner-only file and never printed; Cindertrace ingests while a
@@ -820,6 +830,7 @@ hive_discover_config() {
 
 hive_main() {
   local command=install confirmed=false interactive=true hold_on_failure=false
+  HIVE_ARDENT_PROFILE=assistant HIVE_ARDENT_MODEL_URL='' HIVE_ARDENT_MODEL=''
   HIVE_RETENTION_KEEP='' HIVE_RETENTION_KEEP_DAYS='' HIVE_RETENTION_KEEP_FULL='' HIVE_RETENTION_APPLY=false HIVE_RETENTION_AT='' HIVE_RETENTION_CONTROLLER='' HIVE_RETENTION_TRIGGER='' HIVE_OPERATOR_CONFIG=''
   HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_NATIVE_RECOVERY_FILE='' HIVE_NATIVE_RECOVERY_INPUT=null HIVE_NATIVE_RECOVERY_CONFIGURATION_SHA='' HIVE_NATIVE_RECOVERY_MANIFEST_SEMANTIC_SHA='' HIVE_NATIVE_BACKUP_TOOL='' HIVE_ALLOW_MIGRATIONS=false HIVE_RELAX_AUTH_LIMITS=false HIVE_BACKUP_STOPPED=false HIVE_PREPARE_RECONCILIATION=false
   HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY='' HIVE_CINDERTRACE_SOURCES='' HIVE_AGENT_TARGET='' HIVE_AGENT_SSH_CONFIG='' HIVE_AGENT_SUDO_FILE='' HIVE_AGENT_INSTALL_NODE=false HIVE_AGENT_TRUST=false
@@ -860,6 +871,11 @@ hive_main() {
         [[ "$command" == registry ]] || hive_die '--file applies only to registry'
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
         HIVE_REGISTRY_FILE=$2; shift 2;;
+      --profile|--model-url|--model)
+        [[ "$command" == ardent ]] || hive_die "$1 applies only to ardent"
+        (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
+        case $1 in --profile) HIVE_ARDENT_PROFILE=$2;; --model-url) HIVE_ARDENT_MODEL_URL=$2;; --model) HIVE_ARDENT_MODEL=$2;; esac
+        shift 2;;
       --host|--ssh-config|--sudo-password-file)
         if [[ "$command" == magnus-agent ]]; then
           (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
@@ -886,14 +902,14 @@ hive_main() {
       *)
         [[ "$1" != --* ]] || hive_die 'Unknown option'
         case "$command" in
-          registry|migrate-native|cindertrace-collector|magnus-agent|console-clients|setup|backups) registry_arguments+=("$1");;
+          registry|migrate-native|cindertrace-collector|magnus-agent|ardent|console-clients|setup|backups) registry_arguments+=("$1");;
           magnus-trust) trust_arguments=("$1" "${trust_arguments[@]}");;
           *) hive_die 'Unknown option';;
         esac
         shift;;
     esac
   done
-  case "$command" in init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|console-clients) ;; *) hive_die 'Unknown command';; esac
+  case "$command" in init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients) ;; *) hive_die 'Unknown command';; esac
   [[ "$HIVE_PREPARE_RECONCILIATION" != true || -z "$HIVE_RECONCILIATION" ]] || hive_die 'Choose --prepare-reconciliation or --reconciliation, not both'
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
     case "$command" in plan|install|upgrade) ;; *) hive_die '--relax-auth-limits applies only to plan, install and upgrade';; esac
@@ -970,6 +986,7 @@ hive_main() {
     tls-refresh) hive_need openssl; hive_need sha256sum; hive_manifest; hive_tls_refresh; return;;
     cindertrace-collector) hive_need openssl; hive_need sha256sum; hive_manifest; hive_cindertrace_collector "${registry_arguments[@]}"; return;;
     magnus-agent) hive_need openssl; hive_need sha256sum; hive_manifest; HIVE_CONFIRMED=$confirmed hive_magnus_agent "${registry_arguments[@]}"; return;;
+    ardent) hive_need openssl; hive_need sha256sum; hive_manifest; HIVE_CONFIRMED=$confirmed HIVE_ARDENT_INTERACTIVE=$interactive hive_ardent "${registry_arguments[@]}"; return;;
     console-clients) HIVE_CONFIRMED=$confirmed hive_console_clients "${registry_arguments[@]}"; return;;
     setup) hive_checklist_command "${registry_arguments[@]}"; return;;
     backups) hive_backups_command "${registry_arguments[@]}"; return;;
