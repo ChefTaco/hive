@@ -46,6 +46,50 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Suite 3.11.0: guided administrator product access
+
+Suite 3.11.0 pins HiveMem 1.8.0 and ChatterMost 0.7.0, including the matching ChatterMost
+migrator. These releases add product-owned native administrator provisioning with durable
+receipts. All other product pins, datastore and storage recovery profiles, and storage formats
+are unchanged from 3.10.0. An upgrade from 3.10.0 needs no `--allow-migrations`; older releases
+retain the upgrade requirements documented below.
+
+After upgrading, create your administrator in **Oathweave > Users**, then run:
+
+```bash
+./hive.sh admin-access setup --release 3.11.0
+```
+
+Choose the exact account and review its installed products. Hive requests sudo when needed,
+creates separate native identities, installs their reviewed links and grants, adds the Suite
+Administrator role and reconnects affected services. It preserves the initial operator, other
+accounts, service identities and existing ownership. Sign out of HiveXUI and sign in with your
+own account afterward. No manual identity-file editing is needed; see
+[administrator product access](deployment/QUICKSTART.md#administrator-product-access).
+
+The setup checklist now tracks `administrator-product-access` separately from `first-admin`.
+Guided setup records both as done after it finishes. Upgrading alone does not choose an account
+or grant product access automatically. A successful interactive upgrade offers the guided flow;
+an unattended upgrade leaves it for you to run later. For an exact account, use
+`admin-access setup alice`. Read its retained operation with `admin-access status alice`.
+After an interruption, repeat the same
+setup command to follow the original account IDs and protected receipts rather than creating a
+replacement identity.
+
+The command covers products managed by this installation; an external Magnus needs its own
+installation owner. Native agent enrollment and service permissions stay unchanged. Embermend
+application and target scopes stay explicit. If existing administrator permissions include web
+terminal access, the review discloses it and Magnus keeps its usual recent-authentication check.
+
+After guided administrator setup, keep using the retained 3.11.0 or a newer compatible
+controller for maintenance. Earlier controllers change ownership of the new protected access
+journals during privileged operations on operator-owned installations. Returning to one needs
+a separately reviewed recovery procedure; retain the verified 3.11.0 backup and its receipts.
+
+Take and rehearse a fresh backup after access setup. Restoring an archive from before a grant
+change also requires reviewing its configuration changes with the installation owner; the restore
+guard refuses to pair archived accounts with changed secrets or identity links.
+
 ## Suite 3.10.0: guided Ardent assistants and local native recovery
 
 Suite 3.10.0 adds `./hive.sh ardent setup`: it installs the verified Ardent package staged by
