@@ -942,7 +942,7 @@ containers retain internal-only networks and certificate verification.
 
 ## Create an Ardent assistant
 
-From a controller release that includes Ardent setup, run:
+From suite 3.10.0, run:
 
 ```bash
 ./hive.sh ardent setup

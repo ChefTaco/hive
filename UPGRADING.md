@@ -46,6 +46,31 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Suite 3.10.0: guided Ardent assistants and local native recovery
+
+Suite 3.10.0 adds `./hive.sh ardent setup`: it installs the verified Ardent package staged by
+Magnus and creates the default `assistant` profile through Magnus's durable New Agent workflow.
+The guided local installer offers this after full-node enrollment. Existing installations can
+run it from the retained 3.10.0 checkout when ready. Supply a model endpoint and model when
+prompted; Hive configures HiveMem, starts the profile and tests real inference. See
+[Create an Ardent assistant](deployment/FULL.md#create-an-ardent-assistant) for named profiles,
+unattended settings and explicit recovery. Existing profiles are preserved; an upgrade never
+creates or reconfigures one automatically.
+
+Every product pin remains that of 3.9.8, including Magnus 3.1.1 and its staged Ardent 3.1.3.
+The datastore and storage recovery profiles, initialization contracts and storage formats are
+unchanged. An upgrade from 3.9.8 needs no `--allow-migrations`; older releases retain the upgrade
+requirements documented below. Run `./hive.sh post-upgrade` to verify the existing agent and
+package versions and settle applicable checklist steps. Package maintenance keeps enrollment
+scope and existing native identities, credentials and journals.
+
+Local native backup, rehearsal and restore now request ordinary sudo authorization from the
+installation operator when needed. Protected unattended and remote privilege configuration
+remains explicit. Profiles created through New Agent are included automatically in native suite
+backups; do not duplicate them in installation.json `agents`. The recovery contracts and held
+restore review remain unchanged. Keep the selected release checkout for later lifecycle commands
+and scheduled services.
+
 ## Suite 3.9.8: guided setup and verified quick diagnostics
 
 Suite 3.9.8 pins Magnus 3.1.1: the server, fleet gateway and node agent. Every other product

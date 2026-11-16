@@ -6,6 +6,14 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.10.0] - 2026-11-16
+
+### Changed
+
+- Includes the Ardent setup controller with a new signed source digest. Every product pin,
+  datastore profile, storage recovery profile and storage format stays unchanged from 3.9.8;
+  upgrading from 3.9.8 needs no migration flag.
+
 ### Added
 
 - `hive.sh ardent setup` installs the Ardent package staged by the signed Magnus host agent and
