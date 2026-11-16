@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.9.8] - 2026-11-15
+
+### Changed
+
+- Pins Magnus 3.1.1 (server, fleet gateway and node agent). The fixed **magnus status**
+  diagnostic completes with signed, supervised evidence; unsupported quick commands are refused
+  before creating work. Historical verified uptime receipts remain valid. All other product
+  pins, datastore and storage-recovery profiles, and storage formats stay unchanged from 3.9.7.
+  See `UPGRADING.md`, "Suite 3.9.8: guided setup and verified quick diagnostics".
+
 ### Fixed
 
 - Full-node enrollment recognizes the exact daily retention entry written by the installation's

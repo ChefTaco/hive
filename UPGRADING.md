@@ -46,6 +46,35 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Suite 3.9.8: guided setup and verified quick diagnostics
+
+Suite 3.9.8 pins Magnus 3.1.1: the server, fleet gateway and node agent. Every other product
+pin, datastore profile, storage recovery profile and storage format stays unchanged from 3.9.7,
+so an upgrade from 3.9.7 needs no migration flag. The controller includes the guided setup fixes
+below and has a new signed source digest. Existing backups and native profiles keep their
+normal recovery contracts.
+
+After upgrading, run `./hive.sh post-upgrade` from the retained 3.9.8 checkout to update the
+installer-owned Magnus host agent to 3.1.1. Update other fleet nodes through their usual reviewed
+agent upgrade workflow. Package updates preserve each node's existing enrollment scope; they do
+not grant full-node capabilities automatically.
+
+**Fresh local setup.** Full-node enrollment recognizes the exact backup-pruning job written by
+this installation's current controller, after an independent privileged crontab read. The job
+stays outside Magnus management. Edited jobs, duplicate jobs and unrelated user schedules still
+require independent review. Successful certificate renewal scheduling and host-agent installation
+are recorded immediately in the setup checklist, including when a later review fails. The initial
+operator's personal administrator step remains pending. Child commands retain the selected release,
+manifest, signature and trust key.
+
+**Quick diagnostics.** The fixed **magnus status** action runs only the exact reviewed service
+status diagnostic, with its bounded timeout, signed completion receipt and empty supervised process
+group. Both the server and agent need 3.1.1 for the new completion registry. Unsupported quick
+commands return an explanatory refusal before any work is registered or dispatched; use node
+diagnostics or the dedicated managed operation instead. Verified historical uptime receipts keep
+their original authority. Existing uncertain work is never relabeled or replayed and still needs
+its normal explicit reconciliation.
+
 ## Suite 3.9.7: HiveXUI 0.9.2 and the read-only software status
 
 Suite 3.9.7 pins HiveXUI 0.9.2. Every other product pin, including Magnus 3.1.0, the datastore
