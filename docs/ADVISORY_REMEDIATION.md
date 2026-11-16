@@ -1,5 +1,11 @@
 # Runtime advisory remediation
 
+> **Dated record.** The sections below record each image advisory review in date order, from the
+> 2.4.2 review to the 2026-11-14 PostgreSQL update. The release image gate itself (no CRITICAL or
+> HIGH finding on either architecture, with scoped exceptions) is in
+> [RELEASING.md](RELEASING.md#steps), step 5. The runtime and migration sections still describe
+> how the current images are built.
+
 The Hive 2.4.2 image review recorded 27 unique HIGH/CRITICAL advisory identifiers
 without fixes in their installed Debian suites. The original scanner findings are OS packages. At that review, an `npm audit --omit=dev`
 recheck of the nine affected application repositories reported zero vulnerabilities.

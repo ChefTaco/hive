@@ -28,8 +28,8 @@ Cleanup is measured separately. A controller failure still fails the job.
 - The tag publication job depends on successful full recovery. The reusable workflow defaults to
   full; manual focused runs must explicitly opt out.
 
-All ordinary source tests, both Node versions, image/Compose recovery, public npm upgrades and
-browser integration remain enabled. The focused corpus changes only this recovery acceptance.
+The ordinary gates in `hive-ci.yml` (source tests on Node 24 and 26, and the ingress round trips)
+run either way. The focused corpus changes only this recovery acceptance.
 
 ## Efficiency and boundaries
 

@@ -1,5 +1,11 @@
 # Candidate workflow parity
 
+> **Historical record.** This document records the 2026-11 separation of the products into their
+> own repositories and the candidate checks made before the first suite releases. The separation
+> shipped with suite 2.0.0. It is kept as history and is not current guidance: see the
+> [README](../README.md), [the architecture](HIVE_ARCHITECTURE.md) and the
+> [deployment guides](../deployment/README.md).
+
 See the [current plan](ECOSYSTEM_IMPLEMENTATION_PLAN.md) for
 unfinished work and verification limits. In particular, loading placeholders and
 navigation scripts that finish before background requests settle do not establish

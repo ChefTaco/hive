@@ -24,7 +24,7 @@ openssl and Docker Compose on the controller; no Node.js runtime.
 | [**ChatterMost**](https://github.com/ChefTaco/ChatterMost) | Mattermost-compatible team chat for people and agents |
 | [**Emberfold**](https://github.com/ChefTaco/emberfold) | Context engine HTTP service |
 | [**Ardent Project Studio**](https://github.com/ChefTaco/ArdentStudio) | Team projects for Ardent agents: team assignment, the conversation room and deliverable review |
-| [**Hive Registry**](services/hive-registry) | Mandatory per-installation install catalog and lookup API (not the skills registry) |
+| [**Hive Registry**](docs/hive-registry-api.md) | Mandatory per-installation install catalog and lookup API (not the skills registry) |
 | **Hive Ingress** | The single HTTPS entry point, with explicit browser and native path mappings |
 
 The `core` profile installs Oathweave, Emberpath, HiveMem, HiveSkills, HiveXUI, the ingress and the
@@ -84,6 +84,10 @@ After creating your own administrator in Oathweave, run `./hive.sh admin-access 
 Choose the account and review its products; Hive uses sudo to set up separate product identities
 and access grants. See [administrator product access](deployment/QUICKSTART.md#administrator-product-access).
 
+With Magnus and its host agent enrolled, `./hive.sh ardent setup` creates an Ardent assistant
+through Magnus, with its own HiveMem identity and your OpenAI-compatible model endpoint; see
+[create an Ardent assistant](deployment/QUICKSTART.md#create-an-ardent-assistant).
+
 See the [deployment guide](deployment/README.md) for fresh setup, the [full profile](deployment/FULL.md),
 [distributed](deployment/DISTRIBUTED.md) and [custom](deployment/CUSTOM.md) placements, existing
 installations ([`hive.sh migrate-native`](deployment/MIGRATE_NATIVE.md)) and native agents. Suite
@@ -132,24 +136,29 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
 ## Upgrading
 
 A suite installation upgrades to a newer signed release with `./hive.sh upgrade --config FILE
---release X.Y.Z`; the launcher selects its verified controller. The installer takes a verified
-backup and rehearses data changes on a copy before activation. Moving from 2.x to 3.x with existing
-PostgreSQL stores requires `--allow-migrations`, and so does moving an installation with Emberpath
-or HiveSkills from a release before 3.4.0, one with Embermend from a release before 3.6.0, and one
-that runs Magnus from a release before 3.8.0. Code-only rollback across the 3.0.0 PostgreSQL
-collation change is refused; recovery uses the original-state backup and write reconciliation. An
-installation that runs Magnus moves to 3.9.0 or later, which pin Magnus 3 (node keys only), from
-3.8.1 only, after every Magnus node has its key. Each upgrade keeps a backup and a restored
-rehearsal: `./hive.sh backups list|prune` reviews and removes old pairs, from 3.9.4
-`./hive.sh backups schedule enable|disable|status` prunes them daily on a single-host installation,
-from 3.9.5 only the newest rehearsal keeps its full restored copy
-(see [retention](deployment/BACKUPS.md#retention)). From 3.9.6, which pins Magnus 3.1.0, backups
-include the Ardent profiles of the Magnus agent the Hive installer created
-(see [native profiles](deployment/BACKUPS.md#magnus-managed-native-profiles)).
-See [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade),
-[deployment/README.md](deployment/README.md) and [UPGRADING.md](UPGRADING.md). Existing native
-installations move onto the suite with [`hive.sh migrate-native`](deployment/MIGRATE_NATIVE.md);
-never run fresh-install initialization over their data.
+--release X.Y.Z` (or `--release latest`); the launcher selects its verified controller. The
+upgrade takes a verified backup and rehearses data changes on a copy before activation, then
+`./hive.sh post-upgrade` finishes the steps that follow it, such as Magnus host agents and
+HiveXUI browser clients.
+
+- **Migration approval.** `--allow-migrations` is needed when the rehearsal finds pending product
+  data changes: from 2.x to 3.x with existing PostgreSQL stores, and when an installation with
+  Emberpath or HiveSkills comes from before 3.4.0, one with Embermend from before 3.6.0, or one
+  that runs Magnus from before 3.8.0. Code-only rollback across the 3.0.0 PostgreSQL collation
+  change is refused; recovery uses the original-state backup and write reconciliation.
+- **Magnus node keys.** Releases from 3.9.0 pin Magnus 3, which accepts node keys only. An
+  installation that runs Magnus reaches them from 3.8.1, after every Magnus node has its key.
+- **Backups and rehearsals.** Each upgrade keeps a backup and a restore rehearsal. `./hive.sh
+  backups list|prune` reviews and removes old pairs, `./hive.sh backups schedule enable` prunes
+  them daily on a single-host installation, and only the newest passed rehearsal keeps its full
+  restored copy (see [retention](deployment/BACKUPS.md#retention)). Backups include the Ardent
+  profiles of the installer's Magnus host agent
+  (see [native profiles](deployment/BACKUPS.md#magnus-managed-native-profiles)).
+
+See [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade) and the per-release notes in
+[UPGRADING.md](UPGRADING.md). Existing native installations move onto the suite with
+[`hive.sh migrate-native`](deployment/MIGRATE_NATIVE.md); never run fresh-install initialization
+over their data.
 
 ## License
 

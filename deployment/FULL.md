@@ -690,6 +690,11 @@ any fleet host, with `--ssh-config FILE` and `--sudo-password-file FILE` as that
 
 #### Node keys
 
+**Current releases.** Every suite release from 3.9.0 pins Magnus 3, which accepts node keys only:
+a new agent, or an existing agent without a key, is enrolled with a one-time token; an agent with
+a key keeps it; no fleet-wide node secret is generated or written. The rest of this section also
+describes releases that pin Magnus 2.10.x, for installations still upgrading from them.
+
 Magnus releases with per-node credentials (Magnus's `docs/NODE_CREDENTIALS.md`) give each agent
 its own Ed25519 key instead of relying on the fleet-wide `NODE_MANAGER_SECRET` alone. The
 installer asks the running Magnus whether it has them: Magnus serves

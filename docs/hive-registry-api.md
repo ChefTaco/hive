@@ -18,7 +18,7 @@ long-lived shared secrets for operators and services. Do not put them in browser
 
 ## Field exposure
 
-Public responses carry no more than the kind of information the console's `runtime.json`
+Public responses carry no more than the kind of information HiveXUI's `runtime.json`
 already publishes: product names, same-origin paths and public links.
 
 | Public | Needs a credential |
@@ -41,12 +41,13 @@ Every response is JSON with `Cache-Control: no-store`. Paths are native; add the
 
 | Request | Returns |
 | --- | --- |
+| `GET /health/live` | `{"status":"live"}`. Not served by the ingress |
 | `GET /health/ready` | `{"status":"ready","readOnly":false}` |
 | `GET /v1/installation` | Installation summary, with the [setup checklist](#setup-checklist) once one is recorded |
 | `GET /v1/products` | Catalog. `?installed=true` or `?installed=false` filters it |
 | `GET /v1/products/{id}` | One product |
 | `GET /v1/products/{id}/connection` | Console path, browser prefix, native API URLs, documentation and [capabilities](#capabilities); with a credential also the inventory host and internal endpoints |
-| `GET /v1/history?after=N&limit=M` | Append-only change history. Credential required; not served by the ingress |
+| `GET /v1/history?after=N&limit=M` | Append-only change history entries after sequence `N` (default 0), at most `M` entries (1 to 1000, default 200). Credential required; not served by the ingress |
 
 ```json
 {

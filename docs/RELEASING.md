@@ -114,7 +114,12 @@ openssl pkey -pubin -in trust/publisher.pub -outform DER | sha256sum
 A rotated key is published as a new `trust/publisher.pub` in a new release. Older manifests remain
 verifiable with the key in their own tag.
 
-## First Embermend datastore registration recovery
+## Datastore profile history
+
+These records explain why older releases pin the datastore images they do. They do not change
+the steps above.
+
+### First Embermend datastore registration recovery
 
 Suite 3.2.0 can initialize a newly selected Embermend PostgreSQL store before
 recording its storage format. Later configuration changes correctly refuse that
