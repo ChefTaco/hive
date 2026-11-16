@@ -27,7 +27,7 @@ add their own schema changes.
 Changes people will notice:
 
 - **Sign-in.** The native consoles used host (PAM) accounts. Containers have no PAM, so the
-  console signs in through Oathweave. See [First sign-in](#first-sign-in).
+  UI, HiveXUI, signs in through Oathweave. See [First sign-in](#first-sign-in).
 - **Old console sessions** end. Agents and machine clients are not affected.
 - **Direct Redis and Qdrant access** ends: the suite's stores are private. Anything reaching
   native port 6333 sees the stopped native store.
@@ -66,7 +66,7 @@ One owner-only JSON file per installation. Paths and names below are placeholder
 
 ```json
 {
-  "schema": 1, "installation": "primary", "release": "1.0.0", "profile": "custom",
+  "schema": 1, "installation": "primary", "release": "X.Y.Z", "profile": "custom",
   "origin": "https://hive.example.com",
   "hosts": { "control": { "target": "deploy@hive.example.com", "directory": "/opt/hive-suite",
                           "sudoPasswordFile": "/secure/primary-sudo-password" } },
@@ -92,6 +92,8 @@ One owner-only JSON file per installation. Paths and names below are placeholder
 }
 ```
 
+- `release` is the exact suite release you migrate onto, such as the version `--release latest`
+  reports.
 - `sudoPasswordFile`, on the controller, and `imageRegistry.passwordFile`, on the host, must be
   owner-only. Neither value ever reaches a command line. The image credential is removed from the
   host when `prepare` finishes.
@@ -221,7 +223,7 @@ in the suite: the Emberpath image has no `pamtester`, and the accounts are now O
 the native Router has an Oathweave client (`HIVE_ROUTER_IAM_CLIENT_ID` and its secret), `prepare`
 sets `HIVE_ROUTER_AUTH_MODE=iam-oidc`, and `hive.sh upgrade` does the same for an installation
 migrated earlier. Emberpath's own password sign-in then goes through Oathweave, and its `check`
-passes. Console access does not depend on it: the console signs in through Oathweave and calls
+passes. UI access does not depend on it: HiveXUI signs in through Oathweave and calls
 Emberpath with Oathweave tokens, which Emberpath accepts in either mode.
 
 ### Memory credential
@@ -281,7 +283,7 @@ owner sets a new password once, per installation, with a one-use token:
    `hive-set-admin-password FILE` (or `--token-file FILE`). Neither secret can be given as an argument. They leave the script only on
    standard input of the request to the identity service, so they appear in no command line,
    environment, log or history.
-3. Sign in to the console at the installation's origin, then delete the token file.
+3. Sign in to HiveXUI at the installation's origin, then delete the token file.
 
 The identity service enforces the rest. The password policy and history apply; a refused password
 leaves the token unused. The route allows ten attempts per address in five minutes. A used,
@@ -292,7 +294,7 @@ a secret. No other account changes.
 **MFA is left exactly as it is.** The reset does not disable or enrol anything, so an account with
 MFA still needs its second factor. Enrol a passkey under Account security after first sign-in.
 
-A console section works only when the account has a reviewed link and a grant for that product;
+A HiveXUI section works only when the account has a reviewed link and a grant for that product;
 otherwise that section reports it needs a link. `plan` lists what is missing.
 
 ## Rehearsing

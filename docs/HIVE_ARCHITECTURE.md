@@ -23,9 +23,10 @@ what to install, and the few images the suite builds for itself.
 
 `hive.sh` and `scripts/suite/*` are the controller. It runs with Bash, jq, openssl and Docker
 Compose; the controller host needs no Node.js. One command set covers the whole lifecycle: `init`,
-`plan`, `install`, `status`, `doctor`, `upgrade`, `rollback`, `backup`, `rehearse`, `restore`,
-`adopt` and `migrate-native`, plus focused commands such as `tls-refresh`, `registry` and
-`magnus-agent`.
+`plan`, `install`, `status`, `doctor`, `upgrade`, `post-upgrade`, `rollback`, `backup`, `backups`,
+`rehearse`, `restore`, `adopt` and `migrate-native`, plus focused commands such as `setup`,
+`admin-access`, `magnus-agent`, `ardent`, `console-clients`, `tls-refresh` and `registry`.
+`./hive.sh --help` describes each one.
 
 - **Installation file.** Interactive setup writes a protected installation JSON (see
   `examples/installation.schema.json`). The same file drives unattended commands. It names the
@@ -41,7 +42,12 @@ Compose; the controller host needs no Node.js. One command set covers the whole 
 - **Backups and rehearsals.** Backups are host-bound archives: online by default, or stopped. An
   upgrade takes a verified backup and rehearses data changes on an isolated copy before it
   activates anything. `rehearse` restores an archive into an isolated copy without touching the
-  live installation.
+  live installation. Retention (`backups list|prune`, optionally a daily `backups schedule`)
+  removes old backup and rehearsal pairs together, and only the newest passed rehearsals keep
+  their full restored copy; see [retention](../deployment/BACKUPS.md#retention).
+- **Setup checklist.** Install and upgrade record the steps that still need a person in the
+  Registry; `status`, `post-upgrade`, `setup done|skip` and HiveXUI read and settle them. See
+  [the setup checklist](../deployment/FULL.md#setup-checklist).
 - **Separate installations.** Independent installations never share databases, accounts,
   credentials, the Registry or recovery files.
 
@@ -80,11 +86,12 @@ pins it by digest:
 | ChatterMost | Mattermost-compatible team chat for people and agents |
 | Emberfold | Context engine HTTP service |
 | Ardent Project Studio | Team projects for Ardent agents |
+| Embermend | Optional security assessment and authorized remediation through Magnus |
 
 The `core` profile installs Oathweave, Emberpath, HiveMem, HiveSkills, HiveXUI, the ingress and
 the Registry with their private Redis and Qdrant stores. The `full` profile adds Magnus,
-Cindertrace, ChatterMost (each with its own PostgreSQL) and Emberfold. Optional components, such
-as the Magnus web terminal gateway and Ardent Project Studio, are never selected by a profile.
+Cindertrace, ChatterMost (each with its own PostgreSQL) and Emberfold. Optional components, the
+Magnus web terminal gateway, Ardent Project Studio and Embermend, are never selected by a profile.
 Inference is external: no model or inference image belongs in a release.
 
 HiveXUI is the only UI of the suite. It is a static application served next to the ingress on
@@ -118,8 +125,28 @@ HiveXUI and the product APIs, and native paths and ports to the products their c
 stripping credentials a route must not forward. A [native migration](../deployment/MIGRATE_NATIVE.md)
 keeps every former native port and certificate on the ingress, so existing clients keep their URLs.
 
+## Administrators
+
+The initial operator created at install stays for recovery. `admin-access setup` gives an
+existing active Oathweave administrator the Suite Administrator role and separate product
+identities and grants, using sudo on the hosts, and keeps a protected receipt that backups
+include. See [administrator product access](../deployment/QUICKSTART.md#administrator-product-access).
+
 ## Native agents and hosts
 
 Magnus host agents, Hermes and Ardent profiles, and native clients run on hosts outside Compose.
-The controller enrolls them with explicit consent: see
-[native agents](../deployment/NATIVE_AGENTS.md) and [native consumers](../deployment/NATIVE_CONSUMERS.md).
+The controller enrolls them with explicit consent:
+
+- `magnus-agent install` installs the release's verified Magnus agent package and binds the
+  agent's own node key with a one-time enrollment token; the Magnus 3 releases pin accept node
+  keys only. On an installer-owned single-host installation, `magnus-agent enroll` then reviews
+  and enables full node capabilities. See
+  [Magnus host agents](../deployment/FULL.md#magnus-host-agents).
+- `ardent setup` creates an Ardent assistant through Magnus (**New Agent**) on the enrolled host
+  agent, with its own HiveMem identity and an external model endpoint. See
+  [create an Ardent assistant](../deployment/FULL.md#create-an-ardent-assistant).
+- Signed native agent artifacts (`agentArtifacts` in a manifest) and native consumers are a
+  controller mechanism that no published release pins yet; see
+  [native agents](../deployment/NATIVE_AGENTS.md) and [native consumers](../deployment/NATIVE_CONSUMERS.md).
+- A legacy scoped Ardent runtime moves to the public package with
+  [a host-local migration](legacy-ardent-migration.md).

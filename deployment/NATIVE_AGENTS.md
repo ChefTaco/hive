@@ -1,5 +1,11 @@
 # Native agent artifacts and acceptance
 
+> **Status.** No published suite release pins native agent artifacts (`agentArtifacts`), so the
+> installer skips the native runtime question. This guide describes the controller mechanism and
+> the developer drills (`npm run test:suite:agents`). On a real installation, install the Magnus
+> host agent with [`magnus-agent install`](FULL.md#magnus-host-agents) and create an Ardent
+> assistant through Magnus with [`ardent setup`](FULL.md#create-an-ardent-assistant).
+
 Hive stages selected native agents through their existing unprivileged account.
 Agent versions are independent of the suite version. The signed release matrix
 selects an exact HTTPS archive URL, SHA-256, architecture, launcher and literal

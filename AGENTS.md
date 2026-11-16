@@ -1,5 +1,10 @@
 # Agent Instructions
 
+This repository is the **Hive suite controller**: `hive.sh` installs and manages the Hive:Magnus
+products (Oathweave, Emberpath, HiveMem, HiveSkills, HiveXUI, Magnus and the others) from signed
+release manifests. It holds no product code; each product lives in its own repository and is
+pinned here by image digest. See [docs/HIVE_ARCHITECTURE.md](docs/HIVE_ARCHITECTURE.md).
+
 These instructions apply to AI coding agents (Claude Code, Codex, Copilot and others) and to human
 contributors. This is a **public repository**: everything committed, including commit messages, is
 published.
@@ -43,9 +48,12 @@ Run `npm run hooks:install` once per clone (`npm run bootstrap` does it for you)
 
 | Hook | Checks |
 |---|---|
-| `pre-commit` | `scripts/check-private-data.sh --staged` (forbidden files and private terms) and `scripts/scan-secrets.sh` |
+| `pre-commit` | `scripts/check-private-data.sh --staged` (forbidden files and private terms), `scripts/scan-secrets.sh` and `scripts/gitleaks.sh --staged` |
 | `commit-msg` | private terms in the commit message |
-| `pre-push` | all tracked files, plus the messages of every outgoing commit |
+| `pre-push` | private data in all tracked files, Gitleaks over every outgoing commit range, and private terms in their messages |
+
+The Gitleaks hooks need the pinned CLI: `bash scripts/install-gitleaks.sh` (see
+[CONTRIBUTING.md](CONTRIBUTING.md#secret-scanning)). A missing binary fails the hook.
 
 Private terms come from an optional, gitignored `.private-terms` file in the repository root. It
 holds one case-insensitive extended regex per line, such as personal hostnames, private domains, or
@@ -68,7 +76,9 @@ change.
 | `deployment/` | The ingress and datastore images, the Caddyfile, `images.json`, and the deployment guides |
 | `services/hive-registry` | Hive Registry: the mandatory install catalog and lookup API of one installation, written by `hive.sh`. Not the Skills registry |
 | `examples/` | Installation JSON example and schemas |
-| `docs/` | Architecture, release process, Registry API and runbooks |
+| `docs/` | Architecture, release process, Registry API and runbooks; `docs/acceptance/` holds dated release evidence (JSON) |
+| `.github/workflows/` | `hive-ci.yml` (gates on Node 24 and 26), `recovery.yml` (backup and restore acceptance, see [docs/ci-recovery.md](docs/ci-recovery.md)), `suite-release.yml` (suite images and tagged releases), `gitleaks.yml` |
+| `README.md`, `UPGRADING.md`, `CHANGELOG.md` | Install overview, per-release upgrade notes (newest first) and the change log |
 
 The products (Oathweave, Emberpath, HiveMem, HiveSkills, HiveXUI, Magnus and the others) live in
 their own repositories. The retired npm 1.x packages remain at the `v1.2.2` tag. Install the
@@ -81,7 +91,9 @@ Registry's dependencies and the git hooks with `npm run bootstrap`.
 - Add or update tests with every behaviour change. Security-relevant fixes need a regression test.
 - Changing a file listed in `hive_runtime_files` (`scripts/suite/controller.sh`) changes the
   controller digest that the next signed release pins.
-- Note user-facing changes in `CHANGELOG.md`.
+- Note user-facing changes in `CHANGELOG.md`, and upgrade steps in a new `UPGRADING.md` section.
+- Signed release files (`releases/X.Y.Z.json`, `.json.sig`, `.inputs.json`) are immutable once
+  committed. Never edit or reformat them.
 - Use Conventional Commits (`feat:`, `fix(suite):`, `docs:` and so on).
 
 ## Fresh-install end-to-end testing
@@ -109,11 +121,31 @@ Registry's dependencies and the git hooks with `npm run bootstrap`.
 
 ## Gates
 
-Run these before every commit or pull request:
+Use Node.js from `.nvmrc` (`nvm use`; the engines allow `^24.22.3 || ^26.13.1`), Python 3, jq and
+ripgrep. Run these before every commit or pull request:
 
 ```bash
 npm run typecheck
-npm test
+npm test               # also runs check:release-docs (see below)
 npm run scan:secrets
 npm run check:private
 ```
+
+CI also runs `npm run build`, `npm run scripts:check`, `npm run tls:check`,
+`npm run audit:production` and the ingress round trips (`npm run test:suite:ingress`, which needs
+Docker). The `test:suite:*` round trips are slower and need Docker; run the ones your change
+touches.
+
+## Releases and known gotchas
+
+- A suite release is a signed manifest, built and checked as [docs/RELEASING.md](docs/RELEASING.md)
+  describes. Signing happens offline with the maintainer's key: do not tag, publish images or
+  create releases unless the maintainer asks.
+- `npm run check:release-docs` requires the install examples in `README.md`,
+  `deployment/README.md` and `deployment/QUICKSTART.md` to name the newest release in `releases/`.
+  A release commit updates them.
+- Changing any file in `hive_runtime_files` (including `hive.sh` and the `--help` text in
+  `scripts/suite/controller.sh`) changes the controller digest; the published manifests stay
+  verifiable only from their own tags.
+- The recovery CI job uses the small corpus only for pull requests that change nothing but
+  `README.md` or `CONTRIBUTING.md`; any other change runs the full corpus and takes longer.
