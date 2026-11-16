@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.11.0] - 2026-11-16
+
 ### Added
 
 - Guided `hive.sh admin-access setup` selects an existing administrator and uses sudo to provision
@@ -15,9 +17,20 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Changed
 
-- Clarifies that a new Oathweave administrator also needs the console's Suite Administrator role
-  and any separately reviewed product identity links or scoped grants. Completing the first-admin
-  checklist confirms identity setup, while product authorization remains independently enforced.
+- Pins HiveMem 1.8.0 and ChatterMost 0.7.0, including its matching migrator. Their product-owned
+  administrator provisioning APIs create separate native accounts through the running services
+  and retain durable receipts without issuing credentials or adopting existing identities. All
+  other product pins, datastore and storage recovery profiles, and storage formats stay unchanged
+  from 3.10.0; upgrading from 3.10.0 needs no migration flag.
+- Administrator setup documentation now guides account selection, sudo approval and product
+  access configuration. The command adds the Suite Administrator role and maintains the reviewed
+  product links and scoped grants; users do not edit identity files. Identity setup and product
+  authorization remain separate checklist items, both settled after successful guided setup.
+
+### Fixed
+
+- Administrator provisioning credentials stay out of process arguments while product access is
+  prepared, including retries that reuse retained credentials.
 
 ## [3.10.0] - 2026-11-16
 

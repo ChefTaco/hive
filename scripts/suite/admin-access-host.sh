@@ -160,8 +160,9 @@ case "$mode" in
         if [[ -e "$secret_file" ]]; then private_file "$secret_file" || die 'Unsafe purpose credential'; else openssl rand -hex 32 | atomic_record "$secret_file"; fi
         secret=$(cat "$secret_file")
         [[ "$secret" =~ ^[a-f0-9]{64}$ ]] || die 'Invalid purpose credential'
-        updates=$(jq -c --arg file "$file" --arg secret "$secret" '.+{($file):{HIVE_ADMIN_PROVISIONING_SECRET:$secret}}' <<< "$updates")
-        if [[ "$component" == chattermost ]]; then updates=$(jq -c --arg file "$config/chattermost/runtime.env" --arg secret "$secret" '.+{($file):{HIVE_ADMIN_PROVISIONING_SECRET:$secret}}' <<< "$updates"); fi
+        # Read private bytes by path: a jq argument would expose this credential through argv.
+        updates=$(jq -c --arg file "$file" --rawfile secret "$secret_file" '.+{($file):{HIVE_ADMIN_PROVISIONING_SECRET:($secret|sub("\n+$";""))}}' <<< "$updates")
+        if [[ "$component" == chattermost ]]; then updates=$(jq -c --arg file "$config/chattermost/runtime.env" --rawfile secret "$secret_file" '.+{($file):{HIVE_ADMIN_PROVISIONING_SECRET:($secret|sub("\n+$";""))}}' <<< "$updates"); fi
       else [[ "$secret" =~ ^[a-f0-9]{64}$ ]] || die 'The existing provisioning credential is invalid'; fi
       if [[ -n "${secret_file:-}" ]]; then services=$(jq -c --arg component "$component" '.+[$component]' <<< "$services"); fi
       secret_file=''
