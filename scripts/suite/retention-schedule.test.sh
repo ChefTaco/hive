@@ -256,7 +256,7 @@ grep -q 'Multi-host backup pruning is disabled' "$temporary/after.log" && [[ $(m
 lifecycle() { # OPERATION [FAILING_STEP]
   (
     source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/lifecycle.sh"; source "$ROOT/scripts/suite/retention.sh"; source "$ROOT/scripts/suite/retention-schedule.sh"
-    HIVE_CONFIG=$config HIVE_ARCHIVE=fixture HIVE_PLAN_DIGEST=fixture
+    HIVE_ROOT=$ROOT HIVE_CONFIG=$config HIVE_ARCHIVE=fixture HIVE_PLAN_DIGEST=fixture
     for stub in hive_registry_provision hive_memory_credential_provision hive_audit_collection_provision hive_registry_refresh_ingress hive_doctor hive_stage hive_registry_begin hive_registry_complete hive_checklist_report hive_install_summary hive_initialize hive_render hive_transfer hive_registry_preflight hive_retention_after_upgrade; do eval "$stub() { :; }"; done
     hive_all() { printf '%s\n' "$1" >> "$steps"; [[ "$1" != "$failing" ]]; }
     hive_hold() { hive_die 'held'; }

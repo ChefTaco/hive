@@ -46,7 +46,15 @@ export function assertFullNodeReview(review) {
   assert.deepEqual(review.scheduler.issues, [], 'Scheduler inventory must be complete');
   assert.equal(review.scheduler.activeCount, 0); assert.equal(review.scheduler.unknownCount, 0);
   assert.equal(review.scheduler.managedJobs.length, 0, 'Existing managed schedules need independent review');
-  assert(review.scheduler.blockers.every(source => source.identityVersion === 2 && OS_SOURCES.has(source.kind)),
+  const installer = review.installerSchedulerSources ?? [];
+  assert(Array.isArray(installer) && installer.length <= 1, 'Installer schedule evidence must be bounded');
+  assert(installer.every(source => source.identityVersion === 2 && source.kind === 'LEGACY_OR_UNSUPPORTED_CRONTAB'
+    && /^[a-f0-9]{64}$/.test(source.sourceSha256) && source.count === 1), 'Invalid installer schedule evidence');
+  assert(installer.every(known => review.scheduler.blockers.filter(source => source.identityVersion === 2
+    && source.kind === known.kind && source.sourceSha256 === known.sourceSha256 && source.count === 1).length === 1),
+  'Installer retention schedule changed during discovery');
+  assert(review.scheduler.blockers.every(source => source.identityVersion === 2 && (OS_SOURCES.has(source.kind)
+    || installer.some(known => known.kind === source.kind && known.sourceSha256 === source.sourceSha256 && source.count === 1))),
     'Foreign cron, native schedules or unknown sources require independent review');
   for (const processes of [review.apiProcesses, review.gatewayProcesses]) {
     if (processes === null) continue;
@@ -137,6 +145,7 @@ export async function enrollFullNode(input) {
     assert(stable, 'Scheduler sources keep changing; review again');
     const review = { nodeId: node.id, nodeFqdn: node.hostname, freshInstallation: input.freshInstallation,
       initializerSHA256: input.initializerSHA256, agentRuntime: input.agentRuntime, maintenanceId: input.maintenanceId, owner: input.owner, ardentScopeActive: previousScope.scope.state === 'active',
+      installerSchedulerSources: input.installerSchedulerSources ?? [],
       history, scheduler, apiProcesses: await stableServiceProcesses(apiProcesses), gatewayProcesses: input.gatewayProcesses,
       unsettled: enrollment.commandOwners + enrollment.api.activeCount + enrollment.api.unknownCount
         + enrollment.dashboard.activeCount + enrollment.dashboard.unknownCount + enrollment.schedulerUnsettled
@@ -144,7 +153,7 @@ export async function enrollFullNode(input) {
     assertFullNodeReview(review); const reviewSHA256 = sha(review);
     if (input.mode === 'inspect') return { state: 'review', reviewSHA256, evidence: review,
       capabilities: ['managed Ardent actions', 'node-wide commands', 'managed cron', 'restricted web terminals'],
-      boundary: 'Observed OS maintenance schedules stay outside Magnus management and are left unchanged.' };
+      boundary: 'Observed OS and verified Hive maintenance schedules stay outside Magnus management and are left unchanged.' };
     assert.equal(input.reviewSHA256, reviewSHA256, 'Evidence changed; inspect and approve again');
     const approvalRef = 'hive:full-node:' + reviewSHA256.slice(0, 24);
     const drain = await service.beginEnrollmentDrain(node.id, actor.localUserId);

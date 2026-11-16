@@ -113,6 +113,33 @@ hive_retention_schedule_installed() {
   hive_retention_action "$host" retention-controller "$(hive_retention_input "$hive_retention_default_keep" "$hive_retention_default_keep_days")"
 }
 
+# The full-node review may leave this one installer-owned schedule outside Magnus.
+# A comment alone proves nothing: require every byte of the current controller's
+# configured entry and its installed-controller receipt. The root host collector
+# independently reads the named operator's crontab before attesting its identity.
+hive_retention_schedule_review() (
+  local config time controller log expected current='' installed digest path
+  trap '[[ -z "$current" ]] || rm -f -- "$current"' EXIT
+  config=$(hive_retention_schedule_config) || { printf 'null\n'; exit 0; }
+  time=$(jq -er '.retention.schedule // empty' "$HIVE_CONFIG") || { printf 'null\n'; exit 0; }
+  [[ "$time" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || { printf 'null\n'; exit 0; }
+  controller=$(realpath -e -- "$HIVE_ROOT/hive.sh") || { printf 'null\n'; exit 0; }
+  log=$(hive_retention_schedule_state)/retention-schedule.log
+  for path in "$config" "$controller" "$log"; do
+    [[ "$path" =~ $hive_retention_schedule_path ]] || { printf 'null\n'; exit 0; }
+  done
+  expected=$(hive_retention_schedule_entry "$time" "$controller" "$config" "$log" "$(hive_retention_schedule_search_path)")
+  current=$(mktemp)
+  hive_retention_crontab_read "$current" || { printf 'null\n'; exit 0; }
+  [[ $(hive_retention_crontab_entries "$current" "$config") == "$expected" ]] || { printf 'null\n'; exit 0; }
+  # Even duplicate identical entries are foreign work, not a single known source.
+  [[ $(grep -cxF -- "$expected" "$current") == 1 ]] || { printf 'null\n'; exit 0; }
+  installed=$(hive_retention_schedule_installed) || { printf 'null\n'; exit 0; }
+  digest=$(hive_controller_digest) || { printf 'null\n'; exit 0; }
+  [[ $(jq -r .controllerSourceSHA256 <<< "$installed") == "$digest" ]] || { printf 'null\n'; exit 0; }
+  jq -nc --arg username "$(id -un)" --arg line "$expected" '{username:$username,line:$line}'
+)
+
 # Writes (or rewrites) the installation's line for this controller. TIME and LOG are kept by a
 # rewrite; enable passes the chosen time and the default log.
 hive_retention_schedule_write() { # TIME LOG

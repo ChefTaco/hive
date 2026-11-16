@@ -50,6 +50,11 @@ and, when its listener was selected, the Magnus host agent. Full-node review the
 commands, managed cron and a selected web terminal gateway, while retaining the option to decline
 enrollment or deliberately choose the separate Ardent-only path.
 
+Guided setup records completed certificate renewal and host-agent installation in the setup
+checklist. Creating your personal administrator account remains a separate step. Full-node
+review leaves the installer's verified daily backup-pruning job under the installation operator;
+Magnus does not take control of that job. Other user cron jobs still need independent review.
+
 Every offer can be declined. Existing configuration files and non-interactive commands retain
 explicit prerequisite and certificate management. The following steps describe that manual path
 and remote-host preparation.

@@ -12,6 +12,28 @@ const fresh = () => ({ freshInstallation: true, initializerSHA256: 'a'.repeat(64
 test('reviews fresh full nodes with observed OS maintenance left outside Magnus', () => {
   assert.doesNotThrow(() => assertFullNodeReview(fresh()));
 });
+test('leaves only the independently observed exact installer retention source outside Magnus', () => {
+  const review = fresh();
+  const source = { identityVersion: 2, kind: 'LEGACY_OR_UNSUPPORTED_CRONTAB', sourceSha256: 'c'.repeat(64), count: 1 };
+  review.scheduler.blockers.push(source);
+  assert.throws(() => assertFullNodeReview(review), /Foreign cron/);
+  review.installerSchedulerSources = [{ ...source }];
+  assert.doesNotThrow(() => assertFullNodeReview(review));
+  for (const patch of [
+    r => r.scheduler.blockers[1].count++,
+    r => r.scheduler.blockers[1].identityVersion = 1,
+    r => r.scheduler.blockers[1].sourceSha256 = 'd'.repeat(64),
+    r => r.scheduler.blockers.push({ ...source, sourceSha256: 'e'.repeat(64) }),
+    r => r.scheduler.blockers.push({ ...source }),
+    r => r.scheduler.blockers.pop(),
+    r => r.installerSchedulerSources[0].count++,
+    r => r.installerSchedulerSources[0].kind = 'NATIVE_HERMES_SCHEDULES',
+    r => r.installerSchedulerSources.push({ ...source }),
+  ]) {
+    const unsafe = structuredClone(review); patch(unsafe);
+    assert.throws(() => assertFullNodeReview(unsafe));
+  }
+});
 test('reviews both released Node main-thread names for the API and gateway without allowing other descendants', () => {
   for (const apiName of ['MainThread', 'node-MainThread']) {
     for (const gatewayName of ['MainThread', 'node-MainThread']) {

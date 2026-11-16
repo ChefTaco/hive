@@ -6,6 +6,20 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Fixed
+
+- Full-node enrollment recognizes the exact daily retention entry written by the installation's
+  current controller, after an independent privileged crontab read. The entry stays outside Magnus
+  management and remains in the review evidence; edited entries, duplicates and foreign schedules
+  still require independent review.
+
+- Guided setup now records successful HTTPS renewal scheduling and Magnus host-agent installation
+  in the setup checklist immediately, including when a later capability review fails. Declined
+  or failed preparation stays pending, and creating a personal administrator remains a separate
+  step. An unavailable checklist reports how to retry without undoing completed preparation.
+- Guided host-agent installation and enrollment retain the exact selected release, manifest,
+  signature and trust key throughout their child commands.
+
 ## [3.9.7] - 2026-11-15
 
 ### Changed

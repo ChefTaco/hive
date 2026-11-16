@@ -670,6 +670,20 @@ gateway_processes() {
   die 'Gateway processes did not settle; pause unrelated work and retry the enrollment review'
 }
 
+# Attest only the controller's exact retention entry after a separate privileged
+# read. The agent inventory independently hashes all users' entries and counts
+# duplicates, so an extra copy or any other cron entry still blocks enrollment.
+retention_schedule_proof() {
+  local username line current digest
+  jq -e '.retentionSchedule!=null' <<< "$request" >/dev/null || { printf '[]\n'; return; }
+  username=$(jq -er '.retentionSchedule.username|select(type=="string" and test("^[a-z_][a-z0-9_-]*[$]?$"))' <<< "$request") || die 'Invalid retention schedule owner'
+  line=$(jq -er '.retentionSchedule.line|select(type=="string" and length>0 and length<=8192 and (test("[\\r\\n]")|not))' <<< "$request") || die 'Invalid retention schedule entry'
+  current=$(crontab -u "$username" -l) || die 'The installer retention crontab could not be reviewed'
+  [[ $(grep -cxF -- "$line" <<< "$current") == 1 ]] || die 'The installer retention schedule changed; review it again'
+  digest=$(printf 'magnus.scheduler-content.v2\0%s' "$line" | sha256sum | cut -d ' ' -f1)
+  jq -nc --arg sha "$digest" '[{identityVersion:2,kind:"LEGACY_OR_UNSUPPORTED_CRONTAB",sourceSha256:$sha,count:1}]'
+}
+
 ardent_review() {
   need_root
   local owner uid home native_home profiles processes gateway=null config code mode proof initializer container maintenance=""
@@ -703,6 +717,9 @@ ardent_review() {
   proof=$(jq -c --arg id "$maintenance" --arg version "$(installed_version)" \
     --arg supervisor "$(get "$root/.env" MAGNUS_EXECUTION_SUPERVISOR_ENABLED)" --arg terminal "$(get "$root/.env" MAGNUS_AGENT_MANAGED_TERMINAL_USER)" \
     '.maintenanceId=$id | .agentRuntime={version:$version,supervisor:($supervisor=="true"),terminalUser:$terminal}' <<< "$proof")
+  if [[ "$mode" == inspect || "$mode" == apply ]]; then
+    proof=$(jq -c --argjson sources "$(retention_schedule_proof)" '.installerSchedulerSources=$sources' <<< "$proof")
+  fi
   # Node keys only: the review signs its requests to the agent with the server key (node-enrollment.mjs).
   if [[ "$keys_only" == true ]]; then proof=$(jq -c '.nodeKeysOnly=true' <<< "$proof"); fi
   code=$(jq -er .reviewScript <<< "$request")

@@ -143,6 +143,7 @@ hive_magnus_agent_enroll() (
   local request=$1 review status runtime_ready=false terminal_user wanted
   [[ "$HIVE_AGENT_HOST" == "$HIVE_MAGNUS_HOST" && "$HIVE_AGENT_ON_CONSOLE" == true ]] || hive_die 'Installer enrollment requires its single-host node; use Magnus independent review for other nodes'
   jq -e '.bootstrap!=null and (.hosts|length)==1' "$HIVE_CONFIG" >/dev/null || hive_die 'Installer-owned single-host configuration required'
+  request=$(jq -c --argjson retention "$(hive_retention_schedule_review)" '.retentionSchedule=$retention' <<< "$request")
   status=$(hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$(jq -c '.mode="status"' <<< "$request")" true)
   wanted=$(hive_magnus_agent_release | jq -er .version)
   terminal_user=$(jq -r '.bootstrap.magnusGateway.sshUsername // ""' "$HIVE_CONFIG")
@@ -166,7 +167,7 @@ hive_magnus_agent_enroll() (
   hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$request" true >/dev/null || hive_die 'Full-node discovery is incomplete; enrollment remains held'
   review=$(hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$request" true) || hive_die 'Full-node evidence is incomplete; enrollment remains held'
   jq . <<< "$review"
-  hive_magnus_agent_confirm "${HIVE_CONFIRMED:-false}" 'Approve this exact full-node review? Magnus commands, managed cron and restricted web terminals will be enabled; observed OS maintenance schedules remain outside Magnus.' || hive_die 'Full-node review was not approved'
+  hive_magnus_agent_confirm "${HIVE_CONFIRMED:-false}" 'Approve this exact full-node review? Magnus commands, managed cron and restricted web terminals will be enabled; observed OS and verified Hive maintenance schedules remain outside Magnus.' || hive_die 'Full-node review was not approved'
   request=$(jq -c --arg sha "$(jq -er .reviewSHA256 <<< "$review")" '.mode="apply" | .reviewSHA256=$sha' <<< "$request")
   hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$request" true || hive_die 'Enrollment held; retain evidence and retry after resolving the reported blocker'
   hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-ardent-review "$(jq -c '.mode="release"' <<< "$request")" true || hive_die 'Enrollment completed but admission remains held; rerun enrollment to recover'

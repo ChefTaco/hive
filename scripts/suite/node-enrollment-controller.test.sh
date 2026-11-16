@@ -9,6 +9,7 @@ printf '{"bootstrap":{},"hosts":{"control":{"target":"local"}}}\n' > "$HIVE_CONF
 HIVE_AGENT_HOST=control HIVE_MAGNUS_HOST=control HIVE_AGENT_ON_CONSOLE=true
 state=draining fail_inspect=false fail_apply=false fail_terminal_preflight=false fixture_runtime_ready=true
 hive_magnus_agent_release() { printf '{"version":"9.9.9"}\n'; }
+hive_retention_schedule_review() { printf 'null\n'; }
 hive_magnus_agent_enrollment_runtime() { printf 'agent-install\n' >> "$temporary/calls"; fixture_runtime_ready=true; }
 hive_magnus_agent_action() {
   if [[ "$2" == magnus-agent-terminal-preflight ]]; then
@@ -101,3 +102,55 @@ if gateway_processes example-gateway > "$temporary/gateway-snapshot" 2> "$tempor
 [[ ! -s "$temporary/gateway-snapshot" ]]
 grep -q 'pause unrelated work and retry' "$temporary/gateway-refused"
 printf 'Passed: gateway process inventory waits for two identical read-only snapshots, and refuses persistent extra processes within a bounded window.\n'
+
+# Build the cron entry with the actual installer formatter, then exercise both
+# independent observations. These fixtures never read or change a real crontab.
+(
+  source "$HIVE_ROOT/scripts/suite/retention-schedule.sh"
+  source <(sed -n '/^retention_schedule_proof() {$/,/^}$/p' "$HIVE_ROOT/scripts/suite/magnus-agent-host.sh")
+  die() { printf '%s\n' "$*" >&2; exit 1; }
+  HIVE_CONFIG="$temporary/retention-installation.json"
+  XDG_STATE_HOME="$temporary/state"
+  printf '{"installation":"example-suite","retention":{"schedule":"03:40"}}\n' > "$HIVE_CONFIG"
+  fixture_controller_sha=$(printf 'a%.0s' {1..64})
+  fixture_installed_sha=$fixture_controller_sha
+  hive_controller_digest() { printf '%s\n' "$fixture_controller_sha"; }
+  hive_retention_schedule_installed() { jq -nc --arg sha "$fixture_installed_sha" '{controllerSourceSHA256:$sha}'; }
+  id() { [[ "$*" == -un ]] && printf 'deploy\n'; }
+  hive_retention_crontab_read() { cp -- "$temporary/retention-crontab" "$1"; }
+  crontab() { [[ "$*" == '-u deploy -l' ]] || return 1; cat -- "$temporary/retention-crontab"; }
+  expected=$(hive_retention_schedule_entry 03:40 "$(realpath -e -- "$HIVE_ROOT/hive.sh")" "$HIVE_CONFIG" \
+    "$(hive_retention_schedule_state)/retention-schedule.log" "$(hive_retention_schedule_search_path)")
+  printf '%s\n' "$expected" > "$temporary/retention-crontab"
+  request=$(jq -nc --argjson proof "$(hive_retention_schedule_review)" '{retentionSchedule:$proof}')
+  jq -e '.retentionSchedule.username=="deploy"' <<< "$request" >/dev/null
+  retention_schedule_proof > "$temporary/retention-source"
+  # Use Node's content-digest implementation independently of the shell hasher.
+  printf '%s' "$expected" | node --input-type=module -e '
+    import {createHash} from "node:crypto"; import {readFileSync} from "node:fs";
+    const source=JSON.parse(readFileSync(process.argv[1],"utf8"));
+    const digest=createHash("sha256").update("magnus.scheduler-content.v2\0").update(readFileSync(0)).digest("hex");
+    if(source.length!==1||source[0].identityVersion!==2||source[0].sourceSha256!==digest||source[0].count!==1) process.exit(1);
+  ' "$temporary/retention-source"
+  for edit in command controller time config path log marker; do
+    case "$edit" in
+      command) edited=${expected/ backups schedule run / backups prune --apply };;
+      controller) edited=${expected/\/hive.sh /\/other.sh };;
+      time) edited="41${expected#40}";;
+      config) edited=${expected/--config "$HIVE_CONFIG"/--config /opt/other.json};;
+      path) edited=${expected/PATH=/PATH=/opt/foreign:};;
+      log) edited=${expected/retention-schedule.log/other.log};;
+      marker) edited="0 0 * * * /bin/false # hive-retention-schedule config=$HIVE_CONFIG";;
+    esac
+    printf '%s\n' "$edited" > "$temporary/retention-crontab"
+    [[ $(hive_retention_schedule_review) == null ]]
+    if (retention_schedule_proof) > /dev/null 2>&1; then exit 1; fi
+  done
+  printf '%s\n%s\n' "$expected" "$expected" > "$temporary/retention-crontab"
+  [[ $(hive_retention_schedule_review) == null ]]
+  if (retention_schedule_proof) > /dev/null 2>&1; then exit 1; fi
+  printf '%s\n' "$expected" > "$temporary/retention-crontab"
+  fixture_installed_sha=$(printf 'b%.0s' {1..64})
+  [[ $(hive_retention_schedule_review) == null ]]
+)
+printf 'Passed: exact installed-controller retention cron provenance, independent root read, edited fields, forged marker, duplicates and changed receipt refusals.\n'

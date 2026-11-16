@@ -103,17 +103,35 @@ hive_setup_terminal() {
   fi
 }
 
+# Record a preparation step only after its helper succeeds. The initial registry
+# sync precedes these offers, so leaving that checklist untouched asks a person
+# to repeat work the guided installer just completed.
+hive_setup_record_done() {
+  local recorded
+  hive_checklist_supported || return 0
+  if ! recorded=$(hive_checklist_recorded) || ! hive_checklist_settle "$recorded" "$1" done; then
+    printf 'Hive: setup completed %s, but its checklist could not be updated. Run ./hive.sh post-upgrade to check and record it.\n' "$1" >&2
+  fi
+}
+
 hive_setup_finish() {
   [[ ${HIVE_GUIDED_SETUP:-false} == true && ${HIVE_SETUP_LOCAL:-no} == yes ]] || return 0
+  local -a release_arguments=(--release "$HIVE_VERSION" --manifest "$HIVE_MANIFEST" --signature "$HIVE_SIGNATURE" --trust-key "$HIVE_TRUST_KEY")
   if [[ ${HIVE_SETUP_TAILSCALE:-false} == true ]] && hive_setup_ask 'Keep the HTTPS certificate current with a weekly renewal timer?'; then
     hive_setup_sudo bash "$HIVE_ROOT/scripts/console-certificate.sh" schedule --config "$HIVE_CONFIG"
+    hive_setup_record_done certificate-renewal
   fi
   if jq -e '.components.magnus!=null and any(.console.nativeListeners[]?; .component=="magnus")' "$HIVE_CONFIG" >/dev/null &&
       hive_setup_ask 'Install the Magnus host agent here, so this machine can run agents?'; then
-    bash "$HIVE_ROOT/hive.sh" magnus-agent install --config "$HIVE_CONFIG" --install-node --trust --yes
+    bash "$HIVE_ROOT/hive.sh" magnus-agent install --config "$HIVE_CONFIG" "${release_arguments[@]}" --install-node --trust --yes
+    hive_setup_record_done magnus-agent-enrolled
     if hive_setup_ask 'Review this host for full Magnus capabilities: commands, cron and web terminals?'; then
-      bash "$HIVE_ROOT/hive.sh" magnus-agent enroll --config "$HIVE_CONFIG"
+      bash "$HIVE_ROOT/hive.sh" magnus-agent enroll --config "$HIVE_CONFIG" "${release_arguments[@]}"
     fi
+  fi
+  local recorded
+  if hive_checklist_supported && recorded=$(hive_checklist_recorded); then
+    hive_checklist_print_pending "$recorded"
   fi
 }
 
