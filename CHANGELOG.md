@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Changed
+
+- Clarifies that a new Oathweave administrator also needs the console's Suite Administrator role
+  and any separately reviewed product identity links or scoped grants. Completing the first-admin
+  checklist confirms identity setup, while product authorization remains independently enforced.
+
 ## [3.10.0] - 2026-11-16
 
 ### Changed

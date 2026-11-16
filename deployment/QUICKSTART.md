@@ -208,6 +208,16 @@ Then create your own administrator account and use it from then on, keeping the 
 for recovery. HiveXUI's setup checklist confirms this item once such an account exists; record it
 with `./hive.sh setup done first-admin`.
 
+Creating an Oathweave administrator completes identity setup. Assign **Suite Administrator** for
+the console's product permissions, then sign out and back in. Product access can also require a
+separately reviewed identity link or scoped grant: see [Magnus authentication](https://github.com/ChefTaco/magnus/blob/main/docs/console-api.md#authentication),
+[Embermend permissions](https://github.com/ChefTaco/Embermend/blob/main/docs/OPERATIONS.md#starting-permissions)
+and [ChatterMost account links](https://github.com/ChefTaco/ChatterMost/blob/main/docs/oathweave.md#oathweave-sign-in-for-hivexui).
+Keep the initial operator available for product administration until the installation owner has
+configured those grants. The first-admin checklist checks for another active administrator; it
+does not confirm access to every product. Do not copy the initial operator's product identity to
+another person or edit installer-managed files to bypass their integrity checks.
+
 ## 7. Back up
 
 ```bash
