@@ -21,9 +21,15 @@ All notable changes to this project are documented in this file. The format is b
   client in Oathweave. Every step is journaled beside the installation file and on the host;
   repeating the command continues an interrupted add. See `deployment/FULL.md`, "Adding a product
   to an existing installation".
-- `cindertrace-collector add` accepts the `magnus_ui` source (Magnus UI audit read from Loki), and
-  `deployment/FULL.md` describes running Cindertrace's collector beside Cindertrace to read a
-  separate logging host's Loki.
+- `cindertrace-collector add` accepts the `magnus_ui` source (Magnus UI audit read from Loki).
+- Cindertrace's collector can run inside the installation as the optional component
+  `cindertrace-collector` (the pinned Cindertrace image's `security-collector`), for sources outside
+  the installation such as a logging host's Loki. `cindertrace-collector add ID --sources ... --run`
+  writes its owner-only environment from the generated settings, its credential and the source
+  settings in `ID.sources.env` beside the credential (source settings only), and
+  `hive.sh add cindertrace-collector` starts it. Lifecycle commands stop, back up and recreate it
+  like any other component; rehearsals never start it. Releases built from now on offer the
+  component; no profile selects it. See `deployment/FULL.md`, "Events from a separate logging host".
 
 ### Changed
 
@@ -37,6 +43,11 @@ All notable changes to this project are documented in this file. The format is b
   credential follows: HiveMem's service links, Emberpath's credential record and a still-valid
   static fallback token are moved to `emberpath`, and the rename is recorded so a later credential
   step never links the old principal. See `UPGRADING.md`.
+
+### Fixed
+
+- `deployment/REHEARSALS.md` no longer describes the retired standalone Cindertrace console's
+  Oathweave configuration; it describes HiveXUI's Oathweave and recovery sign-in for Cindertrace.
 
 ## [3.11.2] - 2026-11-17
 

@@ -301,6 +301,25 @@
       }
     }
   },
+  "cindertrace-collector": {
+    "displayName": "Cindertrace collector",
+    "description": "Reads security sources outside the installation, such as a logging host's Loki, and sends signed batches to Cindertrace.",
+    "repository": "https://github.com/ChefTaco/cindertrace",
+    "documentation": "https://github.com/ChefTaco/cindertrace/blob/HEAD/README.md",
+    "license": "https://github.com/ChefTaco/cindertrace/blob/HEAD/LICENSE",
+    "licenseSpdx": "Apache-2.0",
+    "consoleSection": null,
+    "required": false,
+    "dependencies": [
+      "cindertrace"
+    ],
+    "connection": {
+      "browserPrefix": null,
+      "consolePath": null,
+      "nativeApis": {},
+      "internalEndpoints": {}
+    }
+  },
   "cindertrace-postgres": {
     "displayName": "Cindertrace PostgreSQL",
     "description": "Private PostgreSQL datastore for Cindertrace.",

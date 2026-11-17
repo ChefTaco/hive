@@ -313,6 +313,22 @@ export function addFullComponents(manifest, { images, user }) {
       initialization,
     };
   }
+  // Cindertrace's own collector, from the same image, as an opt-in component: it reads sources
+  // outside the installation (such as a logging host's Loki) and sends signed batches to the
+  // Cindertrace API inside it. No profile selects it; hive.sh add cindertrace-collector does.
+  // It serves nothing, so its health is that the collector process runs.
+  manifest.components['cindertrace-collector'] = {
+    image: need(images, 'cindertrace'),
+    kind: 'application',
+    storageFormat: 'cindertrace-collector-state-v1',
+    requiresLocal: ['cindertrace'],
+    service: {
+      user,
+      command: ['node', 'services/security-collector/dist/index.js'],
+      depends_on: { cindertrace: { condition: 'service_healthy' } },
+      healthcheck: health(['node', '-e', "const f=require('fs'),t='security-collector/'+'dist/index.js';process.exit(f.readdirSync('/proc').some((p)=>{try{return /^[0-9]+$/.test(p)&&f.readFileSync('/proc/'+p+'/cmdline','utf8').includes(t)}catch{return false}})?0:1)"]),
+    },
+  };
   manifest.components.emberfold = {
     image: need(images, 'emberfold'),
     kind: 'application',
@@ -348,6 +364,6 @@ export function addFullComponents(manifest, { images, user }) {
     manifest.components['embermend-worker'] = { image: images.embermend, kind: 'application', storageFormat: 'embermend-worker-stateless-v1', requiresLocal: ['embermend-postgres'], service: { ...service, command: ['worker'], healthcheck: health(['node', '/app/healthcheck.mjs', 'worker']) } };
     manifest.components.embermend = { image: images.embermend, kind: 'application', storageFormat: 'embermend-v1', requiresLocal: ['magnus', 'oathweave', 'hivexui', 'embermend-postgres', 'embermend-worker'], service: { ...service, command: ['api'], healthcheck: health(['node', '/app/healthcheck.mjs']) }, initialization: { image: images.embermend, command: ['migrate'], verificationCommand: ['verify-initialization'] } };
   }
-  manifest.profiles.full = Object.keys(manifest.components).filter((name) => name !== 'magnus-gateway' && !name.startsWith('embermend') && !OPTIONAL_PRODUCTS.includes(name)).sort();
+  manifest.profiles.full = Object.keys(manifest.components).filter((name) => !['magnus-gateway', 'cindertrace-collector'].includes(name) && !name.startsWith('embermend') && !OPTIONAL_PRODUCTS.includes(name)).sort();
   return manifest;
 }

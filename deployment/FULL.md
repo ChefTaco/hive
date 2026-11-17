@@ -301,7 +301,7 @@ answers 404. Its state is the `ardentstudio-data` volume (`data/ardentstudio`), 
 rest of the installation ([BACKUPS.md](BACKUPS.md#ardent-project-studio)).
 
 Adding Studio to an existing installation is not automated yet (`hive.sh add` supports Cindertrace
-today; see [Adding a product to an existing installation](#adding-a-product-to-an-existing-installation)):
+and its collector; see [Adding a product to an existing installation](#adding-a-product-to-an-existing-installation)):
 configure the same clients, links and environment by hand, then select the component.
 [Adding an external Magnus and Studio to an existing installation](#adding-an-external-magnus-and-studio-to-an-existing-installation)
 lists every entry; with Magnus as a component, add Studio's link to `MAGNUS_OATHWEAVE_IDENTITIES_JSON`
@@ -566,7 +566,8 @@ with the three Magnus permissions (step 11, which does that by itself without St
 
 `hive.sh add PRODUCT` adds a product, with the private datastores it owns, to an installation that
 is already running, configured as fresh setup would have configured it. It supports `cindertrace`
-(with `cindertrace-postgres` and `cindertrace-redis`) today; for other products, follow
+(with `cindertrace-postgres` and `cindertrace-redis`), described here, and `cindertrace-collector`
+([Events from a separate logging host](#events-from-a-separate-logging-host)); for other products, follow
 [Adding an external Magnus and Studio](#adding-an-external-magnus-and-studio-to-an-existing-installation)
 by hand. It works on an installation set up fresh and on one moved with `migrate-native`:
 
@@ -932,41 +933,71 @@ mark records only that last refusal: the collector's next accepted batch sets it
 
 ### Events from a separate logging host
 
-When syslog, Loki and a SIEM run on their own logging host, Cindertrace's collector runs beside
-Cindertrace and reads from there; nothing of Cindertrace runs on the logging host. The collector
-in the pinned Cindertrace image pulls the network sources from Loki (`unifi_ids`, `unifi_dns` and
-`netflow` from the firewall's syslog stream, and UI audit such as `magnus_ui`) over HTTPS with a
-dedicated read credential. Tools that push their own signed batches, such as a Wazuh forwarder or
-Magnus's security export, each get their own collector credential instead.
+When syslog, Loki and a SIEM run on their own logging host, Cindertrace's collector runs inside
+the installation, beside Cindertrace, and reads from there; nothing of Cindertrace runs on the
+logging host. It is the optional component `cindertrace-collector`: the collector of the pinned
+Cindertrace image (`node services/security-collector/dist/index.js`), started, stopped, backed up
+and recreated by `install`, `upgrade`, `rollback`, `restore` and `backup` like every other
+component. It pulls the network sources from Loki (`unifi_ids`, `unifi_dns` and `netflow` from the
+firewall's syslog stream, and UI audit such as `magnus_ui`) over HTTPS with a dedicated read
+credential, optionally ChatterMost's security export, and sends signed batches to Cindertrace's
+API inside the installation. Tools that push their own signed batches, such as a Wazuh forwarder
+or Magnus's security export, each get their own collector credential instead (step 5).
 
-1. A collector credential for the pulled sources, on the Cindertrace host:
+1. **The logging host.** An HTTPS read endpoint for Loki with a dedicated token for this
+   collector, reachable from the Cindertrace host: allow that host's address in the logging host's
+   firewall.
+2. **The source settings**, on the Cindertrace host, in an owner-only file beside the collector's
+   credential, `config/.credentials/cindertrace-collectors/ID.sources.env` (here ID `logs`):
 
-   ```bash
-   ./hive.sh cindertrace-collector add logs --sources unifi_ids,unifi_dns,netflow,magnus_ui --config FILE
+   ```text
+   LOKI_URL=https://logs.example.com:3443
+   LOKI_QUERY='{syslog_hostname="FIREWALL"}'
+   LOKI_READ_TOKEN=THE_READ_TOKEN
+   UI_SECURITY_SOURCES_JSON={"magnus_ui":["{job=\"magnus\"}"]}
    ```
 
-2. On the logging host, an HTTPS read endpoint for Loki with a dedicated token for this collector,
-   reachable from the Cindertrace host (allow its address in that host's firewall). Store the
-   token on the Cindertrace host in an owner-only file, for example
-   `/opt/hive/config/.credentials/loki-read-token`.
-3. Start the collector from the Cindertrace service, with its settings and credentials in the
-   environment rather than in arguments. It reaches Cindertrace's API inside the installation:
+   It holds source settings only: `LOKI_URL`, `LOKI_QUERY`, `LOKI_LIMIT`, `LOKI_READ_TOKEN`,
+   `UI_SECURITY_SOURCES_JSON`, `CHATTERMOST_SECURITY_EXPORT_URL` and `_TOKEN`,
+   `TAILSCALE_SECURITY_TOKEN` and `TAILSCALE_TAILNET`, and `SECURITY_FUSION_MAX_RESPONSE_BYTES`.
+   URLs are HTTPS without credentials; Loki needs `LOKI_QUERY`, which must select the firewall's
+   stream explicitly, and a read token of at least 40 characters. Write it without echoing the
+   token, for example with an editor run through `sudo`, and keep it mode 0600.
+3. **The collector's credential and environment**, from the release checkout:
 
    ```bash
-   SECURITY_FUSION_INGEST_SECRET=$(cat /opt/hive/config/.credentials/cindertrace-collectors/logs)    LOKI_READ_TOKEN=$(cat /opt/hive/config/.credentials/loki-read-token)      docker compose -f /opt/hive/compose.json run -d --no-deps --name hive-logs-collector      -e SECURITY_FUSION_INGEST_SECRET -e LOKI_READ_TOKEN      -e CINDERTRACE_API_URL=https://cindertrace:4101 -e SECURITY_FUSION_COLLECTOR_ID=logs      -e SECURITY_FUSION_STATE_DIR=/data/collector-logs      -e LOKI_URL=https://logs.example.com:3443 -e 'LOKI_QUERY={syslog_hostname="FIREWALL"}'      -e SECURITY_FUSION_UDP_ENABLED=false -e TAILSCALE_LOCAL_ENABLED=false      cindertrace node services/security-collector/dist/index.js
+   ./hive.sh cindertrace-collector add logs --sources unifi_ids,unifi_dns,netflow,magnus_ui --run --config FILE
    ```
 
-   Add `UI_SECURITY_SOURCES_JSON` for UI audit streams. `LOKI_QUERY` must select the firewall's
-   stream explicitly. The collector reports each source's state under **Cindertrace > Sources**,
-   and its checkpoints are stored by the API, so it resumes where it stopped.
-4. Each pushing tool: `./hive.sh cindertrace-collector add ID --sources wazuh` (or `magnus`), then
-   point the tool at the console origin with that ID and the credential file's contents, as above.
+   It creates the credential as for any collector, and with `--run` writes the component's
+   environment, `config/cindertrace-collector.env` (owner-only): the generated settings
+   (`CINDERTRACE_API_URL=https://cindertrace:4101`, `SECURITY_FUSION_COLLECTOR_ID`,
+   `SECURITY_FUSION_STATE_DIR=/data`, the suite authority in `NODE_EXTRA_CA_CERTS`, UDP and local
+   Tailscale off), the collector's credential, and the source settings, which may not override
+   them. `config/cindertrace-collector/authority.pem` lets it verify Cindertrace. One collector runs
+   per installation; the one that runs cannot be removed. No secret is printed or passed as an
+   argument.
+4. **Start it**, once:
 
-`hive.sh` does not manage the collector container: like the suite audit collector, remove it
-(`docker rm -f hive-logs-collector`) before an upgrade, rollback, restore or stopped backup, and
-start it again afterwards so it runs the Cindertrace image the release pins. A collector container
-cannot read the host's Tailscale daemon; for `tailscale`, give it `TAILSCALE_SECURITY_TOKEN` and
-`TAILSCALE_TAILNET` (API polling) instead.
+   ```bash
+   ./hive.sh add cindertrace-collector --config FILE
+   ```
+
+   This is [`hive.sh add`](#adding-a-product-to-an-existing-installation): an online backup, the
+   component in the installation file, and an upgrade to the installed release that starts it
+   (its state is `data/cindertrace-collector`). Later changes to the source settings: edit the file
+   and repeat step 3, which recreates only the collector. Its sources report under
+   **Cindertrace > Sources**, and its checkpoints are stored by the API and in its state, so it
+   resumes where it stopped.
+5. **Each pushing tool**: `./hive.sh cindertrace-collector add ID --sources wazuh` (or `magnus`),
+   then point the tool at the console origin with that ID and the credential file's contents, as
+   above.
+
+Rehearsals on restored copies never start the collector, so a rehearsal does not read the logging
+host. The collector cannot read the host's Tailscale daemon; for `tailscale`, give it
+`TAILSCALE_SECURITY_TOKEN` and `TAILSCALE_TAILNET` (API polling). The collector reads its
+credential and tokens from its environment; the environment file is owner-only and lives in the
+installation's configuration, like every product's.
 
 ### Suite audit collection
 
@@ -1001,7 +1032,9 @@ Limits:
   the console host's private network, so the run prints a note and skips them; their audit
   reaches Cindertrace once they serve HTTPS inside the installation.
 - A product on another host is reached only on its distributed HTTPS endpoint.
-- The suite does not run the collector process yet. Start it from the Cindertrace service on the
+- The suite does not run this audit collector yet (the `cindertrace-collector` component reads
+  external sources only; see [Events from a separate logging host](#events-from-a-separate-logging-host)).
+  Start it from the Cindertrace service on the
   Cindertrace host, which gives it these settings and the collector credential through the
   environment rather than an argument:
 

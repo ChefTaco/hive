@@ -161,7 +161,7 @@ value, disable certificate verification or derive the configured issuer from
 forwarded headers. Keep canonical issuer, authorization and discovery URLs
 explicit; document the separate browser transport origin in protected evidence.
 
-## Central authorization and optional standalone security sign-in
+## Central authorization and Cindertrace sign-in
 
 HiveXUI provides `/auth/authorize` for explicitly registered Oathweave public
 clients. It accepts standard Authorization Code with PKCE S256 parameters, reuses
@@ -182,10 +182,11 @@ IAM_BROWSER_API_BASE_URL=https://identity.example.com/api/oathweave
 ```
 
 Both endpoint URLs must use HTTPS on the issuer's exact origin, without credentials,
-query parameters or fragments. The browser discovery request is:
+query parameters or fragments. The browser discovery request names the external
+application's registered public client, here `example-portal`:
 
 ```text
-https://identity.example.com/api/oathweave/oauth/.well-known/openid-configuration?client_id=hivexui-security-console
+https://identity.example.com/api/oathweave/oauth/.well-known/openid-configuration?client_id=example-portal
 ```
 
 The selected ID must appear in `IAM_BROWSER_CLIENT_POLICIES` and exist as an active
@@ -194,28 +195,26 @@ Browser metadata uses configured URLs, not forwarding headers, and includes no
 credentials, cookies or redirects. Missing browser metadata configuration fails
 closed. Discovery without `client_id` retains its existing native behavior.
 
-The retained standalone Cindertrace console can optionally use this central flow.
-Its public-client callback remains
-`https://security.example.com/api/auth/hive/callback`. Configure only the selected
-rehearsal copy when exercising it. The console uses these non-secret references:
+Cindertrace has no console of its own in the suite: HiveXUI is its interface. With
+Oathweave available, HiveXUI signs in through Oathweave with the public client
+`hivexui-cindertrace` (audience `cindertrace`), and Cindertrace maps the token to
+its own account through an explicit `CINDERTRACE_OATHWEAVE_IDENTITIES_JSON` link,
+verified with its `OATHWEAVE_ISSUER`, `OATHWEAVE_JWKS_URL` and
+`OATHWEAVE_USERINFO_URL`. When Oathweave is unavailable, HiveXUI's Cindertrace
+recovery sign-in uses Cindertrace's own API-owned local sign-in
+(`/api/cindertrace/auth/local/*`, session cookie `cindertrace_session`), which the
+API serves with `CINDERTRACE_BROWSER_AUTH_ENABLED=true` and a local administrator
+(`DASHBOARD_ADMIN_USERNAME`, `DASHBOARD_ADMIN_ACCOUNT_ID` and the product-prepared
+`DASHBOARD_ADMIN_PASSWORD_HASH`). Fresh setup and `hive.sh add cindertrace`
+configure both. That session reaches Cindertrace's pages only.
 
-```dotenv
-CINDERTRACE_API_BROWSER_AUTH=true
-CINDERTRACE_API_URL=https://security-api.example.com
-DASHBOARD_PUBLIC_ORIGIN=https://security.example.com
-HIVE_OAUTH_ISSUER=https://identity.example.com
-HIVE_OAUTH_DISCOVERY_URL=https://identity.example.com/api/oathweave/oauth/.well-known/openid-configuration?client_id=hivexui-security-console
-HIVE_OAUTH_CLIENT_ID=hivexui-security-console
-HIVE_OAUTH_API_AUDIENCE=cindertrace
-```
-
-The API independently requires `CINDERTRACE_BROWSER_AUTH_ENABLED=true`, its
-verified `OATHWEAVE_ISSUER`, `OATHWEAVE_JWKS_URL` and `OATHWEAVE_USERINFO_URL`, and
-explicit `CINDERTRACE_OATHWEAVE_IDENTITIES_JSON` links to product-local accounts.
-Keep session configuration protected; `HIVE_OAUTH_CLIENT_SECRET` must be absent for
-this public PKCE client. See the selected Cindertrace revision's
-[standalone console runbook](https://github.com/ChefTaco/cindertrace/blob/main/docs/OATHWEAVE_CONSOLE.md)
-for its API-owned session, permission, revocation and verified backchannel contract.
+To rehearse both on a restored copy, use the copy's own configuration only: sign in
+through the copy's Oathweave and confirm Cindertrace accepts the
+`hivexui-cindertrace` token and maps the linked account, then use the recovery
+sign-in with the copy's local administrator. Never reset an existing password or
+add links to make a rehearsal pass. Cindertrace's
+[browser authentication](https://github.com/ChefTaco/cindertrace/blob/main/docs/BROWSER_AUTH.md)
+describes its session, permission and revocation contract.
 
 This documents available integration and an isolated review procedure. It does
 not assert that an existing production Cindertrace deployment was configured or

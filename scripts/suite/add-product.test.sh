@@ -26,8 +26,8 @@ openssl genpkey -algorithm ED25519 -out "$temporary/publisher.key" >/dev/null 2>
 openssl pkey -in "$temporary/publisher.key" -pubout -out "$temporary/publisher.pub" >/dev/null 2>&1
 base='["hive-registry","oathweave","oathweave-redis","hivexui","ingress","emberpath","hivemem","hivemem-qdrant","hiveskills"]'
 jq -n --argjson base "$base" --arg user "$user" '{schema:1,version:"0.1.0",profiles:{core:$base,full:($base+["cindertrace","cindertrace-postgres","cindertrace-redis"])},
-  components:(($base+["cindertrace","cindertrace-postgres","cindertrace-redis"])|map({key:.,value:{image:("example.com/"+.+"@sha256:"+("0"*64)),service:{user:$user,healthcheck:{test:["CMD","true"]}}}})|from_entries)} |
-  .components.hivexui.kind="static-ui" | .components.ingress.kind="ingress" | .components["cindertrace-postgres"].kind="datastore" | .components["cindertrace-redis"].kind="datastore" |
+  components:(($base+["cindertrace","cindertrace-postgres","cindertrace-redis","cindertrace-collector"])|map({key:.,value:{image:("example.com/"+.+"@sha256:"+("0"*64)),service:{user:$user,healthcheck:{test:["CMD","true"]}}}})|from_entries)} |
+  .components.hivexui.kind="static-ui" | .components.ingress.kind="ingress" | .components["cindertrace-postgres"].kind="datastore" | .components["cindertrace-redis"].kind="datastore" | .components["cindertrace-collector"].requiresLocal=["cindertrace"] |
   .components.cindertrace.initialization={image:("example.com/cindertrace@sha256:"+("0"*64)),command:["node","scripts/apply-migrations.mjs"],verificationCommand:["node","scripts/apply-migrations.mjs","--verify-current"]}' > "$temporary/release.json"
 source "$ROOT/scripts/suite/test-catalog.sh"; hive_test_catalog "$temporary/release.json"
 openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/release.json" -out "$temporary/release.json.sig"
@@ -216,6 +216,29 @@ refused 'istributed' hive add cindertrace --yes
 fixture fresh
 jq '.components.cindertrace={host:"control"}' "$configuration" > "$configuration.next"; mv "$configuration.next" "$configuration"; chmod 600 "$configuration"
 refused 'already installed' hive add cindertrace --yes
+
+# The collector the installation runs: refused until cindertrace-collector add --run prepared it,
+# then recorded and applied like any other component, without a schema or console client.
+fixture fresh
+refused 'needs cindertrace in this installation' hive add cindertrace-collector --yes
+hive add cindertrace --yes > /dev/null 2>&1 || fail 'add cindertrace failed before the collector'
+jq '.services.cindertrace={}' "$install/compose.json" > "$install/compose.next"; mv "$install/compose.next" "$install/compose.json"
+: > "$HIVE_TEST_LIFECYCLE"; rm -f -- "$HIVE_TEST_CLIENTS"
+refused 'Prepare the collector first' hive add cindertrace-collector --yes
+store="$install/config/.credentials/cindertrace-collectors"
+mkdir -p "$store" "$install/config/cindertrace-collector"
+cp "$install/config/cindertrace/authority.pem" "$install/config/cindertrace-collector/authority.pem"
+printf "SECURITY_FUSION_COLLECTOR_ID='logs'\nLOKI_URL='https://logs.example.com:3443'\n" > "$install/config/cindertrace-collector.env"; chmod 600 "$install/config/cindertrace-collector.env"
+printf '{"schema":1,"id":"logs","allowedSources":["unifi_ids"]}\n' > "$store/logs.json"
+refused 'Prepare the collector first' hive add cindertrace-collector --yes
+printf '{"schema":1,"id":"logs","allowedSources":["unifi_ids"],"runs":true}\n' > "$store/logs.json"
+hive add cindertrace-collector --yes > "$temporary/collector.log" 2>&1 || { cat "$temporary/collector.log" >&2; fail 'add cindertrace-collector failed'; }
+mapfile -t calls < "$HIVE_TEST_LIFECYCLE"
+[[ "${calls[0]}" == 'backup backup false pre-add-cindertrace-collector-'* && "${calls[1]}" == 'upgrade upgrade true none '*'"cindertrace-collector"'* ]] || fail "The collector was not backed up and applied: ${calls[*]}"
+jq -e --arg root "$install" '.components["cindertrace-collector"]=={host:"control",envFile:($root+"/config/cindertrace-collector.env"),configDirectory:($root+"/config/cindertrace-collector")}' "$configuration" >/dev/null || fail 'The installation file did not gain the collector'
+jq -e '.phase=="complete" and .collector=="logs"' "$temporary/operator/hive/additions/cindertrace-collector.json" >/dev/null && [[ ! -e "$HIVE_TEST_CLIENTS" ]] || fail 'The collector add did not complete without a console client'
+grep -q 'logs runs as component cindertrace-collector' "$temporary/collector.log" || fail 'The collector summary is missing'
+refused 'Cindertrace collector is already installed' hive add cindertrace-collector --yes
 
 # An installation moved with migrate-native: the migration's authority, the operator account it
 # names and its renamed Oathweave environment; no initializer record.
