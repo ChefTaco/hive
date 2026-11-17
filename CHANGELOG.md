@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.11.1] - 2026-11-17
+
+### Security
+
+- Pins Cindertrace 0.7.2, which updates its standalone console to Next.js 16.4.6 for
+  GHSA-mfr8-8qww-v76h. The console is part of the Cindertrace runtime image. Cindertrace 0.7.2 has
+  no database migration. Every other product pin, the datastore profile, the storage recovery
+  profile and the controller are unchanged from 3.11.0, and no storage format changes, so an
+  upgrade from 3.11.0 needs no flag. See `UPGRADING.md`, "Suite 3.11.1: Cindertrace 0.7.2".
+
 ## [3.11.0] - 2026-11-16
 
 ### Added

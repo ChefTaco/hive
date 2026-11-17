@@ -46,6 +46,21 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Suite 3.11.1: Cindertrace 0.7.2
+
+Suite 3.11.1 pins Cindertrace 0.7.2, whose standalone console is built with Next.js 16.4.6 for
+GHSA-mfr8-8qww-v76h. Every other product pin, the datastore profile, the storage recovery profile
+and the controller are those of 3.11.0, and no storage format changes, so an upgrade from 3.11.0
+needs no flag. Cindertrace 0.7.2 has no database migration. Pass `--release 3.11.1` to later
+commands, as described in [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade). From an
+earlier release, follow the steps below for each release you skip, with 3.11.1 in place of 3.11.0.
+
+**Shared controller.** 3.11.0 and 3.11.1 have the same controller source, so a checkout of either
+tag can run both releases' commands; give the exact version to keep 3.11.1's pins. The
+administrator access journals of 3.11.0 keep the same ownership under 3.11.1.
+
+**Rolling back to 3.11.0.** Nothing to change first; Cindertrace 0.7.1 reads the same data.
+
 ## Suite 3.11.0: guided administrator product access
 
 Suite 3.11.0 pins HiveMem 1.8.0 and ChatterMost 0.7.0, including the matching ChatterMost
