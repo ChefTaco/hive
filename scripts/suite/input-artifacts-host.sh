@@ -27,8 +27,20 @@ deployment_inputs_digest() {
     else return 1; fi
   done <<< "$paths" | sha256sum | cut -d ' ' -f1
 }
+# A journaled memory identity change of this plan (hive_identity_commit) is finished, or refused,
+# before any guard compares digests: a crash between its move and its pin is not an outside edit.
+# hive_identity_resume accepts only files holding their journaled original or staged content and a
+# result equal to the journaled digest, against this plan's own pin.
+recover_deployment_inputs() {
+  local definition=$1 journal="$directory/memory-identity.$plan.json"
+  [[ -e "$journal" || -L "$journal" ]] || return 0
+  [[ ! -L "$journal" && -f "$journal" ]] || die 'Unsafe memory identity journal'
+  declare -F hive_identity_resume >/dev/null || die 'A memory identity change of this plan is pending, and this controller cannot finish it'
+  hive_identity_resume "$definition" "$journal"
+}
 pin_deployment_inputs() {
   local definition=$1 current receipt="$directory/deployment-inputs.$plan.json"
+  [[ ! -f "$receipt" ]] || recover_deployment_inputs "$definition"
   current=$(deployment_inputs_digest "$definition") || die 'Deployment input artifacts cannot be read safely'
   if [[ -f "$receipt" ]]; then
     [[ $(jq -er .sha256 "$receipt") == "$current" ]] || die 'Deployment input artifacts changed for this plan; restore the pinned files or review a new configurationRevision'
@@ -36,6 +48,7 @@ pin_deployment_inputs() {
 }
 assert_deployment_inputs() {
   local definition=$1 current
+  recover_deployment_inputs "$definition"
   current=$(deployment_inputs_digest "$definition") || die 'Deployment input artifacts cannot be verified'
   [[ "$current" == "$(jq -er .sha256 "$directory/deployment-inputs.$plan.json")" ]] || die 'Pinned deployment inputs changed; no further migrations or activation will run'
 }
