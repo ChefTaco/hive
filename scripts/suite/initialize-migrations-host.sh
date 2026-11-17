@@ -134,6 +134,7 @@ hive_identity_jwt_claims() { jq -Rr 'split(".")[1] // ""|gsub("-";"+")|gsub("_";
 #   - config/.memory-identity-renames.json records it; memory-credential-host.sh maps a link
 #     request for the old ID through it, also when Emberpath's record lives on another host
 #   - every HIVEMEM_OATHWEAVE_SERVICES_JSON link to the old ID names the new one
+#   - HiveMem's own static HIVEMEM_ADMIN_TOKEN for the old ID is re-issued for the new one
 #   - with Emberpath on this host: its credential record names the new ID, and its static
 #     fallback HIVE_ROUTER_MEMORY_PROXY_TOKEN for the old ID is re-issued by HiveMem for the new
 #     one with the same role, scope and remaining lifetime (an expired one is left as it is)
@@ -201,7 +202,7 @@ hive_identity_resume() {
   rm -f -- "$journal"
 }
 hive_memory_identity_relink_files() {
-  local candidate=$1 manifest=$2 spec from to config="$directory/config" memory ember services renames record legacy claims remaining token issued
+  local candidate=$1 manifest=$2 spec from to config="$directory/config" memory ember services renames record
   jq -e '.placements.hivemem!=null' <<< "$input" >/dev/null || return 0
   spec=$(jq -c '.components.hivemem.initialization // empty' "$manifest") || die 'The HiveMem specification could not be read'
   [[ -n "$spec" ]] && jq -e '.command|length==5 and .[0]=="rename-agent" and .[1]=="--from" and .[3]=="--to"' <<< "$spec" >/dev/null || return 0
@@ -224,6 +225,8 @@ hive_memory_identity_relink_files() {
       hive_identity_env_stage "$memory" HIVEMEM_OATHWEAVE_SERVICES_JSON "$(jq -c --arg from "$from" --arg to "$to" 'map(if .localId==$from then .localId=$to else . end)' <<< "$services")"
       printf 'Memory identity: HiveMem service links now act as %s\n' "$to" >&2
     fi
+    # HiveMem's own operator token (scripts, stats checks) follows the data too.
+    hive_identity_reissue "$candidate" "$memory" HIVEMEM_ADMIN_TOKEN "$from" "$to" 'issue a new one with hivemem-server issue-token when needed'
   fi
   ember="$config/emberpath.env"
   if ! jq -e '.placements.emberpath!=null' <<< "$input" >/dev/null || [[ ! -f "$ember" || -L "$ember" ]]; then
@@ -234,22 +237,29 @@ hive_memory_identity_relink_files() {
   if [[ -f "$record" && ! -L "$record" ]] && jq -e --arg from "$from" '.localId==$from' "$record" >/dev/null 2>&1; then
     jq --arg to "$to" '.localId=$to' "$record" | atomic_json "$record" || die 'The memory credential record could not be saved'
   fi
-  legacy=$(hive_identity_env_get "$ember" HIVE_ROUTER_MEMORY_PROXY_TOKEN)
+  hive_identity_reissue "$candidate" "$ember" HIVE_ROUTER_MEMORY_PROXY_TOKEN "$from" "$to" 'Emberpath uses its self-renewing credential'
+}
+# Re-issues one static HiveMem token for the old ID in an environment file (staged), with the same
+# role, scope and remaining lifetime (at most 30 days). A token for another subject, or one with
+# under two minutes left, is left as it is.
+hive_identity_reissue() {
+  local candidate=$1 file=$2 key=$3 from=$4 to=$5 expired_note=$6 legacy claims remaining token issued
+  legacy=$(hive_identity_env_get "$file" "$key")
   [[ -n "$legacy" ]] || return 0
   claims=$(hive_identity_jwt_claims "$legacy")
   jq -e --arg from "$from" '.sub==$from' <<< "${claims:-null}" >/dev/null 2>&1 || return 0
   remaining=$(jq -r '((.exp // 0)|floor) - now|floor' <<< "$claims")
   if (( remaining < 120 )); then
-    printf 'Memory identity: the expired HIVE_ROUTER_MEMORY_PROXY_TOKEN for %s was left as it is; Emberpath uses its self-renewing credential\n' "$from" >&2
+    printf 'Memory identity: the expired %s for %s was left as it is; %s\n' "$key" "$from" "$expired_note" >&2
     return 0
   fi
   (( remaining <= 2592000 )) || remaining=2592000
   local -a arguments=(issue-token --subject "$to" --role "$(jq -r 'if .role=="admin" then "admin" else "agent" end' <<< "$claims")" --ttl "$remaining")
   if jq -e '.scope|type=="string" and length>0' <<< "$claims" >/dev/null; then arguments+=(--scope "$(jq -r .scope <<< "$claims")"); fi
-  token=$(docker compose -f "$candidate" run --no-deps --rm -T hivemem "${arguments[@]}" < /dev/null 2>/dev/null) || die 'HiveMem could not re-issue the static memory token; the renamed data is complete, rerun the upgrade'
+  token=$(docker compose -f "$candidate" run --no-deps --rm -T hivemem "${arguments[@]}" < /dev/null 2>/dev/null) || die "HiveMem could not re-issue $key; the renamed data is complete, rerun the upgrade"
   [[ "$token" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] || die 'HiveMem returned no token'
   issued=$(hive_identity_jwt_claims "$token")
-  jq -e --arg to "$to" '.sub==$to' <<< "${issued:-null}" >/dev/null 2>&1 || die 'HiveMem re-issued the static memory token for another subject'
-  hive_identity_env_stage "$ember" HIVE_ROUTER_MEMORY_PROXY_TOKEN "$token"
-  printf 'Memory identity: HIVE_ROUTER_MEMORY_PROXY_TOKEN re-issued for %s with its remaining lifetime\n' "$to" >&2
+  jq -e --arg to "$to" '.sub==$to' <<< "${issued:-null}" >/dev/null 2>&1 || die "HiveMem re-issued $key for another subject"
+  hive_identity_env_stage "$file" "$key" "$token"
+  printf 'Memory identity: %s re-issued for %s with its remaining lifetime\n' "$key" "$to" >&2
 }
