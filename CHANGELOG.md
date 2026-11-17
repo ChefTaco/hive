@@ -8,6 +8,9 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- The HiveMem identity relink also re-issues HiveMem's own static `HIVEMEM_ADMIN_TOKEN` when it
+  was issued for the old ID (same role, scope and remaining lifetime). Before, an installation that
+  completed the `hive-router` → `emberpath` rename kept an operator token HiveMem now refuses.
 - A crash between moving a HiveMem identity relink file and pinning it is now finished by the
   ordinary retry of the upgrade. The deployment-input guards first complete (or refuse) this plan's
   journaled change, accepting only files that hold their journaled original or staged content and a

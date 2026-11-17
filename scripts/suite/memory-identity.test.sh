@@ -51,7 +51,9 @@ setup() { # DIRECTORY
   config=$directory/config
   exp=$(( $(date +%s) + 86400 ))
   legacy="$(b64url '{"alg":"HS256","typ":"JWT"}').$(b64url '{"sub":"hive-router","role":"admin","scope":"admin:all","exp":'"$exp"'}').fake-signature"
-  printf "HIVEMEM_JWT_SECRET='fake-memory-secret-0123456789abcdef0123'\nHIVEMEM_OATHWEAVE_SERVICES_JSON='[{\"issuer\":\"hive-iam\",\"clientId\":\"emberpath-hivemem\",\"localId\":\"hive-router\",\"scopes\":[\"admin:all\"]},{\"issuer\":\"hive-iam\",\"clientId\":\"fake-service\",\"localId\":\"fake-service\",\"scopes\":[\"memories:read\"]}]'\n" > "$config/hivemem.env"
+  admin="$(b64url '{"alg":"HS256","typ":"JWT"}').$(b64url '{"sub":"hive-router","role":"admin","exp":'"$exp"'}').fake-admin-signature"
+  printf "HIVEMEM_ADMIN_TOKEN='%s'\n" "$admin" > "$config/hivemem.env"
+  printf "HIVEMEM_JWT_SECRET='fake-memory-secret-0123456789abcdef0123'\nHIVEMEM_OATHWEAVE_SERVICES_JSON='[{\"issuer\":\"hive-iam\",\"clientId\":\"emberpath-hivemem\",\"localId\":\"hive-router\",\"scopes\":[\"admin:all\"]},{\"issuer\":\"hive-iam\",\"clientId\":\"fake-service\",\"localId\":\"fake-service\",\"scopes\":[\"memories:read\"]}]'\n" >> "$config/hivemem.env"
   printf "HIVEMEM_INTERNAL_URL='https://hivemem:18790'\nHIVE_ROUTER_MEMORY_PROXY_TOKEN='%s'\nHIVE_ROUTER_SECRET='fake-router-secret-0123456789abcdef0123'\n" "$legacy" > "$config/emberpath.env"
   chmod 600 "$config/"*.env
   printf '{"schema":1,"clientId":"emberpath-hivemem","localId":"hive-router"}\n' > "$config/.credentials/emberpath-hivemem.json"
@@ -75,6 +77,7 @@ token=$(value "$config/emberpath.env" HIVE_ROUTER_MEMORY_PROXY_TOKEN)
 [[ "$token" != "$before" ]] || fail 'The static token was not re-issued'
 claims "$token" | jq -e --argjson exp "$exp" '.sub=="emberpath" and .role=="admin" and .scope=="admin:all" and (.exp<=$exp) and (.exp>=$exp-30)' >/dev/null || fail "The re-issued token is not the old one's role, scope and lifetime: $(claims "$token")"
 grep -q -- '--ttl' "$temporary/docker.calls" || fail 'No lifetime was passed'
+claims "$(value "$config/hivemem.env" HIVEMEM_ADMIN_TOKEN)" | jq -e '.sub=="emberpath" and .role=="admin"' >/dev/null || fail 'The HiveMem admin token still names the old principal'
 grep -q "^HIVE_ROUTER_SECRET='fake-router-secret-0123456789abcdef0123'$" "$config/emberpath.env" || fail 'Other Emberpath settings changed'
 for file in hivemem emberpath; do
   [[ $(stat -c %a "$config/$file.env") == 600 ]] || fail "$file.env lost its mode"
@@ -96,7 +99,7 @@ setup "$temporary/issue-fails"
 sums=$(sha256sum "$config/"*.env "$directory/deployment-inputs.$plan.json")
 touch "$temporary/fail-issue-once"
 if relink; then fail 'A failed issuance was accepted'; fi
-grep -q 'could not re-issue the static memory token' "$directory/relink.log" || fail 'The failed issuance was not named'
+grep -q 'could not re-issue' "$directory/relink.log" || fail 'The failed issuance was not named'
 [[ $(sha256sum "$config/"*.env "$directory/deployment-inputs.$plan.json") == "$sums" ]] || fail 'A failed issuance left a pinned input changed'
 assert_deployment_inputs "$directory/candidate.json" || fail 'A failed issuance broke the pin'
 relink || { cat "$directory/relink.log" >&2; fail 'The rerun after a failed issuance did not complete'; }
@@ -163,13 +166,15 @@ setup "$temporary/split"
 before=$(value "$config/emberpath.env" HIVE_ROUTER_MEMORY_PROXY_TOKEN); calls=$(wc -l < "$temporary/docker.calls")
 relink || fail 'The relink failed with Emberpath elsewhere'
 [[ $(jq -r '.[0].localId' <<< "$(value "$config/hivemem.env" HIVEMEM_OATHWEAVE_SERVICES_JSON)") == emberpath ]] || fail 'The links did not move'
-[[ $(value "$config/emberpath.env" HIVE_ROUTER_MEMORY_PROXY_TOKEN) == "$before" && $(wc -l < "$temporary/docker.calls") == "$calls" ]] || fail 'A token was issued for another host'
+[[ $(value "$config/emberpath.env" HIVE_ROUTER_MEMORY_PROXY_TOKEN) == "$before" && $(wc -l < "$temporary/docker.calls") == $((calls + 1)) ]] || fail 'A token was issued for another host'
+claims "$(value "$config/hivemem.env" HIVEMEM_ADMIN_TOKEN)" | jq -e '.sub=="emberpath"' >/dev/null || fail 'The HiveMem admin token was not re-issued with Emberpath elsewhere'
 grep -q 're-issue it with hivemem-server issue-token --subject emberpath' "$directory/relink.log" || fail 'The operator was not told to re-issue the remote token'
 
 # ---- An expired static token is left as it is; a token for another subject too. ----
 input='{"placements":{"hivemem":{},"emberpath":{}}}'
 setup "$temporary/expired"
 expired="$(b64url '{"alg":"HS256"}').$(b64url '{"sub":"hive-router","role":"admin","exp":1}').fake-signature"
+sed -i '/^HIVEMEM_ADMIN_TOKEN=/d' "$config/hivemem.env" # this case is about the Emberpath token only
 sed -i "s/^HIVE_ROUTER_MEMORY_PROXY_TOKEN=.*/HIVE_ROUTER_MEMORY_PROXY_TOKEN='$expired'/" "$config/emberpath.env"; pin_deployment_inputs_again() { rm "$directory/deployment-inputs.$plan.json"; pin_deployment_inputs "$directory/candidate.json"; }; pin_deployment_inputs_again
 calls=$(wc -l < "$temporary/docker.calls")
 relink || fail 'The relink failed with an expired token'
