@@ -38,6 +38,7 @@ hive_cleanup() {
   [[ -z "${HIVE_AGENT_CONFIG_DIRECTORY:-}" ]] || rm -rf -- "$HIVE_AGENT_CONFIG_DIRECTORY"
   [[ -z "${HIVE_AGENT_SECRETS:-}" ]] || rm -f -- "$HIVE_AGENT_SECRETS"
   [[ -z "${HIVE_AGENT_ENROLLMENT:-}" ]] || rm -f -- "$HIVE_AGENT_ENROLLMENT"
+  [[ -z "${HIVE_ADD_TEMPORARY:-}" ]] || rm -f -- "$HIVE_ADD_TEMPORARY"
 }
 # Keep this a literal printf list: the launcher parses it without executing downloaded code.
 hive_runtime_files() {
@@ -59,7 +60,8 @@ hive_runtime_files() {
     scripts/suite/console-clients.sh scripts/suite/console-clients-host.sh \
     scripts/suite/admin-access.sh scripts/suite/admin-access-host.sh scripts/suite/admin-access-files-host.sh scripts/suite/admin-access-data.mjs scripts/suite/admin-access-identity.mjs scripts/suite/admin-access-native.mjs \
     scripts/suite/post-upgrade.sh scripts/suite/setup-checklist.sh \
-    scripts/suite/retention.sh scripts/suite/retention-host.sh scripts/suite/retention-schedule.sh scripts/suite/rehearsal-copy-host.sh
+    scripts/suite/retention.sh scripts/suite/retention-host.sh scripts/suite/retention-schedule.sh scripts/suite/rehearsal-copy-host.sh \
+    scripts/suite/add-product.sh scripts/suite/add-product-host.sh
 }
 hive_controller_digest() {
   local file
@@ -128,7 +130,7 @@ hive_setup_hosts_ready() {
 
 hive_usage() {
   cat <<'EOF'
-Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access]
+Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access]
   --config FILE          Installation JSON. Commands other than install, init and plan find
                          it themselves when there is exactly one under ~/.config/hive (or
                          $XDG_CONFIG_HOME/hive), or when HIVE_INSTALLATION names it
@@ -162,6 +164,13 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollb
   --help                 Show this help
 
 init prepares protected configuration for an explicitly fresh installation.
+add PRODUCT [--yes] adds a product with its private datastores to an existing installation, on the
+console host, as fresh setup configures it (today: cindertrace). It backs up first, writes the
+product's secrets and configuration, links the operator's Oathweave account, adds the product to
+the ingress, the console and the installation file, applies it as an upgrade to the installed
+release (rehearsal and schema migration included) and creates its console client. Each step is
+journaled beside the installation file; repeat the command to continue an interrupted add.
+See deployment/FULL.md#adding-a-product-to-an-existing-installation.
 magnus-agent install|status|remove [--host TARGET] [--install-node] [--trust] runs the Magnus agent on a
 fleet host (default: the Magnus host): Node.js check (and NodeSource install with consent), the
 release's verified agent package, its root-only environment and service, a new agent's own node
@@ -186,8 +195,9 @@ cindertrace-collector add ID --sources SOURCE[,SOURCE]|list|remove ID. The crede
 on the Cindertrace host into an owner-only file and never printed; Cindertrace ingests while a
 collector exists. See deployment/FULL.md.
 console-clients add [--yes] creates the HiveXUI browser clients of Magnus (the component or an external
-Magnus) and Ardent Project Studio in an existing Oathweave store, and adds their permissions to the
-SUITE_ADMIN role. Their policies must already be in IAM_BROWSER_CLIENT_POLICIES. See deployment/FULL.md.
+Magnus), Cindertrace, Embermend and Ardent Project Studio in an existing Oathweave store, and adds
+their permissions to the SUITE_ADMIN role. Their policies must already be in
+IAM_BROWSER_CLIENT_POLICIES. See deployment/FULL.md.
 admin-access setup [USERNAME] guides access for an existing active Oathweave administrator.
 It uses sudo, creates separate product identities, preserves existing grants and reconnects only
 changed services. admin-access list shows candidates; status USERNAME reads its retained receipt.
@@ -672,10 +682,10 @@ hive_host() {
     --arg action "${HIVE_HOST_ACTION:-}" --arg operation "${HIVE_OPERATION:-}" --arg archive "${HIVE_ARCHIVE:-}" --argjson allowMigrations "${HIVE_ALLOW_MIGRATIONS:-false}" \
     --argjson serviceUsers "$bootstrap_users" --argjson images "$bootstrap_images" --argjson identityIds "${HIVE_BOOTSTRAP_IDENTITIES:-null}" --arg ingressTemplate "${HIVE_BOOTSTRAP_INGRESS:-}" --argjson magnusNodeKeysOnly "${HIVE_MAGNUS_NODE_KEYS_ONLY:-false}" --arg integrityScript "$(base64 -w0 "$HIVE_ROOT/scripts/suite/check-data.mjs")" --arg snapshotTool "${HIVE_SNAPSHOT_TOOL:-}" \
     --arg skillsManifest "${HIVE_SKILLS_MANIFEST:-}" --arg skillsSignature "${HIVE_SKILLS_SIGNATURE:-}" --arg skillsTrust "${HIVE_SKILLS_TRUST:-}" --arg skillsTokenSHA "${HIVE_SKILLS_TOKEN_SHA:-}" \
-    --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" --argjson registry "${HIVE_REGISTRY_INPUT:-null}" --argjson memoryCredential "${HIVE_MEMORY_CREDENTIAL_INPUT:-null}" --argjson auditCollection "${HIVE_AUDIT_COLLECTION_INPUT:-null}" --argjson magnusTrust "${HIVE_MAGNUS_TRUST_INPUT:-null}" --argjson cindertrace "${HIVE_CINDERTRACE_INPUT:-null}" --argjson magnusAgent "${HIVE_MAGNUS_AGENT_INPUT:-null}" --argjson consoleClients "${HIVE_CONSOLE_CLIENTS_INPUT:-null}" --argjson adminAccess "${HIVE_ADMIN_ACCESS_INPUT:-null}" --argjson retention "${HIVE_RETENTION_INPUT:-null}" --arg abortStep "${HIVE_ABORT_STEP:-}" \
+    --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" --argjson registry "${HIVE_REGISTRY_INPUT:-null}" --argjson memoryCredential "${HIVE_MEMORY_CREDENTIAL_INPUT:-null}" --argjson auditCollection "${HIVE_AUDIT_COLLECTION_INPUT:-null}" --argjson magnusTrust "${HIVE_MAGNUS_TRUST_INPUT:-null}" --argjson cindertrace "${HIVE_CINDERTRACE_INPUT:-null}" --argjson magnusAgent "${HIVE_MAGNUS_AGENT_INPUT:-null}" --argjson consoleClients "${HIVE_CONSOLE_CLIENTS_INPUT:-null}" --argjson adminAccess "${HIVE_ADMIN_ACCESS_INPUT:-null}" --argjson retention "${HIVE_RETENTION_INPUT:-null}" --argjson addProduct "${HIVE_ADD_INPUT:-null}" --arg abortStep "${HIVE_ABORT_STEP:-}" \
     --arg nativeBackupTool "${HIVE_NATIVE_BACKUP_TOOL:-}" --argjson nativeRecovery "${HIVE_NATIVE_RECOVERY_INPUT:-null}" --arg recoveryConfig "${HIVE_NATIVE_RECOVERY_CONFIGURATION_SHA:-}" --arg recoverySemantic "${HIVE_NATIVE_RECOVERY_MANIFEST_SEMANTIC_SHA:-}" \
     --arg dataTool "${HIVE_NATIVE_DATA_TOOL:-}" --arg adminScript "${HIVE_NATIVE_ADMIN_SCRIPT:-}" --argjson reviewedLinks "${HIVE_NATIVE_LINKS:-null}" --arg tokenDigest "${HIVE_NATIVE_TOKEN_DIGEST:-}" --argjson tokenTtlSeconds "${HIVE_NATIVE_TOKEN_TTL:-null}" \
-    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,memoryCredential:$memoryCredential,auditCollection:$auditCollection,magnusTrust:$magnusTrust,cindertrace:$cindertrace,magnusAgent:$magnusAgent,abortStep:$abortStep,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,magnusMemoryIdentity:(.components.magnus!=null and .components.hivemem!=null and .components.oathweave!=null and .components.magnus.host==.components.oathweave.host),ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,snapshotTool:$snapshotTool,nativeBackupTool:$nativeBackupTool,nativeRecovery:($nativeRecovery.hosts[$host] // null),nativeRecoveryConfigurationSHA256:$recoveryConfig,nativeRecoveryManifestSemanticSHA256:$recoverySemantic,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,nativeMigration:(.nativeMigration // null),dataTool:$dataTool,adminScript:$adminScript,reviewedLinks:$reviewedLinks,tokenDigest:$tokenDigest,tokenTtlSeconds:$tokenTtlSeconds,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]} + (if .external then {external:.external} else {} end) + (if $consoleClients!=null then {consoleClients:$consoleClients} else {} end) + (if $adminAccess!=null then {adminAccess:$adminAccess} else {} end) + (if $retention!=null then {retention:$retention} else {} end) + (if $magnusNodeKeysOnly==true then {magnusNodeKeysOnly:true} else {} end)' "$HIVE_CONFIG") ||
+    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,memoryCredential:$memoryCredential,auditCollection:$auditCollection,magnusTrust:$magnusTrust,cindertrace:$cindertrace,magnusAgent:$magnusAgent,abortStep:$abortStep,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,magnusMemoryIdentity:(.components.magnus!=null and .components.hivemem!=null and .components.oathweave!=null and .components.magnus.host==.components.oathweave.host),ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,snapshotTool:$snapshotTool,nativeBackupTool:$nativeBackupTool,nativeRecovery:($nativeRecovery.hosts[$host] // null),nativeRecoveryConfigurationSHA256:$recoveryConfig,nativeRecoveryManifestSemanticSHA256:$recoverySemantic,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,nativeMigration:(.nativeMigration // null),dataTool:$dataTool,adminScript:$adminScript,reviewedLinks:$reviewedLinks,tokenDigest:$tokenDigest,tokenTtlSeconds:$tokenTtlSeconds,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]} + (if .external then {external:.external} else {} end) + (if $consoleClients!=null then {consoleClients:$consoleClients} else {} end) + (if $adminAccess!=null then {adminAccess:$adminAccess} else {} end) + (if $retention!=null then {retention:$retention} else {} end) + (if $addProduct!=null then {addProduct:$addProduct} else {} end) + (if $magnusNodeKeysOnly==true then {magnusNodeKeysOnly:true} else {} end)' "$HIVE_CONFIG") ||
     hive_die "The request for host $host could not be prepared"
   # A secret travels only in the payload, on standard input: it is read here from an owner-only
   # file, never placed in an argument.
@@ -846,7 +856,7 @@ hive_main() {
   HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY='' HIVE_CINDERTRACE_SOURCES='' HIVE_AGENT_TARGET='' HIVE_AGENT_SSH_CONFIG='' HIVE_AGENT_SUDO_FILE='' HIVE_AGENT_INSTALL_NODE=false HIVE_AGENT_TRUST=false
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
   HIVE_RELEASE_SUMMARY='' HIVE_REGISTRY_FILE='' HIVE_REGISTRY_ORIGINAL_CONFIG='' HIVE_REGISTRY_TEMPORARY='' HIVE_OPERATION='' HIVE_CHECKLIST=''
-  HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS='' HIVE_AGENT_ENROLLMENT=''
+  HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS='' HIVE_AGENT_ENROLLMENT='' HIVE_ADD_TEMPORARY='' HIVE_ADD_INPUT=''
   local -a registry_arguments=() trust_arguments=()
   if (($#)) && [[ "$1" != --* ]]; then command=$1; shift; fi
   while (($#)); do
@@ -919,14 +929,14 @@ hive_main() {
       *)
         [[ "$1" != --* ]] || hive_die 'Unknown option'
         case "$command" in
-          registry|migrate-native|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|setup|backups) registry_arguments+=("$1");;
+          registry|migrate-native|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|setup|backups|add) registry_arguments+=("$1");;
           magnus-trust) trust_arguments=("$1" "${trust_arguments[@]}");;
           *) hive_die 'Unknown option';;
         esac
         shift;;
     esac
   done
-  case "$command" in init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access) ;; *) hive_die 'Unknown command';; esac
+  case "$command" in init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access) ;; *) hive_die 'Unknown command';; esac
   [[ "$HIVE_PREPARE_RECONCILIATION" != true || -z "$HIVE_RECONCILIATION" ]] || hive_die 'Choose --prepare-reconciliation or --reconciliation, not both'
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
     case "$command" in plan|install|upgrade) ;; *) hive_die '--relax-auth-limits applies only to plan, install and upgrade';; esac
@@ -1009,6 +1019,7 @@ hive_main() {
     setup) hive_checklist_command "${registry_arguments[@]}"; return;;
     backups) hive_backups_command "${registry_arguments[@]}"; return;;
     post-upgrade) hive_need openssl; hive_need sha256sum; hive_manifest; HIVE_CONFIRMED=$confirmed hive_post_upgrade; return;;
+    add) hive_need openssl; hive_need sha256sum; hive_manifest; HIVE_CONFIRMED=$confirmed HIVE_ADD_INTERACTIVE=$interactive hive_add_product "${registry_arguments[@]}"; return;;
   esac
   hive_need openssl; hive_need sha256sum; hive_manifest
   # Before the plan is confirmed and before anything changes: a Magnus 2.x that the pinned Magnus 3

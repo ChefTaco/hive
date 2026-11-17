@@ -6,6 +6,30 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Added
+
+- `hive.sh add cindertrace` adds Cindertrace, with its private PostgreSQL and Redis, to an existing
+  installation (set up fresh or moved with `migrate-native`) on its console host. It takes an
+  online backup first, then reuses fresh setup's configuration: generated secrets, an internal
+  certificate from the installation's authority, native browser sign-in with a local administrator
+  (HiveXUI's Cindertrace recovery sign-in) and an explicit issuer/subject link from the operator's
+  existing Oathweave account. It adds the `hivexui-cindertrace` browser policy to Oathweave, the
+  Cindertrace routes to the ingress and Cindertrace to the console's `runtime.json`, adds the
+  components to the installation file (keeping its previous copy), applies the change as an
+  upgrade to the installed release (stopped backup, rehearsal on a restored copy, Cindertrace's
+  schema migration claimed, applied and verified, Hive Registry record) and creates the console
+  client in Oathweave. Every step is journaled beside the installation file and on the host;
+  repeating the command continues an interrupted add. See `deployment/FULL.md`, "Adding a product
+  to an existing installation".
+- `cindertrace-collector add` accepts the `magnus_ui` source (Magnus UI audit read from Loki), and
+  `deployment/FULL.md` describes running Cindertrace's collector beside Cindertrace to read a
+  separate logging host's Loki.
+
+### Changed
+
+- `console-clients add` (and `post-upgrade`) also creates the `hivexui-cindertrace` browser client
+  when the installation has Cindertrace.
+
 ## [3.11.2] - 2026-11-17
 
 ### Changed

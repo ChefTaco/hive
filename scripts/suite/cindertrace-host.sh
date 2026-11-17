@@ -51,8 +51,8 @@ case "$action" in
     id=$(jq -er .cindertrace.id <<< "$input")
     sources=$(jq -ce .cindertrace.sources <<< "$input")
     [[ "$id" =~ ^[a-z][a-z0-9-]{0,47}$ ]] || die 'A collector ID is lowercase letters, digits and hyphens, starting with a letter'
-    jq -e 'type=="array" and length>0 and length==(unique|length) and all(.[]; IN("unifi_dns","unifi_ids","netflow","wazuh","tailscale","magnus","hive","chattermost"))' <<< "$sources" >/dev/null ||
-      die 'Sources are one or more of unifi_dns, unifi_ids, netflow, wazuh, tailscale, magnus, hive and chattermost'
+    jq -e 'type=="array" and length>0 and length==(unique|length) and all(.[]; IN("unifi_dns","unifi_ids","netflow","wazuh","tailscale","magnus","magnus_ui","hive","chattermost"))' <<< "$sources" >/dev/null ||
+      die 'Sources are one or more of unifi_dns, unifi_ids, netflow, wazuh, tailscale, magnus, magnus_ui, hive and chattermost'
     record="$store/$id.json" secret=$(secret_file "$id")
     [[ ! -L "$record" && ! -L "$secret" && ! -L "$secret.pending" ]] || die 'Unsafe collector path'
     if [[ -f "$record" ]]; then

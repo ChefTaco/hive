@@ -232,7 +232,7 @@ if has_component magnus; then for name in magnus-db magnus-redis magnus-api magn
   if [[ "$magnus_node_keys_only" == true && "$name" =~ ^magnus-(manager|result|reconcile)$ ]]; then continue; fi
   ensure_secret "$name"; done; fi
 if has_component magnus-gateway; then for name in magnus-gateway-api magnus-gateway-drain; do ensure_secret "$name"; done; fi
-if has_component cindertrace; then for name in security-db security-redis security-admin-password security-session security-console security-audit security-receipt security-backup security-rate; do ensure_secret "$name"; done; fi
+if has_component cindertrace; then while IFS= read -r name; do ensure_secret "$name"; done < <(hive_full_secret_names cindertrace); fi
 if has_component chattermost; then for name in chat-db chat-cookie chat-token chat-admin-password chat-bot; do ensure_secret "$name"; done; fi
 if has_component emberfold; then ensure_secret context-api; fi
 # Studio runs with Oathweave, so its client secrets are generated once, on that host.
