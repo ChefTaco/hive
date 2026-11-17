@@ -29,6 +29,14 @@ All notable changes to this project are documented in this file. The format is b
 
 - `console-clients add` (and `post-upgrade`) also creates the `hivexui-cindertrace` browser client
   when the installation has Cindertrace.
+- From HiveMem 1.9.0, the release manifest gives HiveMem a signed initialization that moves HiveMem
+  data owned by `hive-router` (Emberpath's principal on installations migrated from the native
+  Hive Router) to `emberpath`, with HiveMem's `rename-agent`. An upgrade verifies it read-only
+  first, needs `--allow-migrations` only where `hive-router` exists, rehearses it on the restored
+  backup and runs it once on the stopped live store. Before any service starts, the memory
+  credential follows: HiveMem's service links, Emberpath's credential record and a still-valid
+  static fallback token are moved to `emberpath`, and the rename is recorded so a later credential
+  step never links the old principal. See `UPGRADING.md`.
 
 ## [3.11.2] - 2026-11-17
 

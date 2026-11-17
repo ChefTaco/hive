@@ -76,6 +76,12 @@ A durable journal binds each migration to its exact signed product specification
 or uncertain attempt is reconciled by that product's verifier; it is never blindly replayed.
 Automatic migrations on ordinary application startup remain disabled.
 
+HiveMem uses this path, from HiveMem 1.9.0, to move data owned by Emberpath's former principal
+`hive-router` to `emberpath` (`hivemem-server rename-agent`). Its verifier passes on an
+installation that never had `hive-router`, so only migrated installations need the flag. After the
+live rename, and before any service starts, the upgrade re-links the memory credential to
+`emberpath`. See [UPGRADING.md](../UPGRADING.md#emberpaths-memory-principal-hive-router-becomes-emberpath).
+
 ## Setup checklist
 
 Some steps after an install or upgrade still need a person. The controller records them in the

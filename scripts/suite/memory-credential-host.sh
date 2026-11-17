@@ -53,6 +53,15 @@ update() {
   fi
   changed+=("${file##*/}")
 }
+# A HiveMem identity rename that already ran on this host (initialize-migrations-host.sh,
+# hive_memory_identity_relink) maps a principal to its new ID, so a link never points back at
+# the disabled old one, even when the credential record on another host still names it.
+renamed() {
+  local renames="$config/.memory-identity-renames.json"
+  if [[ -f "$renames" && ! -L "$renames" ]]; then
+    jq -er --arg id "$1" 'if .schema==1 and (.renames|type=="object") then (.renames[$id] // $id) else error("invalid") end' "$renames" 2>/dev/null || die 'Invalid memory identity record'
+  else printf '%s\n' "$1"; fi
+}
 https_origin() { [[ "$1" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || die 'Product endpoints must be HTTPS origins'; }
 # The Oathweave client the identity host declares, with its HiveMem principal and issuer.
 identity() {
@@ -83,12 +92,17 @@ identity() {
   issuer=$(get "$oath" JWT_ISSUER); [[ -n "$issuer" ]] || issuer=hive-iam
   if [[ -f "$record" ]]; then
     local_id=$(jq -er --arg client "$client" 'select(.schema==1 and .clientId==$client)|.localId' "$record") || die 'Invalid credential record'
+    legacy=$(renamed "$local_id")
+    if [[ "$legacy" != "$local_id" ]]; then
+      jq --arg id "$legacy" '.localId=$id' "$record" > "$record.new"; mv -T -- "$record.new" "$record"; local_id=$legacy
+    fi
   else
-    # A migrated Router acted as the subject of its static admin token; keep that principal so
-    # its HiveMem audit trail and ownership continue. A fresh installation uses emberpath.
+    # A migrated Router acted as the subject of its static admin token; keep that principal, which
+    # owns its HiveMem data, until HiveMem's identity rename moves that data to emberpath and
+    # re-links it (hive_memory_identity_relink). A fresh installation uses emberpath.
     legacy=$(get "$ember" HIVE_ROUTER_MEMORY_PROXY_TOKEN)
     subject=$(jq -Rr 'split(".")[1] // ""|gsub("-";"+")|gsub("_";"/")|.+("="*((4-length%4)%4))|@base64d|fromjson?|.sub // empty|strings' <<< "$legacy" 2>/dev/null || true)
-    if [[ "$subject" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then local_id=$subject; else local_id=emberpath; fi
+    if [[ "$subject" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]; then local_id=$(renamed "$subject"); else local_id=emberpath; fi
     jq -n --arg client "$client" --arg id "$local_id" '{schema:1,clientId:$client,localId:$id}' > "$record.new"; mv -T -- "$record.new" "$record"
   fi
   policies=$(get "$oath" IAM_MACHINE_CLIENT_POLICIES); [[ -n "$policies" ]] || policies='{}'
@@ -124,6 +138,7 @@ link() {
   issuer=$(jq -er .memoryCredential.issuer <<< "$input"); local_id=$(jq -er .memoryCredential.localId <<< "$input")
   [[ $(jq -er .memoryCredential.clientId <<< "$input") == "$client" ]] || die 'Unexpected client'
   [[ "$local_id" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ && -n "$issuer" && ${#issuer} -le 512 ]] || die 'Invalid credential link'
+  local_id=$(renamed "$local_id")
   memory=$(env_file hivemem)
   [[ -n $(get "$memory" OATHWEAVE_JWKS_URL) ]] || die 'HiveMem has no OATHWEAVE_JWKS_URL to verify service tokens'
   services=$(get "$memory" HIVEMEM_OATHWEAVE_SERVICES_JSON); [[ -n "$services" ]] || services='[]'

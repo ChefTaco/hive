@@ -41,7 +41,7 @@ host() {
   jq -nc --arg directory "$directory" --arg action "$1" --arg plan "$plan" --arg version "$version" --arg digest "$(printf '%064d' 2)" \
     --arg archive "${ARCHIVE:-archive}" --arg operation "${OPERATION:-upgrade}" \
     '{directory:$directory,installation:"example-suite",host:"control",action:$action,plan:$plan,version:$version,digest:$digest,archive:$archive,operation:$operation,allowMigrations:true,integrityScript:"ZXhwb3J0IHt9",agents:[],inference:[],placements:{}}' |
-    bash -c "${HOST_SCRIPT:-$script}" > "$temporary/host.log" 2>&1
+    bash <(printf '%s\n' "${HOST_SCRIPT:-$script}") > "$temporary/host.log" 2>&1
 }
 reset() {
   rm -rf -- "$directory"; rm -f "$temporary/migrated" "$temporary/consumed-"*

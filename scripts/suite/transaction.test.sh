@@ -18,7 +18,7 @@ done
 host() { # ACTION PLAN [STEP] [OPERATION]
   jq -nc --arg directory "$directory" --arg action "$1" --arg plan "$2" --arg step "${3:-}" --arg operation "${4:-upgrade}" \
     '{directory:$directory,installation:"example-suite",host:"control",action:$action,plan:$plan,version:"0.1.0",archive:"",operation:$operation,abortStep:$step,agents:[],inference:[],placements:{}}' |
-    bash -c "$script" > "$temporary/host.log" 2>&1
+    bash <(printf '%s\n' "$script") > "$temporary/host.log" 2>&1
 }
 phase() { jq -r .phase "$directory/transaction.json"; }
 id() { printf '%064d' "$1"; }

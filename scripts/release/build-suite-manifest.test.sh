@@ -209,6 +209,20 @@ for versions in '2.1.0 1.4.0 emberpath-v1 hiveskills-v1' '2.2.0 1.4.0 emberpath-
 done
 jq 'del(.products.emberpath.version)' "$temporary/inputs.json" > "$temporary/bad-inputs.json"
 if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'A product without an exact version skipped its data format review' >&2; exit 1; fi
+# HiveMem 1.9.0 moves Emberpath's former memory principal, hive-router, to emberpath as its signed
+# initialization; older HiveMem pins have none and stay byte for byte.
+jq -e '.components.hivemem|has("initialization")|not' "$temporary/original.json" >/dev/null || { echo 'An older HiveMem gained an initialization' >&2; exit 1; }
+for version in 1.9.0 1.10.2 2.0.0; do
+  jq --arg version "$version" '.products.hivemem.version=$version' "$temporary/inputs.json" > "$temporary/memory-inputs.json"
+  node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/memory-inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/memory.json" >/dev/null
+  jq -e '.components.hivemem as $memory | $memory.initialization=={image:$memory.image,
+      command:["rename-agent","--from","hive-router","--to","emberpath"],
+      verificationCommand:["rename-agent","--from","hive-router","--to","emberpath","--verify"]}' "$temporary/memory.json" >/dev/null || { echo "HiveMem $version lacks the reviewed memory identity rename" >&2; exit 1; }
+  diff <(jq 'del(.components.hivemem)' "$temporary/memory.json") <(jq 'del(.components.hivemem)' "$temporary/original.json") >/dev/null || { echo 'The memory identity rename changed another component' >&2; exit 1; }
+done
+jq '.products.hivemem.version="1.8.9"' "$temporary/inputs.json" > "$temporary/memory-inputs.json"
+node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/memory-inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/memory.json" >/dev/null
+jq -e '.components.hivemem|has("initialization")|not' "$temporary/memory.json" >/dev/null || { echo 'HiveMem 1.8.9 gained an initialization' >&2; exit 1; }
 # Embermend requires an explicit reviewed bridge declaration, not a version guess.
 jq '.products.embermend={image:"ghcr.io/example/embermend:0.1.0",version:"0.1.0",platforms:["linux/amd64","linux/arm64"]} | .products.magnus.version="2.5.0" | .products.magnus.embermendProtocol=1' "$temporary/inputs.json" > "$temporary/embermend-inputs.json"
 jq --arg digest "$(digest 95)" '.+{embermend:("ghcr.io/example/embermend@"+$digest)}' "$temporary/pinned.json" > "$temporary/embermend-pinned.json"

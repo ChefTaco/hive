@@ -74,7 +74,7 @@ fixture() {
 run() {
   jq -nc --arg directory "$directory" --arg plan "$plan" --arg operation "$operation" --arg action "$1" \
     '{directory:$directory,installation:"example",host:"control",plan:$plan,operation:$operation,action:$action,version:"0.1.0",archive:"fixture",agents:[],inference:[]}' |
-    bash -c "$script" > "$temporary/result" 2> "$temporary/error" || { cat "$temporary/error" >&2; return 1; }
+    bash <(printf '%s\n' "$script") > "$temporary/result" 2> "$temporary/error" || { cat "$temporary/error" >&2; return 1; }
 }
 before() {
   local first second
