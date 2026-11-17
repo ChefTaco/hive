@@ -48,6 +48,11 @@ All notable changes to this project are documented in this file. The format is b
 
 - `deployment/REHEARSALS.md` no longer describes the retired standalone Cindertrace console's
   Oathweave configuration; it describes HiveXUI's Oathweave and recovery sign-in for Cindertrace.
+- The HiveMem identity relink after the `hive-router` → `emberpath` rename (#156) no longer traps a
+  retry. Its changes to `hivemem.env` and `emberpath.env` are staged beside them until the static
+  token has been re-issued, then journaled with the expected pinned-input digest, moved into place
+  and pinned. A failed token issuance leaves no pinned input changed; a crash between the move and
+  the pin is finished by the next run. Any other edit is still refused.
 
 ## [3.11.2] - 2026-11-17
 

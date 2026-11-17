@@ -24,6 +24,8 @@ cat > "$temporary/bin/docker" <<'DOCKER'
 set -Eeuo pipefail
 [[ "$1 $2" == 'compose -f' && "$4 $5 $6 $7 $8 $9" == 'run --no-deps --rm -T hivemem issue-token' ]] || exit 9
 printf '%s\n' "$*" >> "$HIVE_IDENTITY_FIXTURE/docker.calls"
+# Failure injection: the next issuance fails once, as a HiveMem that cannot start would.
+if [[ -e "$HIVE_IDENTITY_FIXTURE/fail-issue-once" ]]; then rm -f -- "$HIVE_IDENTITY_FIXTURE/fail-issue-once"; exit 1; fi
 shift 9
 subject='' role='' scope='' ttl=''
 while (($#)); do case "$1" in --subject) subject=$2;; --role) role=$2;; --scope) scope=$2;; --ttl) ttl=$2;; esac; shift 2; done
@@ -31,6 +33,15 @@ b64url() { printf '%s' "$1" | base64 -w0 | tr '+/' '-_' | tr -d '='; }
 printf '%s.%s.fake-signature\n' "$(b64url '{"alg":"HS256","typ":"JWT"}')" "$(b64url "$(jq -nc --arg s "$subject" --arg r "$role" --arg c "$scope" --argjson t "$ttl" '{sub:$s,role:$r,scope:$c,exp:(now+$t|floor)}')")"
 DOCKER
 chmod +x "$temporary/bin/docker"
+# Crash injection: after the first file moved over hivemem.env, the controller dies without cleanup.
+cat > "$temporary/bin/mv" <<'MV'
+#!/usr/bin/env bash
+/bin/mv "$@" || exit
+if [[ -e "$HIVE_IDENTITY_FIXTURE/crash-after-hivemem" && "${!#}" == */config/hivemem.env ]]; then
+  rm -f -- "$HIVE_IDENTITY_FIXTURE/crash-after-hivemem"; kill -KILL "$PPID"
+fi
+MV
+chmod +x "$temporary/bin/mv"
 export PATH="$temporary/bin:$PATH"
 
 plan=$(printf 'a%.0s' {1..64})
@@ -79,6 +90,55 @@ relink || fail 'A repeat failed'
 printf 'EXTRA=1\n' >> "$config/hivemem.env"
 if relink; then fail 'An unpinned edit was accepted'; fi
 grep -q 'Pinned deployment inputs changed' "$directory/relink.log" || fail 'The unpinned edit was not named'
+
+# ---- A failed token issuance changes no pinned input, and the rerun completes. ----
+setup "$temporary/issue-fails"
+sums=$(sha256sum "$config/"*.env "$directory/deployment-inputs.$plan.json")
+touch "$temporary/fail-issue-once"
+if relink; then fail 'A failed issuance was accepted'; fi
+grep -q 'could not re-issue the static memory token' "$directory/relink.log" || fail 'The failed issuance was not named'
+[[ $(sha256sum "$config/"*.env "$directory/deployment-inputs.$plan.json") == "$sums" ]] || fail 'A failed issuance left a pinned input changed'
+assert_deployment_inputs "$directory/candidate.json" || fail 'A failed issuance broke the pin'
+relink || { cat "$directory/relink.log" >&2; fail 'The rerun after a failed issuance did not complete'; }
+[[ $(jq -r '.[0].localId' <<< "$(value "$config/hivemem.env" HIVEMEM_OATHWEAVE_SERVICES_JSON)") == emberpath ]] || fail 'The rerun did not move the links'
+claims "$(value "$config/emberpath.env" HIVE_ROUTER_MEMORY_PROXY_TOKEN)" | jq -e '.sub=="emberpath"' >/dev/null || fail 'The rerun did not re-issue the token'
+assert_deployment_inputs "$directory/candidate.json" || fail 'The rerun did not pin its change'
+[[ -z $(find "$config" "$directory" -maxdepth 1 -name '*memory-identity*staged*' -o -maxdepth 1 -name "memory-identity.$plan.json") ]] || fail 'Staged files or the journal were left behind'
+
+# ---- A crash between moving the files and pinning them resumes from the journal. ----
+setup "$temporary/crash"
+touch "$temporary/crash-after-hivemem"
+if relink; then fail 'The crash was not simulated'; fi
+[[ -f "$directory/memory-identity.$plan.json" ]] || fail 'No journal survived the crash'
+if ( assert_deployment_inputs "$directory/candidate.json" ) 2>/dev/null; then fail 'The crash fixture did not interrupt between move and pin'; fi
+relink || { cat "$directory/relink.log" >&2; fail 'The rerun after a crash did not complete'; }
+[[ $(jq -r '.[0].localId' <<< "$(value "$config/hivemem.env" HIVEMEM_OATHWEAVE_SERVICES_JSON)") == emberpath ]] || fail 'The links did not move after the crash'
+claims "$(value "$config/emberpath.env" HIVE_ROUTER_MEMORY_PROXY_TOKEN)" | jq -e '.sub=="emberpath"' >/dev/null || fail 'The token was not re-issued after the crash'
+assert_deployment_inputs "$directory/candidate.json" || fail 'The resumed change is not pinned'
+[[ ! -e "$directory/memory-identity.$plan.json" ]] || fail 'The journal was left behind'
+for file in hivemem emberpath; do
+  [[ $(jq -r --arg path "$config/$file.env" '.files[$path]' "$config/.initializer/receipt.json") == "$(sha256sum "$config/$file.env" | cut -d ' ' -f1)" ]] || fail "The initializer receipt does not record the resumed $file.env"
+done
+
+# ---- An unrelated edit while a crashed change is pending is still refused. ----
+setup "$temporary/crash-edit"
+touch "$temporary/crash-after-hivemem"
+if relink; then fail 'The crash was not simulated'; fi
+printf 'EXTRA=1\n' >> "$config/emberpath.env"
+if relink; then fail 'An unrelated edit was accepted during recovery'; fi
+grep -q 'changed outside' "$directory/relink.log" || grep -q 'Pinned deployment inputs changed' "$directory/relink.log" || fail 'The unrelated edit was not named'
+setup "$temporary/crash-other"
+touch "$temporary/crash-after-hivemem"
+if relink; then fail 'The crash was not simulated'; fi
+printf 'EXTRA=1\n' >> "$config/hivemem.env"
+if relink; then fail 'An edit to a journaled file was accepted during recovery'; fi
+
+# ---- The digest with a staged override equals the digest of the same content in place. ----
+setup "$temporary/override"
+cp -p "$config/hivemem.env" "$directory/same.env"
+declare -gA HIVE_INPUT_OVERRIDES=(["$config/hivemem.env"]="$directory/same.env")
+[[ $(deployment_inputs_digest "$directory/candidate.json") == "$(jq -r .sha256 "$directory/deployment-inputs.$plan.json")" ]] || fail 'An override with identical content changes the digest'
+HIVE_INPUT_OVERRIDES=()
 
 # ---- Without a verified rename receipt nothing is re-linked. ----
 setup "$temporary/unverified"

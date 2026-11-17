@@ -106,15 +106,21 @@ hive_identity_env_get() {
   jq -Rrs --arg key "$2" --arg sq "'" 'split("\n")|map(select(startswith($key+"="))|.[($key|length)+1:]|
     if length>1 and ((startswith("\"") and endswith("\"")) or (startswith($sq) and endswith($sq))) then .[1:-1] else . end)|last // empty' "$1"
 }
-# Replaces one KEY='VALUE' line, keeping every other line, the owner and the mode, and the
-# initializer's record of the file.
-hive_identity_env_set() {
-  local file=$1 key=$2 value=$3 temporary receipt="$directory/config/.initializer/receipt.json"
+# Stages one KEY='VALUE' replacement of an environment file next to it, keeping every other line,
+# the owner and the mode. Nothing live changes until hive_identity_commit moves the staged files.
+hive_identity_env_stage() {
+  local file=$1 key=$2 value=$3 source staged="$1.memory-identity-staged"
   [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ && "$value" != *"'"* && "$value" != *$'\n'* && "$value" != *$'\r'* ]] || die 'A value cannot be represented in an environment file'
-  temporary=$(mktemp "$directory/config/.memory-identity.XXXXXX") || die 'The environment file could not be staged'
-  { grep -vE "^$key=" -- "$file" || true; printf "%s='%s'\n" "$key" "$value"; } > "$temporary"
-  chown --reference="$file" -- "$temporary" && chmod 600 -- "$temporary" && sync -f "$temporary" && mv -T -- "$temporary" "$file" || die 'The environment file could not be replaced'
-  hive_identity_inputs_changed=true
+  [[ ! -L "$staged" ]] || die 'Unsafe staged environment file'
+  source=${hive_identity_staged[$file]:-$file}
+  { grep -vE "^$key=" -- "$source" || true; printf "%s='%s'\n" "$key" "$value"; } > "$staged.next" &&
+    chown --reference="$file" -- "$staged.next" && chmod 600 -- "$staged.next" && sync -f "$staged.next" && mv -T -- "$staged.next" "$staged" ||
+    die 'The environment file could not be staged'
+  hive_identity_staged[$file]=$staged
+}
+# The initializer's record of a replaced file follows its new content.
+hive_identity_receipt_update() {
+  local file=$1 receipt="$directory/config/.initializer/receipt.json"
   if [[ -f "$receipt" && ! -L "$receipt" ]] && jq -e --arg path "$file" '.files[$path]!=null' "$receipt" >/dev/null; then
     jq --arg path "$file" --arg sha "$(sha256sum -- "$file" | cut -d ' ' -f1)" '.files[$path]=$sha' "$receipt" > "$receipt.new" && chmod 600 -- "$receipt.new" && mv -T -- "$receipt.new" "$receipt" || die 'The initializer receipt could not be updated'
   fi
@@ -133,16 +139,66 @@ hive_identity_jwt_claims() { jq -Rr 'split(".")[1] // ""|gsub("-";"+")|gsub("_";
 #     one with the same role, scope and remaining lifetime (an expired one is left as it is)
 # Every step is idempotent. Old-ID tokens left anywhere are refused: the rename disables it.
 # The environment files are deployment inputs pinned for this plan: they are checked unchanged
-# first, and pinned again after this controller's own change, so activation still refuses any
-# other edit.
+# first, every change is staged beside them until nothing can fail any more, and the change is then
+# journaled, moved into place and pinned (hive_identity_commit). A rerun after any failure finishes
+# or repeats exactly this change, so activation still refuses any other edit.
 hive_memory_identity_relink() {
-  hive_identity_inputs_changed=false
+  local journal="$directory/memory-identity.$plan.json"
+  [[ ! -L "$journal" ]] || die 'Unsafe memory identity journal'
+  [[ ! -f "$journal" ]] || hive_identity_resume "$1" "$journal"
+  declare -gA hive_identity_staged=()
   hive_memory_identity_relink_files "$@"
-  if [[ "$hive_identity_inputs_changed" == true ]]; then
-    local sha
-    sha=$(deployment_inputs_digest "$1") || die 'Deployment input artifacts cannot be read safely'
-    jq -n --arg sha "$sha" '{schema:1,sha256:$sha}' | atomic_json "$directory/deployment-inputs.$plan.json" || die 'The changed memory credential could not be pinned'
+  (( ${#hive_identity_staged[@]} == 0 )) || hive_identity_commit "$1" "$journal"
+}
+# Every fallible step, token issuance included, ran while only staged files changed. The journal
+# records the pinned digest before and the digest with the staged files in place (computed before
+# anything moves), so a rerun after a crash can finish exactly this change and nothing else.
+hive_identity_commit() {
+  local candidate=$1 journal=$2 before after file files='[]'
+  before=$(jq -er .sha256 "$directory/deployment-inputs.$plan.json") || die 'The pinned deployment inputs cannot be read'
+  HIVE_INPUT_OVERRIDES=()
+  for file in "${!hive_identity_staged[@]}"; do
+    HIVE_INPUT_OVERRIDES[$file]=${hive_identity_staged[$file]}
+    files=$(jq -c --arg path "$file" --arg staged "${hive_identity_staged[$file]}" --arg original "$(sha256sum -- "$file" | cut -d ' ' -f1)" --arg sha "$(sha256sum -- "${hive_identity_staged[$file]}" | cut -d ' ' -f1)" '.+[{path:$path,staged:$staged,original:$original,sha256:$sha}]' <<< "$files")
+  done
+  after=$(deployment_inputs_digest "$candidate") || { HIVE_INPUT_OVERRIDES=(); die 'Deployment input artifacts cannot be read safely'; }
+  HIVE_INPUT_OVERRIDES=()
+  jq -n --arg plan "$plan" --arg before "$before" --arg after "$after" --argjson files "$files" '{schema:1,plan:$plan,before:$before,after:$after,files:$files}' |
+    atomic_json "$journal" || die 'The memory identity change could not be journaled'
+  hive_identity_resume "$candidate" "$journal"
+}
+# Finishes a journaled change: each file holds either its old content with the staged copy beside
+# it, or the staged content already. Anything else, or any other changed input, stops it.
+hive_identity_resume() {
+  local candidate=$1 journal=$2 pinned before after count index path staged sha original live current
+  jq -e --arg plan "$plan" '.schema==1 and .plan==$plan and (.before|type=="string") and (.after|type=="string") and (.files|type=="array")' "$journal" >/dev/null 2>&1 ||
+    die 'The memory identity journal is unreadable'
+  pinned=$(jq -er .sha256 "$directory/deployment-inputs.$plan.json") || die 'The pinned deployment inputs cannot be read'
+  before=$(jq -r .before "$journal"); after=$(jq -r .after "$journal")
+  if [[ "$pinned" != "$after" ]]; then
+    [[ "$pinned" == "$before" ]] || die 'The memory identity journal does not match the pinned deployment inputs'
+    count=$(jq '.files|length' "$journal")
+    for (( index = 0; index < count; index++ )); do
+      path=$(jq -r ".files[$index].path" "$journal"); staged=$(jq -r ".files[$index].staged" "$journal")
+      sha=$(jq -r ".files[$index].sha256" "$journal"); original=$(jq -r ".files[$index].original" "$journal")
+      [[ "$staged" == "$path.memory-identity-staged" && -f "$path" && ! -L "$path" && ! -L "$staged" ]] || die 'Unsafe memory identity journal entry'
+      live=$(sha256sum -- "$path" | cut -d ' ' -f1)
+      [[ "$live" == "$sha" ]] && continue
+      [[ "$live" == "$original" && -f "$staged" && $(sha256sum -- "$staged" | cut -d ' ' -f1) == "$sha" ]] ||
+        die 'A memory identity input changed outside this controller; restore it or review a new configurationRevision'
+      mv -T -- "$staged" "$path" || die 'The environment file could not be replaced'
+    done
+    current=$(deployment_inputs_digest "$candidate") || die 'Deployment input artifacts cannot be read safely'
+    [[ "$current" == "$after" ]] || die 'Pinned deployment inputs changed; no further migrations or activation will run'
+    jq -n --arg sha "$after" '{schema:1,sha256:$sha}' | atomic_json "$directory/deployment-inputs.$plan.json" || die 'The changed memory credential could not be pinned'
   fi
+  count=$(jq '.files|length' "$journal")
+  for (( index = 0; index < count; index++ )); do
+    path=$(jq -r ".files[$index].path" "$journal")
+    hive_identity_receipt_update "$path"
+    rm -f -- "$path.memory-identity-staged"
+  done
+  rm -f -- "$journal"
 }
 hive_memory_identity_relink_files() {
   local candidate=$1 manifest=$2 spec from to config="$directory/config" memory ember services renames record legacy claims remaining token issued
@@ -165,7 +221,7 @@ hive_memory_identity_relink_files() {
   if [[ -f "$memory" && ! -L "$memory" ]]; then
     services=$(hive_identity_env_get "$memory" HIVEMEM_OATHWEAVE_SERVICES_JSON)
     if [[ -n "$services" ]] && jq -e --arg from "$from" 'type=="array" and any(.[]; .localId==$from)' <<< "$services" >/dev/null 2>&1; then
-      hive_identity_env_set "$memory" HIVEMEM_OATHWEAVE_SERVICES_JSON "$(jq -c --arg from "$from" --arg to "$to" 'map(if .localId==$from then .localId=$to else . end)' <<< "$services")"
+      hive_identity_env_stage "$memory" HIVEMEM_OATHWEAVE_SERVICES_JSON "$(jq -c --arg from "$from" --arg to "$to" 'map(if .localId==$from then .localId=$to else . end)' <<< "$services")"
       printf 'Memory identity: HiveMem service links now act as %s\n' "$to" >&2
     fi
   fi
@@ -194,6 +250,6 @@ hive_memory_identity_relink_files() {
   [[ "$token" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] || die 'HiveMem returned no token'
   issued=$(hive_identity_jwt_claims "$token")
   jq -e --arg to "$to" '.sub==$to' <<< "${issued:-null}" >/dev/null 2>&1 || die 'HiveMem re-issued the static memory token for another subject'
-  hive_identity_env_set "$ember" HIVE_ROUTER_MEMORY_PROXY_TOKEN "$token"
+  hive_identity_env_stage "$ember" HIVE_ROUTER_MEMORY_PROXY_TOKEN "$token"
   printf 'Memory identity: HIVE_ROUTER_MEMORY_PROXY_TOKEN re-issued for %s with its remaining lifetime\n' "$to" >&2
 }

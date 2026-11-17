@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Definitions only. No environment file is sourced or printed.
+# Files the digest reads from a staged path instead of their own (path -> staged file). Empty
+# except while a controller change is staged.
+declare -gA HIVE_INPUT_OVERRIDES=()
 deployment_inputs_digest() {
   local definition=$1 path paths
   paths=$(jq -r '[.services[]|(.env_file[]? | if type=="string" then . else .path end),(.volumes[]?|select(.read_only==true)|.source)]|unique[]' "$definition") || return 1
@@ -14,6 +17,12 @@ deployment_inputs_digest() {
       stat -c '%a:%u:%g' "$path" || return 1
       find "$path" -mindepth 1 -type d -print0 | sort -z | while IFS= read -r -d '' path; do printf '%s\0' "$path" || return 1; stat -c '%a:%u:%g' "$path" || return 1; done || return 1
       find "$path" -type f -print0 | sort -z | while IFS= read -r -d '' path; do stat -c '%a:%u:%g' "$path" || return 1; sha256sum --zero -- "$path" || return 1; done || return 1
+    elif [[ -n "${HIVE_INPUT_OVERRIDES[$path]+set}" ]]; then
+      # A staged replacement counts as if it were already in place (hive_memory_identity_relink).
+      local staged=${HIVE_INPUT_OVERRIDES[$path]}
+      [[ -f "$staged" && ! -L "$staged" ]] || return 1
+      stat -c '%a:%u:%g' "$staged" || return 1
+      printf '%s  %s\0' "$(sha256sum < "$staged" | cut -d ' ' -f1)" "$path" || return 1
     elif [[ -f "$path" ]]; then stat -c '%a:%u:%g' "$path" || return 1; sha256sum --zero -- "$path" || return 1
     else return 1; fi
   done <<< "$paths" | sha256sum | cut -d ' ' -f1
