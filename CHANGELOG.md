@@ -6,6 +6,19 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.11.2] - 2026-11-17
+
+### Changed
+
+- Pins Oathweave 2.3.1 (its SDK's default issuer now matches the server default; the server is
+  unchanged), HiveMem 1.8.1 (deployment script and documentation fixes), Emberpath 2.5.2 (removes
+  the expired static security-export credential), Magnus 3.1.2 for the server, the fleet gateway
+  and the host agent package (help text and environment schema fixes), and Ardent Project Studio
+  0.4.3 (Magnus contracts 3.1.2, no behaviour change). HiveXUI stays at 0.9.2. The datastore
+  profile and the storage recovery profile are unchanged, and no storage format changes, so an
+  upgrade from 3.11.1 needs no flag. The controller changes with the help text fix below. See
+  `UPGRADING.md`, "Suite 3.11.2: product maintenance releases".
+
 ### Fixed
 
 - `hive.sh --help` now says `--release latest` also works for `admin-access` (and names install and
