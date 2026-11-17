@@ -111,6 +111,7 @@ manifest.controllerSHA256 = controllerSHA256;
 // Each component records the version of what it runs; applySuiteCatalog falls back to the suite version.
 for (const [name, product] of Object.entries(products)) if (product.version && manifest.components[name]) manifest.components[name].version = product.version;
 if (products.embermend?.version) manifest.components['embermend-worker'].version = products.embermend.version;
+if (products.cindertrace?.version) manifest.components['cindertrace-collector'].version = products.cindertrace.version;
 if (products.embermend) manifest.components.magnus.embermendProtocol = products.magnus.embermendProtocol;
 const datastoreVersion = { [DATASTORE_IMAGES.redis]: DATASTORE_VERSIONS.redis, [DATASTORE_IMAGES.qdrant]: DATASTORE_VERSIONS.qdrant, [DATASTORE_IMAGES.postgres17]: DATASTORE_VERSIONS.postgres17, [DATASTORE_IMAGES.postgres18]: DATASTORE_VERSIONS.postgres18 };
 for (const [name, spec] of Object.entries(datastoreReferences)) datastoreVersion[pinned[name]] = spec.version;

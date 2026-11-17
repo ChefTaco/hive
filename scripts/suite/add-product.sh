@@ -15,11 +15,15 @@
 #   5. the console's browser client is created in Oathweave's store with its permissions in
 #      SUITE_ADMIN, as console-clients add does.
 
-# What add supports. Each entry names the components it adds (the product first) and its HiveXUI
-# browser client, as fresh setup declares it.
+# What add supports. Each entry names the components it adds (the product first), the components
+# it needs already installed, whether the product has a signed schema initialization, its HiveXUI
+# browser client as fresh setup declares it (or null), and what the host step prepares.
 hive_add_catalog() {
-  printf '%s\n' '{"cindertrace":{"name":"Cindertrace","components":["cindertrace","cindertrace-postgres","cindertrace-redis"],
-    "browserClient":{"id":"hivexui-cindertrace","audience":"cindertrace","permissions":["cindertrace:view","cindertrace:investigate","cindertrace:admin"]}}}' | jq -c .
+  printf '%s\n' '{"cindertrace":{"name":"Cindertrace","components":["cindertrace","cindertrace-postgres","cindertrace-redis"],"requires":[],"initialization":true,
+    "browserClient":{"id":"hivexui-cindertrace","audience":"cindertrace","permissions":["cindertrace:view","cindertrace:investigate","cindertrace:admin"]},
+    "prepares":"Cindertrace secrets, internal certificate, private PostgreSQL and Redis configuration and environment, with native browser sign-in for the operator and an Oathweave link from the operator account to a new Cindertrace account; the hivexui-cindertrace browser policy in Oathweave, the Cindertrace routes in the ingress and Cindertrace in the console runtime.json"},
+  "cindertrace-collector":{"name":"Cindertrace collector","components":["cindertrace-collector"],"requires":["cindertrace"],"initialization":false,"browserClient":null,
+    "prepares":"checks the collector settings that cindertrace-collector add ID --sources ... --run wrote"}}' | jq -c .
 }
 
 hive_add_record() { # JOURNAL FILTER [JQ ARGUMENTS...]
@@ -42,8 +46,11 @@ hive_add_candidate() { # ENTRY
 # What the installation and the release must offer before anything is changed.
 hive_add_check() { # ENTRY
   local entry=$1 name
-  jq -e --argjson entry "$entry" '. as $r | all($entry.components[]; $r.components[.]!=null) and $r.components[$entry.components[0]].initialization!=null' "$HIVE_MANIFEST" >/dev/null ||
-    hive_die "Release $HIVE_VERSION does not offer $(jq -r .name <<< "$entry") with its datastores"
+  jq -e --argjson entry "$entry" '. as $r | all($entry.components[]; $r.components[.]!=null) and ($entry.initialization==false or $r.components[$entry.components[0]].initialization!=null)' "$HIVE_MANIFEST" >/dev/null ||
+    hive_die "Release $HIVE_VERSION does not offer $(jq -r .name <<< "$entry")$(jq -r 'if (.components|length)>1 then " with its datastores" else "" end' <<< "$entry")"
+  for name in $(jq -r '.requires[]' <<< "$entry"); do
+    jq -e --arg name "$name" '.components[$name]!=null' "$HIVE_CONFIG" >/dev/null || hive_die "$(jq -r .name <<< "$entry") needs $name in this installation: add it first"
+  done
   jq -e '.components.oathweave!=null and .components.ingress!=null and .components.hivexui!=null and .components["hive-registry"]!=null and .console!=null and .components.oathweave.host==.console.host' "$HIVE_CONFIG" >/dev/null ||
     hive_die 'add needs Oathweave, HiveXUI, the ingress and the Hive Registry, with Oathweave on the console host'
   jq -e '.bootstrap.productEndpoints==null' "$HIVE_CONFIG" >/dev/null || hive_die 'add does not support a distributed installation yet; see deployment/DISTRIBUTED.md'
@@ -87,11 +94,14 @@ hive_add_product() {
     printf 'Continue adding %s to installation %s (release %s) on host %s, after step "%s":\n' "$name" "$HIVE_ID" "$HIVE_VERSION" "$host" "$phase"
   fi
   printf '  1. Online backup of the installation; no service stops\n'
-  printf '  2. On %s: %s secrets, internal certificate, private PostgreSQL and Redis configuration and environment, with native browser sign-in for the operator and an Oathweave link from the operator account to a new %s account; the %s browser policy in Oathweave, the %s routes in the ingress and %s in the console runtime.json\n' \
-    "$host" "$name" "$name" "$(jq -r .browserClient.id <<< "$entry")" "$name" "$name"
+  printf '  2. On %s: %s\n' "$host" "$(jq -r .prepares <<< "$entry")"
   printf '  3. The installation file %s gains %s (its previous copy is kept beside the journal)\n' "$HIVE_OPERATOR_CONFIG" "$(jq -r '.components|join(", ")' <<< "$entry")"
-  printf '  4. Apply it as an upgrade to release %s: stopped pre-change backup, rehearsal on a restored copy, %s schema migration claimed, applied and verified, then activation. Oathweave, the ingress and HiveXUI restart\n' "$HIVE_VERSION" "$name"
-  printf '  5. Create %s in Oathweave with its permissions in SUITE_ADMIN\n' "$(jq -r .browserClient.id <<< "$entry")"
+  if jq -e '.initialization' <<< "$entry" >/dev/null; then
+    printf '  4. Apply it as an upgrade to release %s: stopped pre-change backup, rehearsal on a restored copy, %s schema migration claimed, applied and verified, then activation. Oathweave, the ingress and HiveXUI restart\n' "$HIVE_VERSION" "$name"
+  else
+    printf '  4. Apply it as an upgrade to release %s: stopped pre-change backup, rehearsal on a restored copy, then activation, which starts %s\n' "$HIVE_VERSION" "$name"
+  fi
+  if jq -e '.browserClient!=null' <<< "$entry" >/dev/null; then printf '  5. Create %s in Oathweave with its permissions in SUITE_ADMIN\n' "$(jq -r .browserClient.id <<< "$entry")"; fi
   printf 'Journal: %s\n' "$journal"
   if [[ "${HIVE_CONFIRMED:-false}" != true ]]; then
     [[ "${HIVE_ADD_INTERACTIVE:-true}" == true && -t 0 ]] && hive_confirm "Add $name?" || hive_die 'Cancelled; nothing was changed. Unattended use needs --yes'
@@ -122,7 +132,7 @@ hive_add_product() {
     ) || hive_die "$name could not be configured on $host; the installation is unchanged and serving. Fix the cause and repeat the command to continue"
     result=$(tail -n 1 <<< "$result")
     jq -e '.phase=="complete"' <<< "$result" >/dev/null 2>&1 || hive_die "$host did not confirm the $name configuration"
-    hive_add_record "$journal" '.phase="prepared" | .operator=$result.username | .passwordFile=$result.passwordFile | .changedFiles=$result.changed' --argjson result "$result"
+    hive_add_record "$journal" '.phase="prepared" | .changedFiles=$result.changed | . + ($result|{operator:.username,passwordFile,collector}|with_entries(select(.value!=null)))' --argjson result "$result"
     phase=prepared
   fi
   if [[ "$phase" == prepared ]]; then
@@ -153,6 +163,10 @@ hive_add_product() {
     hive_add_record "$journal" '.phase="applied"'
     phase=applied
   fi
+  if [[ "$phase" == applied ]] && jq -e '.browserClient==null' <<< "$entry" >/dev/null; then
+    hive_add_record "$journal" '.phase="complete" | .completedAt=$now' --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    phase=complete
+  fi
   if [[ "$phase" == applied ]]; then
     clients=$(jq -c --arg redirect "$(jq -r .origin "$HIVE_CONFIG")/auth/callback" '[.browserClient+{redirectUris:[$redirect],firstParty:true}]' <<< "$entry")
     result=$(HIVE_HOST_ACTION=console-clients HIVE_CONSOLE_CLIENTS_INPUT=$clients hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/console-clients-host.sh")") ||
@@ -161,6 +175,12 @@ hive_add_product() {
     hive_add_record "$journal" '.phase="complete" | .completedAt=$now' --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   fi
   printf '\n%s is installed in %s.\n' "$name" "$HIVE_ID"
+  if [[ "$product" == cindertrace-collector ]]; then
+    printf '  Collector: %s runs as component cindertrace-collector; its sources report under Cindertrace > Sources\n' "$(jq -r '.collector // "?"' "$journal")"
+    printf '  Settings:  edit its sources file, then ./hive.sh cindertrace-collector add ID --sources ... --run applies them\n'
+    printf '  Backup:    %s was taken before any change\n' "$(jq -r '.backup // "?"' "$journal")"
+    return 0
+  fi
   printf '  Console:   sign out of %s/ and in again to see %s\n' "$(jq -r .origin "$HIVE_CONFIG")" "$name"
   printf '  Recovery:  %s'"'"'s own sign-in, for when Oathweave is unavailable: account %s, password in %s on %s (owner-only; never printed)\n' "$name" "$(jq -r '.operator // "?"' "$journal")" "$(jq -r '.passwordFile // "?"' "$journal")" "$host"
   printf '  Backup:    %s was taken before any change\n' "$(jq -r '.backup // "?"' "$journal")"

@@ -22,10 +22,14 @@ request=$(jq -ce '.addProduct|objects' <<< "$input") || { printf 'Hive add: miss
 product=$(jq -er .product <<< "$request")
 die() { printf 'Hive add: %s\n' "$*" >&2; exit 1; }
 [[ "$directory" =~ ^/[A-Za-z0-9_./-]+$ && "$directory" == "$(realpath -m -- "$directory")" && ! -L "$directory" ]] || die 'Installation path must be canonical without symlinks'
-# Only the products whose configuration initialize-full-host.sh owns, one at a time.
-[[ "$product" == cindertrace ]] || die "add does not support $product"
+# One product at a time: Cindertrace, whose configuration initialize-full-host.sh owns, or its
+# collector, whose settings hive.sh cindertrace-collector add --run writes.
 mapfile -t components < <(jq -r '.components[]' <<< "$request")
-[[ "${components[*]}" == "cindertrace cindertrace-postgres cindertrace-redis" ]] || die 'Unexpected component set'
+case "$product" in
+  cindertrace) [[ "${components[*]}" == "cindertrace cindertrace-postgres cindertrace-redis" ]] || die 'Unexpected component set';;
+  cindertrace-collector) [[ "${components[*]}" == cindertrace-collector ]] || die 'Unexpected component set';;
+  *) die "add does not support $product";;
+esac
 for tool in openssl jq docker flock sha256sum cmp stat find; do command -v "$tool" >/dev/null || die "Required tool missing on this host: $tool"; done
 docker info >/dev/null 2>&1 || die "Docker is not reachable by $(id -un) on this host"
 config="$directory/config"
@@ -50,6 +54,66 @@ done
 while IFS= read -r user; do
   [[ $(id -u) == 0 || "$(id -u):$(id -g)" == "$user" ]] || die 'Run add as the configured service owner or with sudo; application containers stay non-root'
 done < <(jq -r --argjson names "$(jq -c .components <<< "$request")" '.bootstrapServiceUsers|to_entries[]|select(.key as $name|$names|index($name))|.value' <<< "$input")
+# Compose semantics: the last assignment wins; one pair of quotes is removed.
+get() {
+  jq -Rrs --arg key "$2" --arg sq "'" 'split("\n")|map(select(startswith($key+"="))|.[($key|length)+1:]|
+    if length>1 and ((startswith("\"") and endswith("\"")) or (startswith($sq) and endswith($sq))) then .[1:-1] else . end)|last // empty' "$1"
+}
+# Holds the host lock for the rest of the run and creates the journal directories.
+lock_and_journal() {
+  [[ ! -L "$directory/controller.lock" ]] || die 'Unsafe controller lock'
+  exec 9>"$directory/controller.lock"
+  flock -n 9 || die 'Another controller holds this host'
+  for path in "$config/.additions" "$state" "$state/secrets" "$state/keys" "$state/certificates"; do
+    [[ ! -L "$path" ]] || die 'Unsafe journal directory'
+    install -d -m 700 -- "$path"
+  done
+}
+changed=()
+# A fresh installation records a storage format for every component of its release, selected or
+# not, and a later release may have renamed those formats. None of these components has a store
+# here (checked above), so such an entry describes no data: removing it lets the upgrade treat
+# them as new, start them at the release's formats and initialize their schema, instead of asking
+# for a migration of data that does not exist. The removed entries are kept in the journal.
+drop_stale_formats() {
+  local formats="$directory/data-formats.json" temporary names
+  names=$(jq -c .components <<< "$request")
+  if [[ -f "$formats" && ! -L "$formats" ]] && jq -e --argjson names "$names" 'any(keys[]; . as $key|$names|index($key))' "$formats" >/dev/null; then
+    jq --argjson names "$names" --slurpfile formats "$formats" '.staleFormats=((.staleFormats // {})+($formats[0]|with_entries(select(.key as $key|$names|index($key)))))' "$journal" | atomic_receipt
+    temporary=$(mktemp "$directory/.data-formats.XXXXXX")
+    jq --argjson names "$names" 'with_entries(select(.key as $key|$names|index($key)|not))' "$formats" > "$temporary"
+    chown --reference="$formats" -- "$temporary"; chmod --reference="$formats" -- "$temporary"; sync -f "$temporary"; mv -T -- "$temporary" "$formats"
+    changed+=(data-formats.json)
+  fi
+}
+atomic_receipt() { local pending; pending=$(mktemp "$state/receipt.XXXXXX"); cat > "$pending"; chmod 600 "$pending"; sync -f "$pending"; mv -T -- "$pending" "$journal"; sync -f "$state"; }
+begin_journal() { # INPUTS-JSON
+  if [[ -e "$journal" || -L "$journal" ]]; then
+    [[ -f "$journal" && ! -L "$journal" && $(stat -c %u "$journal") == "$(id -u)" ]] || die 'Unsafe journal'
+    jq -e --arg id "$installation" --arg host "$host" --arg product "$product" --argjson inputs "$1" '.schema==1 and .installation==$id and .host==$host and .product==$product and .inputs==$inputs' "$journal" >/dev/null ||
+      die "An earlier add of $product used other inputs (operator account, release or image); its journal $journal is kept"
+  else
+    jq -n --arg id "$installation" --arg host "$host" --arg product "$product" --argjson inputs "$1" '{schema:1,installation:$id,host:$host,product:$product,inputs:$inputs,phase:"preparing",files:{}}' | atomic_receipt
+  fi
+}
+
+# The collector Cindertrace runs beside it: its settings were written by
+# hive.sh cindertrace-collector add ID --sources ... --run. Nothing else changes here.
+if [[ "$product" == cindertrace-collector ]]; then
+  placed cindertrace && jq -e '.services.cindertrace!=null' "$directory/compose.json" >/dev/null || die 'Cindertrace must run on this host first: ./hive.sh add cindertrace'
+  collector_env="$config/cindertrace-collector.env" store="$config/.credentials/cindertrace-collectors"
+  prepare='Prepare the collector first: ./hive.sh cindertrace-collector add ID --sources SOURCE[,SOURCE] --run (deployment/FULL.md#events-from-a-separate-logging-host)'
+  [[ -f "$collector_env" && ! -L "$collector_env" && -f "$config/cindertrace-collector/authority.pem" && ! -L "$config/cindertrace-collector" ]] || die "$prepare"
+  (( (8#$(stat -c %a "$collector_env") & 077)==0 )) || die "$collector_env must be owner-only"
+  collector=$(get "$collector_env" SECURITY_FUSION_COLLECTOR_ID)
+  [[ "$collector" =~ ^[a-z][a-z0-9-]{0,47}$ && -f "$store/$collector.json" ]] && jq -e '.runs==true' "$store/$collector.json" >/dev/null || die "$prepare"
+  lock_and_journal
+  begin_journal "$(jq -nc --arg image "$(jq -er '.bootstrapImages["cindertrace-collector"]' <<< "$input")" --arg version "$version" '{image:$image,release:$version}')"
+  drop_stale_formats
+  jq --arg collector "$collector" '.phase="complete" | .collector=$collector' "$journal" | atomic_receipt
+  jq -nc --arg collector "$collector" '{phase:"complete",changed:$ARGS.positional,collector:$collector}' --args "${changed[@]}"
+  exit 0
+fi
 
 # The operator account fresh setup linked, or the one a migration names.
 oathweave_environment=$(jq -er .placements.oathweave.envFile <<< "$input")
@@ -60,11 +124,6 @@ for file in "$oathweave_environment" "$ingress_environment"; do
   (( (8#$(stat -c %a "$file") & 077)==0 )) || die "$file must be owner-only"
 done
 [[ -f "$runtime" && ! -L "$runtime" ]] || die 'The console runtime.json is missing'
-# Compose semantics: the last assignment wins; one pair of quotes is removed.
-get() {
-  jq -Rrs --arg key "$2" --arg sq "'" 'split("\n")|map(select(startswith($key+"="))|.[($key|length)+1:]|
-    if length>1 and ((startswith("\"") and endswith("\"")) or (startswith($sq) and endswith($sq))) then .[1:-1] else . end)|last // empty' "$1"
-}
 issuer=$(get "$oathweave_environment" IAM_BROWSER_ISSUER)
 [[ "$issuer" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._/-]*)?$ ]] || die 'Oathweave has no HTTPS IAM_BROWSER_ISSUER'
 if jq -e '.bootstrap!=null' <<< "$input" >/dev/null; then
@@ -85,14 +144,7 @@ else die 'This installation has no internal certificate authority (a distributed
 for path in "$ca_key" "$ca"; do [[ -f "$path" && ! -L "$path" ]] || die 'Unsafe internal authority'; done
 cmp -s "$ca" "$config/ingress/backend-ca.pem" || die 'The internal authority is not the one the ingress trusts'
 
-[[ ! -L "$directory/controller.lock" ]] || die 'Unsafe controller lock'
-exec 9>"$directory/controller.lock"
-flock -n 9 || die 'Another controller holds this host'
-for path in "$config/.additions" "$state" "$state/secrets" "$state/keys" "$state/certificates"; do
-  [[ ! -L "$path" ]] || die 'Unsafe journal directory'
-  install -d -m 700 -- "$path"
-done
-atomic_receipt() { local pending; pending=$(mktemp "$state/receipt.XXXXXX"); cat > "$pending"; chmod 600 "$pending"; sync -f "$pending"; mv -T -- "$pending" "$journal"; sync -f "$state"; }
+lock_and_journal
 image=$(jq -er --arg name "$product" '.bootstrapImages[$name]' <<< "$input")
 inputs=$(jq -nc --arg issuer "$issuer" --arg subject "$subject" --arg username "$username" --arg image "$image" --arg version "$version" '{issuer:$issuer,subject:$subject,username:$username,image:$image,release:$version}')
 if [[ -e "$journal" || -L "$journal" ]]; then
@@ -179,7 +231,6 @@ hive_full_configuration
 
 # Existing files gain only their new entries; every other line, the owner and the mode stay, and
 # fresh setup's record of a file follows its new bytes, so tls-refresh keeps accepting it.
-changed=()
 update() { # FILE JSON-OBJECT
   local file=$1 wanted=$2 changes keys temporary key
   changes='{}'
@@ -226,19 +277,7 @@ if ! jq -e --arg product "$product" --arg id "$client_id" '.products[$product]==
   rerecord "$runtime"
   changed+=("${runtime#"$config"/}")
 fi
-# A fresh installation records a storage format for every component of its release, selected or
-# not, and a later release may have renamed those formats. None of these components has a store
-# here (checked above), so such an entry describes no data: removing it lets the upgrade treat
-# them as new, start them at the release's formats and initialize their schema, instead of asking
-# for a migration of data that does not exist. The removed entries are kept in the journal.
-formats="$directory/data-formats.json"
-if [[ -f "$formats" && ! -L "$formats" ]] && jq -e --argjson names "$(jq -c .components <<< "$request")" 'any(keys[]; . as $key|$names|index($key))' "$formats" >/dev/null; then
-  jq --argjson names "$(jq -c .components <<< "$request")" --slurpfile formats "$formats" '.staleFormats=((.staleFormats // {})+($formats[0]|with_entries(select(.key as $key|$names|index($key)))))' "$journal" | atomic_receipt
-  temporary=$(mktemp "$directory/.data-formats.XXXXXX")
-  jq --argjson names "$(jq -c .components <<< "$request")" 'with_entries(select(.key as $key|$names|index($key)|not))' "$formats" > "$temporary"
-  chown --reference="$formats" -- "$temporary"; chmod --reference="$formats" -- "$temporary"; sync -f "$temporary"; mv -T -- "$temporary" "$formats"
-  changed+=(data-formats.json)
-fi
+drop_stale_formats
 jq --arg password "$state/secrets/security-admin-password" '.phase="complete" | .passwordFile=$password' "$journal" | atomic_receipt
 printf 'Cindertrace configuration prepared on %s; secrets stay in %s.\n' "$host" "$state/secrets" >&2
 jq -nc --arg username "$username" --arg password "$state/secrets/security-admin-password" '{phase:"complete",changed:$ARGS.positional,username:$username,passwordFile:$password}' --args "${changed[@]}"

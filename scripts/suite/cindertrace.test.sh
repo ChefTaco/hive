@@ -35,6 +35,9 @@ case "\$*" in
   'compose -f $install/compose.json up -d --no-deps --force-recreate cindertrace') printf 'recreated\n' >> '$temporary/docker.log';;
   'compose -f $install/compose.json ps -q cindertrace') printf 'cindertrace-container\n';;
   'inspect -f '*' cindertrace-container') printf 'healthy\n';;
+  'compose -f $install/compose.json up -d --no-deps --force-recreate cindertrace-collector') printf 'collector recreated\n' >> '$temporary/docker.log';;
+  'compose -f $install/compose.json ps -q cindertrace-collector') printf 'collector-container\n';;
+  'inspect -f '*' collector-container') printf 'healthy\n';;
   *) exit 99;;
 esac
 SH
@@ -105,4 +108,51 @@ chmod 600 "$install/config/cindertrace.env"
 jq '.profile="custom" | del(.components.cindertrace,.components["cindertrace-postgres"],.components["cindertrace-redis"])' "$temporary/config.json" > "$temporary/core.json"
 if "$ROOT/hive.sh" cindertrace-collector list --config "$temporary/core.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive > "$temporary/core.log" 2>&1; then fail 'An installation without Cindertrace was accepted'; fi
 grep -q "no Cindertrace" "$temporary/core.log" || { cat "$temporary/core.log" >&2; fail "The missing Cindertrace refusal is unclear"; }
-printf 'Passed: Cindertrace collector credentials generated into owner-only files and never printed, ingestion on while a collector exists, idempotent add, revocation, recorded and re-pinned environment, and input refusal.\n'
+# --run: the collector the installation runs (component cindertrace-collector), from its owner-only
+# source settings beside the credential. No secret reaches an argument or the output.
+store="$install/config/.credentials/cindertrace-collectors"
+mkdir -p "$install/config/cindertrace"; printf 'example authority\n' > "$install/config/cindertrace/authority.pem"
+reject hive cindertrace-collector add logs --sources unifi_ids,unifi_dns,netflow --run
+grep -q 'Write the source settings' "$temporary/rejection.log" || { cat "$temporary/rejection.log" >&2; fail 'A missing sources file was not explained'; }
+[[ ! -e "$install/config/cindertrace-collector.env" ]] || fail 'A refused --run wrote the collector environment'
+token=$(openssl rand -hex 32)
+printf '# Loki on the logging host\nLOKI_URL=https://logs.example.com:3443\nLOKI_QUERY='"'"'{syslog_hostname="FIREWALL"}'"'"'\nLOKI_READ_TOKEN=%s\nUI_SECURITY_SOURCES_JSON={"magnus_ui":["{job=\\"magnus\\"}"]}\n' "$token" > "$store/logs.sources.env"
+chmod 600 "$store/logs.sources.env"
+: > "$temporary/jq-arguments"
+hive cindertrace-collector add logs --sources unifi_ids,unifi_dns,netflow,magnus_ui --run > "$temporary/run.log" || { cat "$temporary/run.log" >&2; fail 'add --run failed'; }
+collector_env="$install/config/cindertrace-collector.env"
+cvalue() { sed -n "s/^$1='\(.*\)'\$/\1/p" "$collector_env"; }
+[[ $(stat -c %a "$collector_env") == 600 && $(cvalue SECURITY_FUSION_COLLECTOR_ID) == logs && $(cvalue SECURITY_FUSION_INGEST_SECRET) == "$(cat "$store/logs")" ]] || fail 'The collector identity or credential is wrong'
+[[ $(cvalue CINDERTRACE_API_URL) == https://cindertrace:4101 && $(cvalue SECURITY_FUSION_STATE_DIR) == /data && $(cvalue NODE_EXTRA_CA_CERTS) == /config/authority.pem && $(cvalue SECURITY_FUSION_UDP_ENABLED) == false ]] || fail 'The generated collector settings are wrong'
+[[ $(cvalue LOKI_READ_TOKEN) == "$token" && $(cvalue LOKI_QUERY) == '{syslog_hostname="FIREWALL"}' && $(cvalue UI_SECURITY_SOURCES_JSON) == '{"magnus_ui":["{job=\"magnus\"}"]}' ]] || fail 'The source settings were not carried over'
+cmp -s "$install/config/cindertrace/authority.pem" "$install/config/cindertrace-collector/authority.pem" && [[ $(stat -c %a "$install/config/cindertrace-collector") == 700 ]] || fail 'The collector does not trust the installation authority'
+grep -q 'start it with ./hive.sh add cindertrace-collector' "$temporary/run.log" || { cat "$temporary/run.log" >&2; fail 'The next step was not named'; }
+! grep -qF "$token" "$temporary/run.log" && ! grep -qF "$(cat "$store/logs")" "$temporary/run.log" || fail '--run printed a secret'
+python3 - "$temporary/jq-arguments" "$token" "$(cat "$store/logs")" <<'CHECK'
+import pathlib, sys
+arguments = pathlib.Path(sys.argv[1]).read_bytes()
+for secret in sys.argv[2:]:
+    assert secret.encode() not in arguments, 'A collector secret reached process arguments'
+CHECK
+hive cindertrace-collector list | jq -e '.[]|select(.id=="logs")|.runs==true and (.sourcesFile|endswith("/logs.sources.env"))' >/dev/null || fail 'list does not show the running collector'
+reject hive cindertrace-collector remove logs
+grep -q 'runs in this installation' "$temporary/rejection.log" || fail 'Removing the running collector was not refused clearly'
+reject hive cindertrace-collector add other --sources wazuh --run
+grep -q 'Collector logs already runs' "$temporary/rejection.log" || fail 'A second running collector was not refused'
+# Only source settings are accepted, and the URLs are verified HTTPS.
+cp "$store/logs.sources.env" "$temporary/sources.good"
+for line in 'SECURITY_FUSION_COLLECTOR_ID=edge' 'CINDERTRACE_API_URL=https://elsewhere.example.com' 'LOKI_URL=http://logs.example.com:3100' 'not a setting'; do
+  { grep -v '^LOKI_URL=' "$temporary/sources.good"; [[ "$line" == LOKI_URL=* ]] || grep '^LOKI_URL=' "$temporary/sources.good"; printf '%s\n' "$line"; } > "$store/logs.sources.env"
+  before=$(sha256sum "$collector_env")
+  reject hive cindertrace-collector add logs --sources unifi_ids,unifi_dns,netflow,magnus_ui --run
+  [[ $(sha256sum "$collector_env") == "$before" ]] || fail "Refused sources ($line) changed the collector environment"
+done
+cp "$temporary/sources.good" "$store/logs.sources.env"
+# Once the component runs, changed settings recreate only the collector.
+jq --arg env "$collector_env" '.services["cindertrace-collector"]={env_file:[$env]}' "$install/compose.json" > "$install/compose.next"; mv "$install/compose.next" "$install/compose.json"
+hive cindertrace-collector add logs --sources unifi_ids,unifi_dns,netflow,magnus_ui --run > "$temporary/run.log"
+grep -q 'settings are unchanged' "$temporary/run.log" && ! grep -q 'collector recreated' "$temporary/docker.log" || fail 'Unchanged settings recreated the collector'
+printf 'LOKI_LIMIT=500\n' >> "$store/logs.sources.env"
+hive cindertrace-collector add logs --sources unifi_ids,unifi_dns,netflow,magnus_ui --run > "$temporary/run.log"
+[[ $(cvalue LOKI_LIMIT) == 500 && $(grep -c 'collector recreated' "$temporary/docker.log") == 1 ]] || fail 'Changed settings did not recreate the collector once'
+printf 'Passed: Cindertrace collector credentials generated into owner-only files and never printed, ingestion on while a collector exists, idempotent add, revocation, recorded and re-pinned environment, input refusal, and the collector the installation runs from owner-only source settings.\n'

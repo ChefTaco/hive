@@ -164,12 +164,12 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollb
   --help                 Show this help
 
 init prepares protected configuration for an explicitly fresh installation.
-add PRODUCT [--yes] adds a product with its private datastores to an existing installation, on the
-console host, as fresh setup configures it (today: cindertrace). It backs up first, writes the
-product's secrets and configuration, links the operator's Oathweave account, adds the product to
-the ingress, the console and the installation file, applies it as an upgrade to the installed
-release (rehearsal and schema migration included) and creates its console client. Each step is
-journaled beside the installation file; repeat the command to continue an interrupted add.
+add PRODUCT [--yes] adds a product to an existing installation, on the console host, as fresh
+setup configures it: cindertrace (with its private datastores: secrets, Oathweave link, ingress,
+console and console client) or cindertrace-collector (prepared by cindertrace-collector add --run).
+It backs up first, adds the product to the installation file and applies it as an upgrade to the
+installed release (rehearsal and schema migration included). Each step is journaled beside the
+installation file; repeat the command to continue an interrupted add.
 See deployment/FULL.md#adding-a-product-to-an-existing-installation.
 magnus-agent install|status|remove [--host TARGET] [--install-node] [--trust] runs the Magnus agent on a
 fleet host (default: the Magnus host): Node.js check (and NodeSource install with consent), the
@@ -191,9 +191,11 @@ The setup needs Magnus, HiveMem and Oathweave, an enrolled host agent and a mode
 does not require a separate API key. API keys and authenticated model endpoints are not accepted
 by this guided path.
 cindertrace-collector provisions the credential a Cindertrace collector signs events with:
-cindertrace-collector add ID --sources SOURCE[,SOURCE]|list|remove ID. The credential is generated
-on the Cindertrace host into an owner-only file and never printed; Cindertrace ingests while a
-collector exists. See deployment/FULL.md.
+cindertrace-collector add ID --sources SOURCE[,SOURCE] [--run]|list|remove ID. The credential is
+generated on the Cindertrace host into an owner-only file and never printed; Cindertrace ingests
+while a collector exists. --run makes ID the collector the installation runs (component
+cindertrace-collector, started by add cindertrace-collector) with the source settings in its
+owner-only ID.sources.env beside the credential. See deployment/FULL.md.
 console-clients add [--yes] creates the HiveXUI browser clients of Magnus (the component or an external
 Magnus), Cindertrace, Embermend and Ardent Project Studio in an existing Oathweave store, and adds
 their permissions to the SUITE_ADMIN role. Their policies must already be in
@@ -853,7 +855,7 @@ hive_main() {
   HIVE_ARDENT_PROFILE=assistant HIVE_ARDENT_MODEL_URL='' HIVE_ARDENT_MODEL=''
   HIVE_RETENTION_KEEP='' HIVE_RETENTION_KEEP_DAYS='' HIVE_RETENTION_KEEP_FULL='' HIVE_RETENTION_APPLY=false HIVE_RETENTION_AT='' HIVE_RETENTION_CONTROLLER='' HIVE_RETENTION_TRIGGER='' HIVE_OPERATOR_CONFIG=''
   HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_NATIVE_RECOVERY_FILE='' HIVE_NATIVE_RECOVERY_INPUT=null HIVE_NATIVE_RECOVERY_CONFIGURATION_SHA='' HIVE_NATIVE_RECOVERY_MANIFEST_SEMANTIC_SHA='' HIVE_NATIVE_BACKUP_TOOL='' HIVE_ALLOW_MIGRATIONS=false HIVE_RELAX_AUTH_LIMITS=false HIVE_BACKUP_STOPPED=false HIVE_PREPARE_RECONCILIATION=false
-  HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY='' HIVE_CINDERTRACE_SOURCES='' HIVE_AGENT_TARGET='' HIVE_AGENT_SSH_CONFIG='' HIVE_AGENT_SUDO_FILE='' HIVE_AGENT_INSTALL_NODE=false HIVE_AGENT_TRUST=false
+  HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY='' HIVE_CINDERTRACE_SOURCES='' HIVE_CINDERTRACE_RUN=false HIVE_AGENT_TARGET='' HIVE_AGENT_SSH_CONFIG='' HIVE_AGENT_SUDO_FILE='' HIVE_AGENT_INSTALL_NODE=false HIVE_AGENT_TRUST=false
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
   HIVE_RELEASE_SUMMARY='' HIVE_REGISTRY_FILE='' HIVE_REGISTRY_ORIGINAL_CONFIG='' HIVE_REGISTRY_TEMPORARY='' HIVE_OPERATION='' HIVE_CHECKLIST=''
   HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS='' HIVE_AGENT_ENROLLMENT='' HIVE_ADD_TEMPORARY='' HIVE_ADD_INPUT=''
@@ -883,6 +885,7 @@ hive_main() {
         [[ "$command" == backup || "$command" == restore ]] || hive_die '--native-recovery applies only to backup or restore'
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die 'Missing value: --native-recovery'
         HIVE_NATIVE_RECOVERY_FILE=$2; shift 2;;
+      --run) [[ "$command" == cindertrace-collector ]] || hive_die '--run applies only to cindertrace-collector add'; HIVE_CINDERTRACE_RUN=true; shift;;
       --sources)
         [[ "$command" == cindertrace-collector ]] || hive_die '--sources applies only to cindertrace-collector'
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
