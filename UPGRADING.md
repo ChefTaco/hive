@@ -46,6 +46,34 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Suite 3.11.2: product maintenance releases
+
+Suite 3.11.2 pins Oathweave 2.3.1, HiveMem 1.8.1, Emberpath 2.5.2, Magnus 3.1.2 (the server, the
+fleet gateway and the host agent package) and Ardent Project Studio 0.4.3. HiveXUI stays at 0.9.2;
+its Magnus browser contract is byte-identical to Magnus 3.1.2's. The datastore profile and the
+storage recovery profile are those of 3.11.1, no storage format changes and none of these product
+versions has a database migration, so an upgrade from 3.11.1 needs no flag. Pass `--release 3.11.2`
+to later commands, as described in [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
+From an earlier release, follow the steps below for each release you skip, with 3.11.2 in place of
+3.11.1.
+
+**New controller.** The `hive.sh --help` text changed, so 3.11.2 has its own controller source and
+a checkout of the 3.11.1 tag refuses the 3.11.2 manifest. Run 3.11.2 from a checkout of its tag;
+`--release latest` and `--release 3.11.2` select it.
+
+**Emberpath security export.** Emberpath 2.5.2 removes the static security-export credential,
+which expired on 2026-09-30. `GET /api/security/events` accepts only the `security-exporter`
+Oathweave client token. `HIVE_ROUTER_SECURITY_EXPORT_TOKEN_HASH` in `config/emberpath.env` is now
+ignored and can stay. `HIVE_ROUTER_SECURITY_EXPORT_STATIC_FALLBACK_ENABLED=true` is still refused at
+startup, as it has been since the credential expired, so a running Emberpath 2.5.1 needs no change.
+
+**Oathweave SDK issuer.** The Oathweave server is unchanged. Its in-repository SDK now expects the
+server's default issuer, `hive-iam`, when a verifier sets none. This affects only services built
+against that SDK; no pinned suite image changes because of it, so an installation needs no change.
+
+**Rolling back to 3.11.1.** Nothing to change first; the earlier product versions read the same
+data. Run the rollback from the 3.11.1 release checkout.
+
 ## Suite 3.11.1: Cindertrace 0.7.2
 
 Suite 3.11.1 pins Cindertrace 0.7.2, whose standalone console is built with Next.js 16.4.6 for
