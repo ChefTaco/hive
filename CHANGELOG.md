@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Fixed
+
+- A crash between moving a HiveMem identity relink file and pinning it is now finished by the
+  ordinary retry of the upgrade. The deployment-input guards first complete (or refuse) this plan's
+  journaled change, accepting only files that hold their journaled original or staged content and a
+  result equal to the journaled digest. Tested through the host program's real `migrate` step.
+
 ## [3.12.0] - 2026-11-17
 
 ### Added

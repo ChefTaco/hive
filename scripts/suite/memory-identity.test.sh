@@ -110,7 +110,7 @@ setup "$temporary/crash"
 touch "$temporary/crash-after-hivemem"
 if relink; then fail 'The crash was not simulated'; fi
 [[ -f "$directory/memory-identity.$plan.json" ]] || fail 'No journal survived the crash'
-if ( assert_deployment_inputs "$directory/candidate.json" ) 2>/dev/null; then fail 'The crash fixture did not interrupt between move and pin'; fi
+[[ $(deployment_inputs_digest "$directory/candidate.json") != "$(jq -r .sha256 "$directory/deployment-inputs.$plan.json")" ]] || fail 'The crash fixture did not interrupt between move and pin'
 relink || { cat "$directory/relink.log" >&2; fail 'The rerun after a crash did not complete'; }
 [[ $(jq -r '.[0].localId' <<< "$(value "$config/hivemem.env" HIVEMEM_OATHWEAVE_SERVICES_JSON)") == emberpath ]] || fail 'The links did not move after the crash'
 claims "$(value "$config/emberpath.env" HIVE_ROUTER_MEMORY_PROXY_TOKEN)" | jq -e '.sub=="emberpath"' >/dev/null || fail 'The token was not re-issued after the crash'
