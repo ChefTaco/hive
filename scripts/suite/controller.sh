@@ -132,7 +132,8 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollb
   --config FILE          Installation JSON. Commands other than install, init and plan find
                          it themselves when there is exactly one under ~/.config/hive (or
                          $XDG_CONFIG_HOME/hive), or when HIVE_INSTALLATION names it
-  --release VERSION      Exact release version, or latest for setup, plan and upgrade
+  --release VERSION      Exact release version, or latest for guided setup (no command, install
+                         or init), plan, upgrade and admin-access
   --manifest FILE        Signed release manifest (default releases/VERSION.json)
   --signature FILE       Detached manifest signature (default MANIFEST.sig)
   --trust-key FILE       Publisher public key (default trust/publisher.pub)

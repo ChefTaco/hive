@@ -152,4 +152,11 @@ mkdir -p "$TEST_ROOT/releases"
 jq -n '{controllerSHA256:("0"*63+"1")}' > "$TEST_ROOT/releases/2.0.7.json"
 TEST_API_FAIL=true bash "$TEST_ROOT/hive.sh" --release 2.0.7
 [[ $(cat "$TEST_RESULT") == local ]] || fail 'Matching local release was replaced'
+# The controller help names every command that accepts --release latest, as the launcher does.
+launcher_commands=$(grep -o "latest applies only to [^']*" "$ROOT/scripts/suite/release-launcher.sh" | sed 's/latest applies only to //; s/, and /, /; s/ and /, /' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | sort)
+[[ $launcher_commands == $(printf '%s\n' admin-access init install plan upgrade) ]] || fail "Launcher latest commands changed: $launcher_commands"
+help_text=$(sed -n '/--release VERSION/,/^  --manifest/p' "$ROOT/scripts/suite/controller.sh")
+for command in $launcher_commands; do
+  grep -qw -- "$command" <<< "$help_text" || fail "hive.sh --help does not say latest works for $command"
+done
 printf 'Passed: latest and explicit versions, exact forwarding, offline reuse, stdin, exit status, signed checkouts and fail-closed resolution.\n'

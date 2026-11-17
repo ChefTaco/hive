@@ -6,6 +6,11 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Fixed
+
+- `hive.sh --help` now says `--release latest` also works for `admin-access` (and names install and
+  init for guided setup), matching the launcher. A launcher test keeps the two in step.
+
 ## [3.11.1] - 2026-11-17
 
 ### Security
