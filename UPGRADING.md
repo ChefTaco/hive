@@ -68,7 +68,9 @@ principal, so the data must move with it. The upgrade does it as HiveMem's signe
    `HIVEMEM_OATHWEAVE_SERVICES_JSON` links to `hive-router` name `emberpath`, Emberpath's
    credential record does too, and a still-valid static fallback `HIVE_ROUTER_MEMORY_PROXY_TOKEN`
    for `hive-router` is re-issued by HiveMem for `emberpath` with the same role, scope and
-   remaining lifetime (an expired one is left as it is). `config/.memory-identity-renames.json`
+   remaining lifetime (an expired one is left as it is). From 3.12.1, HiveMem's own
+   `HIVEMEM_ADMIN_TOKEN` for `hive-router` is re-issued the same way, also when Emberpath runs on
+   another host. `config/.memory-identity-renames.json`
    records the rename, so a later credential step never links the old principal again. When
    Emberpath runs on another host than HiveMem, the upgrade prints the `issue-token` command for
    its static token, if it has one.
@@ -90,6 +92,45 @@ first, on the stopped store, after a backup.
 **Rolling back across this release.** A rollback restores the pre-upgrade backup, which holds the
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
+
+## Suite 3.12.1: memory identity relink fixes
+
+Suite 3.12.1 is a controller release. Every product pin, the datastore profile and the storage
+recovery profile are those of 3.12.0 (Cindertrace 0.8.0, HiveXUI 0.10.0, HiveMem 1.9.0, Emberpath
+2.5.3 and Magnus 3.1.3), and no storage format changes, so an upgrade from 3.12.0 needs no
+migration flag. The controller has a new signed source digest, so a checkout of the 3.12.0 tag
+refuses the 3.12.1 manifest; run 3.12.1 from a checkout of its tag (`--release latest` or
+`--release 3.12.1`).
+
+```bash
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.12.1
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.12.1
+```
+
+The release fixes two cases of the HiveMem identity re-link that runs with
+[Emberpath's memory principal](#emberpaths-memory-principal-hive-router-becomes-emberpath):
+
+- **HiveMem's own admin token.** The re-link also re-issues `HIVEMEM_ADMIN_TOKEN` in HiveMem's
+  environment when it was issued for the old ID, with the same role, scope and remaining lifetime.
+  Under 3.12.0 an installation that completed the rename kept an operator token that HiveMem
+  refuses.
+- **An interrupted re-link.** A crash between moving a re-linked settings file into place and
+  pinning it is now finished by repeating the same upgrade. The deployment-input checks first
+  complete, or refuse, this plan's journaled change, and accept only files that hold their
+  journaled original or staged content and a result equal to the journaled digest.
+
+**Installations already on 3.12.0.** An installation that already completed the rename under
+3.12.0 needs nothing extra and no flag. The upgrade's verifier finds the rename complete, and the
+re-link that follows it re-issues a `HIVEMEM_ADMIN_TOKEN` still issued for `hive-router` (an
+expired one is left as it is; issue a new one with `hivemem-server issue-token` when needed).
+Fresh installations, and installations without data owned by `hive-router`, are not affected.
+
+**Upgrading from 3.11.x.** Follow [Suite 3.12.0](#suite-3120-cindertrace-080-and-the-emberpath-memory-principal)
+with `--release 3.12.1`: the upgrade needs `--allow-migrations` where `hive-router` owns HiveMem
+data, as for 3.12.0, and now gets both fixes above, so a retry finishes an interrupted re-link.
+
+**Rolling back to 3.12.0.** Run the rollback from the 3.12.0 release checkout. It restores the
+pre-upgrade backup; both releases pin the same products.
 
 ## Suite 3.12.0: Cindertrace 0.8.0 and the emberpath memory principal
 

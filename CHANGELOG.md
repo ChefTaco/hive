@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.12.1] - 2026-11-17
+
+### Changed
+
+- The controller changes; every product pin, the datastore profile and the storage recovery profile
+  are those of 3.12.0. An upgrade from 3.12.0 needs no flag. See `UPGRADING.md`, "Suite 3.12.1".
+
 ### Fixed
 
 - The HiveMem identity relink also re-issues HiveMem's own static `HIVEMEM_ADMIN_TOKEN` when it
