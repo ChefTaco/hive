@@ -91,6 +91,58 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.12.0: Cindertrace 0.8.0 and the emberpath memory principal
+
+Suite 3.12.0 pins Cindertrace 0.8.0, HiveXUI 0.10.0, HiveMem 1.9.0, Emberpath 2.5.3 and Magnus
+3.1.3 (the server, the fleet gateway and the host agent package, with Ardent 3.1.4). Every other
+product pin, the datastore profile and the storage recovery profile are those of 3.11.2. Pass
+`--release 3.12.0` to later commands, as described in
+[the upgrade procedure](deployment/QUICKSTART.md#8-upgrade). From an earlier release, follow the
+steps below for each release you skip.
+
+**`--allow-migrations` where `hive-router` owns HiveMem data.** HiveMem 1.9.0 brings the signed
+initialization that moves HiveMem data from `hive-router` to `emberpath`, described in
+[Emberpath's memory principal](#emberpaths-memory-principal-hive-router-becomes-emberpath).
+Installations migrated from the native Hive Router (`hive.sh migrate-native`) have such data, so
+their upgrade needs `--allow-migrations`; without it the upgrade stops before any service is
+stopped. Fresh installations need no flag. Run the read-only `rename-agent --dry-run` shown there
+first to see what moves.
+
+```bash
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.12.0 --allow-migrations
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.12.0 --allow-migrations
+```
+
+**New controller.** The controller gains `hive.sh add`, the HiveMem rename and credential re-link
+and the managed collector, so 3.12.0 has its own controller source and a checkout of the 3.11.2 tag
+refuses the 3.12.0 manifest. Run 3.12.0 from a checkout of its tag; `--release latest` and
+`--release 3.12.0` select it.
+
+**Cindertrace's standalone console is gone.** Cindertrace 0.8.0 no longer ships its own console.
+The suite already served Cindertrace through HiveXUI, so an installation with Cindertrace needs no
+change; HiveXUI 0.10.0 adds a Cindertrace recovery sign-in with Cindertrace's local accounts for
+when Oathweave is unavailable. Cindertrace's API, collector and schema migrations are unchanged
+from 0.7.2, and its settings, including `SECURITY_CONSOLE_TOKEN_SECRET`, stay as they are.
+
+**Adding Cindertrace to an installation.** An installation without Cindertrace can add it after
+upgrading, with `./hive.sh add cindertrace --config FILE --release 3.12.0`; see
+[Adding a product to an existing installation](deployment/FULL.md#adding-a-product-to-an-existing-installation).
+
+**Managed collector.** The release offers the optional `cindertrace-collector` component, which
+runs Cindertrace's collector inside the installation for sources outside it, such as a logging
+host's Loki. No profile selects it, so an upgrade does not start it; add it with
+`cindertrace-collector add ID --sources ... --run` and `./hive.sh add cindertrace-collector`, as
+[Events from a separate logging host](deployment/FULL.md#events-from-a-separate-logging-host)
+describes.
+
+**Magnus 3.1.3.** An external Magnus is upgraded by its own procedure, not by this upgrade. A
+leftover `SECURITY_FUSION_RECEIPT_SIGNING_KEY` in a Magnus server's settings is now ignored.
+
+**Rolling back to 3.11.2.** Run the rollback from the 3.11.2 release checkout. It restores the
+pre-upgrade backup, which holds HiveMem data and the memory credential from before the rename.
+The `cindertrace-collector` component is new in 3.12.0 and 3.11.2 does not know it, so add it only
+once you no longer expect to roll back.
+
 ## Suite 3.11.2: product maintenance releases
 
 Suite 3.11.2 pins Oathweave 2.3.1, HiveMem 1.8.1, Emberpath 2.5.2, Magnus 3.1.2 (the server, the

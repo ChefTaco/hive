@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.12.0] - 2026-11-17
+
 ### Added
 
 - `hive.sh add cindertrace` adds Cindertrace, with its private PostgreSQL and Redis, to an existing
@@ -33,6 +35,16 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Changed
 
+- Pins Cindertrace 0.8.0 (its standalone console is removed; HiveXUI, which the suite already
+  used, is Cindertrace's only browser interface, and the API, collector and migration contract are
+  unchanged), HiveXUI 0.10.0 (Cindertrace recovery sign-in with Cindertrace's own local accounts
+  when Oathweave is unavailable), HiveMem 1.9.0 (`rename-agent`), Emberpath 2.5.3 (its memory
+  principal is `emberpath`), and Magnus 3.1.3 for the server, the fleet gateway and the host agent
+  package (Ardent 3.1.4; the retired receipt signing key is ignored). HiveXUI 0.10.0's Magnus
+  browser contract is byte-identical to Magnus 3.1.3's. The datastore profile and the storage
+  recovery profile are those of 3.11.2. The controller changes. An upgrade needs
+  `--allow-migrations` where HiveMem has data owned by `hive-router` (installations migrated from
+  the native Hive Router); elsewhere it needs no flag. See `UPGRADING.md`, "Suite 3.12.0".
 - `console-clients add` (and `post-upgrade`) also creates the `hivexui-cindertrace` browser client
   when the installation has Cindertrace.
 - From HiveMem 1.9.0, the release manifest gives HiveMem a signed initialization that moves HiveMem
