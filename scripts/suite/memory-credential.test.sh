@@ -77,6 +77,22 @@ restored=$(run_step "$migrated" memory-credential-identity "$endpoints" '{"schem
 jq -e '.localId=="hive-router"' <<< "$restored" >/dev/null || fail 'The principal is stable'
 [[ $(value "$migrated/config/emberpath.env" EMBERPATH_HIVEMEM_CLIENT_SECRET) == "$secret" ]] || fail 'The secret is stable'
 
+# ---- After HiveMem's identity rename (hive_memory_identity_relink) the principal is emberpath. ----
+# Until then, the principal that owns the data stays (above); the rename's record maps it after.
+printf '{"schema":1,"renames":{"hive-router":"emberpath"}}\n' > "$migrated/config/.memory-identity-renames.json"
+renamed=$(run_step "$migrated" memory-credential-identity "$endpoints") || fail 'The identity step failed after the rename'
+jq -e '.localId=="emberpath"' <<< "$renamed" >/dev/null || fail "The renamed principal is not used: $renamed"
+jq -e '.localId=="emberpath" and .clientId=="emberpath-hivemem"' "$migrated/config/.credentials/emberpath-hivemem.json" >/dev/null || fail 'The credential record keeps the old principal'
+# A link request still naming the old principal (a record on another host) maps to the new one.
+run_step "$migrated" memory-credential-link '{"clientId":"emberpath-hivemem","issuer":"hive-iam","localId":"hive-router"}' >/dev/null || fail 'The link step failed after the rename'
+jq -e '.==[{issuer:"hive-iam",clientId:"emberpath-hivemem",localId:"emberpath",scopes:["admin:all"]}]' <<< "$(value "$migrated/config/hivemem.env" HIVEMEM_OATHWEAVE_SERVICES_JSON)" >/dev/null || fail 'HiveMem links the old principal after the rename'
+sums=$(sha256sum "$migrated/config/"*.env)
+jq -e '.changed==[] and .localId=="emberpath"' <<< "$(run_step "$migrated" memory-credential-identity "$endpoints")" >/dev/null || fail 'A repeat after the rename changed something'
+[[ $(sha256sum "$migrated/config/"*.env) == "$sums" ]] || fail 'A repeat after the rename rewrote a file'
+printf '{"schema":2}\n' > "$migrated/config/.memory-identity-renames.json"
+refused 'Invalid memory identity record' run_step "$migrated" memory-credential-identity "$endpoints"
+rm "$migrated/config/.memory-identity-renames.json"
+
 # ---- A fresh installation: Emberpath serves no HiveMem-backed endpoints, so nothing is added. ----
 fresh="$temporary/fresh"; mkdir -p -m 700 "$fresh/config/.initializer"
 printf 'JWT_ISSUER=oathweave-fake\nIAM_BROWSER_CLIENT_POLICIES={"hivexui-hivemem":{"audience":"hivemem","permissions":["hivemem:admin:all"]}}\n' > "$fresh/config/oathweave.env"

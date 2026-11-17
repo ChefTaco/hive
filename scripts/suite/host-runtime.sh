@@ -467,6 +467,8 @@ case "$action" in
     done < <(jq -r '.services|keys[]' "$directory/candidate.$plan.json")
     if [[ $(jq -r .operation <<< "$input") == upgrade ]]; then
       hive_upgrade_schema_migrations "$directory/candidate.$plan.json" "$manifest" "$directory" "$(jq -r .allowMigrations <<< "$input")"
+      # The memory credential follows a verified HiveMem identity rename before any service starts.
+      hive_memory_identity_relink "$directory/candidate.$plan.json" "$manifest"
     fi
     ;;
   initialize-data)

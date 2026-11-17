@@ -199,7 +199,7 @@ backup() {
     --argjson placements "${SNAPSHOT_PLACEMENTS:-null}" \
     '{directory:$directory,installation:"synthetic",host:"control",action:"snapshot",operation:"backup",plan:$plan,version:"0.1.0",digest:$digest,archive:$archive,
       minimumFreeMiB:$minimum,snapshotTool:$tool,integrityScript:$integrity,agents:[],inference:[]} + (if $placements==null then {} else {placements:$placements} end)' |
-    if [[ -n "${SNAPSHOT_SCRIPT_FILE:-}" ]]; then bash "$SNAPSHOT_SCRIPT_FILE"; else bash -c "$script"; fi
+    if [[ -n "${SNAPSHOT_SCRIPT_FILE:-}" ]]; then bash "$SNAPSHOT_SCRIPT_FILE"; else bash <(printf '%s\n' "$script"); fi
 }
 calls() { cat "$STUB_STATE/calls"; }
 line() { grep -nx -- "$1" "$STUB_STATE/calls" | head -n 1 | cut -d: -f1; }

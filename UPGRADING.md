@@ -46,6 +46,51 @@ credential. Before rolling back to a release whose Cindertrace predates them, ru
 `./hive.sh cindertrace-collector remove suite-audit`. The other settings are ignored by older
 products.
 
+## Emberpath's memory principal: hive-router becomes emberpath
+
+From the release that pins HiveMem 1.9.0, HiveMem data owned by `hive-router`, the HiveMem
+principal of Emberpath on an installation migrated from the native Hive Router, moves to
+`emberpath`, the principal fresh installations already use. HiveMem keys ownership on that
+principal, so the data must move with it. The upgrade does it as HiveMem's signed initialization
+(see [Upgrading product schemas](deployment/FULL.md#upgrading-product-schemas)):
+
+1. Before anything stops, the read-only check `hivemem-server rename-agent --from hive-router --to
+   emberpath --verify` runs. An installation that never had `hive-router` passes and needs no
+   flag. One that has it needs `--allow-migrations`; without it the upgrade stops before any
+   service is stopped.
+2. With the flag, after the pre-change backup, the rename runs and is verified on the restored
+   copy, then once on the stopped live store, journaled like any product migration. It moves
+   memories (private ones into `emberpath`'s collections, with their vectors), sessions, episodes,
+   conclusions, queue jobs, webhooks, workspace membership, operation receipts and the agent record
+   with its credential state. `hive-router` keeps a disabled record, so a token still issued to it
+   is refused rather than starting a new, empty owner.
+3. Still before any service starts, the memory credential follows: HiveMem's
+   `HIVEMEM_OATHWEAVE_SERVICES_JSON` links to `hive-router` name `emberpath`, Emberpath's
+   credential record does too, and a still-valid static fallback `HIVE_ROUTER_MEMORY_PROXY_TOKEN`
+   for `hive-router` is re-issued by HiveMem for `emberpath` with the same role, scope and
+   remaining lifetime (an expired one is left as it is). `config/.memory-identity-renames.json`
+   records the rename, so a later credential step never links the old principal again. When
+   Emberpath runs on another host than HiveMem, the upgrade prints the `issue-token` command for
+   its static token, if it has one.
+
+To see what will move before the upgrade, run the read-only plan with the new HiveMem image
+against the running installation (safe while HiveMem serves; `DIRECTORY` is the installation
+directory on the HiveMem host, and the image is the one the release pins):
+
+```bash
+printf '{"services":{"hivemem":{"image":"ghcr.io/cheftaco/hivemem:1.9.0"}}}\n' > /tmp/hivemem-rename-plan.json
+sudo docker compose -f DIRECTORY/compose.json -f /tmp/hivemem-rename-plan.json run --rm --no-deps -T hivemem \
+  rename-agent --from hive-router --to emberpath --dry-run
+```
+
+If `emberpath` already owns HiveMem data, the rename refuses (exit 3) without writing and the
+rehearsal holds the upgrade: merge the two principals by hand with `--allow-existing-target`
+first, on the stopped store, after a backup.
+
+**Rolling back across this release.** A rollback restores the pre-upgrade backup, which holds the
+data and the credential settings from before the rename, so they stay consistent. A code-only
+rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
+
 ## Suite 3.11.2: product maintenance releases
 
 Suite 3.11.2 pins Oathweave 2.3.1, HiveMem 1.8.1, Emberpath 2.5.2, Magnus 3.1.2 (the server, the

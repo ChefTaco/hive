@@ -21,7 +21,7 @@ user="$(id -u):$(id -g)"
 host() { # ACTION
   jq -nc --arg directory "$directory" --arg action "$1" --arg plan "$plan" --arg digest "$(printf '%064d' 2)" \
     '{directory:$directory,installation:"example-suite",host:"control",action:$action,plan:$plan,version:"0.2.0",digest:$digest,archive:"",operation:"upgrade",allowMigrations:false,abortStep:"",agents:[],inference:[],placements:{}}' |
-    bash -c "$script" > "$temporary/host.log" 2>&1
+    bash <(printf '%s\n' "$script") > "$temporary/host.log" 2>&1
 }
 service() { jq -nc --arg name "$1" --arg base "$directory" --arg user "$user" '{($name):{image:("example.com/"+$name+"@sha256:"+("0"*64)),user:$user,volumes:[{type:"bind",source:($base+"/data/"+$name),target:"/data"}]}}'; }
 # The active deployment and the formats it recorded: Emberpath only. The release offers Studio

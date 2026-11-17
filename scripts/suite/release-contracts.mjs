@@ -150,6 +150,24 @@ export function applyProductFormats(manifest, products) {
   }
 }
 
+// HiveMem keys ownership on the token subject. Emberpath's memory principal was the Hive
+// Router's subject, hive-router; from HiveMem 1.9.0 the suite moves that data to emberpath with
+// HiveMem's own rename-agent, as HiveMem's signed initialization: an upgrade verifies it first
+// (read-only, so the preflight can run while HiveMem serves), rehearses it on the restored backup
+// and runs it once on the stopped live store, journaled like any product schema migration and
+// approved with --allow-migrations. It finds nothing to do on an installation that never had
+// hive-router, so fresh installs and later upgrades verify and move on. After the live rename,
+// initialize-migrations-host.sh re-links the memory credential (hive_memory_identity_relink).
+// Releases pinning older HiveMem versions keep their manifests byte for byte.
+export const MEMORY_IDENTITY_RENAME = Object.freeze({ since: '1.9.0', from: 'hive-router', to: 'emberpath' });
+export function applyProductInitializations(manifest, products) {
+  const hivemem = manifest.components.hivemem;
+  const version = products.hivemem?.version;
+  if (!hivemem || typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version) || !atLeast(version, MEMORY_IDENTITY_RENAME.since)) return;
+  const command = ['rename-agent', '--from', MEMORY_IDENTITY_RENAME.from, '--to', MEMORY_IDENTITY_RENAME.to];
+  hivemem.initialization = { image: hivemem.image, command, verificationCommand: [...command, '--verify'] };
+}
+
 // Product images each profile needs. chat-migrator is ChatterMost's initialization image.
 export const CORE_PRODUCTS = Object.freeze(['hive-registry', 'oathweave', 'emberpath', 'hivemem', 'hiveskills', 'hivexui', 'ingress']);
 export const FULL_PRODUCTS = Object.freeze(['magnus', 'cindertrace', 'chattermost', 'chat-migrator', 'emberfold', 'magnus-gateway']);

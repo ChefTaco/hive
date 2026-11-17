@@ -51,7 +51,7 @@ run() {
   : > "$STUB_CALLS"
   jq -nc --arg directory "$directory" --arg plan "$plan" --arg action "$1" \
     '{directory:$directory,installation:"example",host:"control",plan:$plan,action:$action,operation:"restore",version:"0.1.0",archive:"example",agents:[],inference:[]}' |
-    bash -c "$script" > "$temporary/result" 2> "$temporary/error"
+    bash <(printf '%s\n' "$script") > "$temporary/result" 2> "$temporary/error"
 }
 archive
 before=$(tree_digest "$directory/data")
