@@ -999,6 +999,64 @@ host. The collector cannot read the host's Tailscale daemon; for `tailscale`, gi
 credential and tokens from its environment; the environment file is owner-only and lives in the
 installation's configuration, like every product's.
 
+### Cindertrace and an external Magnus
+
+With an [external Magnus](#external-magnus), setup does not connect Cindertrace and Magnus; set
+these entries by hand. Cindertrace reads Magnus's node inventory, Magnus reads Cindertrace's case
+summary and links to its pages, and Magnus exports its observations as a collector. The examples
+use `/opt/hive` as the installation directory, `https://console.example.com` as the console origin
+and `https://magnus.example.com:4000` as the external Magnus.
+
+1. **Two tokens**, each of 64 hex characters (`openssl rand -hex 32`), and their SHA-256 digests
+   (`printf '%s' "$token" | sha256sum | cut -d ' ' -f1`): one for the inventory and one for the
+   summary. Each side holds one token and the other side holds only its digest.
+2. **Cindertrace** (`config/cindertrace.env` on the Cindertrace host, owner-only):
+
+   ```text
+   MAGNUS_INVENTORY_URL=https://magnus.example.com:4000/api/v1/security-integration/inventory
+   MAGNUS_INVENTORY_TOKEN=INVENTORY_TOKEN
+   SECURITY_SUMMARY_TOKEN_SHA256=SUMMARY_TOKEN_DIGEST
+   ```
+
+   `MAGNUS_INVENTORY_URL` is the full HTTPS URL of Magnus's inventory route; Cindertrace refuses to
+   start with an inventory URL that is not HTTPS or has no token. Cindertrace pulls the inventory
+   with that token as a bearer (every node's agent URL in it must be HTTPS), and answers `/api/v1/security-fusion/summary` only to a bearer
+   whose digest is `SECURITY_SUMMARY_TOKEN_SHA256`. Record the edit (the initialization receipt, as
+   in step 9 of [Adding an external Magnus](#adding-an-external-magnus-and-studio-to-an-existing-installation),
+   with `cindertrace.env`), then recreate only Cindertrace:
+
+   ```bash
+   sudo docker compose -f /opt/hive/compose.json up -d --no-deps --force-recreate cindertrace
+   ```
+
+3. **The exporting collector.** Magnus signs its observation batches as the collector
+   `magnus-control-api`, so create the credential under that ID:
+
+   ```bash
+   ./hive.sh cindertrace-collector add magnus-control-api --sources magnus --config FILE
+   ```
+
+4. **The external Magnus** (its server environment):
+
+   ```text
+   SECURITY_FUSION_MODE=remote
+   SECURITY_FUSION_API_URL=https://console.example.com
+   MAGNUS_SECURITY_CONSOLE_URL=https://console.example.com
+   SECURITY_INVENTORY_TOKEN_SHA256=INVENTORY_TOKEN_DIGEST
+   SECURITY_SUMMARY_TOKEN=SUMMARY_TOKEN
+   SECURITY_EXPORT_ENABLED=true
+   SECURITY_EXPORT_SECRET=COLLECTOR_CREDENTIAL
+   ```
+
+   Both URLs are the console origin with no path: Magnus appends `/api/v1/security-fusion/...` for
+   the summary and the export, which the ingress routes to Cindertrace, and `/security-fusion/...`
+   for links to Cindertrace's pages. `COLLECTOR_CREDENTIAL` is the contents of
+   `config/.credentials/cindertrace-collectors/magnus-control-api`. Magnus must reach the console
+   and trust its certificate, as for Oathweave. Restart that Magnus.
+
+Magnus's fleet nodes then appear as Cindertrace targets, and its `magnus` events under
+**Cindertrace > Events**. A rehearsal on a restored copy does not read the inventory.
+
 ### Suite audit collection
 
 Cindertrace's collector can pull the suite audit export (HiveAuditRecord v1) of HiveMem,
