@@ -2,7 +2,7 @@
 # hive.sh console-clients: the HiveXUI browser clients of products added to an existing
 # installation, in Oathweave's store. Fresh setup seeds them when it creates the store; an
 # existing store (an upgraded or migrated installation) gets them here: Magnus (the component or
-# an external Magnus) and Ardent Project Studio. Each client's policy must already be in the
+# an external Magnus), Cindertrace, Embermend and Ardent Project Studio. Each client's policy must already be in the
 # running Oathweave's IAM_BROWSER_CLIENT_POLICIES with exactly these permissions. The command
 # creates the missing public clients and adds their permissions to the SUITE_ADMIN role, in one
 # transaction inside the Oathweave container; any other identity record that would change
@@ -13,6 +13,7 @@ hive_console_clients_wanted() {
   jq -c --arg redirect "$(jq -r .origin "$HIVE_CONFIG")/auth/callback" '
     (if .components.magnus or .external.magnus then [{id:"hivexui-magnus",audience:"magnus",permissions:["magnus:view","magnus:operate","magnus:admin"]}] else [] end) +
     (if .components.embermend then [{id:"hivexui-embermend",audience:"embermend",permissions:["embermend:read","embermend:evidence","embermend:assess","embermend:prepare","embermend:propose","embermend:publish-explanation","embermend:ingest","embermend:policy"]}] else [] end) +
+    (if .components.cindertrace then [{id:"hivexui-cindertrace",audience:"cindertrace",permissions:["cindertrace:view","cindertrace:investigate","cindertrace:admin"]}] else [] end) +
     (if .components.ardentstudio then [{id:"hivexui-ardentstudio",audience:"ardentstudio",permissions:["ardentstudio:projects:read","ardentstudio:projects:write","ardentstudio:templates:read","ardentstudio:templates:write","ardentstudio:review:write","ardentstudio:agents:admin"]}] else [] end) |
     map(.+{redirectUris:[$redirect],firstParty:true})' "$HIVE_CONFIG"
 }
@@ -24,7 +25,7 @@ hive_console_clients() {
   # With the gateway's terminal grant, Magnus's client carries magnus:terminal; that stays with fresh setup.
   ! jq -e '.bootstrap.magnusGateway.grantTerminalToInitialOperator==true' "$HIVE_CONFIG" >/dev/null || hive_die 'This installation grants the web terminal; its Magnus client is managed by fresh setup'
   clients=$(hive_console_clients_wanted)
-  [[ "$clients" != '[]' ]] || hive_die 'No product here needs a console client from this command: it covers Magnus (the component or external) and Ardent Project Studio'
+  [[ "$clients" != '[]' ]] || hive_die 'No product here needs a console client from this command: it covers Magnus (the component or external), Cindertrace, Embermend and Ardent Project Studio'
   host=$(jq -r .components.oathweave.host "$HIVE_CONFIG")
   printf 'Oathweave on %s: create any missing public browser client among %s, and add their permissions to the SUITE_ADMIN role.\n' "$host" "$(jq -r 'map(.id)|join(", ")' <<< "$clients")"
   if [[ "${HIVE_CONFIRMED:-false}" != true ]]; then

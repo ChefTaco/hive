@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
-# Product-owned bootstrap contracts. Called only by the fresh initializer after
-# all hosts have passed preflight. No existing product state is adopted here.
+# Product-owned bootstrap contracts. Called by the fresh initializer after all hosts have passed
+# preflight, and by hive.sh add for one product added to an existing installation
+# (add-product-host.sh). No existing product state is adopted here.
+
+# The generated secrets a full-profile product's configuration reads, besides its account ID.
+hive_full_secret_names() {
+  case $1 in
+    cindertrace) printf '%s\n' security-db security-redis security-admin-password security-session security-console security-audit security-receipt security-backup security-rate;;
+    *) return 1;;
+  esac
+}
 hive_full_configuration() {
   local component password image user uid gid hash_output password_hash endpoint hostname magnus_identities
   for component in magnus cindertrace chattermost; do

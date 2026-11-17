@@ -200,6 +200,14 @@ ingress copies, records their digests in the initialization receipt so retries k
 restarts only the ingress. An installation moved with `migrate-native` uses its own
 `migrate-native tls-refresh`.
 
+A product left out at setup joins later with `./hive.sh add PRODUCT --config FILE` (Cindertrace
+today): it backs up first, configures the product on the console host as fresh setup would, with
+its own secrets, internal certificate and private datastores, an explicit link from the operator's
+Oathweave account and its console client, records it in the installation file and applies it as an
+upgrade to the installed release, rehearsal and schema migration included. Every step is
+journaled; repeat the command to continue an interrupted add. See
+[Adding a product to an existing installation](FULL.md#adding-a-product-to-an-existing-installation).
+
 Only private backends and datastores run during first initialization. After
 readiness, they stop and the normal release starts with automatic migrations and
 upgrades disabled. Ingress, the UI and agents wait for that boundary. Initial

@@ -294,8 +294,9 @@ the prefix kept, no cookies either way and unbuffered event streams; without Stu
 answers 404. Its state is the `ardentstudio-data` volume (`data/ardentstudio`), backed up with the
 rest of the installation ([BACKUPS.md](BACKUPS.md#ardent-project-studio)).
 
-Adding Studio to an existing installation is not automated yet: configure the same clients, links
-and environment by hand, then select the component.
+Adding Studio to an existing installation is not automated yet (`hive.sh add` supports Cindertrace
+today; see [Adding a product to an existing installation](#adding-a-product-to-an-existing-installation)):
+configure the same clients, links and environment by hand, then select the component.
 [Adding an external Magnus and Studio to an existing installation](#adding-an-external-magnus-and-studio-to-an-existing-installation)
 lists every entry; with Magnus as a component, add Studio's link to `MAGNUS_OATHWEAVE_IDENTITIES_JSON`
 in `config/magnus.env` (and `config/magnus-gateway.env` with the gateway) instead of on an external
@@ -555,6 +556,83 @@ Studio's link (step 8), add only the `external` object (step 10), and create onl
 with the three Magnus permissions (step 11, which does that by itself without Studio). This section covers an installation without the
 `magnus` component; moving a Magnus that the installation runs to another host is not covered.
 
+## Adding a product to an existing installation
+
+`hive.sh add PRODUCT` adds a product, with the private datastores it owns, to an installation that
+is already running, configured as fresh setup would have configured it. It supports `cindertrace`
+(with `cindertrace-postgres` and `cindertrace-redis`) today; for other products, follow
+[Adding an external Magnus and Studio](#adding-an-external-magnus-and-studio-to-an-existing-installation)
+by hand. It works on an installation set up fresh and on one moved with `migrate-native`:
+
+```bash
+./hive.sh add cindertrace --config installation.json
+```
+
+It shows what it will do and asks first; `--yes` applies it unattended. It uses the installed
+release: pass `--release VERSION` only to name that same release, and upgrade first when you want a
+newer one. It then:
+
+1. **Backs up** the installation online, before anything changes (archive
+   `pre-add-cindertrace-TIMESTAMP-ID`, listed by `hive.sh backups list`).
+2. **Configures Cindertrace on the console host.** The product joins the console host, which must
+   also run Oathweave. It generates Cindertrace's secrets once, issues its internal certificate from
+   the installation's authority (the one the ingress verifies products with), and writes its
+   private PostgreSQL and Redis configuration and `config/cindertrace.env` with the same contract
+   fresh setup uses (`initialize-full-host.sh`). Native browser sign-in is on
+   (`CINDERTRACE_BROWSER_AUTH_ENABLED=true`) with a local administrator named like the operator,
+   whose password hash the pinned Cindertrace image prepares; this is the account of HiveXUI's
+   Cindertrace recovery sign-in, for when Oathweave is unavailable. The operator's existing
+   Oathweave account is linked to a new Cindertrace account with an explicit issuer/subject link
+   (`CINDERTRACE_OATHWEAVE_IDENTITIES_JSON`, role `ADMIN`); nothing is matched by email. The
+   operator is the account fresh setup created, or on a migrated installation
+   `nativeMigration.adminAccount`. Existing files gain only their new entries: the browser client
+   policy `hivexui-cindertrace` in Oathweave's `IAM_BROWSER_CLIENT_POLICIES`,
+   `CINDERTRACE_ENDPOINT` and `CINDERTRACE_TLS_NAME` in `config/ingress.env`, and Cindertrace in the
+   console's `runtime.json` (rewritten in place). Fresh setup's record of a file follows its new
+   bytes, so `tls-refresh` keeps accepting it.
+3. **Records the components** in the installation file, at the paths fresh setup uses. The previous
+   file is kept as `additions/cindertrace.installation-before.json` beside it.
+4. **Applies the change as an upgrade to the installed release**: the stopped pre-change backup,
+   a rehearsal of the new Compose definition on a restored copy, Cindertrace's signed schema
+   migration claimed in a journal, applied and verified on the new store
+   ([Upgrading product schemas](#upgrading-product-schemas)), activation, and the Hive Registry
+   record. Compose recreates Oathweave, the ingress and HiveXUI, whose configuration changed, and
+   starts Cindertrace. Later backups, rehearsals, upgrades and the daily prune include Cindertrace
+   like any other component.
+5. **Creates the console client** `hivexui-cindertrace` in Oathweave's store and adds its
+   permissions to `SUITE_ADMIN`, as `console-clients add` does. Sign out of the console and in
+   again to see Cindertrace.
+
+At the end it names the recovery account and the owner-only file that holds its password
+(`config/.additions/cindertrace/secrets/security-admin-password`); no secret is printed.
+
+| Where (console host) | What |
+|---|---|
+| `config/.additions/cindertrace/` | The host journal (`receipt.json`, the files it wrote and their digests), the generated secrets, Cindertrace's key and certificate |
+| `config/cindertrace.env`, `config/cindertrace/`, `config/cindertrace-postgres/`, `config/cindertrace-redis/` | New, owned by the services' user |
+| `config/oathweave.env` (the Oathweave `envFile`), `config/ingress.env`, `config/runtime.json` | The entries above added; every other line kept |
+| `data-formats.json` | Recorded formats of the added components removed when they have no store (fresh setup records one for every component of its release); the upgrade records the release's formats |
+| `data/cindertrace*` | Created by the upgrade; must not exist or be empty before |
+
+**Interrupted?** Each step is journaled in `additions/cindertrace.json` beside the installation
+file, and every step is idempotent. Repeat the same command, from the same checkout: it continues
+after the last completed step, keeps the secrets it already generated, never repeats the first
+backup, and repeats the same upgrade plan, which recovers its open transaction
+([transactions and recovery](README.md#when-a-command-stops-transactions-and-recovery)). A file it
+wrote that has changed since is never overwritten. Once complete, `add cindertrace` is refused:
+Cindertrace is installed.
+
+Refused before anything changes: a product `add` does not support, one already in the
+installation file, an installation without Oathweave, HiveXUI, the ingress and the Hive Registry
+on the console host, a [distributed installation](DISTRIBUTED.md), and an installation file that
+names no operator account. The console host then refuses an installation running another
+release, an open transaction, a store that already holds data, and an ingress or Oathweave already
+set up for another Cindertrace; those leave the installation serving. Removing a product is not
+automated; the pre-add archive holds the installation as it was before (restoring it is described in
+[BACKUPS.md](BACKUPS.md)).
+
+Next, give Cindertrace its event sources: [Sending security events to Cindertrace](#sending-security-events-to-cindertrace).
+
 ## Magnus and HiveMem
 
 Magnus's Ardent New Agent and Enable HiveMem give every Ardent agent its own HiveMem identity.
@@ -813,8 +891,9 @@ The credential is generated on the Cindertrace host into
 as an argument. The command turns ingestion on, records the change for later `install`,
 `upgrade` and backup runs, and recreates only Cindertrace. `list` shows each collector, its
 sources and credential file; `remove ID` revokes one, and removing the last turns ingestion
-off. Sources are `unifi_dns`, `unifi_ids`, `netflow`, `wazuh`, `tailscale`, `magnus`, `hive`
-and `chattermost`. Collectors survive upgrades: they live in the installation, not the release.
+off. Sources are `unifi_dns`, `unifi_ids`, `netflow`, `wazuh`, `tailscale`, `magnus`,
+`magnus_ui`, `hive` and `chattermost`. Collectors survive upgrades: they live in the installation,
+not the release.
 
 Collectors send to `https://hive.example.com/api/v1/security-fusion/ingest/events` through the
 console origin. Cindertrace's own collector, `node services/security-collector/dist/index.js`
@@ -844,6 +923,44 @@ but refused, for example `403` for a source the collector may not send or `400` 
 event, marks the collector's *Cursor health* as `ERROR` under **Cindertrace > Sources**. The
 mark records only that last refusal: the collector's next accepted batch sets it back to
 `HEALTHY`.
+
+### Events from a separate logging host
+
+When syslog, Loki and a SIEM run on their own logging host, Cindertrace's collector runs beside
+Cindertrace and reads from there; nothing of Cindertrace runs on the logging host. The collector
+in the pinned Cindertrace image pulls the network sources from Loki (`unifi_ids`, `unifi_dns` and
+`netflow` from the firewall's syslog stream, and UI audit such as `magnus_ui`) over HTTPS with a
+dedicated read credential. Tools that push their own signed batches, such as a Wazuh forwarder or
+Magnus's security export, each get their own collector credential instead.
+
+1. A collector credential for the pulled sources, on the Cindertrace host:
+
+   ```bash
+   ./hive.sh cindertrace-collector add logs --sources unifi_ids,unifi_dns,netflow,magnus_ui --config FILE
+   ```
+
+2. On the logging host, an HTTPS read endpoint for Loki with a dedicated token for this collector,
+   reachable from the Cindertrace host (allow its address in that host's firewall). Store the
+   token on the Cindertrace host in an owner-only file, for example
+   `/opt/hive/config/.credentials/loki-read-token`.
+3. Start the collector from the Cindertrace service, with its settings and credentials in the
+   environment rather than in arguments. It reaches Cindertrace's API inside the installation:
+
+   ```bash
+   SECURITY_FUSION_INGEST_SECRET=$(cat /opt/hive/config/.credentials/cindertrace-collectors/logs)    LOKI_READ_TOKEN=$(cat /opt/hive/config/.credentials/loki-read-token)      docker compose -f /opt/hive/compose.json run -d --no-deps --name hive-logs-collector      -e SECURITY_FUSION_INGEST_SECRET -e LOKI_READ_TOKEN      -e CINDERTRACE_API_URL=https://cindertrace:4101 -e SECURITY_FUSION_COLLECTOR_ID=logs      -e SECURITY_FUSION_STATE_DIR=/data/collector-logs      -e LOKI_URL=https://logs.example.com:3443 -e 'LOKI_QUERY={syslog_hostname="FIREWALL"}'      -e SECURITY_FUSION_UDP_ENABLED=false -e TAILSCALE_LOCAL_ENABLED=false      cindertrace node services/security-collector/dist/index.js
+   ```
+
+   Add `UI_SECURITY_SOURCES_JSON` for UI audit streams. `LOKI_QUERY` must select the firewall's
+   stream explicitly. The collector reports each source's state under **Cindertrace > Sources**,
+   and its checkpoints are stored by the API, so it resumes where it stopped.
+4. Each pushing tool: `./hive.sh cindertrace-collector add ID --sources wazuh` (or `magnus`), then
+   point the tool at the console origin with that ID and the credential file's contents, as above.
+
+`hive.sh` does not manage the collector container: like the suite audit collector, remove it
+(`docker rm -f hive-logs-collector`) before an upgrade, rollback, restore or stopped backup, and
+start it again afterwards so it runs the Cindertrace image the release pins. A collector container
+cannot read the host's Tailscale daemon; for `tailscale`, give it `TAILSCALE_SECURITY_TOKEN` and
+`TAILSCALE_TAILNET` (API polling) instead.
 
 ### Suite audit collection
 

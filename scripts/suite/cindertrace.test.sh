@@ -83,7 +83,7 @@ jq -e 'map(.id)==["edge","lab"] and all(.[]; has("credentialFile") and (has("sec
 ! grep -qF "$(cat "$secret")" "$temporary/list.json" || fail 'list printed a credential'
 
 # Refused before anything reaches the host.
-for arguments in 'add Bad --sources tailscale' 'add edge' 'add x --sources tailscale,unknown' 'add x --sources magnus_ui' 'remove' 'list extra' 'rotate edge' 'add x --sources tailscale --secret abc'; do
+for arguments in 'add Bad --sources tailscale' 'add edge' 'add x --sources tailscale,unknown' 'add x --sources cindertrace_ui' 'remove' 'list extra' 'rotate edge' 'add x --sources tailscale --secret abc'; do
   # shellcheck disable=SC2086
   reject hive cindertrace-collector $arguments
 done
