@@ -40,11 +40,11 @@ describe('Hive Registry API', () => {
   let store: RegistryStore | undefined;
   let base = '';
 
-  async function start(readOnly = false, data = mkdtempSync(join(tmpdir(), 'hive-registry-test-'))): Promise<string> {
+  async function start(readOnly = false, data = mkdtempSync(join(tmpdir(), 'hive-registry-test-')), log?: (line: string) => void): Promise<string> {
     directories.push(data);
     await stop();
     store = new RegistryStore(openDatabase({ dataDirectory: data, autoMigrate: false, readOnly }), 'fixture');
-    server = createServer(createApp({ store, installation: 'fixture', readToken, writeToken, readOnly }));
+    server = createServer(createApp({ store, installation: 'fixture', readToken, writeToken, readOnly, ...(log ? { log } : {}) }));
     await new Promise<void>((done) => server!.listen(0, '127.0.0.1', done));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     return data;
@@ -510,6 +510,29 @@ describe('Hive Registry API', () => {
       assert.equal((await call('GET', '/health/live')).status, 200);
       assert.equal((await call('POST', '/health/ready')).status, 405);
       for (const path of ['/v1/products/Bad%20Name', '/v1/products/emberpath/other', '/v1/products/a/b/c', '/v2/products', '/']) assert.equal((await call('GET', path)).status, 404, path);
+    });
+    it('logs every request except successful health and readiness probes', async () => {
+      const lines: string[] = [];
+      await start(false, undefined, (line) => lines.push(line));
+      const logged = () => lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+      assert.equal((await call('GET', '/health/ready')).status, 200);
+      assert.equal((await call('GET', '/health/live')).status, 200);
+      assert.equal((await call('GET', '/health/ready?probe=1')).status, 200);
+      assert.deepEqual(logged(), []);
+      assert.equal((await call('POST', '/health/ready')).status, 405);
+      assert.equal((await call('GET', '/v1/installation')).status, 200);
+      assert.equal((await call('GET', '/health/other')).status, 404);
+      assert.deepEqual(logged(), [
+        { method: 'POST', path: '/health/ready', status: 405 },
+        { method: 'GET', path: '/v1/installation', status: 200 },
+        { method: 'GET', path: '/health/other', status: 404 },
+      ]);
+      // A readiness probe that fails is still logged.
+      lines.length = 0;
+      store!.close();
+      store = undefined;
+      assert.equal((await call('GET', '/health/ready')).status, 500);
+      assert.deepEqual(logged().filter((line) => line.path !== undefined), [{ method: 'GET', path: '/health/ready', status: 500 }]);
     });
     it('answers 404, not a server error, for a request target that is not a path', async () => {
       const { port } = server!.address() as AddressInfo;
