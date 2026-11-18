@@ -68,10 +68,14 @@ rm "$temporary/https-off"
 run tailscale --dir "$tls" || { cat "$temporary/out" >&2; fail 'tailscale issue failed'; }
 expect 'Certificate for hive.example.com (new)'
 expect "certificate: $tls/console.crt"
+expect 'Give these paths to ./hive.sh'
 [[ $(stat -c '%a %U' "$tls/console.key") == "600 $user" && $(stat -c '%a %U' "$tls/console.crt") == "644 $user" ]] || fail 'file modes or owner'
 [[ $(stat -c %a "$tls") == 750 ]] || fail 'directory mode'
 run tailscale --dir "$tls" || fail 'repeat failed'
 grep -q '(new)' "$temporary/out" && fail 'a repeat reported a new certificate'
+run tailscale --guided --dir "$tls" || fail 'guided issue failed'
+expect "certificate: $tls/console.crt"
+if grep -Eq 'Give these paths|schedule --config FILE' "$temporary/out"; then fail 'guided issue printed manual steps'; fi
 
 # A refused issue leaves no scratch copy of the key behind.
 mkdir -p "$temporary/scratch"

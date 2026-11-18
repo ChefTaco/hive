@@ -34,8 +34,11 @@ bash() {
   esac
 }
 docker() { return 0; }
-tailscale() { printf '{"CertDomains":["console.example.com"],"Self":{"DNSName":"console.example.com."}}'; }
-hive_writable_directory() { return 1; }
+tailscale() {
+  if [[ "$*" == 'ip -4' ]]; then printf '100.64.0.10\\n'
+  else printf '{"CertDomains":["console.example.com"],"Self":{"DNSName":"console.example.com."}}'; fi
+}
+hive_writable_directory() { [[ ${TEST_GUIDED_CONFIGURE:-false} == true ]]; }
 hive_checklist_supported() { [[ ${TEST_OLD_REGISTRY:-false} != true ]]; }
 hive_checklist_recorded() {
   [[ ${TEST_REGISTRY_READ_FAIL:-false} != true ]] || return 1
@@ -51,6 +54,18 @@ hive_checklist_print_pending() {
   jq -r '.[] | select(.status=="pending") | "still pending: " + .id' <<< "$1"
 }
 case "$1" in
+  configure)
+    HIVE_GUIDED_SETUP=true HIVE_SETUP_LOCAL=yes
+    HIVE_VERSION=3.12.3 HIVE_MANIFEST="$HIVE_ROOT/releases/3.12.3.json"
+    HIVE_SIGNATURE="$HIVE_MANIFEST.sig" HIVE_TRUST_KEY="$HIVE_ROOT/trust/publisher.pub"
+    # The fixture verifies the published manifest signature. Skip the runtime
+    # digest check so the unreleased setup code can read that immutable fixture.
+    hive_manifest() { :; }
+    hive_configure;;
+  resume)
+    HIVE_GUIDED_SETUP=${TEST_GUIDED:-true} HIVE_SETUP_LOCAL=yes
+    hive_setup_resume "$2"
+    printf 'managed-certificate=%s\\n' "$HIVE_SETUP_TAILSCALE";;
   certificate)
     HIVE_GUIDED_SETUP=true HIVE_SETUP_LOCAL=yes
     hive_setup_origin
@@ -94,16 +109,21 @@ esac
                        ('explicit-manifest', ['install', '--manifest', '/opt/release.json'])]:
         transcript, calls = run(name, args)
         assert 'guided=false' in transcript and not calls
-    questions = [('Prepare this machine', 'yes'), ('Apply these prerequisite changes', 'yes')]
+    questions = [('Install Hive on this machine', 'yes'), ('Apply these prerequisite changes', 'yes')]
     transcript, calls = run('local', ['install', '--release', 'latest'], questions)
     assert 'guided=true' in transcript and '--controller' not in calls and '--yes' in calls
-    transcript, calls = run('remote', ['install'], [('Prepare this machine', 'no'), ('Apply these prerequisite changes', 'yes')])
+    transcript, calls = run('remote', ['install'], [('Install Hive on this machine', 'no'), ('Apply these prerequisite changes', 'yes')])
     assert '--controller' in calls
-    transcript, calls = run('declined', ['install'], [('Prepare this machine', 'yes'), ('Apply these prerequisite changes', 'no')], expected=1)
+    transcript, calls = run('declined', ['install'], [('Install Hive on this machine', 'yes'), ('Apply these prerequisite changes', 'no')], expected=1)
     assert not calls and 'Prerequisites were not changed' in transcript
     transcript, calls = run('certificate', ['certificate', 'https://console.example.com'], [('Obtain the console certificate', 'yes')])
     assert 'certificate=/etc/hive/tls/console.crt key=/etc/hive/tls/console.key' in transcript and 'tailscale' in calls
     transcript, calls = run('other-origin', ['certificate', 'https://other.example.com'])
+    assert not calls and 'certificate= key=' in transcript
+    transcript, calls = run('certificate-port', ['certificate', 'https://console.example.com:8443'],
+                            [('Obtain the console certificate', 'yes')])
+    assert 'certificate=/etc/hive/tls/console.crt' in transcript and '--name console.example.com\n' in calls
+    transcript, calls = run('certificate-origin-prefix', ['certificate', 'https://console.example.com.other.example.com'])
     assert not calls and 'certificate= key=' in transcript
     transcript, calls = run('certificate-declined', ['certificate', 'https://console.example.com'], [('Obtain the console certificate', 'no')])
     assert not calls and 'certificate= key=' in transcript
@@ -113,6 +133,37 @@ esac
     assert not calls and 'account= key=' in transcript
     transcript, calls = run('directory', ['directory'], [('Create /opt/example-suite', 'yes')])
     assert '--directory /opt/example-suite' in calls
+    guided_config = base / 'guided-installation.json'
+    questions = [
+        ('Installation name [hive]', ''), ('Installation directory on the selected host', ''),
+        ('Console HTTPS origin', 'https://console.example.com:8443'), ('Product profile', 'full'),
+        ('HTTPS bind address', 'tailscale'), ('HTTPS listener port [8443]', ''), ('Configuration mode', ''),
+        ('Initial operator username', ''), ('Initial operator email', 'alice@example.com'),
+        ('Obtain the console certificate', 'yes'), ('Deploy the Magnus web terminal gateway', 'yes'),
+        ('Prepare that account and key', 'yes'), ('Grant magnus:terminal', 'no'),
+        ('Deploy Ardent Project Studio', ''), ('Deploy Embermend', 'no'),
+        ('Port for Magnus host agents', '4000'), ('Existing external inference HTTPS endpoint', ''),
+        ('Prune old backups and rehearsals daily', ''), ('Write protected installation configuration to', str(guided_config)),
+    ]
+    transcript, _ = run('configure', ['configure'], questions,
+                        environment={'TEST_GUIDED_CONFIGURE': 'true', 'XDG_CONFIG_HOME': str(base / 'config')})
+    assert 'Enter "tailscale" to bind to the tailnet address' in transcript
+    assert all(prompt not in transcript for prompt in ['Host SSH target', 'Host architecture',
+        'Existing console certificate file', 'Protected console private key file',
+        'Restricted SSH account on fleet nodes', 'Protected SSH private key file on the Magnus host'])
+    selected = json.loads(guided_config.read_text())
+    assert selected['hosts']['control']['target'] == 'local'
+    assert selected['console']['httpsPort'] == 8443 and selected['console']['bindAddress'] == '100.64.0.10'
+    assert selected['bootstrap']['certificateFile'] == '/etc/hive/tls/console.crt'
+    assert selected['bootstrap']['privateKeyFile'] == '/etc/hive/tls/console.key'
+    assert selected['bootstrap']['magnusGateway'] == {'sshUsername': 'hive-terminal',
+        'sshPrivateKeyFile': '/etc/hive/fleet/gateway-key', 'grantTerminalToInitialOperator': False}
+    transcript, calls = run('resume', ['resume', str(guided_config)])
+    assert 'managed-certificate=true' in transcript and not calls
+    selected['bootstrap']['privateKeyFile'] = '/opt/supplied/key.pem'
+    guided_config.write_text(json.dumps(selected))
+    transcript, calls = run('resume-supplied-certificate', ['resume', str(guided_config)])
+    assert 'managed-certificate=false' in transcript and not calls
     config = base / 'finish-config.json'
     config.write_text(json.dumps({'components': {'magnus': {'host': 'control'}}, 'console': {'nativeListeners': [{'component': 'magnus'}]}}))
     transcript, calls = run('finish', ['finish', str(config)], [('Install the Magnus host agent', 'yes'), ('Review this host for full Magnus capabilities', 'yes')])

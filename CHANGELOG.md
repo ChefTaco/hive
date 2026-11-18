@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Fixed
+
+- `--release latest` retains the verified release checkout even when the launcher already has
+  matching source. Guided installs can use that checkout for certificate renewal and backup pruning
+  without tying either job to the launcher's branch.
+- Guided local setup detects the host architecture, uses the certificate and terminal account it
+  prepares, and accepts `tailscale` as the HTTPS bind address. An explicit port in the HTTPS origin
+  becomes the listener default. The preparation helpers leave follow-up instructions to the wizard.
+  Retrying a saved guided installation can offer Tailscale renewal.
+
 ## [3.12.3] - 2026-11-18
 
 ### Security

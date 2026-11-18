@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Gets, checks and renews the console HTTPS certificate of a Hive installation.
 #
-#   sudo ./scripts/console-certificate.sh tailscale [--dir DIR] [--owner USER] [--name NAME]
+#   sudo ./scripts/console-certificate.sh tailscale [--dir DIR] [--owner USER] [--name NAME] [--guided]
 #       Issue (or refresh) a certificate for this host's Tailscale MagicDNS name with
 #       `tailscale cert`, into DIR/console.crt and DIR/console.key (default DIR: /etc/hive/tls).
 #       USER (default: the sudo caller) owns both files, so it can run hive.sh; the key is 0600.
+#       In guided mode the installer provides the next steps.
 #   ./scripts/console-certificate.sh check --cert FILE --key FILE [--name NAME]
 #       Check a certificate and key the way hive.sh does before it uses them.
 #   sudo ./scripts/console-certificate.sh renew --config FILE [--hive DIR] [--no-tailscale]
@@ -28,7 +29,7 @@ say() { printf '%s\n' "$*"; }
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; }
 
 command=${1:-}; [[ -n "$command" ]] || { usage >&2; exit 2; }; shift
-dir=/etc/hive/tls owner=${SUDO_USER:-} name='' cert='' key='' config='' use_tailscale=true hive='' refresh_existing=false
+dir=/etc/hive/tls owner=${SUDO_USER:-} name='' cert='' key='' config='' use_tailscale=true hive='' refresh_existing=false guided=false
 while (($#)); do
   case "$1" in
     --dir) dir=${2:?--dir needs a value}; shift;;
@@ -40,6 +41,7 @@ while (($#)); do
     --hive) hive=${2:?--hive needs a value}; shift;;
     --no-tailscale) use_tailscale=false;;
     --refresh-existing) refresh_existing=true;;
+    --guided) guided=true;;
     -h|--help) usage; exit 0;;
     *) die "unknown option: $1";;
   esac
@@ -134,9 +136,11 @@ case "$command" in
     say "Certificate for $name ${result:+(new) }valid until $(expiry "$dir/console.crt"), owned by $owner:"
     say "  certificate: $dir/console.crt"
     say "  private key: $dir/console.key"
-    say "Give these paths to ./hive.sh, and use https://$name as the console origin."
-    say 'Tailscale certificates last 90 days. After installing, keep it current with:'
-    say "  sudo $(realpath -- "$0") schedule --config FILE";;
+    if [[ "$guided" == false ]]; then
+      say "Give these paths to ./hive.sh, and use https://$name as the console origin."
+      say 'Tailscale certificates last 90 days. After installing, keep it current with:'
+      say "  sudo $(realpath -- "$0") schedule --config FILE"
+    fi;;
   check)
     [[ -n "$cert" && -n "$key" ]] || die 'check needs --cert FILE and --key FILE'
     check_pair "$cert" "$key" "$name"

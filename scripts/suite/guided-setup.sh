@@ -36,16 +36,16 @@ hive_setup_start() {
   HIVE_GUIDED_SETUP=true
   if [[ ${HIVE_SETUP_LOCAL:-} != yes && ${HIVE_SETUP_LOCAL:-} != no ]]; then
     printf 'Hive can prepare this machine with Docker and the required tools. Remote installations need only the controller tools here.\n'
-    if hive_setup_ask 'Prepare this machine for a local installation?'; then HIVE_SETUP_LOCAL=yes
+    if hive_setup_ask 'Install Hive on this machine and prepare it as needed?'; then HIVE_SETUP_LOCAL=yes
     else HIVE_SETUP_LOCAL=no; fi
     export HIVE_SETUP_LOCAL
   fi
   local -a preparation=()
   if [[ "$HIVE_SETUP_LOCAL" == no ]]; then preparation+=(--controller); fi
   if ! bash "$HIVE_ROOT/scripts/install-prerequisites.sh" --check "${preparation[@]}" >/dev/null 2>&1; then
-    bash "$HIVE_ROOT/scripts/install-prerequisites.sh" --dry-run "${preparation[@]}"
+    bash "$HIVE_ROOT/scripts/install-prerequisites.sh" --dry-run --guided "${preparation[@]}"
     if hive_setup_ask 'Apply these prerequisite changes with sudo?'; then
-      hive_setup_sudo bash "$HIVE_ROOT/scripts/install-prerequisites.sh" --yes "${preparation[@]}"
+      hive_setup_sudo bash "$HIVE_ROOT/scripts/install-prerequisites.sh" --yes --guided "${preparation[@]}"
     else
       printf 'Prerequisites were not changed. Prepare them manually before continuing.\n' >&2
       return 1
@@ -67,7 +67,7 @@ hive_setup_directory() {
   if ! hive_writable_directory "$directory"; then
     [[ "$directory" == /* && "$directory" != / && "$directory" == "$(realpath -m -- "$directory")" ]] || return 0
     if hive_setup_ask "Create $directory for $(id -un) with sudo?"; then
-      hive_setup_sudo bash "$HIVE_ROOT/scripts/install-prerequisites.sh" --yes --directory "$directory"
+      hive_setup_sudo bash "$HIVE_ROOT/scripts/install-prerequisites.sh" --yes --guided --directory "$directory"
     fi
   fi
 }
@@ -82,15 +82,34 @@ hive_setup_origin() {
   HIVE_SETUP_ORIGIN="https://$name"
 }
 
+hive_setup_uses_tailscale() {
+  local authority=${1#https://}
+  [[ -n ${HIVE_SETUP_ORIGIN:-} && "$authority" != "$1" &&
+     "$HIVE_SETUP_ORIGIN" == "https://${authority%%:*}" &&
+     ( "$authority" != *:* || "${authority#*:}" =~ ^[0-9]+$ ) ]]
+}
+
 hive_setup_certificate() {
   HIVE_SETUP_CERTIFICATE='' HIVE_SETUP_PRIVATE_KEY='' HIVE_SETUP_TAILSCALE=false
-  [[ ${HIVE_GUIDED_SETUP:-false} == true && -n ${HIVE_SETUP_ORIGIN:-} && ${HIVE_SETUP_ORIGIN:-} == "$1" ]] || return 0
-  if ! bash "$HIVE_ROOT/scripts/console-certificate.sh" check --cert /etc/hive/tls/console.crt --key /etc/hive/tls/console.key --name "${1#https://}" >/dev/null 2>&1; then
+  [[ ${HIVE_GUIDED_SETUP:-false} == true ]] && hive_setup_uses_tailscale "$1" || return 0
+  local name=${HIVE_SETUP_ORIGIN#https://}
+  if ! bash "$HIVE_ROOT/scripts/console-certificate.sh" check --cert /etc/hive/tls/console.crt --key /etc/hive/tls/console.key --name "$name" >/dev/null 2>&1; then
     printf 'Tailscale can obtain a trusted HTTPS certificate for this console. Its name will appear in public Certificate Transparency logs.\n'
     hive_setup_ask 'Obtain the console certificate with sudo?' || return 0
-    hive_setup_sudo bash "$HIVE_ROOT/scripts/console-certificate.sh" tailscale --owner "$(id -un)" --name "${1#https://}"
+    hive_setup_sudo bash "$HIVE_ROOT/scripts/console-certificate.sh" tailscale --guided --owner "$(id -un)" --name "$name"
   fi
   HIVE_SETUP_CERTIFICATE=/etc/hive/tls/console.crt HIVE_SETUP_PRIVATE_KEY=/etc/hive/tls/console.key HIVE_SETUP_TAILSCALE=true
+}
+
+# A retry with the saved configuration does not revisit the certificate prompts.
+hive_setup_resume() {
+  HIVE_SETUP_TAILSCALE=false
+  [[ ${HIVE_GUIDED_SETUP:-false} == true && ${HIVE_SETUP_LOCAL:-no} == yes ]] || return 0
+  jq -e '.hosts[.console.host].target=="local" and
+    .bootstrap.certificateFile=="/etc/hive/tls/console.crt" and
+    .bootstrap.privateKeyFile=="/etc/hive/tls/console.key"' "$1" >/dev/null || return 0
+  hive_setup_origin
+  if hive_setup_uses_tailscale "$(jq -r .origin "$1")"; then HIVE_SETUP_TAILSCALE=true; fi
 }
 
 hive_setup_terminal() {
