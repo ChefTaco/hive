@@ -6,6 +6,18 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Changed
+
+- Every service the controller renders now has a bounded Docker log: `json-file`, rotated at
+  10 MB, 3 files kept. This covers the products, datastores, ingress, HiveXUI, optional components
+  such as `cindertrace-collector`, and rehearsal and restored-copy projects (including a restored
+  Compose file from before this change). Before, Docker kept each container's whole log. The new
+  installation-file setting `containerLogs` (`{"maxSize":"10m","maxFiles":3}`, both optional)
+  changes the bounds; see `deployment/README.md`, "Container logs". The rendered Compose file
+  changes, so the next upgrade recreates every container, including ones whose image is
+  unchanged, and the log of each replaced container is removed with it. Adopting an existing
+  Compose project ignores the log settings when it compares the project with the plan.
+
 ## [3.12.2] - 2026-11-18
 
 ### Changed

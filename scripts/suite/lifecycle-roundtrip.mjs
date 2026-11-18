@@ -201,6 +201,13 @@ process.on('SIGTERM',()=>server.close(()=>{db.close();process.exit(0);}));
   const identity = readFileSync(join(owned, 'installation.json'), 'utf8');
   cli('install');
   assert.equal(readFileSync(join(owned, 'installation.json'), 'utf8'), identity);
+  // Every running container rotates its log: Docker's json-file driver is otherwise unbounded.
+  for (const id of execute('docker', ['compose', '-f', compose, 'ps', '-q']).trim().split('\n')) {
+    assert.deepEqual(JSON.parse(execute('docker', ['inspect', '-f', '{{json .HostConfig.LogConfig}}', id])), {
+      Type: 'json-file',
+      Config: { 'max-file': '3', 'max-size': '10m' },
+    });
+  }
   assert.equal(JSON.parse(sql("SELECT value FROM counters WHERE name='enrollment'"))[0].value, 1);
   cli('backup', '0.1.0', ['--archive', 'baseline']);
   // A legacy combined archive must never launch or restore its inference service.
@@ -269,6 +276,11 @@ process.on('SIGTERM',()=>server.close(()=>{db.close();process.exit(0);}));
   projects.add(rehearsal);
   assert.equal(JSON.parse(readFileSync(rehearsal)).networks.default.internal, true);
   assert.equal(JSON.parse(readFileSync(rehearsal)).services.probe.ports, undefined);
+  assert.ok(
+    Object.values(JSON.parse(readFileSync(rehearsal)).services).every(
+      (service) => service.logging?.driver === 'json-file' && service.logging.options['max-size'] === '10m',
+    ),
+  );
   cli('upgrade', '0.2.0', ['--archive', 'before-two'], false); // Missing migration approval fails before stopping writers.
   assert.equal(JSON.parse(sql("SELECT value FROM counters WHERE name='enrollment'"))[0].value, 1);
   cli('upgrade', '0.2.0', ['--archive', 'before-two', '--allow-migrations']);

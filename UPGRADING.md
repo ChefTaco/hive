@@ -93,6 +93,28 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.12.3 (draft): bounded container logs
+
+From suite 3.12.3, every container the controller creates rotates its Docker log
+(`json-file`, 10 MB per file, 3 files), as [Container logs](deployment/README.md#container-logs)
+describes. The setting is part of the rendered Compose file, and Docker Compose recreates a
+container whose configuration changed. So the upgrade to 3.12.3 recreates every container on each
+host, including datastores and other services whose image is unchanged, instead of only restarting
+them. Data is kept: every store is a bind mount of the installation's `data` directory.
+
+The log of each replaced container is removed with it, so `docker logs` shows nothing from before
+the upgrade. Save what you need first, for example
+`docker compose -f /opt/hive/compose.json logs --no-color > /path/to/pre-upgrade.log`, with the
+installation directory in place of `/opt/hive`. This is also how an oversized log goes away.
+
+To use other bounds, set `containerLogs` (`{"maxSize":"50m","maxFiles":5}`) in the installation
+file before the upgrade. Controllers before 3.12.3 refuse the key: before rolling back to an older
+release, remove it from the installation file. A rollback restores the older Compose file and
+recreates the containers with Docker's unbounded default again.
+
+Containers that the suite did not create keep their own log settings; see
+[Container logs](deployment/README.md#container-logs) for a host-wide Docker default.
+
 ## Suite 3.12.2: Cindertrace 0.8.1
 
 Suite 3.12.2 pins Cindertrace 0.8.1, for Cindertrace and the optional `cindertrace-collector`
