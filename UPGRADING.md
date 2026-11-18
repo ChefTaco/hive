@@ -93,14 +93,31 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
-## Suite 3.12.3 (draft): bounded container logs
+## Suite 3.12.3: bounded container logs and security updates
 
-From suite 3.12.3, every container the controller creates rotates its Docker log
-(`json-file`, 10 MB per file, 3 files), as [Container logs](deployment/README.md#container-logs)
-describes. The setting is part of the rendered Compose file, and Docker Compose recreates a
-container whose configuration changed. So the upgrade to 3.12.3 recreates every container on each
-host, including datastores and other services whose image is unchanged, instead of only restarting
-them. Data is kept: every store is a bind mount of the installation's `data` directory.
+Suite 3.12.3 pins HiveMem 1.9.1 and HiveXUI 0.10.1, which move to `@hivemagnus/hive-common` 0.5.1
+(a fix for a polynomial regular-expression denial of service in the path handling of the
+unauthenticated health endpoints), and the Hive Registry 1.3.2 (image 2.0.9), which no longer logs
+successful health and readiness probes. Every other product pin, the datastore profile and the
+storage recovery profile are those of 3.12.2 (Cindertrace 0.8.1, Emberpath 2.5.3 and Magnus 3.1.3).
+None of the three has a schema migration: HiveMem 1.9.1 keeps 1.9.0's storage, so its signed
+initialization verifier finds nothing pending on an installation already on 3.12.x, and an upgrade
+from 3.12.2 needs no migration flag. The controller changes (bounded container logs, below), so a
+checkout of the 3.12.2 tag refuses the 3.12.3 manifest; run 3.12.3 from a checkout of its tag
+(`--release latest` or `--release 3.12.3`).
+
+```bash
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.12.3
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.12.3
+```
+
+**Bounded container logs.** From suite 3.12.3, every container the controller creates rotates its
+Docker log (`json-file`, 10 MB per file, 3 files), as
+[Container logs](deployment/README.md#container-logs) describes. The setting is part of the
+rendered Compose file, and Docker Compose recreates a container whose configuration changed. So
+the first upgrade to 3.12.3 recreates every container on each host, including datastores and other
+services whose image is unchanged, instead of only restarting them. Data is kept: every store is a
+bind mount of the installation's `data` directory.
 
 The log of each replaced container is removed with it, so `docker logs` shows nothing from before
 the upgrade. Save what you need first, for example
@@ -108,12 +125,19 @@ the upgrade. Save what you need first, for example
 installation directory in place of `/opt/hive`. This is also how an oversized log goes away.
 
 To use other bounds, set `containerLogs` (`{"maxSize":"50m","maxFiles":5}`) in the installation
-file before the upgrade. Controllers before 3.12.3 refuse the key: before rolling back to an older
-release, remove it from the installation file. A rollback restores the older Compose file and
-recreates the containers with Docker's unbounded default again.
-
-Containers that the suite did not create keep their own log settings; see
+file before the upgrade. Containers that the suite did not create keep their own log settings; see
 [Container logs](deployment/README.md#container-logs) for a host-wide Docker default.
+
+**Upgrading from 3.12.1, 3.12.0 or 3.11.x.** Follow [Suite 3.12.2](#suite-3122-cindertrace-081),
+[Suite 3.12.1](#suite-3121-memory-identity-relink-fixes) and, from 3.11.x,
+[Suite 3.12.0](#suite-3120-cindertrace-080-and-the-emberpath-memory-principal) with
+`--release 3.12.3`: from 3.11.x the upgrade needs `--allow-migrations` where `hive-router` owns
+HiveMem data, as for 3.12.0.
+
+**Rolling back to 3.12.2.** Run the rollback from the 3.12.2 release checkout. It restores the
+pre-upgrade backup and the older Compose file, and recreates every container again, with Docker's
+unbounded default log and without the history of the 3.12.3 containers. Controllers before 3.12.3
+refuse the `containerLogs` key, so remove it from the installation file first.
 
 ## Suite 3.12.2: Cindertrace 0.8.1
 

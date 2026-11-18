@@ -6,8 +6,20 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.12.3] - 2026-11-18
+
+### Security
+
+- Pins HiveMem 1.9.1 and HiveXUI 0.10.1, which move to `@hivemagnus/hive-common` 0.5.1: it fixes
+  a polynomial regular-expression denial of service in the path handling of the unauthenticated
+  health endpoints. Neither has a schema migration.
+
 ### Changed
 
+- Pins the Hive Registry 1.3.2 (image 2.0.9). Every other product pin, the datastore profile and
+  the storage recovery profile are those of 3.12.2. The controller changes. An upgrade from 3.12.2
+  needs no flag; the first upgrade to 3.12.3 recreates every container (see below). See
+  `UPGRADING.md`, "Suite 3.12.3".
 - Every service the controller renders now has a bounded Docker log: `json-file`, rotated at
   10 MB, 3 files kept. This covers the products, datastores, ingress, HiveXUI, optional components
   such as `cindertrace-collector`, and rehearsal and restored-copy projects (including a restored

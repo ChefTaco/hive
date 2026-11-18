@@ -29,7 +29,7 @@ cd hive
 ```
 
 Run the preparation commands from this checkout. `--release latest` resolves the published
-release once and runs its matching tagged controller; an exact `--release 3.12.2` selects that
+release once and runs its matching tagged controller; an exact `--release 3.12.3` selects that
 version instead. The launcher prints the version and retained checkout path, under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`. The signed release still pins the exact
 controller source. After setup, switch to the retained release checkout printed by the launcher
@@ -152,7 +152,7 @@ questions. Press Enter to accept the default shown in brackets.
 | Deploy the Magnus web terminal gateway | `no`. For `yes`, first create the restricted account and key in [preparing nodes](FULL.md#preparing-nodes-and-the-gateway-key) |
 | Port for Magnus host agents | blank for none. Give a port, such as `4000`, to let hosts join the Magnus fleet; see [Magnus host agents](FULL.md#magnus-host-agents) |
 | Existing external inference HTTPS endpoint | blank to skip; see [external inference](INFERENCE.md) |
-| Native agent runtime | Release 3.12.2 skips this question because it pins no native runtime artifacts; the guided local setup offers a Magnus host agent after installation, as in [Magnus host agents](FULL.md#magnus-host-agents) |
+| Native agent runtime | Release 3.12.3 skips this question because it pins no native runtime artifacts; the guided local setup offers a Magnus host agent after installation, as in [Magnus host agents](FULL.md#magnus-host-agents) |
 | Prune old backups and rehearsals daily | the default, `yes`: from 3.9.4, a line in your crontab removes old backup and rehearsal pairs every day at 03:40, local time, keeping the newest 5 restorable pairs, everything from the last 14 days and anything a recovery needs. Give another time such as `04:15`, or `no`. Asked only for a single-host installation; see [daily pruning](BACKUPS.md#daily-pruning) |
 | Write protected installation configuration to | the default, `~/.config/hive/hive/installation.json` |
 
@@ -162,10 +162,10 @@ it. The first install pulls the images and takes a few minutes; later commands t
 If it stops after writing the configuration file, fix the cause and run `./hive.sh --release
 X.Y.Z` again, replacing `X.Y.Z` with the exact version it reported: after the installation name
 it offers to continue with the saved file instead of asking everything again. Use that exact version for retries and for planning then applying,
-so a new release cannot change the plan between commands. Unattended, for example with 3.12.2:
+so a new release cannot change the plan between commands. Unattended, for example with 3.12.3:
 
 ```bash
-./hive.sh install --config ~/.config/hive/hive/installation.json --release 3.12.2
+./hive.sh install --config ~/.config/hive/hive/installation.json --release 3.12.3
 ```
 
 After setup, change to the retained release checkout path printed by the launcher before
@@ -303,6 +303,14 @@ its own release checkout. An upgrade from 3.11.2 straight to 3.12.2 needs the sa
 `--allow-migrations` as 3.12.0. See
 [Suite 3.12.2](../UPGRADING.md#suite-3122-cindertrace-081).
 
+Upgrading from 3.12.2 to 3.12.3 needs no migration flag. HiveMem moves to 1.9.1, HiveXUI to 0.10.1
+and the Hive Registry to 1.3.2, none with a schema migration; every other pin stays that of 3.12.2.
+Every container now gets a bounded Docker log, so the first upgrade to 3.12.3 recreates every
+container, datastores included; data is kept, but `docker logs` loses the history of each replaced
+container. The controller changes, so run 3.12.3 from its own release checkout. An upgrade from
+3.11.2 straight to 3.12.3 needs the same `--allow-migrations` as 3.12.0. See
+[Suite 3.12.3](../UPGRADING.md#suite-3123-bounded-container-logs-and-security-updates).
+
 Use an exact version instead of `latest` to review and apply a specific release. Existing
 PostgreSQL stores need explicit migration approval when moving from 2.x to 3.6.0, and so do
 existing Emberpath and HiveSkills stores when moving from a release before 3.4.0 (see
@@ -313,12 +321,12 @@ installation that runs Magnus when moving from a release before 3.8.0 (see
 [UPGRADING](../UPGRADING.md#suite-380-magnus-node-credentials-and-product-security-updates)):
 
 ```bash
-./hive.sh plan --config ~/.config/hive/hive/installation.json --release 3.12.2 --allow-migrations
-./hive.sh upgrade --config ~/.config/hive/hive/installation.json --release 3.12.2 --allow-migrations
+./hive.sh plan --config ~/.config/hive/hive/installation.json --release 3.12.3 --allow-migrations
+./hive.sh upgrade --config ~/.config/hive/hive/installation.json --release 3.12.3 --allow-migrations
 ```
 
 An installation that runs Magnus moves from 3.8.1 to 3.9.0 or later, which pin Magnus 3
-(node keys only), without an additional flag. Later upgrades through 3.12.2 also need no flag
+(node keys only), without an additional flag. Later upgrades through 3.12.3 also need no flag
 for this change. First give every Magnus node its key. The upgrade checks the running Magnus
 before it changes anything and stops while a node would be locked out, naming the blockers
 and the ways out; see
@@ -351,16 +359,16 @@ existing local Hive certificate-renewal service to its verified controller check
 
 When two releases share the same controller source, the checkout retains the compatible release
 named in the installation file. Pass the new exact version to later commands to keep using its
-product pins, for example `./hive.sh doctor --config FILE --release 3.12.2`. Certificate renewal
+product pins, for example `./hive.sh doctor --config FILE --release 3.12.3`. Certificate renewal
 uses a unique matching release tag in this case, so its receipt follows that checkout.
 
 Then finish maintenance from the retained release checkout with the individual commands:
 
 ```bash
-./hive.sh magnus-agent status --config ~/.config/hive/hive/installation.json --release 3.12.2
-./hive.sh magnus-agent install --config ~/.config/hive/hive/installation.json --release 3.12.2
-./hive.sh console-clients add --config ~/.config/hive/hive/installation.json --release 3.12.2
-./hive.sh doctor --config ~/.config/hive/hive/installation.json --release 3.12.2
+./hive.sh magnus-agent status --config ~/.config/hive/hive/installation.json --release 3.12.3
+./hive.sh magnus-agent install --config ~/.config/hive/hive/installation.json --release 3.12.3
+./hive.sh console-clients add --config ~/.config/hive/hive/installation.json --release 3.12.3
+./hive.sh doctor --config ~/.config/hive/hive/installation.json --release 3.12.3
 ```
 
 Run the Magnus commands only when this installation hosts Magnus and has a host agent to update;
@@ -369,7 +377,7 @@ run `console-clients add` when it hosts Oathweave and needs missing HiveXUI brow
 Full-node enrollment is a separate authorization through `magnus-agent enroll`; a package update
 must not enable commands, cron or web terminals on an intentionally limited node. See
 [Magnus host agents](FULL.md#magnus-host-agents) for enrollment review and other hosts.
-With a release that pins Magnus 3.0.0 or later, such as 3.12.2, which accepts node keys only, an
+With a release that pins Magnus 3.0.0 or later, such as 3.12.3, which accepts node keys only, an
 agent that already has a key keeps it and is not re-enrolled, an agent without one is enrolled with
 a one-time token, and no fleet-wide node secret is copied to agents (see
 [node keys](FULL.md#node-keys); under a release that pins Magnus 2.10.x an existing agent binds its
