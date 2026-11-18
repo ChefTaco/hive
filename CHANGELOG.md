@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.12.4] - 2026-11-18
+
 ### Fixed
 
 - `--release latest` retains the verified release checkout even when the launcher already has
@@ -15,6 +17,8 @@ All notable changes to this project are documented in this file. The format is b
   prepares, and accepts `tailscale` as the HTTPS bind address. An explicit port in the HTTPS origin
   becomes the listener default. The preparation helpers leave follow-up instructions to the wizard.
   Retrying a saved guided installation can offer Tailscale renewal.
+
+This release uses the product and datastore image digests from 3.12.3.
 
 ## [3.12.3] - 2026-11-18
 

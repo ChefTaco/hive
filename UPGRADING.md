@@ -93,14 +93,19 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
-## Unreleased guided setup changes
+## Suite 3.12.4: guided setup
 
 New installations launched with `--release latest` use the retained, verified checkout for
 installation, certificate renewal and backup pruning. Use the checkout path printed by the launcher
 when resuming setup with the exact version. Guided Tailscale setup accepts `tailscale` as the
 HTTPS bind address and reuses the certificate it prepares, including for a custom HTTPS port.
-Existing installations can continue using their release checkout. There is no configuration
-migration for these changes.
+Suite 3.12.4 uses the product and datastore digests from 3.12.3. Use the normal signed upgrade
+from 3.12.3:
+
+```bash
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.12.4
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.12.4
+```
 
 ## Suite 3.12.3: bounded container logs and security updates
 
