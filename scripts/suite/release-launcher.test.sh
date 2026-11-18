@@ -152,6 +152,12 @@ mkdir -p "$TEST_ROOT/releases"
 jq -n '{controllerSHA256:("0"*63+"1")}' > "$TEST_ROOT/releases/2.0.7.json"
 TEST_API_FAIL=true bash "$TEST_ROOT/hive.sh" --release 2.0.7
 [[ $(cat "$TEST_RESULT") == local ]] || fail 'Matching local release was replaced'
+# Even when the mutable launcher has matching source, latest retains and uses
+# the verified tag. The exact-version offline behavior above still applies.
+jq -n '{controllerSHA256:("0"*63+"1")}' > "$TEST_ROOT/releases/2.0.4.json"
+bash "$TEST_ROOT/hive.sh" --release latest 2>"$temporary/error"
+jq -e '.args==["--release","2.0.4"]' "$TEST_RESULT" >/dev/null || fail 'Latest used the mutable launcher'
+grep -Fq "running release 2.0.4 from $XDG_DATA_HOME/hive/releases/2.0.4" "$temporary/error" || fail 'Retained controller path was not reported'
 # The controller help names every command that accepts --release latest, as the launcher does.
 launcher_commands=$(grep -o "latest applies only to [^']*" "$ROOT/scripts/suite/release-launcher.sh" | sed 's/latest applies only to //; s/, and /, /; s/ and /, /' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | sort)
 [[ $launcher_commands == $(printf '%s\n' admin-access init install plan upgrade) ]] || fail "Launcher latest commands changed: $launcher_commands"

@@ -37,15 +37,18 @@ for later commands and certificate renewal timers. Keep that directory.
 
 ## Guided local setup
 
-With Hive 2.4.0 or later, run `./hive.sh --release latest` from the checkout for a fresh local installation. Interactive
-setup offers to prepare this machine with Docker and the required tools, using sudo only after
-showing its changes and asking for consent. A new Docker group membership takes effect in a
-child shell, so no logout is needed. Setup then offers to create the installation directory.
+With Hive 2.4.0 or later, run `./hive.sh --release latest` from the checkout for a fresh local
+installation. Choose the local installation and setup detects the host architecture. It offers
+to prepare Docker and the required tools, using sudo after showing its changes and asking for
+consent. A new Docker group membership takes effect in a child shell. Setup then offers to create
+the installation directory.
 
 If Tailscale is already logged in with HTTPS certificates enabled, setup suggests this host's
-HTTPS name and can obtain its certificate. Tailscale remains optional: bring your own DNS name
-and certificate on other networks. Selecting the optional local web terminal offers to prepare
-its dedicated account and key. After installation, setup offers the certificate renewal timer
+HTTPS name and can obtain and use its certificate. Enter `tailscale` when asked for a bind address
+to use the detected tailnet address. The loopback default is for access through a tunnel or local
+reverse proxy. Tailscale remains optional: bring your own DNS name and certificate on other
+networks. Selecting the optional local web terminal offers to prepare and use its dedicated
+account and key. After installation, setup offers the certificate renewal timer
 and, when its listener was selected, the Magnus host agent. Full-node review then enables
 commands, managed cron and a selected web terminal gateway, while retaining the option to decline
 enrollment or deliberately choose the separate Ardent-only path.
@@ -143,7 +146,7 @@ questions. Press Enter to accept the default shown in brackets.
 | Console HTTPS origin | `https://hive.example.com`, the name on the certificate. Add `:PORT` if the listener port is not 443 |
 | Product profile | `full` for every product, or `core` (see the [README](../README.md)) |
 | HTTPS bind address | The default `127.0.0.1` accepts connections from this host only. Use `0.0.0.0` to serve every network the host is on, or one of the host's addresses. `0.0.0.0` also works when a Tailscale address appears only after Docker starts at boot |
-| HTTPS listener port | `443` |
+| HTTPS listener port | The port from the console origin, or `443` by default |
 | Configuration mode | `fresh` |
 | Initial operator username | `admin` |
 | Initial operator email | your address, for identity recovery |
@@ -160,7 +163,8 @@ questions. Press Enter to accept the default shown in brackets.
 it. The first install pulls the images and takes a few minutes; later commands take seconds.
 
 If it stops after writing the configuration file, fix the cause and run `./hive.sh --release
-X.Y.Z` again, replacing `X.Y.Z` with the exact version it reported: after the installation name
+X.Y.Z` again from the retained checkout, replacing `X.Y.Z` with the exact version it reported.
+After the installation name,
 it offers to continue with the saved file instead of asking everything again. Use that exact version for retries and for planning then applying,
 so a new release cannot change the plan between commands. Unattended, for example with 3.12.3:
 
@@ -210,7 +214,8 @@ completed administrator steps in the setup checklist.
 
 ### Administrator product access
 
-From suite 3.11.0, after creating your administrator in **Oathweave > Users**, run:
+From suite 3.11.0, create your account in **Oathweave > Users** and select **IAM Administrator**
+as its initial role. Then run:
 
 ```bash
 ./hive.sh admin-access setup --release latest

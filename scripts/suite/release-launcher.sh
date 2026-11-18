@@ -108,11 +108,11 @@ hive_release_launch() {
   [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || hive_die 'Use --release latest or an exact version such as 2.0.5'
   hive_need jq; hive_need sha256sum
   arguments[release_index]=$version
-  # A matching local controller stays offline. Explicit manifests retain their existing path.
-  if [[ -f "$HIVE_ROOT/releases/$version.json" ]]; then
+  # Exact versions can run from a matching local checkout. Channel launches always
+  # retain a verified tag so installed timers can keep using the selected controller.
+  if [[ "$requested" != latest && -f "$HIVE_ROOT/releases/$version.json" ]]; then
     digest=$(hive_controller_digest) || hive_die 'Could not verify local controller source'
     if jq -e --arg digest "$digest" '.controllerSHA256==$digest' "$HIVE_ROOT/releases/$version.json" >/dev/null; then
-      if [[ $requested == latest ]]; then exec bash "$HIVE_ROOT/hive.sh" "${arguments[@]}"; fi
       return 0
     fi
   fi

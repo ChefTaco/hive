@@ -115,6 +115,7 @@ logged "usermod -aG docker $(id -un)"
 [[ -d "$box/opt/hive" && $(stat -c %a "$box/opt/hive") == 750 ]] || fail 'installation directory'
 if [[ -d /run/systemd/system ]]; then logged 'systemctl enable --now docker.service containerd.service'; fi
 expect 'compose    2.40.0'
+expect 'Log out and back in'
 
 # Re-running changes nothing.
 : > "$box/log"
@@ -123,6 +124,13 @@ expect 'Nothing to change'
 grep -q 'apt-get install\|usermod\|curl' "$box/log" && fail 'rerun changed something'
 run --check || { cat "$box/out" >&2; fail '--check failed after install'; }
 expect 'Ready'
+
+# Guided mode prepares the same host and leaves the follow-up to the installer.
+machine ubuntu 24.04 noble
+run --yes --guided || { cat "$box/out" >&2; fail 'guided apply failed'; }
+logged "usermod -aG docker $(id -un)"
+expect 'Hive prerequisites are ready.'
+if grep -Eq 'next login|Log out|Done\. Next' "$box/out"; then fail 'guided apply printed manual steps'; fi
 
 # Debian 12 uses Docker's Debian repository; a key with another fingerprint is refused.
 KEY_FPR=0000000000000000000000000000000000000000 machine debian 12 bookworm

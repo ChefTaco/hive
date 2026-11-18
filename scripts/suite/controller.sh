@@ -277,6 +277,7 @@ hive_configure() {
   [[ -t 0 ]] || hive_die 'Interactive setup requires a terminal; use --config FILE --non-interactive'
   hive_need openssl; hive_need sha256sum
   local resume control_ssh='' existing id directory origin profile output endpoint model credential engine protocol target bind port architecture selected mode certificate private_key username email
+  local default_port=443 tailnet_bind=''
   local inference='[]' agents='[]' temporary config selected_json runtime version agent_id agent_profile agent_environment agent_service authorized
   local external_ca enrollment_endpoint enrollment_prefix enrollment_credential enrollment_ca provider_slug provider_aliases
   local product product_host product_origin product_bind product_certificate product_key product_inference trust_bundle ssh_config magnus_console
@@ -295,7 +296,7 @@ hive_configure() {
   openssl pkeyutl -verify -pubin -inkey "$HIVE_TRUST_KEY" -rawin -in "$HIVE_MANIFEST" -sigfile "$HIVE_SIGNATURE" >/dev/null 2>&1 || hive_die 'Release signature verification failed'
   jq -e '.components["hive-registry"]!=null' "$HIVE_MANIFEST" >/dev/null || hive_die 'This release has no Hive Registry. The registry is mandatory: use a release whose signed manifest includes hive-registry.'
   jq -e --arg version "$HIVE_VERSION" '.schema==1 and .version==$version and (.components|keys|all(.[];test("^[a-z][a-z0-9-]{0,47}$")))' "$HIVE_MANIFEST" >/dev/null || hive_die 'Release metadata does not match the requested version'
-  hive_prompt id 'Installation name'
+  hive_prompt id 'Installation name' hive
   [[ "$id" =~ ^[a-z][a-z0-9-]{0,47}$ ]] || hive_die 'An installation name starts with a lowercase letter and has only lowercase letters, digits and hyphens'
   # A setup that stopped after writing its configuration continues from that file.
   existing="${XDG_CONFIG_HOME:-${HOME:-$PWD}/.config}/hive/$id/installation.json"
@@ -305,10 +306,15 @@ hive_configure() {
     [[ "$resume" == yes ]] || hive_die "Choose another installation name, or move $existing away first"
     printf 'Continuing with it. The same step unattended: ./hive.sh install --config %s --release %s\n' "$existing" "$HIVE_VERSION"
     HIVE_CONFIG=$existing
+    hive_setup_resume "$existing"
     return 0
   fi
   hive_prompt directory 'Installation directory on the selected host (absolute)' "/opt/$id"
-  hive_prompt target 'Host SSH target (local or deploy@host)' local
+  if [[ ${HIVE_GUIDED_SETUP:-false} == true && ${HIVE_SETUP_LOCAL:-no} == yes ]]; then
+    target=local
+  else
+    hive_prompt target 'Host SSH target (local or deploy@host)' local
+  fi
   if [[ "$target" == local ]]; then
     hive_setup_directory "$directory"
     # Checked now, not after the plan: fresh setup creates this directory as the current account.
@@ -320,7 +326,9 @@ hive_configure() {
     hive_prompt control_ssh 'Protected SSH configuration for the selected host (blank for your default SSH settings)'
   fi
   architecture=$(uname -m); case "$architecture" in x86_64) architecture=amd64;; aarch64) architecture=arm64;; esac
-  hive_prompt architecture 'Host architecture (amd64/arm64)' "$architecture"
+  if [[ ${HIVE_GUIDED_SETUP:-false} != true || ${HIVE_SETUP_LOCAL:-no} != yes || ( "$architecture" != amd64 && "$architecture" != arm64 ) ]]; then
+    hive_prompt architecture 'Host architecture (amd64/arm64)' "$architecture"
+  fi
   if [[ "$target" == local ]]; then hive_setup_origin; else HIVE_SETUP_ORIGIN=''; fi
   hive_prompt origin 'Console HTTPS origin' "${HIVE_SETUP_ORIGIN:-}"
   hive_prompt profile 'Product profile (core/full/custom)' core
@@ -336,16 +344,27 @@ hive_configure() {
   selected_json=$(jq -nc --argjson selected "$selected_json" '$selected+["hive-registry"]|unique')
   jq -e --argjson selected "$selected_json" '.components as $components|all($selected[];$components[.]!=null)' "$HIVE_MANIFEST" >/dev/null || hive_die 'Unknown selected component'
   printf 'The console listens on this address. The default, 127.0.0.1, accepts connections from this host only (for an SSH tunnel or a local reverse proxy); 0.0.0.0, or one of this host'"'"'s addresses, serves the network.\n'
+  if hive_setup_uses_tailscale "$origin" && tailnet_bind=$(tailscale ip -4 2>/dev/null) &&
+      [[ "$tailnet_bind" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+    printf 'Enter "tailscale" to bind to the tailnet address (%s).\n' "$tailnet_bind"
+  else tailnet_bind=''; fi
   hive_prompt bind 'HTTPS bind address' 127.0.0.1
-  hive_prompt port 'HTTPS listener port' 443
+  if [[ "$bind" == tailscale && -n "$tailnet_bind" ]]; then bind=$tailnet_bind; fi
+  if [[ "$origin" =~ ^https://[A-Za-z0-9.-]+:([1-9][0-9]{0,4})$ ]]; then default_port=${BASH_REMATCH[1]}; fi
+  hive_prompt port 'HTTPS listener port' "$default_port"
   [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] && ((port <= 65535)) || hive_die 'The HTTPS listener port is a number from 1 to 65535'
   hive_prompt mode 'Configuration mode (fresh/distributed/prepared)' fresh
   if [[ "$mode" == fresh || "$mode" == distributed ]]; then
     hive_prompt username 'Initial operator username' admin
     hive_prompt email 'Initial operator email for identity recovery'
-    if [[ "$target" == local ]]; then hive_setup_certificate "$origin"; fi
-    hive_prompt certificate 'Existing console certificate file on the selected host (absolute)' "${HIVE_SETUP_CERTIFICATE:-}"
-    hive_prompt private_key 'Protected console private key file on the selected host (absolute)' "${HIVE_SETUP_PRIVATE_KEY:-}"
+    if [[ "$target" == local ]]; then
+      hive_setup_certificate "$origin"
+      certificate=$HIVE_SETUP_CERTIFICATE private_key=$HIVE_SETUP_PRIVATE_KEY
+    fi
+    if [[ -z ${certificate:-} || -z ${private_key:-} ]]; then
+      hive_prompt certificate 'Existing console certificate file on the selected host (absolute)'
+      hive_prompt private_key 'Protected console private key file on the selected host (absolute)'
+    fi
   elif [[ "$mode" != prepared ]]; then hive_die 'Choose fresh, distributed or prepared configuration'; fi
   if [[ "$mode" == fresh || "$mode" == distributed ]]; then
     selected_json=$(jq -nc --argjson selected "$selected_json" '$selected+["oathweave","oathweave-redis","hivexui","ingress"]|unique')
@@ -355,9 +374,14 @@ hive_configure() {
       else hive_prompt gateway_deploy 'Deploy the Magnus web terminal gateway (yes/no)' no; fi
       if [[ "$gateway_deploy" == yes ]]; then
         selected_json=$(jq -nc --argjson selected "$selected_json" '$selected+["magnus-gateway"]|unique')
-        if [[ "$target" == local ]]; then hive_setup_terminal; fi
-        hive_prompt gateway_username 'Restricted SSH account on fleet nodes for the gateway' "${HIVE_SETUP_TERMINAL_USER:-}"
-        hive_prompt gateway_key 'Protected SSH private key file on the Magnus host (absolute)' "${HIVE_SETUP_TERMINAL_KEY:-}"
+        if [[ "$target" == local ]]; then
+          hive_setup_terminal
+          gateway_username=$HIVE_SETUP_TERMINAL_USER gateway_key=$HIVE_SETUP_TERMINAL_KEY
+        fi
+        if [[ -z "$gateway_username" || -z "$gateway_key" ]]; then
+          hive_prompt gateway_username 'Restricted SSH account on fleet nodes for the gateway'
+          hive_prompt gateway_key 'Protected SSH private key file on the Magnus host (absolute)'
+        fi
         hive_prompt gateway_grant 'Grant magnus:terminal to the initial operator (yes/no)' no
       elif [[ "$gateway_deploy" != no ]]; then hive_die 'Answer yes or no'; fi
       [[ "$gateway_grant" == yes || "$gateway_grant" == no ]] || hive_die 'Answer yes or no'

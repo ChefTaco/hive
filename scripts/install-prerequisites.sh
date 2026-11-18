@@ -13,6 +13,7 @@
 #   --directory DIR    also create the empty installation directory DIR (for example /opt/hive),
 #                      owned by that account with mode 0750
 #   --controller       a controller that only manages other hosts over SSH: tools only, no Docker
+#   --guided           leave follow-up instructions to the guided installer
 #   --no-docker-group  never change group membership
 #   --replace-conflicting
 #                      remove distribution container packages (docker.io, podman-docker, ...)
@@ -39,7 +40,7 @@ DOCKER_PACKAGES=(docker-ce docker-ce-cli containerd.io docker-compose-plugin)
 CONFLICTING_PACKAGES=(docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc)
 
 mode=apply assume_yes=false target_user=${SUDO_USER:-$(id -un)} manage_group=true
-replace_conflicting=false controller=false directory=''
+replace_conflicting=false controller=false guided=false directory=''
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; }
 while (($#)); do
   case "$1" in
@@ -51,6 +52,7 @@ while (($#)); do
       if [[ "$1" == --user ]]; then target_user=$2; else directory=$2; fi
       shift;;
     --controller) controller=true;;
+    --guided) guided=true;;
     --no-docker-group) manage_group=false;;
     --replace-conflicting) replace_conflicting=true;;
     -h|--help) usage; exit 0;;
@@ -187,7 +189,10 @@ if ((${#missing_packages[@]})); then plan+=("Install packages: ${missing_package
 if [[ "$add_repository" == true ]]; then plan+=("Add Docker's apt repository ($os_id $os_codename, stable) with its signing key in $APT_DIR/keyrings/docker.asc, checking fingerprint $DOCKER_KEY_FINGERPRINT"); fi
 if [[ "$install_docker" == true ]]; then plan+=("Install Docker packages: ${DOCKER_PACKAGES[*]}"); fi
 if [[ "$start_docker" == true ]]; then plan+=('Enable and start the docker service'); fi
-if [[ "$group_change" == true ]]; then plan+=("Add $target_user to the docker group (takes effect at the next login)"); fi
+if [[ "$group_change" == true ]]; then
+  if [[ "$guided" == true ]]; then plan+=("Add $target_user to the docker group for this setup");
+  else plan+=("Add $target_user to the docker group (takes effect at the next login)"); fi
+fi
 if [[ "$create_directory" == true ]]; then plan+=("Create the installation directory $directory, owned by $target_user, mode 0750"); fi
 if ((${#plan[@]} == 0)); then
   say "Nothing to change on $os_name ($architecture)."
@@ -246,7 +251,7 @@ if [[ "$controller" == false ]]; then
   if [[ -n "$target_user" ]]; then
     if in_group "$target_user"; then
       say "$target_user is in the docker group. Members of that group control Docker, which is equivalent to root on this host."
-      if [[ "$group_change" == true ]]; then say "Log out and back in (or run: newgrp docker) so $target_user's shell picks up the new group."; fi
+      if [[ "$group_change" == true && "$guided" == false ]]; then say "Log out and back in (or run: newgrp docker) so $target_user's shell picks up the new group."; fi
     fi
     uid=$(id -u "$target_user")
     if [[ "$uid" != 1000 ]]; then
@@ -258,7 +263,8 @@ if [[ "$controller" == false ]]; then
   fi
 fi
 if [[ "$ready" == true ]]; then
-  if [[ "$controller" == true ]]; then say 'Done. Next: run ./hive.sh --release VERSION with an SSH target for each host.'
+  if [[ "$guided" == true ]]; then say 'Hive prerequisites are ready.'
+  elif [[ "$controller" == true ]]; then say 'Done. Next: run ./hive.sh --release VERSION with an SSH target for each host.'
   else say 'Done. Next: get a console certificate (scripts/console-certificate.sh), then run ./hive.sh --release VERSION.'; fi
 else
   say 'Some prerequisites are not ready yet; see above.'
