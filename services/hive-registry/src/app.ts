@@ -143,7 +143,10 @@ export function createApp(options: AppOptions): RequestListener {
         response.writeHead(reply.status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...reply.headers });
         response.end(request.method === 'HEAD' ? undefined : JSON.stringify(reply.body));
         // Paths and status only: query strings and headers are never logged.
-        options.log?.(JSON.stringify({ method: request.method, path: (request.url ?? '').split('?')[0], status: reply.status }));
+        const path = (request.url ?? '').split('?')[0];
+        // A successful health or readiness probe runs every few seconds; only its failures are logged.
+        if (request.method === 'GET' && reply.status === 200 && (path === '/health/live' || path === '/health/ready')) return;
+        options.log?.(JSON.stringify({ method: request.method, path, status: reply.status }));
       });
   };
 }

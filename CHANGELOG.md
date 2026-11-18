@@ -17,6 +17,9 @@ All notable changes to this project are documented in this file. The format is b
   changes, so the next upgrade recreates every container, including ones whose image is
   unchanged, and the log of each replaced container is removed with it. Adopting an existing
   Compose project ignores the log settings when it compares the project with the plan.
+- Hive Registry 1.3.2 (image 2.0.9) no longer writes an access log line for a successful health or
+  readiness probe (`GET /health/live` or `GET /health/ready` answered 200), which the container
+  health check sends every few seconds. Failed probes and every other request are still logged.
 
 ## [3.12.2] - 2026-11-18
 
