@@ -939,7 +939,7 @@ logging host. It is the optional component `cindertrace-collector`: the collecto
 Cindertrace image (`node services/security-collector/dist/index.js`), started, stopped, backed up
 and recreated by `install`, `upgrade`, `rollback`, `restore` and `backup` like every other
 component. It pulls the network sources from Loki (`unifi_ids`, `unifi_dns` and `netflow` from the
-firewall's syslog stream, and UI audit such as `magnus_ui`) over HTTPS with a dedicated read
+firewall's syslog and flow streams, and UI audit such as `magnus_ui`) over HTTPS with a dedicated read
 credential, optionally ChatterMost's security export, and sends signed batches to Cindertrace's
 API inside the installation. Tools that push their own signed batches, such as a Wazuh forwarder
 or Magnus's security export, each get their own collector credential instead (step 5).
@@ -959,9 +959,14 @@ or Magnus's security export, each get their own collector credential instead (st
 
    It holds source settings only: `LOKI_URL`, `LOKI_QUERY`, `LOKI_LIMIT`, `LOKI_READ_TOKEN`,
    `UI_SECURITY_SOURCES_JSON`, `CHATTERMOST_SECURITY_EXPORT_URL` and `_TOKEN`,
-   `TAILSCALE_SECURITY_TOKEN` and `TAILSCALE_TAILNET`, and `SECURITY_FUSION_MAX_RESPONSE_BYTES`.
-   URLs are HTTPS without credentials; Loki needs `LOKI_QUERY`, which must select the firewall's
-   stream explicitly, and a read token of at least 40 characters. Write it without echoing the
+   `TAILSCALE_SECURITY_TOKEN` and `TAILSCALE_TAILNET`, `SECURITY_FUSION_MAX_RESPONSE_BYTES`, and,
+   from Cindertrace 0.8.1 (suite 3.12.2), `SECURITY_FUSION_QUIET_AFTER_HOURS` and
+   `SECURITY_FUSION_QUIET_SOURCES`. URLs are HTTPS without credentials; Loki needs `LOKI_QUERY`,
+   which must select the firewall's streams explicitly, and a read token of at least 40 characters.
+   The quiet-source signal marks a watched source `degraded` under **Cindertrace > Sources** when its
+   polls succeed but it has had no event for `SECURITY_FUSION_QUIET_AFTER_HOURS` hours (default 6,
+   `0` turns it off, at most 720); `SECURITY_FUSION_QUIET_SOURCES` is a comma-separated list of
+   sources (default `netflow`). Write it without echoing the
    token, for example with an editor run through `sudo`, and keep it mode 0600.
 3. **The collector's credential and environment**, from the release checkout:
 
@@ -992,6 +997,22 @@ or Magnus's security export, each get their own collector credential instead (st
 5. **Each pushing tool**: `./hive.sh cindertrace-collector add ID --sources wazuh` (or `magnus`),
    then point the tool at the console origin with that ID and the credential file's contents, as
    above.
+
+**UniFi Network 11 and later.** UniFi Network 11 no longer logs firewall hits as syslog lines, so a
+query that selects only the gateway's syslog stream leaves `netflow` and `unifi_dns` silent. Export
+NetFlow/IPFIX from the gateway to a flow collector on the logging host instead, for example GoFlow2
+writing JSON lines (`-format json`) that the log shipper sends to Loki with an `exporter` label, and
+give the gateway's syslog stream the same label. Cindertrace 0.8.1 and later turn each flow into a
+`netflow` event (and `unifi_dns` activity for port 53), with counts scaled by the sampling rate,
+and also read UniFi's CEF lines (Activity Logging to a SIEM server) from Loki. Set `LOKI_QUERY` to a
+selector that matches both streams, for example:
+
+```text
+LOKI_QUERY='{exporter="gateway"}'
+```
+
+Then repeat step 3. A firewall that exports nothing for six hours shows `netflow` as `degraded`,
+the quiet-source signal described in step 2.
 
 Rehearsals on restored copies never start the collector, so a rehearsal does not read the logging
 host. The collector cannot read the host's Tailscale daemon; for `tailscale`, give it

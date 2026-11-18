@@ -6,6 +6,26 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.12.2] - 2026-11-18
+
+### Changed
+
+- Pins Cindertrace 0.8.1 for Cindertrace and the `cindertrace-collector` component (one image).
+  Its collector reads UniFi IPFIX/NetFlow v9 flows decoded by GoFlow2 (JSON lines in Loki) as
+  `netflow` events, and `unifi_dns` activity for port 53, with counts scaled by the sampling rate;
+  reads UniFi CEF lines on the Loki path; no longer drops later polls' five-minute flow and firewall
+  summary rows as duplicates; and reports a watched source `degraded` when it has had no event for
+  `SECURITY_FUSION_QUIET_AFTER_HOURS` hours (default 6; `SECURITY_FUSION_QUIET_SOURCES`, default
+  `netflow`). Cindertrace 0.8.1 has no schema migration. Every other product pin, the datastore
+  profile and the storage recovery profile are those of 3.12.1. The controller changes. An upgrade
+  from 3.12.1 needs no flag. See `UPGRADING.md`, "Suite 3.12.2".
+- The source settings of the collector the installation runs
+  (`cindertrace-collector add ID --run`) may set `SECURITY_FUSION_QUIET_AFTER_HOURS` (0 to 720)
+  and `SECURITY_FUSION_QUIET_SOURCES` (a comma-separated list of source names).
+- `deployment/FULL.md`, "Events from a separate logging host": UniFi Network 11 no longer logs
+  firewall hits as syslog; export NetFlow/IPFIX into a collector shipped to Loki and select both
+  streams with `LOKI_QUERY`.
+
 ## [3.12.1] - 2026-11-17
 
 ### Changed
