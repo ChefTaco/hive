@@ -346,6 +346,31 @@ includes the whole SQLite family. Rehearsals mount `/data` read-only and serve a
 copy that refuses writes. A rollback to a release from before the registry stops it and
 keeps its data for the next upgrade.
 
+## Container logs
+
+Every service the controller renders rotates its Docker log: the products, their datastores,
+the ingress and HiveXUI, optional components such as `cindertrace-collector`, and the isolated
+projects of rehearsals and restored copies. Each container writes Docker's `json-file` log,
+rotates it at 10 MB and keeps 3 files, so one container keeps at most about 30 MB of log.
+Without this setting Docker keeps a container's whole log for as long as the container exists.
+
+To change the bounds, set `containerLogs` in the installation file:
+
+```json
+"containerLogs": { "maxSize": "50m", "maxFiles": 5 }
+```
+
+`maxSize` is the size at which a log rotates, in megabytes from `"1m"` to `"9999m"` (default
+`"10m"`). `maxFiles` is the number of files kept per container, from 1 to 20 (default 3). The
+settings are part of the rendered Compose file, so the next `install` or `upgrade` recreates each
+container with them. `docker logs` then starts with the new container: the log of the replaced
+container is removed with it. Controllers before suite 3.12.3 refuse the key.
+
+Containers that the suite did not create, such as those of an older deployment on the same host,
+keep their own settings. A host-wide default for them belongs in Docker's `daemon.json`
+(`"log-driver": "json-file"` with `"log-opts": {"max-size": "10m", "max-file": "3"}`), which
+applies to containers created after the Docker daemon restarts.
+
 ## Relaxed authentication limits for testing
 
 `./hive.sh install --relax-auth-limits` and `./hive.sh upgrade --relax-auth-limits`

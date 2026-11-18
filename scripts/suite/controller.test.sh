@@ -30,6 +30,17 @@ hive_validate
 hive_manifest
 hive_render control > "$temporary/compose.json"
 jq -e '.services.emberpath.env_file[0]=="/opt/hive/config/emberpath.env" and .services.emberpath.cap_drop==["ALL"] and (.services.emberpath|has("privileged")|not)' "$temporary/compose.json" >/dev/null
+# Every rendered service, datastores and the static UI included, has a bounded log.
+jq -e '(.services|length)>0 and all(.services[]; .logging=={driver:"json-file",options:{"max-size":"10m","max-file":"3"}})' "$temporary/compose.json" >/dev/null || fail 'A rendered service has no bounded container log'
+jq '.containerLogs={maxSize:"50m",maxFiles:5}' "$temporary/installation.json" > "$temporary/logs.json"
+( HIVE_CONFIG=$temporary/logs.json; hive_validate; hive_render control ) > "$temporary/logs.compose.json" || fail 'Configured container logs were refused'
+jq -e 'all(.services[]; .logging=={driver:"json-file",options:{"max-size":"50m","max-file":"5"}})' "$temporary/logs.compose.json" >/dev/null || fail 'The configured container log bounds were not rendered'
+[[ $(jq -Sc 'del(.services[].logging)' "$temporary/compose.json") == "$(jq -Sc 'del(.services[].logging)' "$temporary/logs.compose.json")" ]] || fail 'Container log settings changed more than the logging of each service'
+for patch in '.containerLogs={maxSize:"0m"}' '.containerLogs={maxSize:"10"}' '.containerLogs={maxSize:"1g"}' '.containerLogs={maxSize:10}' '.containerLogs={maxFiles:0}' '.containerLogs={maxFiles:21}' '.containerLogs={maxFiles:2.5}' '.containerLogs={maxFiles:"3"}' '.containerLogs={driver:"none"}' '.containerLogs="10m"'; do
+  jq "$patch" "$temporary/installation.json" > "$temporary/bad-logs.json"
+  if ( HIVE_CONFIG=$temporary/bad-logs.json; hive_validate ) > "$temporary/result" 2>&1; then fail "Invalid container log settings were accepted: $patch"; fi
+  grep -q 'containerLogs is' "$temporary/result" || fail "Invalid container log settings were not explained: $patch"
+done
 cp "$temporary/release.json" "$temporary/valid.json"
 printf '\n' >> "$temporary/release.json"
 reject hive_manifest

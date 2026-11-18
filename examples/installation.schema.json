@@ -142,6 +142,24 @@
     "skillsDeployment": {
       "$ref": "#/$defs/skillsDeployment"
     },
+    "containerLogs": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Rotation of each container's Docker json-file log (deployment/README.md#container-logs). Every service the controller renders, datastores, optional components and rehearsal copies included, rotates its log at maxSize and keeps maxFiles files. Changing it recreates every container at the next install or upgrade. Requires suite 3.12.3 or later: older controllers refuse the key.",
+      "properties": {
+        "maxSize": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,3}m$",
+          "default": "10m"
+        },
+        "maxFiles": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 3
+        }
+      }
+    },
     "retention": {
       "type": "object",
       "additionalProperties": false,

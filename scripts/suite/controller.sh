@@ -496,7 +496,7 @@ hive_validate() {
   jq -e '
     def id: type=="string" and test("^[a-z][a-z0-9-]{0,47}$");
     def path: type=="string" and startswith("/") and test("^/[A-Za-z0-9_./-]+$") and (split("/") | all(. != ".."));
-    (keys-["schema","installation","release","configurationRevision","profile","origin","hosts","components","console","bootstrap","agents","inference","skillsDeployment","nativeMigration","external","retention"]|length==0) and
+    (keys-["schema","installation","release","configurationRevision","profile","origin","hosts","components","console","bootstrap","agents","inference","skillsDeployment","nativeMigration","external","retention","containerLogs"]|length==0) and
     ((.configurationRevision // "1")|type=="string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")) and
     .schema==1 and (.installation|id) and (.profile|IN("core","full","custom")) and
     (.origin|type=="string" and test("^https://[A-Za-z0-9.-]+(:[0-9]+)?$")) and
@@ -515,6 +515,13 @@ hive_validate() {
       ((.value.configDirectory // "/dev/null")|path))) and
     (.agents|type=="array") and (.inference|type=="array")
   ' "$HIVE_CONFIG" >/dev/null || hive_die 'Invalid installation configuration'
+  if jq -e 'has("containerLogs")' "$HIVE_CONFIG" >/dev/null; then
+    jq -e '
+      .containerLogs|type=="object" and (keys-["maxSize","maxFiles"]|length==0) and
+      ((.maxSize // "10m")|type=="string" and test("^[1-9][0-9]{0,3}m$")) and
+      ((.maxFiles // 3)|type=="number" and floor==. and .>=1 and .<=20)
+    ' "$HIVE_CONFIG" >/dev/null || hive_die 'containerLogs is {"maxSize":"NNm","maxFiles":N}: the size at which Docker rotates each container log, in megabytes from "1m" to "9999m" (default "10m"), and the number of log files kept per container, from 1 to 20 (default 3). See deployment/README.md#container-logs'
+  fi
   HIVE_ID=$(jq -r '.installation' "$HIVE_CONFIG")
   if [[ -z "${HIVE_VERSION:-}" ]]; then HIVE_VERSION=$(hive_default_release); fi
   if jq -e 'has("bootstrap")' "$HIVE_CONFIG" >/dev/null; then
@@ -775,12 +782,14 @@ hive_render() {
     $config[0] as $c | $release[0] as $r |
     # ChatterMost already has login limit settings. Every product carries the marker status reads.
     {oathweave:{RELAX_AUTH_LIMITS:"true"},cindertrace:{RELAX_AUTH_LIMITS:"true"},chattermost:{RELAX_AUTH_LIMITS:"true",RATE_LIMIT_LOGIN_SOURCE_MAX:"10000",RATE_LIMIT_LOGIN_ACCOUNT_MAX:"10000"}} as $relaxedEnvironment |
+    # Every container log is bounded: Docker'"'"'s json-file driver otherwise grows without limit.
+    {driver:"json-file",options:{"max-size":($c.containerLogs.maxSize // "10m"),"max-file":(($c.containerLogs.maxFiles // 3)|tostring)}} as $logging |
     {name:($c.installation+"-"+$host),services:($c.components|to_entries|map(select(.value.host==$host)|
       .key as $name | .value as $placement |
       ($r.components[$name].kind // "application") as $kind |
       {key:$name,value:($r.components[$name].service + {
         image:$r.components[$name].image, restart:"unless-stopped",
-        security_opt:["no-new-privileges:true"],cap_drop:["ALL"],read_only:true,init:true,stop_grace_period:"45s",tmpfs:(["/tmp:mode=1777"] + (($r.components[$name].service.tmpfs // []) | map(. as $path | ($r.components[$name].service.user|split(":")) as $owner | $path+":uid="+$owner[0]+",gid="+$owner[1]+",mode=700")) + (if $kind=="static-ui" then ($r.components[$name].service.user|split(":")) as $user | ["/var/cache/nginx:uid="+$user[0]+",gid="+$user[1]+",mode=700","/var/run:uid="+$user[0]+",gid="+$user[1]+",mode=700"] else [] end)),
+        security_opt:["no-new-privileges:true"],cap_drop:["ALL"],read_only:true,init:true,stop_grace_period:"45s",logging:$logging,tmpfs:(["/tmp:mode=1777"] + (($r.components[$name].service.tmpfs // []) | map(. as $path | ($r.components[$name].service.user|split(":")) as $owner | $path+":uid="+$owner[0]+",gid="+$owner[1]+",mode=700")) + (if $kind=="static-ui" then ($r.components[$name].service.user|split(":")) as $user | ["/var/cache/nginx:uid="+$user[0]+",gid="+$user[1]+",mode=700","/var/run:uid="+$user[0]+",gid="+$user[1]+",mode=700"] else [] end)),
         volumes:((if $kind=="static-ui" then [{type:"bind",source:$c.console.runtimeFile,target:"/usr/share/nginx/html/runtime.json",read_only:true}] else [{type:"bind",source:($c.hosts[$host].directory+"/data/"+$name),target:"/data"}] end) +
           (if $placement.configDirectory then [{type:"bind",source:$placement.configDirectory,target:"/config",read_only:true}] else [] end))
       } + (if $placement.envFile then {env_file:[$placement.envFile]} else {} end) +

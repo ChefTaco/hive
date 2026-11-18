@@ -614,6 +614,8 @@ case "$action" in
       .name=$name | .services |= with_entries(
         select((.key|test("collector|dispatcher|agent"))|not) |
         .value |= (del(.ports,.network_mode,.external_links,.links,.restart) |
+          # A Compose file from before bounded logs still gets them in the restored copy.
+          (if has("logging") then . else .logging={driver:"json-file",options:{"max-size":"10m","max-file":"3"}} end) |
           (if has("depends_on") then .depends_on |= (if type=="array" then map(select(. as $name|$selected|index($name)!=null)) else with_entries(select(.key as $name|$selected|index($name)!=null)) end) else . end) |
           .environment=((.environment // {}) + {HIVE_REHEARSAL:"true",SECURITY_FUSION_DISPATCH_ENABLED:"false",SECURITY_FUSION_COLLECTOR_ENABLED:"false",SECURITY_DISPATCH_ENABLED:"false",SECURITY_INGEST_ENABLED:"false",SECURITY_RETENTION_ENABLED:"false",SECURITY_NOTIFICATIONS_ENABLED:"false",SECURITY_WRITES_ENABLED:"false",MAGNUS_AUTO_MIGRATE:"false"}) |
           .volumes |= map(if .source|startswith($base+"/") then .source=($restored+.source[($base|length):]) else error("Unowned restore mount") end) |
@@ -717,7 +719,8 @@ case "$action" in
     [[ -f "$directory/compose.json" && -f "$directory/adoption.$plan.json" ]] || die 'Explicit existing and expected Compose definitions are required'
     # The mandatory Hive Registry joins an adopted project, so it and its start ordering
     # are the only difference allowed from the reviewed existing definition.
-    without_registry='del(.services["hive-registry"]) | .services |= map_values(if .depends_on then (.depends_on |= del(.["hive-registry"])) | (if .depends_on=={} then del(.depends_on) else . end) else . end)'
+    # The log settings are not a resource; a project from before bounded logs gets them at its next upgrade.
+    without_registry='del(.services["hive-registry"]) | .services |= map_values(del(.logging)) | .services |= map_values(if .depends_on then (.depends_on |= del(.["hive-registry"])) | (if .depends_on=={} then del(.depends_on) else . end) else . end)'
     [[ $(jq -Sc "$without_registry" "$directory/compose.json") == "$(jq -Sc "$without_registry" "$directory/adoption.$plan.json")" ]] || die 'Existing Compose differs from the reviewed deployment plan'
     expected=$(jq -r '.services|keys[]' "$directory/compose.json" | sort)
     [[ $(compose ps --status running --services | sort) == "$expected" ]] || die 'Every adopted service must already be running'
