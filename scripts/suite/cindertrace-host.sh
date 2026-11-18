@@ -147,13 +147,15 @@ if [[ -n "$running" ]]; then
       .value |= (if length>1 and ((startswith("\"") and endswith("\"")) or (startswith($sq) and endswith($sq))) then .[1:-1] else . end)]|from_entries' < "$sources_file") ||
     die "$sources_file has a line that is not KEY=VALUE"
   # Only source settings: the identity, credential, API and state of the collector are generated.
-  jq -e 'keys-["LOKI_URL","LOKI_QUERY","LOKI_LIMIT","LOKI_READ_TOKEN","UI_SECURITY_SOURCES_JSON","CHATTERMOST_SECURITY_EXPORT_URL","CHATTERMOST_SECURITY_EXPORT_TOKEN","TAILSCALE_SECURITY_TOKEN","TAILSCALE_TAILNET","SECURITY_FUSION_MAX_RESPONSE_BYTES"]|length==0' <<< "$settings" >/dev/null ||
-    die "$sources_file sets $(jq -r 'keys-["LOKI_URL","LOKI_QUERY","LOKI_LIMIT","LOKI_READ_TOKEN","UI_SECURITY_SOURCES_JSON","CHATTERMOST_SECURITY_EXPORT_URL","CHATTERMOST_SECURITY_EXPORT_TOKEN","TAILSCALE_SECURITY_TOKEN","TAILSCALE_TAILNET","SECURITY_FUSION_MAX_RESPONSE_BYTES"]|join(", ")' <<< "$settings"), which are not source settings"
+  jq -e 'keys-["LOKI_URL","LOKI_QUERY","LOKI_LIMIT","LOKI_READ_TOKEN","UI_SECURITY_SOURCES_JSON","CHATTERMOST_SECURITY_EXPORT_URL","CHATTERMOST_SECURITY_EXPORT_TOKEN","TAILSCALE_SECURITY_TOKEN","TAILSCALE_TAILNET","SECURITY_FUSION_MAX_RESPONSE_BYTES","SECURITY_FUSION_QUIET_AFTER_HOURS","SECURITY_FUSION_QUIET_SOURCES"]|length==0' <<< "$settings" >/dev/null ||
+    die "$sources_file sets $(jq -r 'keys-["LOKI_URL","LOKI_QUERY","LOKI_LIMIT","LOKI_READ_TOKEN","UI_SECURITY_SOURCES_JSON","CHATTERMOST_SECURITY_EXPORT_URL","CHATTERMOST_SECURITY_EXPORT_TOKEN","TAILSCALE_SECURITY_TOKEN","TAILSCALE_TAILNET","SECURITY_FUSION_MAX_RESPONSE_BYTES","SECURITY_FUSION_QUIET_AFTER_HOURS","SECURITY_FUSION_QUIET_SOURCES"]|join(", ")' <<< "$settings"), which are not source settings"
   jq -e --arg sq "'" 'all(.[]; (contains($sq)|not) and length>0) and
     (if .LOKI_URL then (.LOKI_URL|test("^https://[^ ?#@]+$")) and (.LOKI_QUERY|type=="string") and ((.LOKI_READ_TOKEN // "")|length>=40) else (has("LOKI_QUERY") or has("LOKI_READ_TOKEN")|not) end) and
     (if .CHATTERMOST_SECURITY_EXPORT_URL then (.CHATTERMOST_SECURITY_EXPORT_URL|test("^https://[^ ?#@]+$")) and has("CHATTERMOST_SECURITY_EXPORT_TOKEN") else true end) and
-    (if .UI_SECURITY_SOURCES_JSON then (.UI_SECURITY_SOURCES_JSON|fromjson|type=="object") and has("LOKI_URL") else true end)' <<< "$settings" >/dev/null 2>&1 ||
-    die "$sources_file: LOKI_URL and CHATTERMOST_SECURITY_EXPORT_URL are HTTPS URLs without credentials, Loki also needs LOKI_QUERY and a LOKI_READ_TOKEN of at least 40 characters, UI_SECURITY_SOURCES_JSON is a JSON object read through Loki, and no value is empty or contains a single quote"
+    (if .UI_SECURITY_SOURCES_JSON then (.UI_SECURITY_SOURCES_JSON|fromjson|type=="object") and has("LOKI_URL") else true end) and
+    (if .SECURITY_FUSION_QUIET_AFTER_HOURS then (.SECURITY_FUSION_QUIET_AFTER_HOURS|test("^[0-9]{1,3}(\\.[0-9]+)?$") and tonumber<=720) else true end) and
+    (if .SECURITY_FUSION_QUIET_SOURCES then (.SECURITY_FUSION_QUIET_SOURCES|test("^[a-z][a-z0-9_]*(,[a-z][a-z0-9_]*)*$")) else true end)' <<< "$settings" >/dev/null 2>&1 ||
+    die "$sources_file: LOKI_URL and CHATTERMOST_SECURITY_EXPORT_URL are HTTPS URLs without credentials, Loki also needs LOKI_QUERY and a LOKI_READ_TOKEN of at least 40 characters, UI_SECURITY_SOURCES_JSON is a JSON object read through Loki, SECURITY_FUSION_QUIET_AFTER_HOURS is a number of hours from 0 to 720, SECURITY_FUSION_QUIET_SOURCES is a comma-separated list of source names, and no value is empty or contains a single quote"
   [[ -d "$config/cindertrace" && -f "$config/cindertrace/authority.pem" ]] || die 'The Cindertrace configuration is missing its authority'
   wanted=$(jq -c --arg id "$running" --rawfile secret "$(secret_file "$running")" '. as $settings | {
     NODE_ENV:"production",NODE_EXTRA_CA_CERTS:"/config/authority.pem",CINDERTRACE_API_URL:"https://cindertrace:4101",

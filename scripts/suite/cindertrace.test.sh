@@ -141,7 +141,7 @@ reject hive cindertrace-collector add other --sources wazuh --run
 grep -q 'Collector logs already runs' "$temporary/rejection.log" || fail 'A second running collector was not refused'
 # Only source settings are accepted, and the URLs are verified HTTPS.
 cp "$store/logs.sources.env" "$temporary/sources.good"
-for line in 'SECURITY_FUSION_COLLECTOR_ID=edge' 'CINDERTRACE_API_URL=https://elsewhere.example.com' 'LOKI_URL=http://logs.example.com:3100' 'not a setting'; do
+for line in 'SECURITY_FUSION_COLLECTOR_ID=edge' 'CINDERTRACE_API_URL=https://elsewhere.example.com' 'LOKI_URL=http://logs.example.com:3100' 'not a setting' 'SECURITY_FUSION_QUIET_AFTER_HOURS=721' 'SECURITY_FUSION_QUIET_AFTER_HOURS=six' 'SECURITY_FUSION_QUIET_SOURCES=netflow,' 'SECURITY_FUSION_QUIET_SOURCES=netflow; unifi_dns'; do
   { grep -v '^LOKI_URL=' "$temporary/sources.good"; [[ "$line" == LOKI_URL=* ]] || grep '^LOKI_URL=' "$temporary/sources.good"; printf '%s\n' "$line"; } > "$store/logs.sources.env"
   before=$(sha256sum "$collector_env")
   reject hive cindertrace-collector add logs --sources unifi_ids,unifi_dns,netflow,magnus_ui --run
@@ -155,4 +155,8 @@ grep -q 'settings are unchanged' "$temporary/run.log" && ! grep -q 'collector re
 printf 'LOKI_LIMIT=500\n' >> "$store/logs.sources.env"
 hive cindertrace-collector add logs --sources unifi_ids,unifi_dns,netflow,magnus_ui --run > "$temporary/run.log"
 [[ $(cvalue LOKI_LIMIT) == 500 && $(grep -c 'collector recreated' "$temporary/docker.log") == 1 ]] || fail 'Changed settings did not recreate the collector once'
+# The quiet-source signal of Cindertrace 0.8.1 is a source setting too.
+printf 'SECURITY_FUSION_QUIET_AFTER_HOURS=12\nSECURITY_FUSION_QUIET_SOURCES=netflow,unifi_dns\n' >> "$store/logs.sources.env"
+hive cindertrace-collector add logs --sources unifi_ids,unifi_dns,netflow,magnus_ui --run > "$temporary/run.log"
+[[ $(cvalue SECURITY_FUSION_QUIET_AFTER_HOURS) == 12 && $(cvalue SECURITY_FUSION_QUIET_SOURCES) == netflow,unifi_dns && $(grep -c 'collector recreated' "$temporary/docker.log") == 2 ]] || fail 'The quiet-source settings were not carried over'
 printf 'Passed: Cindertrace collector credentials generated into owner-only files and never printed, ingestion on while a collector exists, idempotent add, revocation, recorded and re-pinned environment, input refusal, and the collector the installation runs from owner-only source settings.\n'
