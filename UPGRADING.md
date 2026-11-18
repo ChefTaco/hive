@@ -93,6 +93,49 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.12.2: Cindertrace 0.8.1
+
+Suite 3.12.2 pins Cindertrace 0.8.1, for Cindertrace and the optional `cindertrace-collector`
+component, which run the same image. Every other product pin, the datastore profile and the storage
+recovery profile are those of 3.12.1 (HiveXUI 0.10.0, HiveMem 1.9.0, Emberpath 2.5.3 and Magnus
+3.1.3). Cindertrace 0.8.1 has no schema migration, so the upgrade's Cindertrace verifier finds
+nothing pending and an upgrade from 3.12.1 needs no migration flag. The controller changes (the
+collector's source settings accept the quiet-source settings), so a checkout of the 3.12.1 tag
+refuses the 3.12.2 manifest; run 3.12.2 from a checkout of its tag (`--release latest` or
+`--release 3.12.2`).
+
+```bash
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.12.2
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.12.2
+```
+
+What changes in Cindertrace's collector:
+
+- **UniFi flows from Loki.** UniFi Network 11 no longer logs firewall hits as syslog lines, so the
+  `netflow` and `unifi_dns` sources went silent. The collector now reads a gateway's IPFIX or
+  NetFlow v9 export decoded by GoFlow2 (JSON lines in Loki): each flow becomes a `netflow` event,
+  plus `unifi_dns` activity when either port is 53, with byte, packet and flow counts scaled by the
+  sampling rate. It also reads UniFi's CEF lines (Activity Logging to a SIEM server) on the Loki
+  path. Point `LOKI_QUERY` at every stream of the gateway, as
+  [Events from a separate logging host](deployment/FULL.md#events-from-a-separate-logging-host)
+  describes, then repeat `cindertrace-collector add ID --run` to recreate the collector.
+- **Summary rows.** Five-minute flow and firewall summaries no longer lose the rows of later polls
+  of the same window as duplicates, so busy windows count every row.
+- **Quiet sources.** A watched source whose polls succeed but that has had no event for
+  `SECURITY_FUSION_QUIET_AFTER_HOURS` hours (default 6, `0` turns it off) reports `degraded` under
+  **Cindertrace > Sources**. `SECURITY_FUSION_QUIET_SOURCES` lists the watched sources (default
+  `netflow`). The defaults apply after the upgrade: a collector that polls `netflow` but receives
+  no flows shows `netflow` as `degraded` after six hours. Set either in the collector's source settings file.
+
+**Upgrading from 3.12.0 or 3.11.x.** Follow [Suite 3.12.1](#suite-3121-memory-identity-relink-fixes)
+and, from 3.11.x, [Suite 3.12.0](#suite-3120-cindertrace-080-and-the-emberpath-memory-principal)
+with `--release 3.12.2`: from 3.11.x the upgrade needs `--allow-migrations` where `hive-router`
+owns HiveMem data, as for 3.12.0.
+
+**Rolling back to 3.12.1.** Run the rollback from the 3.12.1 release checkout. It restores the
+pre-upgrade backup; the 3.12.1 controller refuses a collector source settings file that sets the
+quiet-source settings, so remove them before repeating `cindertrace-collector add ID --run` there.
+
 ## Suite 3.12.1: memory identity relink fixes
 
 Suite 3.12.1 is a controller release. Every product pin, the datastore profile and the storage
