@@ -105,6 +105,22 @@ jq -e '
   (.services.chattermost.environment|.RELAX_AUTH_LIMITS=="true" and .RATE_LIMIT_LOGIN_SOURCE_MAX=="10000" and .RATE_LIMIT_LOGIN_ACCOUNT_MAX=="10000" and .SYNTHETIC=="kept") and
   (.services.emberpath.environment|has("RELAX_AUTH_LIMITS")|not)
 ' "$temporary/suite-relaxed.compose.json" >/dev/null || fail 'Relaxed render did not reach each selected product'
+# ChatterMost believes the ingress's X-Forwarded-For: the pinned suite network when there is one,
+# otherwise Docker's private ranges, and nothing when its port is published or the ingress is elsewhere.
+jq -e '(.services.chattermost.environment.TRUSTED_PROXIES=="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7") and
+  ([.services|to_entries[]|select(.key!="chattermost" and ((.value.environment // {})|has("TRUSTED_PROXIES")))]|length==0)' \
+  "$temporary/suite-default.compose.json" >/dev/null || fail 'ChatterMost does not trust the ingress on its host'
+jq -e '.services.chattermost.environment|.TRUSTED_PROXIES=="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7" and .RELAX_AUTH_LIMITS=="true"' \
+  "$temporary/suite-relaxed.compose.json" >/dev/null || fail 'Relaxed limits dropped the ChatterMost proxy trust'
+jq '.console.networkSubnet="10.200.0.0/24"' "$temporary/suite.json" > "$temporary/suite-subnet.json"
+HIVE_CONFIG=$temporary/suite-subnet.json hive_render control | jq -e '.services.chattermost.environment.TRUSTED_PROXIES=="10.200.0.0/24"' >/dev/null ||
+  fail 'ChatterMost does not trust exactly the pinned suite network'
+jq '.bootstrap.productEndpoints.chattermost={origin:"https://chat.example.com:8065",bindAddress:"192.0.2.10"}' "$temporary/suite.json" > "$temporary/suite-published-chat.json"
+HIVE_CONFIG=$temporary/suite-published-chat.json hive_render control | jq -e '.services.chattermost.environment|has("TRUSTED_PROXIES")|not' >/dev/null ||
+  fail 'A published ChatterMost port trusts forwarded addresses'
+jq '.components.ingress.host="edge"' "$temporary/suite.json" > "$temporary/suite-remote-ingress.json"
+HIVE_CONFIG=$temporary/suite-remote-ingress.json hive_render control | jq -e '.services.chattermost.environment|has("TRUSTED_PROXIES")|not' >/dev/null ||
+  fail 'ChatterMost trusts forwarded addresses with the ingress on another host'
 # Only the product environment differs: env files and mounted inputs stay pinned as they are.
 [[ $(jq -Sc 'del(.services[].environment)' "$temporary/suite-default.compose.json") == "$(jq -Sc 'del(.services[].environment)' "$temporary/suite-relaxed.compose.json")" ]] || fail 'Relaxed limits changed more than the product environment'
 # Setup reaches each SSH host before the plan and checks its installation directory.

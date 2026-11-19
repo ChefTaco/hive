@@ -27,7 +27,7 @@ git clone https://github.com/ChefTaco/hive.git && cd hive
 ./hive.sh --release latest
 ```
 
-Replace `latest` with an exact version, such as `3.12.5`, to select it explicitly. The launcher
+Replace `latest` with an exact version, such as `3.12.6`, to select it explicitly. The launcher
 resolves `latest` for `install`/`init`, `plan`, `upgrade` and `admin-access`, and reports the exact
 version before starting setup. It retains matching tagged controllers under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`, verifies their clean Git checkout and signed
@@ -259,6 +259,14 @@ is never passed on.
   (`docker network inspect`) to `config/oathweave.env`, record and apply the edit the same way; the range stays valid only while that network is not recreated, so prefer the pinned
   subnet. Oathweave reads `X-Forwarded-For` from the right as well and never uses an address a
   caller supplied.
+- **ChatterMost.** ChatterMost limits sign-ins, sign-ups, password changes and WebSocket
+  connections per client address, and believes a forwarded address only from the peers in its
+  `TRUSTED_PROXIES`. When the ingress runs on ChatterMost's host and ChatterMost has no directly
+  published endpoint, the controller sets `TRUSTED_PROXIES` in ChatterMost's container
+  environment on every install and upgrade: the pinned `console.networkSubnet`, or, without one,
+  the private ranges Docker assigns (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
+  `fc00::/7`), which only the installation's own containers can use to reach it. A ChatterMost
+  with a published endpoint gets no trusted proxies and uses the connecting address.
 
 ## When a command stops: transactions and recovery
 
