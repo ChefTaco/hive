@@ -6,6 +6,18 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.12.7] - 2026-11-19
+
+### Fixed
+
+- Oathweave receives the browser's address on installations without a pinned suite network.
+  When `console.networkSubnet` is not set, the ingress runs on Oathweave's host and Oathweave
+  publishes no port of its own, the controller sets Oathweave's `TRUSTED_PROXY_IPS` to the private
+  ranges Docker assigns. Before, every browser shared the ingress's address for Oathweave's
+  per-address sign-in limits (5 attempts in 15 minutes by default) and its audit records.
+  Installations with a pinned network keep the list setup or `migrate-native` wrote. Every
+  product pin stays that of 3.12.6.
+
 ## [3.12.6] - 2026-11-19
 
 ### Security

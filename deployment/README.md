@@ -27,7 +27,7 @@ git clone https://github.com/ChefTaco/hive.git && cd hive
 ./hive.sh --release latest
 ```
 
-Replace `latest` with an exact version, such as `3.12.6`, to select it explicitly. The launcher
+Replace `latest` with an exact version, such as `3.12.7`, to select it explicitly. The launcher
 resolves `latest` for `install`/`init`, `plan`, `upgrade` and `admin-access`, and reports the exact
 version before starting setup. It retains matching tagged controllers under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`, verifies their clean Git checkout and signed
@@ -254,11 +254,13 @@ is never passed on.
   range: set `console.networkSubnet` to an unused IPv4 CIDR (for example `10.200.0.0/24`). Setup
   then pins the console host's suite network to it and writes `TRUSTED_PROXY_IPS` with that range
   to `config/oathweave.env`, when the ingress and Oathweave share a host and Oathweave has no
-  directly published endpoint. `migrate-native` always does this. On an existing fresh
-  installation, add `TRUSTED_PROXY_IPS` with the suite network's actual range
-  (`docker network inspect`) to `config/oathweave.env`, record and apply the edit the same way; the range stays valid only while that network is not recreated, so prefer the pinned
-  subnet. Oathweave reads `X-Forwarded-For` from the right as well and never uses an address a
-  caller supplied.
+  directly published endpoint. `migrate-native` always does this. Without a pinned subnet, from
+  3.12.7 the controller sets `TRUSTED_PROXY_IPS` in Oathweave's container environment on every
+  install and upgrade instead, under the same conditions: the private ranges Docker assigns
+  (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`), which only the installation's own
+  containers can use to reach it. That value takes precedence over one in `config/oathweave.env`;
+  to trust a narrower range, pin `console.networkSubnet` at setup. Oathweave reads
+  `X-Forwarded-For` from the right as well and never uses an address a caller supplied.
 - **ChatterMost.** ChatterMost limits sign-ins, sign-ups, password changes and WebSocket
   connections per client address, and believes a forwarded address only from the peers in its
   `TRUSTED_PROXIES`. When the ingress runs on ChatterMost's host and ChatterMost has no directly

@@ -115,12 +115,22 @@ jq -e '.services.chattermost.environment|.TRUSTED_PROXIES=="10.0.0.0/8,172.16.0.
 jq '.console.networkSubnet="10.200.0.0/24"' "$temporary/suite.json" > "$temporary/suite-subnet.json"
 HIVE_CONFIG=$temporary/suite-subnet.json hive_render control | jq -e '.services.chattermost.environment.TRUSTED_PROXIES=="10.200.0.0/24"' >/dev/null ||
   fail 'ChatterMost does not trust exactly the pinned suite network'
+# Oathweave gets Docker's private ranges only without a pinned network, whose list setup and
+# migrate-native write to oathweave.env and the container environment must not replace.
+jq -e '.services.oathweave.environment.TRUSTED_PROXY_IPS=="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7" and
+  ([.services|to_entries[]|select(.key!="oathweave" and ((.value.environment // {})|has("TRUSTED_PROXY_IPS")))]|length==0)' \
+  "$temporary/suite-default.compose.json" >/dev/null || fail 'Oathweave does not trust the ingress on its host'
+HIVE_CONFIG=$temporary/suite-subnet.json hive_render control | jq -e '.services.oathweave.environment|has("TRUSTED_PROXY_IPS")|not' >/dev/null ||
+  fail 'The render replaced the TRUSTED_PROXY_IPS that setup writes for a pinned suite network'
+jq '.bootstrap.productEndpoints.oathweave={origin:"https://identity.example.com:4200",bindAddress:"192.0.2.10"}' "$temporary/suite.json" > "$temporary/suite-published-identity.json"
+HIVE_CONFIG=$temporary/suite-published-identity.json hive_render control | jq -e '.services.oathweave.environment|has("TRUSTED_PROXY_IPS")|not' >/dev/null ||
+  fail 'A published Oathweave port trusts forwarded addresses'
 jq '.bootstrap.productEndpoints.chattermost={origin:"https://chat.example.com:8065",bindAddress:"192.0.2.10"}' "$temporary/suite.json" > "$temporary/suite-published-chat.json"
 HIVE_CONFIG=$temporary/suite-published-chat.json hive_render control | jq -e '.services.chattermost.environment|has("TRUSTED_PROXIES")|not' >/dev/null ||
   fail 'A published ChatterMost port trusts forwarded addresses'
 jq '.components.ingress.host="edge"' "$temporary/suite.json" > "$temporary/suite-remote-ingress.json"
-HIVE_CONFIG=$temporary/suite-remote-ingress.json hive_render control | jq -e '.services.chattermost.environment|has("TRUSTED_PROXIES")|not' >/dev/null ||
-  fail 'ChatterMost trusts forwarded addresses with the ingress on another host'
+HIVE_CONFIG=$temporary/suite-remote-ingress.json hive_render control | jq -e '(.services.chattermost.environment|has("TRUSTED_PROXIES")|not) and (.services.oathweave.environment|has("TRUSTED_PROXY_IPS")|not)' >/dev/null ||
+  fail 'ChatterMost or Oathweave trusts forwarded addresses with the ingress on another host'
 # Only the product environment differs: env files and mounted inputs stay pinned as they are.
 [[ $(jq -Sc 'del(.services[].environment)' "$temporary/suite-default.compose.json") == "$(jq -Sc 'del(.services[].environment)' "$temporary/suite-relaxed.compose.json")" ]] || fail 'Relaxed limits changed more than the product environment'
 # Setup reaches each SSH host before the plan and checks its installation directory.

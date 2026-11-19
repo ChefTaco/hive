@@ -814,6 +814,11 @@ hive_render() {
     # the pinned suite network, or the private ranges Docker assigns when none is pinned.
     (if $c.components.chattermost.host!=null and $c.components.ingress.host==$c.components.chattermost.host and $c.bootstrap.productEndpoints.chattermost==null
       then {TRUSTED_PROXIES:($c.console.networkSubnet // "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7")} else null end) as $chatProxies |
+    # Oathweave limits sign-ins and audits by client address in the same way (TRUSTED_PROXY_IPS).
+    # With a pinned suite network, setup and migrate-native write that list to oathweave.env, so it
+    # is left alone. Without one, the same conditions as above let it trust Docker'"'"'s private ranges.
+    (if $c.components.oathweave.host!=null and $c.components.ingress.host==$c.components.oathweave.host and $c.bootstrap.productEndpoints.oathweave==null and $c.console.networkSubnet==null
+      then {TRUSTED_PROXY_IPS:"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"} else null end) as $identityProxies |
     {name:($c.installation+"-"+$host),services:($c.components|to_entries|map(select(.value.host==$host)|
       .key as $name | .value as $placement |
       ($r.components[$name].kind // "application") as $kind |
@@ -824,7 +829,7 @@ hive_render() {
           (if $placement.configDirectory then [{type:"bind",source:$placement.configDirectory,target:"/config",read_only:true}] else [] end))
       } + (if $placement.envFile then {env_file:[$placement.envFile]} else {} end) +
         (if $c.nativeMigration.dataAliases[$name] then {volumes:((if $kind=="static-ui" then [] else [{type:"bind",source:($c.hosts[$host].directory+"/data/"+$name),target:"/data"}] end)+[{type:"bind",source:($c.hosts[$host].directory+"/data/"+$name),target:$c.nativeMigration.dataAliases[$name]}]+(if $placement.configDirectory then [{type:"bind",source:$placement.configDirectory,target:"/config",read_only:true}] else [] end))} else {} end) +
-        (if $kind=="application" then {environment:(($r.components[$name].service.environment // {})+{HIVE_AUTO_MIGRATE:"false",HIVE_AUTO_UPGRADE:"false",HIVE_UPDATE_CHECK:"false",HIVE_UI_UPGRADE:"false"} + (if $name=="magnus" then {MAGNUS_AUTO_MIGRATE:"false"} else {} end) + (if $relax then ($relaxedEnvironment[$name] // {}) else {} end) + (if $name=="chattermost" then ($chatProxies // {}) else {} end))} else {} end) +
+        (if $kind=="application" then {environment:(($r.components[$name].service.environment // {})+{HIVE_AUTO_MIGRATE:"false",HIVE_AUTO_UPGRADE:"false",HIVE_UPDATE_CHECK:"false",HIVE_UI_UPGRADE:"false"} + (if $name=="magnus" then {MAGNUS_AUTO_MIGRATE:"false"} else {} end) + (if $relax then ($relaxedEnvironment[$name] // {}) else {} end) + (if $name=="chattermost" then ($chatProxies // {}) elif $name=="oathweave" then ($identityProxies // {}) else {} end))} else {} end) +
         (if $kind=="ingress" then {ports:([{target:8443,published:($c.console.httpsPort|tostring),host_ip:$c.console.bindAddress,protocol:"tcp"}]+(($c.console.nativeListeners // [])|map({target:.port,published:(.port|tostring),host_ip:$c.console.bindAddress,protocol:"tcp"})))} + (if $c.nativeMigration.rehearsal==true then {networks:["default","edge"]} else {} end)
          elif $c.bootstrap.productEndpoints[$name] then $c.bootstrap.productEndpoints[$name] as $endpoint |
           {ports:([{target:({oathweave:4200,emberpath:9443,hivemem:18790,hiveskills:4030,magnus:4000,"magnus-gateway":4310,cindertrace:4101,chattermost:8065}[$name]),published:($endpoint.origin|capture("^https://[^:]+(?::(?<port>[0-9]+))?$")|.port // "443"),host_ip:$endpoint.bindAddress,protocol:"tcp"}] +
