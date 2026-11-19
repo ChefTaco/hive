@@ -6,6 +6,18 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.12.5] - 2026-11-18
+
+### Fixed
+
+- Pins HiveXUI 0.10.2. The Fleet Submit test form sends a UUID so Ardent accepts the task
+  and the profile can use its configured tools, including HiveMem.
+
+### Security
+
+- HiveXUI 0.10.2 requires nginx 1.30.7 or later to address the November nginx advisories.
+- Hive ingress 2.0.7 rebuilds Caddy with Go 1.26.11, which fixes CVE-2026-97054.
+
 ## [3.12.4] - 2026-11-18
 
 ### Fixed

@@ -93,6 +93,17 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.12.5: Fleet test submissions
+
+Suite 3.12.5 updates HiveXUI to 0.10.2. The Fleet Submit test form now sends task UUIDs
+that Ardent accepts. HiveXUI includes the patched nginx package, and Hive ingress 2.0.7
+rebuilds Caddy with Go 1.26.11. Upgrading from 3.12.4 requires no migration flag.
+
+```bash
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.12.5
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.12.5
+```
+
 ## Suite 3.12.4: guided setup
 
 New installations launched with `--release latest` use the retained, verified checkout for
