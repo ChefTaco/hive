@@ -390,7 +390,8 @@ if has_component oathweave; then
   # Oathweave rate limits, allowlists and audits by client address. It believes the address the
   # ingress forwards only from a known ingress address, which needs the pinned network
   # (console.networkSubnet), the ingress on this host and no directly published Oathweave port.
-  # Without that it uses the connecting address, which is the ingress for every browser request.
+  # Without a pinned network the controller supplies Docker's private ranges in the container
+  # environment instead (hive_render), so the ingress's forwarded address is believed either way.
   ingress_subnet=$(jq -r '.console.networkSubnet // empty' <<< "$input")
   if [[ "$ingress_subnet" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$ ]] && has_component ingress && jq -e '.bootstrap.productEndpoints.oathweave==null' <<< "$input" >/dev/null; then
     line TRUSTED_PROXY_IPS "$ingress_subnet"

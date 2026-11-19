@@ -93,6 +93,24 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.12.7: Oathweave client addresses
+
+Suite 3.12.7 pins the same products as 3.12.6 and changes only the controller, so run it from its
+own release checkout. Upgrading from 3.12.6 needs no migration flag.
+
+```bash
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.12.7
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.12.7
+```
+
+On an installation without `console.networkSubnet`, the upgrade sets Oathweave's
+`TRUSTED_PROXY_IPS` to Docker's private ranges, so Oathweave limits sign-ins and records audit
+events per browser instead of per ingress. It replaces a `TRUSTED_PROXY_IPS` you added to
+`config/oathweave.env` by hand on such an installation; the private ranges include the suite
+network's range that the earlier instructions named. Installations with a pinned network, which
+includes every `migrate-native` installation, are unchanged. IP allowlists on Oathweave accounts or
+clients now see browser addresses rather than the ingress's.
+
 ## Suite 3.12.6: ChatterMost 0.7.1
 
 Suite 3.12.6 updates ChatterMost and its migrator to 0.7.1, a security release with no database
