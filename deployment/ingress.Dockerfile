@@ -3,7 +3,7 @@
 # module by version and checksum), then placed on the official Caddy 2.11.9 Alpine image.
 # Smallstep certificates is pinned to its merged go-jose v4 compatibility commit until a tagged
 # release includes it; crypto 0.92.0 and go-jose 4.1.9 remove the unsupported v3 dependency.
-FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine@sha256:2529d034e028b777993173bcd4d48f0594e31daaa0191454c52ebf0b5fa0db97 AS caddy
+FROM --platform=$BUILDPLATFORM golang:1.26.11-alpine@sha256:ecb67f987aa1a57794c91d19ade7ae0209f2f0f5496aaef9e6ae85ddf92d02ab AS caddy
 ARG TARGETOS
 ARG TARGETARCH
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-trimpath GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org
