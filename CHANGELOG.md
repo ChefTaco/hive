@@ -6,6 +6,23 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.12.6] - 2026-11-19
+
+### Security
+
+- Pins ChatterMost 0.7.1 (application and migrator), which hardens it for Internet exposure:
+  validated reaction names, size limits on every member-writable field, per-address budgets for
+  sign-up, password changes and WebSocket upgrades, and a stricter Content Security Policy. No
+  database migration.
+
+### Fixed
+
+- ChatterMost now receives the browser's address. When the ingress runs on the same host and
+  ChatterMost publishes no port of its own, the controller sets ChatterMost's `TRUSTED_PROXIES` to
+  the pinned suite network (`console.networkSubnet`), or to the private ranges Docker assigns when
+  none is pinned. Before, every console user shared the ingress's address for ChatterMost's
+  per-address sign-in, sign-up and WebSocket limits.
+
 ## [3.12.5] - 2026-11-18
 
 ### Fixed

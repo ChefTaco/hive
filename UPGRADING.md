@@ -93,6 +93,25 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.12.6: ChatterMost 0.7.1
+
+Suite 3.12.6 updates ChatterMost and its migrator to 0.7.1, a security release with no database
+migration. Every other product pin stays that of 3.12.5. Upgrading from 3.12.5 needs no migration
+flag. The controller changes, so run 3.12.6 from its own release checkout.
+
+```bash
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.12.6
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.12.6
+```
+
+ChatterMost 0.7.1 limits each client address to 200 open WebSocket connections, 120 handshakes a
+minute and 20 connections that have not signed in, and counts sign-up, password changes and
+password resets against the per-address sign-in budget (`RATE_LIMIT_LOGIN_SOURCE_MAX`, 20 a
+minute). With the ingress on ChatterMost's host and no published ChatterMost port, the upgrade
+sets ChatterMost's `TRUSTED_PROXIES` so these limits apply to each browser rather than to the
+ingress; see [Client addresses and reverse proxies](deployment/README.md#client-addresses-and-reverse-proxies).
+A ChatterMost placed on another host with a published port keeps using the connecting address.
+
 ## Suite 3.12.5: Fleet test submissions
 
 Suite 3.12.5 updates HiveXUI to 0.10.2. The Fleet Submit test form now sends task UUIDs
