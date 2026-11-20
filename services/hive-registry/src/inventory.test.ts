@@ -20,6 +20,9 @@ const readToken = 'r'.repeat(40);
 const writeToken = 'w'.repeat(40);
 const issuer = 'https://hive.example.com/api/oathweave';
 const digest = (fill: string): string => 'sha256:' + fill.repeat(64);
+// A real manifest digest mixes digits and letters, as an opaque token does; one of a single
+// repeated letter would not exercise the registry's credential guard.
+const RECEIPT_DIGEST = '227d003449ae500d6dbf5e20c2b7139c6a1af92a0e642c3a84a01a0093bd9824';
 const image = (id: string, fill: string): string => `registry.example.com/${id}@${digest(fill)}`;
 const entry = (id: string, kind = 'application', version = '1.0.0', fill = 'a') => ({
   id, kind, displayName: id.toUpperCase(), description: `Fixture ${id}`,
@@ -45,7 +48,7 @@ const service = (name: string, fill: string, patch: Record<string, unknown> = {}
 const observations = (patch: Record<string, unknown> = {}) => ({
   schema: 1,
   hosts: [{
-    host: 'control', active: true, unreachable: false, receipt: { version: '3.12.9', digest: 'c'.repeat(64) }, transactionPhase: 'complete',
+    host: 'control', active: true, unreachable: false, receipt: { version: '3.12.9', digest: RECEIPT_DIGEST }, transactionPhase: 'complete',
     catalog: [{ id: 'hive-registry', version: '1.4.0', image: image('hive-registry', 'a') }, { id: 'magnus', version: '3.1.5', image: image('magnus', 'e') }],
     services: [service('hive-registry', 'a'), service('hivexui', 'b', { runningImage: image('hivexui', '7'), imageMatches: false })],
     ...patch,

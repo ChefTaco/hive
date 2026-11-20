@@ -8,7 +8,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
-- Hive Registry 1.4.0 (image 2.0.10) serves an inventory to administrators: `GET /v1/inventory`
+- Hive Registry 1.4.1 (image 2.0.11) serves an inventory to administrators: `GET /v1/inventory`
   puts each product's signed release pin (version and image digest) beside what each host reports
   it runs (the configured and local image, whether they match, state and health), for HiveXUI's
   Installed software view. It accepts an Oathweave token for the new `hive-registry` audience with
@@ -21,6 +21,16 @@ All notable changes to this project are documented in this file. The format is b
   `console-clients add` on an existing installation once its policy is in Oathweave (skipped and
   named otherwise). Every registry provisioning writes `identity.json` and `authority.pem` beside
   the registry credentials. See `deployment/FULL.md`, "Hive Registry inventory".
+
+### Fixed
+
+- The Hive Registry's credential guard refused every recorded observation: a host's activation
+  receipt carries the manifest's SHA-256 as `digest`, which looked like an opaque token. It is now
+  exempt like `manifestDigest`. Registry 1.4.0 (image 2.0.10) was published but never pinned by a
+  release.
+- `console-clients add` on an installation that grants the Magnus web terminal stopped before
+  creating any client. It now leaves only `hivexui-magnus` to fresh setup and adds the others,
+  the registry client among them, and `post-upgrade` runs it there too.
 
 ## [3.12.9] - 2026-11-20
 

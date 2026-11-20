@@ -46,6 +46,16 @@ grep -q 'Update package' "$temporary/output" || fail 'The Ardent package step wa
 # Upgraded agents are left to Magnus's automatic binding of their node keys: nothing is issued.
 grep -q 'Its node key: nothing to do' "$temporary/output" && grep -q 'Upgraded agents bind their node keys automatically' "$temporary/output" || fail 'The node key step of upgraded agents was not explained'
 
+# With the web terminal granted, fresh setup manages hivexui-magnus: no other client wanted, so
+# console-clients is not run; with the Hive Registry too, it runs for that client.
+terminal='.components={magnus:{host:"control"},oathweave:{host:"control"},ingress:{host:"control"}} | .console={host:"control"} | .bootstrap={magnusGateway:{grantTerminalToInitialOperator:true}} | .hosts={control:{target:"local",directory:"/opt/hive"}}'
+run "$terminal" 2> "$temporary/terminal.err"
+! grep -qx 'console-clients add' "$calls" || fail 'console-clients ran for a terminal-granting installation that wants only the Magnus client'
+[[ ! -s "$temporary/terminal.err" ]] || { cat "$temporary/terminal.err" >&2; fail 'The terminal-grant client filter printed an error'; }
+run "$terminal"' | .components["hive-registry"]={host:"control"}' 2> "$temporary/terminal.err"
+grep -qx 'console-clients add' "$calls" || fail 'console-clients did not run for the registry client on a terminal-granting installation'
+[[ ! -s "$temporary/terminal.err" ]] || { cat "$temporary/terminal.err" >&2; fail 'The terminal-grant client filter printed an error'; }
+
 # --yes confirms a package update, never a scope expansion. The same single-host config
 # can describe an intentionally LIMITED node, an Ardent-only node, or a fully enrolled node.
 # Do not infer enrollment authority from topology, even when the status includes that evidence.
