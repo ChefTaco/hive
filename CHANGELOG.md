@@ -4,7 +4,19 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## [3.13.0] - 2026-11-20
+
+### Changed
+
+- Pins Magnus 3.2.0 (the server, the fleet gateway and the host agent package). Its server and
+  console packages ship `npm-shrinkwrap.json`, so a native npm install gets the dependency graph
+  the release images run, and `GET /api/v1/system/installation` lists any runtime dependency whose
+  installed version differs from it. No migration, new setting or protocol change.
+- Pins HiveXUI 0.11.0, which adds the Installed software view: the signed release's pins beside
+  what each host reports it runs, and Magnus's installation report.
+- Pins the Hive Registry 1.4.1 (image 2.0.11), below. Every other product pin, the datastore
+  profile and the storage recovery profile are those of 3.12.9; the controller changes. See
+  `UPGRADING.md`, "Suite 3.13.0".
 
 ### Added
 
@@ -24,10 +36,9 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
-- The Hive Registry's credential guard refused every recorded observation: a host's activation
-  receipt carries the manifest's SHA-256 as `digest`, which looked like an opaque token. It is now
-  exempt like `manifestDigest`. Registry 1.4.0 (image 2.0.10) was published but never pinned by a
-  release.
+- Hive Registry 1.4.0 (image 2.0.10) was published but no release pins it: its credential guard
+  refused every recorded observation, because a host's activation receipt carries the manifest's
+  SHA-256 as `digest`, which looked like an opaque token. 1.4.1 exempts it like `manifestDigest`.
 - `console-clients add` on an installation that grants the Magnus web terminal stopped before
   creating any client. It now leaves only `hivexui-magnus` to fresh setup and adds the others,
   the registry client among them, and `post-upgrade` runs it there too.

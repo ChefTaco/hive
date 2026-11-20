@@ -93,10 +93,13 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
-## Unreleased: Hive Registry 1.4.0 and the inventory view
+## Suite 3.13.0: Hive Registry 1.4.1 and the Installed software view
 
-The release that pins Hive Registry 1.4.0 adds HiveXUI's Installed software view. Its storage
-format is unchanged and it needs no flag. For an existing installation:
+Suite 3.13.0 pins the Hive Registry 1.4.1, HiveXUI 0.11.0 and Magnus 3.2.0 (the server, the fleet
+gateway and the host agent package), and adds HiveXUI's Installed software view: the signed
+release's pins beside what each host reports it runs. No storage format changes and no product has
+a migration, so an upgrade from 3.12.9 needs no flag. The controller changes, so run 3.13.0 from
+its own release checkout. For an existing installation:
 
 1. Before the upgrade, add the `hivexui-registry` policy to `IAM_BROWSER_CLIENT_POLICIES` in
    `config/oathweave.env`, as `deployment/FULL.md`, "Hive Registry inventory", describes.
@@ -106,7 +109,20 @@ format is unchanged and it needs no flag. For an existing installation:
 4. Run `./hive.sh status` once, so the registry records what the hosts run.
 
 A rollback to a release with an older registry keeps both files and the recorded observations;
-that registry ignores them.
+that registry ignores them. Step 1 and the new registry files change the deployment inputs that
+3.12.9's own plan pinned, so a rollback to 3.12.9 stops with "Deployment input artifacts changed for
+this plan" until the installation has a new `configurationRevision`: set one in
+`installation.json`, then run the rollback from the retained 3.12.9 checkout.
+
+```bash
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.13.0
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.13.0
+```
+
+After upgrading, `./hive.sh post-upgrade` from the retained 3.13.0 checkout also updates the
+installer-owned Magnus host agent to 3.2.0. An external Magnus and other fleet nodes are upgraded
+by their own reviewed procedures. A native npm install of Magnus 3.2.0 no longer needs an `effect`
+override; Magnus's own installation report shows whether it matches the shipped lock.
 
 ## Suite 3.12.9: effect 3.22.1 in the Prisma-based products
 
