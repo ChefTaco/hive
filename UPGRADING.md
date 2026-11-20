@@ -93,7 +93,27 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.12.9: effect 3.22.1 in the Prisma-based products
+
+Suite 3.12.9 pins Oathweave 2.3.2, Emberpath 2.5.4, Embermend 0.3.4, Magnus 3.1.5 (the server,
+the fleet gateway and the host agent package, with Ardent 3.1.4) and ChatterMost 0.7.2, each of
+which forces the npm package `effect` to 3.22.1 (CVE-2026-121707). It also brings 3.12.8's
+changes, HiveXUI 0.10.3 among them, because 3.12.8 was tagged but never published. The datastore
+profile, the storage recovery profile and the controller are those of 3.12.7, and none of these
+product versions has a database migration, so an upgrade from 3.12.7 needs no migration flag.
+
+```bash
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.12.9
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.12.9
+```
+
+After upgrading, run `./hive.sh post-upgrade` from the retained 3.12.9 checkout to update the
+installer-owned Magnus host agent to 3.1.5. An external Magnus and other fleet nodes are upgraded by
+their own reviewed procedures, not by this upgrade.
+
 ## Suite 3.12.8: HiveXUI 0.10.3, Embermend 0.3.3 and Magnus 3.1.4
+
+Suite 3.12.8 was tagged but never published; upgrade to [3.12.9](#suite-3129-effect-3221-in-the-prisma-based-products) instead.
 
 Suite 3.12.8 pins HiveXUI 0.10.3, Embermend 0.3.3 and Magnus 3.1.4 (the server, the fleet gateway
 and the host agent package, with Ardent 3.1.4). Every other product pin, the datastore profile,

@@ -1,7 +1,7 @@
 # Embermend integration
 
-Embermend is an optional product of the signed suite releases from 3.2.0; release 3.12.8 pins
-Embermend 0.3.3.
+Embermend is an optional product of the signed suite releases from 3.2.0; release 3.12.9 pins
+Embermend 0.3.4.
 Existing release profiles do not select it. The
 API and durable worker use the same exact image; PostgreSQL 18 is private.
 Selecting it requires a reviewed Magnus release declaring `embermendProtocol: 1`
