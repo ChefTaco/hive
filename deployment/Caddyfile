@@ -445,6 +445,7 @@
 				|| {path} == "/api/v1/self-update/version"
 				|| {path} == "/api/v1/skills"
 				|| {path} == "/api/v1/stats/overview"
+				|| {path} == "/api/v1/system/installation"
 				|| {path} == "/api/v1/system/updates"
 				|| {path} == "/api/v1/topology"
 				|| {path} == "/api/v1/webhooks"
