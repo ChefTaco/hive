@@ -101,12 +101,22 @@ release's pins beside what each host reports it runs. No storage format changes 
 a migration, so an upgrade from 3.12.9 needs no flag. The controller changes, so run 3.13.0 from
 its own release checkout. For an existing installation:
 
-1. Before the upgrade, add the `hivexui-registry` policy to `IAM_BROWSER_CLIENT_POLICIES` in
-   `config/oathweave.env`, as `deployment/FULL.md`, "Hive Registry inventory", describes.
+1. Before any `plan`, `rehearse` or `upgrade` of 3.13.0, add the `hivexui-registry` policy to
+   `IAM_BROWSER_CLIENT_POLICIES` in `config/oathweave.env`, as `deployment/FULL.md`, "Hive
+   Registry inventory", describes. A rehearsal or upgrade pins the deployment inputs of its plan,
+   so an edit after one of them makes that plan refuse ("Deployment input artifacts changed for
+   this plan") until the installation has a new `configurationRevision`.
 2. Upgrade. The controller writes `config/hive-registry/identity.json` and `authority.pem`.
 3. Run `./hive.sh console-clients add` (or `./hive.sh post-upgrade` where it runs it), then sign
    out of the console and in again.
 4. Run `./hive.sh status` once, so the registry records what the hosts run.
+
+With the 3.13.0 controller itself, do not run `rehearse` on its own before the upgrade: the
+upgrade installs the new Caddyfile (which adds the Magnus installation route) after the
+rehearsal pinned the old one, and refuses. The upgrade rehearses its own pre-change backup
+anyway. Up to 3.13.0, an installation that moved from native services with `migrate-native`
+does not close a transaction that failed in its read-only checks. Each further command then
+stops with "A different transaction requires recovery". Releases after 3.13.0 fix both.
 
 A rollback to a release with an older registry keeps both files and the recorded observations;
 that registry ignores them. Step 1 and the new registry files change the deployment inputs that

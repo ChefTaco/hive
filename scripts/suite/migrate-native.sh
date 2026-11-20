@@ -161,7 +161,7 @@ hive_native_migrate() {
       hive_registry_provision
       hive_memory_credential_provision
       hive_native_action "$host" native-registry-login || hive_die 'Image registry login failed; native services are untouched'
-      hive_stage
+      HIVE_NATIVE_STAGING=true hive_stage
       hive_native_action "$host" native-dry-run || hive_die 'The dry run failed; native services are untouched'
       hive_native_action "$host" native-registry-logout
       printf 'Prepared. Native services were not stopped. Review plan output, then run cutover.\n';;

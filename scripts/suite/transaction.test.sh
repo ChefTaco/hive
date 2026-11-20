@@ -94,10 +94,16 @@ done
 : > "$temporary/actions.log"
 if controller prepare; then fail 'hive_stage passed a failed prepare'; fi
 ! grep -q ' abort ' "$temporary/actions.log" || fail 'A failed prepare aborted a transaction'
-# A native migration's staging keeps its own recovery: nothing is aborted.
+# migrate-native prepare's staging keeps its own recovery: nothing is aborted.
 : > "$temporary/actions.log"
 jq '.nativeMigration={}' "$temporary/config.json" > "$temporary/native.json"; cp "$temporary/config.json" "$temporary/plain.json"; cp "$temporary/native.json" "$temporary/config.json"
-if HIVE_OPERATION=install controller stage; then fail 'hive_stage passed a failed migration stage'; fi
-cp "$temporary/plain.json" "$temporary/config.json"
+if HIVE_NATIVE_STAGING=true HIVE_OPERATION=install controller stage; then fail 'hive_stage passed a failed migration stage'; fi
 ! grep -q ' abort ' "$temporary/actions.log" || fail 'A native migration transaction was aborted'
+grep -q 'HIVE_NATIVE_STAGING=true hive_stage' "$ROOT/scripts/suite/migrate-native.sh" || fail 'migrate-native prepare no longer marks its staging'
+# An installation migrated earlier keeps its nativeMigration record; its upgrade aborts like any other.
+: > "$temporary/actions.log"
+if HIVE_OPERATION=upgrade controller stage; then fail 'hive_stage passed a failed stage of a migrated installation'; fi
+cp "$temporary/plain.json" "$temporary/config.json"
+grep -q 'closed as aborted' "$temporary/controller.log" || { cat "$temporary/controller.log" >&2; fail 'A migrated installation did not abort its failed stage'; }
+grep -q '^alpha abort stage$' "$temporary/actions.log" && grep -q '^beta abort stage$' "$temporary/actions.log" || { cat "$temporary/actions.log" >&2; fail 'A migrated installation left a prepared host open'; }
 printf 'Passed: read-only-check failures abort and keep their record, the next plan proceeds, and host changes or quiescence keep the transaction for recovery.\n'

@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Rehearse, then upgrade under the same plan, is refused when the Caddyfile changes.** `hive.sh
+  rehearse` followed by `upgrade` under the same plan no longer refuses the upgrade with
+  "Deployment input artifacts changed for this plan" when the release changes the ingress
+  Caddyfile. An upgrade or rollback installs the release Caddyfile before it stages, but a
+  rehearsal leaves the live file alone. A rehearsal now pins the release Caddyfile in its place,
+  and the copies kept beside it (`Caddyfile.previous`, `Caddyfile.pre-registry`) no longer count
+  as deployment inputs. Upgrades and rollbacks still pin the live file, so an edit after staging
+  is still refused.
+- **A failed read-only check leaves the transaction open on migrated installations.** A failure in
+  an upgrade's read-only checks (stage, compatibility, preflight, native preparation) now closes
+  the transaction as aborted on an installation that moved from native services earlier.
+  Previously, any configuration with a `nativeMigration` record left it prepared, which refused
+  every new plan with "A different transaction requires recovery". Only `migrate-native prepare`
+  keeps its own staging and recovery.
+
 ## [3.13.0] - 2026-11-20
 
 ### Changed

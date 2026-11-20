@@ -3,8 +3,21 @@
 # Files the digest reads from a staged path instead of their own (path -> staged file). Empty
 # except while a controller change is staged.
 declare -gA HIVE_INPUT_OVERRIDES=()
+# The ingress Caddyfile belongs to the release. An upgrade or rollback installs the controller's
+# template before it stages (refresh_ingress in registry-host.sh), while a rehearsal of the same
+# plan leaves the live file alone. So a rehearsal counts the template in the Caddyfile's place, and
+# the upgrade it rehearsed finds the same pin. Prints nothing when the live file counts as it is.
+deployment_inputs_ingress_template() {
+  local template
+  [[ -n "${input:-}" && -n "${directory:-}" ]] || return 0
+  jq -e '.operation=="rehearse" and .placements["hive-registry"]!=null and (.ingressTemplate // "")!=""' <<< "$input" >/dev/null 2>&1 || return 0
+  [[ -f "$directory/config/ingress/Caddyfile" && ! -L "$directory/config/ingress/Caddyfile" ]] || return 0
+  template=$(jq -er .ingressTemplate <<< "$input" | base64 -d) || return 1
+  printf '%s\n' "$template" | sha256sum | cut -d ' ' -f1
+}
 deployment_inputs_digest() {
-  local definition=$1 path paths
+  local definition=$1 path paths template caddyfile="${directory:-}/config/ingress/Caddyfile"
+  template=$(deployment_inputs_ingress_template) || return 1
   paths=$(jq -r '[.services[]|(.env_file[]? | if type=="string" then . else .path end),(.volumes[]?|select(.read_only==true)|.source)]|unique[]' "$definition") || return 1
   while IFS= read -r path; do
     [[ -n "$path" ]] || continue
@@ -16,7 +29,13 @@ deployment_inputs_digest() {
       printf '%s\0' "$path" || return 1
       stat -c '%a:%u:%g' "$path" || return 1
       find "$path" -mindepth 1 -type d -print0 | sort -z | while IFS= read -r -d '' path; do printf '%s\0' "$path" || return 1; stat -c '%a:%u:%g' "$path" || return 1; done || return 1
-      find "$path" -type f -print0 | sort -z | while IFS= read -r -d '' path; do stat -c '%a:%u:%g' "$path" || return 1; sha256sum --zero -- "$path" || return 1; done || return 1
+      # The copies refresh_ingress retains beside the Caddyfile are never read by the ingress.
+      find "$path" -type f -print0 | sort -z | while IFS= read -r -d '' path; do
+        [[ "$path" != "$caddyfile.previous" && "$path" != "$caddyfile.pre-registry" ]] || continue
+        stat -c '%a:%u:%g' "$path" || return 1
+        if [[ -n "$template" && "$path" == "$caddyfile" ]]; then printf '%s  %s\0' "$template" "$path" || return 1
+        else sha256sum --zero -- "$path" || return 1; fi
+      done || return 1
     elif [[ -n "${HIVE_INPUT_OVERRIDES[$path]+set}" ]]; then
       # A staged replacement counts as if it were already in place (hive_memory_identity_relink).
       local staged=${HIVE_INPUT_OVERRIDES[$path]}
