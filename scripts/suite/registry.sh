@@ -96,7 +96,19 @@ hive_registry_provision() {
   host=$(hive_registry_host)
   user=$(jq -er '.components["hive-registry"].service.user' "$HIVE_MANIFEST")
   HIVE_BOOTSTRAP_INGRESS=${HIVE_BOOTSTRAP_INGRESS:-$(hive_ingress_template)}
-  hive_registry_action "$host" registry-provision "$(jq -nc --arg user "$user" '{serviceUser:$user}')" || hive_die 'Hive Registry credentials and configuration could not be prepared; no service was changed'
+  hive_registry_action "$host" registry-provision "$(jq -nc --arg user "$user" --argjson identity "$(hive_registry_identity)" '{serviceUser:$user,identity:$identity}')" || hive_die 'Hive Registry credentials and configuration could not be prepared; no service was changed'
+}
+
+# Where the registry verifies people for its inventory view: Oathweave's browser issuer and its
+# internal JWKS and userinfo endpoints, as the other products reach them. null without Oathweave
+# and a console in this installation.
+hive_registry_identity() {
+  jq -c '
+    if .components.oathweave!=null and .console!=null then
+      (.bootstrap.productEndpoints.oathweave.origin // "https://oathweave:4200") as $endpoint |
+      {issuer:(.nativeMigration.browserIssuer // (.origin+"/api/oathweave")),
+       jwksUrl:($endpoint+"/api/v1/oauth/jwks"),userinfoUrl:($endpoint+"/api/v1/oauth/userinfo")}
+    else null end' "$HIVE_CONFIG"
 }
 
 # The release's ingress configuration: this step replaces a Caddyfile that differs from the
@@ -161,6 +173,20 @@ hive_registry_begin() {
   hive_registry_write POST /v1/sync "$(hive_registry_body begin activating)" >/dev/null
 }
 
+# Records what the hosts run (OBSERVED, from hive_registry_observed) in a registry that serves
+# the inventory view (SUPPORTED is true). Best effort: an older registry, a read-only rehearsal or
+# a failed write never fails the command; status and doctor still report drift.
+hive_registry_record_observations() {
+  local observed=$1 supported=$2 body
+  [[ "$supported" == true ]] || return 0
+  body=$(jq -c '{schema:1,hosts:map({host,active:(.active // false),unreachable:(.unreachable // false),
+    receipt:(if .receipt then {version:.receipt.version,digest:.receipt.digest} else null end),
+    transactionPhase:(.transactionPhase // null),
+    catalog:(if .catalog then .catalog|map(select(.image!=null)|{id,version,image}) else null end),
+    services:((.services // [])|map({service,image:(.image // null),runningImage:(.runningImage // null),imageId:(.imageId // null),imageMatches:(.imageMatches // false),state,health:(.health // "")}))})}' <<< "$observed") || return 0
+  hive_registry_write PUT /v1/observations "$body" >/dev/null 2>&1 || printf 'NOTICE: the Hive Registry did not record what the hosts run; the inventory view keeps its previous observation.\n' >&2
+}
+
 hive_registry_observed() {
   local host
   while IFS= read -r host; do hive_registry_action "$host" registry-observe null || jq -n --arg host "$host" '{host:$host,active:false,unreachable:true,services:[]}'; done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG") | jq -s .
@@ -182,7 +208,8 @@ hive_registry_complete() {
     printf 'Hive Registry: these products do not match the signed release on their hosts: %s\n' "$(jq -r 'join(", ")' <<< "$mismatch")" >&2
     return 1
   fi
-  hive_registry_write POST /v1/sync "$body" >/dev/null
+  hive_registry_write POST /v1/sync "$body" >/dev/null || return 1
+  hive_registry_record_observations "$observed" "$(jq -r 'any(.installed[];.id=="hive-registry" and .connection.capabilities["inventory.v1"]!=null)' <<< "$body")"
 }
 
 hive_registry_failed() {
@@ -203,6 +230,8 @@ hive_registry_report() {
     list=$(hive_registry_action "$host" registry-read '{"path":"/v1/products"}' 2>/dev/null) || list=null
     jq -e . <<< "$summary" >/dev/null 2>&1 || summary=null
     jq -e . <<< "$list" >/dev/null 2>&1 || list=null
+    # A registry that serves the inventory view keeps the latest observation for it.
+    hive_registry_record_observations "$observed" "$(jq -r 'any(.products[]?;.id=="hive-registry" and .capabilities["inventory.v1"]!=null)' <<< "$list" 2>/dev/null || printf 'false')"
   fi
   jq -n --argjson observed "$observed" --argjson summary "$summary" --argjson list "$list" --argjson external "$(jq -c '.external // {}|keys' "$HIVE_CONFIG")" '
     def drift($code;$detail): {code:$code,detail:$detail};

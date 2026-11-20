@@ -19,6 +19,7 @@ test('declares the events feed path per product, relative to its browser prefix'
   // The first released version serving each feed.
   const since = { magnus: '2.8.0', cindertrace: '0.5.0', hiveskills: '1.6.0', embermend: '0.2.0' };
   for (const [name, version] of Object.entries(since)) assert.equal(suiteCatalog[name].capabilities['events.v1'].since, version, name);
+  assert.equal(suiteCatalog['hive-registry'].capabilities['inventory.v1'].since, '1.4.0');
   for (const [name, entry] of Object.entries(suiteCatalog)) if (entry.capabilities) assert.ok(entry.connection.browserPrefix, name);
 });
 
@@ -67,18 +68,25 @@ function ingressMapping(prefix) {
   assert.match(caddyfile, new RegExp(`\\n\\t\\turi strip_prefix ${escaped}\\n`), `${prefix} is routed but not stripped`);
   return (rest) => rest;
 }
-// Where each product serves its feed natively.
-const nativeFeeds = { magnus: '/api/v1/hive/events', cindertrace: '/api/v1/hive/events', hiveskills: '/v1/hive/events', embermend: '/api/v1/hive/events' };
+// Where each product serves each capability natively.
+const nativeRoutes = {
+  'events.v1': { magnus: '/api/v1/hive/events', cindertrace: '/api/v1/hive/events', hiveskills: '/v1/hive/events', embermend: '/api/v1/hive/events' },
+  'inventory.v1': { 'hive-registry': '/v1/inventory' },
+};
 
-test('every declared capability reaches the product feed through the ingress', () => {
-  const declared = Object.entries(suiteCatalog).filter(([, entry]) => entry.capabilities?.['events.v1']).map(([name]) => name).sort();
-  assert.deepEqual(declared, Object.keys(nativeFeeds).sort());
+test('every declared capability reaches the product route through the ingress', () => {
+  for (const [capability, routes] of Object.entries(nativeRoutes)) {
+    const declared = Object.entries(suiteCatalog).filter(([, entry]) => entry.capabilities?.[capability]).map(([name]) => name).sort();
+    assert.deepEqual(declared, Object.keys(routes).sort(), capability);
+  }
   for (const [name, entry] of Object.entries(suiteCatalog)) {
     for (const [capability, { path }] of Object.entries(entry.capabilities ?? {})) {
       const prefix = entry.connection.browserPrefix;
-      assert.equal(ingressMapping(prefix)(path), nativeFeeds[name], `${name} ${capability}: ${prefix}${path}`);
+      assert.equal(ingressMapping(prefix)(path), nativeRoutes[capability]?.[name], `${name} ${capability}: ${prefix}${path}`);
     }
   }
+  // The registry serves only its allowlisted reads through the ingress: the inventory is one.
+  assert.match(caddyfile, /@registry_read path_regexp \^\/v1\/\(installation\|inventory\|/);
   // Magnus is default deny behind the prefix: its feed must be on the browser allowlist.
   const allowlist = caddyfile.slice(caddyfile.indexOf('@magnus_browser expression'), caddyfile.indexOf('handle @magnus_browser'));
   assert.match(allowlist, /\{path\} == "\/api\/v1\/hive\/events"/);

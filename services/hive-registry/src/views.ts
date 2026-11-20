@@ -107,4 +107,49 @@ export function privateInstallation(installation: InstallationRow | undefined, c
   };
 }
 
-export const historyView = (row: HistoryRow) => ({ sequence: row.sequence, recordedAt: row.recorded_at, actor: row.actor, operation: row.operation, subject: row.subject, change: JSON.parse(row.change_json) as unknown });
+const digestOf = (image: string): string => image.slice(image.indexOf('@') + 1);
+
+/**
+ * GET /v1/inventory: the signed release's pins beside what each host reports (see
+ * inventory-contract.ts). Its own allowlist: internal endpoints, origins and plan digests stay out.
+ */
+export function inventoryView(installation: InstallationRow | undefined, configured: string, store: RegistryStore) {
+  const observed = store.observations();
+  const hosts = observed?.hosts ?? [];
+  // Pins from the manifest the hosts keep, for products the installation does not run itself.
+  const manifestPin = (id: string) => {
+    for (const host of hosts) {
+      const pin = host.catalog?.find((entry) => entry.id === id);
+      if (pin) return { version: pin.version, image: pin.image, imageDigest: digestOf(pin.image) };
+    }
+    return null;
+  };
+  const components = store.products().filter((row) => row.source === 'external' || row.offered === 1).map((row) => {
+    const installed = store.installedProduct(row.id);
+    const deployed = row.source === 'release' && installed && installed.status !== 'external' && installed.image && installed.image_digest;
+    return {
+      id: row.id,
+      displayName: row.display_name,
+      kind: row.kind,
+      source: row.source,
+      status: installed ? installed.status : 'not-installed',
+      inventoryHost: installed?.inventory_host ?? null,
+      pinned: row.source === 'external' ? null : deployed ? { version: installed.version, image: installed.image!, imageDigest: installed.image_digest! } : manifestPin(row.id),
+      recorded: row.source === 'external' ? { version: installed?.version ?? null, imageDigest: installed?.image_digest ?? null } : null,
+    };
+  });
+  return {
+    schema: 1,
+    installationId: installation?.id ?? configured,
+    release: installation ? { version: installation.release_version, manifestDigest: installation.manifest_digest } : null,
+    phase: installation?.phase ?? null,
+    observedAt: observed?.observedAt ?? null,
+    components,
+    hosts: hosts.map((host) => ({
+      host: host.host, active: host.active, unreachable: host.unreachable, receipt: host.receipt, transactionPhase: host.transactionPhase, catalog: host.catalog,
+      services: host.services.map((service) => ({ service: service.service, image: service.image, runningImage: service.runningImage, imageId: service.imageId, imageMatches: service.imageMatches, state: service.state, health: service.health })),
+    })),
+  };
+}
+
+export const historyView =(row: HistoryRow) => ({ sequence: row.sequence, recordedAt: row.recorded_at, actor: row.actor, operation: row.operation, subject: row.subject, change: JSON.parse(row.change_json) as unknown });

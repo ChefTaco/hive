@@ -61,7 +61,10 @@ done
 export PATH="$temporary/bin:$PATH"
 run_init() { "$ROOT/hive.sh" init --config "$temporary/config.json" --manifest "$temporary/release.json" --trust-key "$temporary/publisher.pub" --non-interactive --yes; }
 HIVE_TEST_ARGV_LOG="$temporary/initializer-argv.jsonl" run_init > "$temporary/initialization.log" 2>&1
-jq -e '.clients|length==7' "$temporary/install/config/oathweave/suite-bootstrap.json" >/dev/null
+jq -e '.clients|length==8' "$temporary/install/config/oathweave/suite-bootstrap.json" >/dev/null
+# The Hive Registry inventory view's client, with its one permission, in the policies too.
+jq -e '[.clients[]|select(.id=="hivexui-registry")|.audience=="hive-registry" and .permissions==["registry:inventory"] and .firstParty==true]==[true]' "$temporary/install/config/oathweave/suite-bootstrap.json" >/dev/null || fail 'The registry browser client is not the reviewed grant'
+rg -q '"hivexui-registry":\{"audience":"hive-registry","permissions":\["registry:inventory"\]\}' "$temporary/install/config/oathweave.env" || fail 'Oathweave has no policy for the registry browser client'
 # The terminal is off in a fresh install. Oathweave gives its initial administrator every
 # permission a client lists, so listing magnus:terminal would grant it to the operator.
 jq -e '(.clients[]|select(.id=="hivexui-magnus")|.audience=="magnus" and .permissions==["magnus:view","magnus:operate","magnus:admin"])' "$temporary/install/config/oathweave/suite-bootstrap.json" >/dev/null || fail 'Magnus browser client is not the reviewed resource grant'
@@ -196,7 +199,7 @@ hash -r
 magnus_secret=$(cat "$studio/.initializer/secrets/studio-magnus-client"); memory_secret=$(cat "$studio/.initializer/secrets/studio-hivemem-client")
 [[ "$magnus_secret" =~ ^[a-f0-9]{64}$ && "$memory_secret" =~ ^[a-f0-9]{64}$ && "$magnus_secret" != "$memory_secret" ]] || fail 'Studio client secrets are not distinct generated values'
 permissions='["ardentstudio:projects:read","ardentstudio:projects:write","ardentstudio:templates:read","ardentstudio:templates:write","ardentstudio:review:write","ardentstudio:agents:admin"]'
-jq -e --argjson permissions "$permissions" '(.clients|length)==8 and (.clients[]|select(.id=="hivexui-ardentstudio")|.audience=="ardentstudio" and .permissions==$permissions and .firstParty==true)' "$studio/oathweave/suite-bootstrap.json" >/dev/null || fail 'Studio browser client is not the reviewed resource grant'
+jq -e --argjson permissions "$permissions" '(.clients|length)==9 and (.clients[]|select(.id=="hivexui-ardentstudio")|.audience=="ardentstudio" and .permissions==$permissions and .firstParty==true)' "$studio/oathweave/suite-bootstrap.json" >/dev/null || fail 'Studio browser client is not the reviewed resource grant'
 value "$studio/oathweave.env" IAM_BROWSER_CLIENT_POLICIES | jq -e --argjson permissions "$permissions" '."hivexui-ardentstudio"=={audience:"ardentstudio",permissions:$permissions}' >/dev/null || fail 'The Studio browser ceiling differs from its bootstrap client'
 studio_fleet_secret=$(cat "$studio/.initializer/secrets/magnus-hivemem-client")
 [[ "$studio_fleet_secret" != "$magnus_secret" && "$studio_fleet_secret" != "$memory_secret" ]] || fail 'Magnus and Studio share a client secret'
@@ -259,7 +262,7 @@ external="$temporary/external/config"
 grep -qF "External Magnus: add the entries in $external/.initializer/external-magnus.env to the environment of the Magnus at $external_url" "$temporary/external.log" || fail 'The operator is not told where the external Magnus entries are'
 while IFS= read -r secret; do if rg -F -q -- "$(cat "$secret")" "$temporary/external.log" "$external/.initializer/external-magnus.env"; then fail 'A generated credential was printed or written for the external Magnus'; fi; done < <(find "$external/.initializer/secrets" -type f ! -name '*-id')
 # The console signs in to it with the same reviewed browser client as for the component.
-jq -e '(.clients|length)==8 and (.clients[]|select(.id=="hivexui-magnus")|.audience=="magnus" and .permissions==["magnus:view","magnus:operate","magnus:admin"] and .firstParty==true)' "$external/oathweave/suite-bootstrap.json" >/dev/null || fail 'The external Magnus has no reviewed browser client'
+jq -e '(.clients|length)==9 and (.clients[]|select(.id=="hivexui-magnus")|.audience=="magnus" and .permissions==["magnus:view","magnus:operate","magnus:admin"] and .firstParty==true)' "$external/oathweave/suite-bootstrap.json" >/dev/null || fail 'The external Magnus has no reviewed browser client'
 value "$external/oathweave.env" IAM_BROWSER_CLIENT_POLICIES | jq -e '."hivexui-magnus"=={audience:"magnus",permissions:["magnus:view","magnus:operate","magnus:admin"]}' >/dev/null || fail 'The Magnus browser ceiling differs from its bootstrap client'
 jq -e '.products.magnus=="/api/magnus" and .identity.clients.magnus=="hivexui-magnus" and .products.ardentstudio=="/api/ardentstudio" and (.products|length)==8' "$external/runtime.json" >/dev/null || fail 'The console does not show the external Magnus'
 hive_check_public_runtime "$external/runtime.json" || fail 'The external Magnus broke the public browser allowlist'

@@ -132,6 +132,38 @@ export const syncRequest = z.strictObject({
 });
 export type SyncRequest = z.infer<typeof syncRequest>;
 
+// What each host actually runs, as hive.sh observes it (registry-host.sh observe): the active
+// release receipt, the signed release's pins from the manifest that host keeps, and per service
+// the deployed image reference, what Docker reports the container runs and whether they match.
+// PUT /v1/observations replaces the whole set. Nothing here is a secret; it is private like
+// versions and digests, served only to the inventory view.
+const runningImage = z.string().regex(/^[a-zA-Z0-9./:_@-]+$/).max(512);
+const observedService = z.strictObject({
+  service: productId,
+  image: image.nullable(),
+  runningImage: runningImage.nullable(),
+  imageId: digest.nullable(),
+  imageMatches: z.boolean(),
+  state: z.enum(['created', 'restarting', 'running', 'removing', 'paused', 'exited', 'dead', 'missing']),
+  health: z.enum(['', 'starting', 'healthy', 'unhealthy']),
+});
+const observedPin = z.strictObject({ id: productId, version: version.nullable(), image });
+export const observedHost = z.strictObject({
+  host: productId,
+  active: z.boolean(),
+  unreachable: z.boolean().default(false),
+  receipt: z.strictObject({ version, digest: hex64 }).nullable().default(null),
+  transactionPhase: z.string().regex(/^[a-z][a-z0-9-]{0,47}$/).nullable().default(null),
+  catalog: z.array(observedPin).max(256).nullable().default(null),
+  services: z.array(observedService).max(256),
+});
+export type ObservedHost = z.infer<typeof observedHost>;
+export const observationsRequest = z.strictObject({
+  schema: z.literal(1),
+  hosts: z.array(observedHost).max(64),
+}).refine((value) => new Set(value.hosts.map((host) => host.host)).size === value.hosts.length, 'Duplicate host');
+export type ObservationsRequest = z.infer<typeof observationsRequest>;
+
 // An externally managed product: the operator adds it, the release does not own it.
 // It stays out of the unauthenticated view unless `public` is set explicitly.
 export const externalProduct = z.strictObject({

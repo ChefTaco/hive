@@ -12,9 +12,12 @@ See [the deployment overview](../deployment/README.md#hive-registry).
 | Public | No `Authorization` header | Public fields only |
 | Read | `Authorization: Bearer` + `config/hive-registry/read-token` | Private fields and, on the private network, history |
 | Write | `Authorization: Bearer` + `config/hive-registry/write-token` | Everything, plus writes on the private network |
+| Inventory | `Authorization: Bearer` + an Oathweave access token for the `hive-registry` audience with `registry:inventory` (Registry 1.4.0) | [`GET /v1/inventory`](#inventory) only |
 
 A wrong or malformed credential gets `401`; it is never treated as public. Credentials are
-long-lived shared secrets for operators and services. Do not put them in browser code.
+long-lived shared secrets for operators and services. Do not put them in browser code. An
+Oathweave token opens the inventory and nothing else: any other route answers it `401` like any
+unknown credential.
 
 ## Field exposure
 
@@ -47,6 +50,7 @@ Every response is JSON with `Cache-Control: no-store`. Paths are native; add the
 | `GET /v1/products` | Catalog. `?installed=true` or `?installed=false` filters it |
 | `GET /v1/products/{id}` | One product |
 | `GET /v1/products/{id}/connection` | Console path, browser prefix, native API URLs, documentation and [capabilities](#capabilities); with a credential also the inventory host and internal endpoints |
+| `GET /v1/inventory` | The signed release's pins beside what each host reports. Read or write credential, or an administrator's Oathweave token; see [Inventory](#inventory) |
 | `GET /v1/history?after=N&limit=M` | Append-only change history entries after sequence `N` (default 0), at most `M` entries (1 to 1000, default 200). Credential required; not served by the ingress |
 
 ```json
@@ -90,8 +94,10 @@ the installed product version serves to the browser. A product that offers none 
 - A capability needs a `browserPrefix`.
 - Names match `[a-z0-9.-]{1,64}`, with at most 32 per product. Each value holds only `path`.
   Readers ignore names they do not know.
-- `events.v1` is the only capability so far: the product serves a HiveEvent v1 feed,
+- `events.v1`: the product serves a HiveEvent v1 feed,
   `GET browserPrefix + path?after=CURSOR&limit=N`, with its normal user authentication.
+- `inventory.v1` (the Hive Registry only, from 1.4.0): the registry serves its
+  [inventory](#inventory) at `GET browserPrefix + path`, here `/api/registry/v1/inventory`.
 
 The suite catalog (`scripts/suite/suite-catalog.json`) declares a capability per product with the
 first product version that serves it, as `{"path": "...", "since": "X.Y.Z"}`; `"since": null`
@@ -161,6 +167,73 @@ entry is the current list, its time the `updatedAt`. No table or column holds it
 format (`hive-registry-v1`) and the migrations are unchanged, an older registry image ignores it
 after a rollback, and an installation recorded before it reads back unchanged.
 
+## Inventory
+
+From Registry 1.4.0, `GET /v1/inventory` puts what the signed release pins beside what the hosts
+report they run, for HiveXUI's Installed software view. The registry announces it with the
+`inventory.v1` [capability](#capabilities) (`{"path": "/v1/inventory"}`, declared in the suite
+catalog from 1.4.0), so a console asks only a registry that serves it.
+
+A person reads it with an Oathweave access token for the `hive-registry` audience that carries
+`registry:inventory`: the console's `hivexui-registry` browser client, whose permission
+`SUITE_ADMIN` holds. The registry verifies the token with `@hivemagnus/hive-common` against the
+issuer, JWKS and userinfo URLs in `config/hive-registry/identity.json`, which `hive.sh` writes
+beside the credentials on every install, upgrade, rollback, adoption and rehearsal, with the
+installation's internal authority as `authority.pem` (the ingress's `backend-ca.pem`). Neither
+file is a secret. Without `identity.json` (no Oathweave, or a registry provisioned before 1.4.0
+that has not been upgraded) only the shared credentials read the inventory. A wrong audience,
+signature or key gets `401`, a person without the permission `403`, and an unreachable Oathweave
+`503`.
+
+```json
+{
+  "schema": 1,
+  "installationId": "example-suite",
+  "release": { "version": "3.12.9", "manifestDigest": "<64 hex>" },
+  "phase": "complete",
+  "observedAt": "2026-11-20T10:00:00.000Z",
+  "components": [
+    { "id": "hivexui", "displayName": "HiveXUI", "kind": "static-ui", "source": "release", "status": "installed", "inventoryHost": "control",
+      "pinned": { "version": "0.10.3", "image": "ghcr.io/example/hivexui@sha256:<64 hex>", "imageDigest": "sha256:<64 hex>" }, "recorded": null },
+    { "id": "magnus", "displayName": "Magnus", "kind": "application", "source": "release", "status": "external", "inventoryHost": null,
+      "pinned": { "version": "3.1.5", "image": "ghcr.io/example/magnus-server@sha256:<64 hex>", "imageDigest": "sha256:<64 hex>" }, "recorded": null }
+  ],
+  "hosts": [
+    { "host": "control", "active": true, "unreachable": false, "receipt": { "version": "3.12.9", "digest": "<64 hex>" }, "transactionPhase": "complete",
+      "catalog": [{ "id": "magnus", "version": "3.1.5", "image": "ghcr.io/example/magnus-server@sha256:<64 hex>" }],
+      "services": [{ "service": "hivexui", "image": "ghcr.io/example/hivexui@sha256:<64 hex>", "runningImage": "ghcr.io/example/hivexui@sha256:<64 hex>",
+        "imageId": "sha256:<64 hex>", "imageMatches": true, "state": "running", "health": "healthy" }] }
+  ]
+}
+```
+
+- `components`: every product of the release catalog, and every externally managed one.
+  `status` is `installed`, `activating`, `external` (a release product used but run elsewhere,
+  such as an external Magnus) or `not-installed`. `pinned` is the signed pin: what activation
+  recorded for a product the installation runs, otherwise the pin in the active release's
+  manifest as a host keeps it, or null. An externally managed product (`source: external`) has
+  no pin; `recorded` is what its operator recorded.
+- `hosts`: what `hive.sh` last observed on each host (`observedAt`): the activated release
+  (`receipt`), the pins in the manifest that host keeps (`catalog`), and per service the
+  deployed reference (`image`), the container's configured image (`runningImage`), the local
+  image it runs (`imageId`) and `imageMatches`, true only when the container runs the deployed
+  reference and its local image is that reference's image.
+- It carries no origin, internal endpoint, plan digest or credential.
+
+`hive.sh status`, `doctor`, and the completion of `install`, `upgrade`, `rollback` and `adopt`
+send what they observe with `PUT /v1/observations` (write credential), to a registry that
+announces `inventory.v1`. The body is `{"schema": 1, "hosts": [...]}` in the shape above and
+replaces the whole set, so a host removed from the configuration disappears. The registry keeps
+it in its append-only history under the subject `observations`, like the setup checklist, so the
+storage format is unchanged and an older image ignores it after a rollback. An identical set
+within an hour of the last one adds no history. A failed write, such as to a read-only rehearsal
+copy, never fails the command; it prints a notice.
+
+[`services/hive-registry/src/inventory-contract.ts`](../services/hive-registry/src/inventory-contract.ts)
+describes the response with zod and nothing else, for HiveXUI to vendor like the browser
+contract (`registryInventoryContractVersion`, now 1). It is separate because the browser
+contract is the public view and must never carry versions or digests.
+
 ## Browser contract
 
 [`services/hive-registry/src/browser-contract.ts`](../services/hive-registry/src/browser-contract.ts)
@@ -171,12 +244,13 @@ reaches the browser. The service's own tests parse every public response with it
 
 | Version | Registry | Adds |
 | --- | --- | --- |
+| 4 | 1.4.0 | The `inventory.v1` capability, announcing the [inventory](#inventory) |
 | 3 | 1.3.0 | The optional [setup checklist](#setup-checklist) on `GET /v1/installation` |
 | 2 | 1.2.0 | Product [capabilities](#capabilities) |
 
 ## Ingress
 
-Only `GET` passes, on `/health/ready`, `/v1/installation`, `/v1/products`,
+Only `GET` passes, on `/health/ready`, `/v1/installation`, `/v1/inventory`, `/v1/products`,
 `/v1/products/{id}` and `/v1/products/{id}/connection`. Any other method gets `405` at the
 ingress, any other path `404`. Cookies are removed in both directions, and only a
 well-formed bearer credential is forwarded.
@@ -192,6 +266,7 @@ Private network only, with the write credential. `hive.sh` calls them over SSH t
 | `PUT /v1/products/{id}` | Adds or updates an externally managed product |
 | `DELETE /v1/products/{id}` | Removes an externally managed product |
 | `PUT /v1/setup/items/{id}` | Records one [setup checklist](#setup-checklist) item's status: `{"status":"done"}`, `"skipped"` or `"pending"` |
+| `PUT /v1/observations` | Replaces what the hosts were observed to run, for the [inventory](#inventory). Does not change the installation revision |
 
 A sync's `installed` entries are the products this installation runs, each with its inventory
 host, version, image and `activating` or `installed`, and the release products it uses but does

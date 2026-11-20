@@ -14,7 +14,10 @@ hive_console_clients_wanted() {
     (if .components.magnus or .external.magnus then [{id:"hivexui-magnus",audience:"magnus",permissions:["magnus:view","magnus:operate","magnus:admin"]}] else [] end) +
     (if .components.embermend then [{id:"hivexui-embermend",audience:"embermend",permissions:["embermend:read","embermend:evidence","embermend:assess","embermend:prepare","embermend:propose","embermend:publish-explanation","embermend:ingest","embermend:policy"]}] else [] end) +
     (if .components.cindertrace then [{id:"hivexui-cindertrace",audience:"cindertrace",permissions:["cindertrace:view","cindertrace:investigate","cindertrace:admin"]}] else [] end) +
-    (if .components.ardentstudio then [{id:"hivexui-ardentstudio",audience:"ardentstudio",permissions:["ardentstudio:projects:read","ardentstudio:projects:write","ardentstudio:templates:read","ardentstudio:templates:write","ardentstudio:review:write","ardentstudio:agents:admin"]}] else [] end) |
+    (if .components.ardentstudio then [{id:"hivexui-ardentstudio",audience:"ardentstudio",permissions:["ardentstudio:projects:read","ardentstudio:projects:write","ardentstudio:templates:read","ardentstudio:templates:write","ardentstudio:review:write","ardentstudio:agents:admin"]}] else [] end) +
+    # The Hive Registry inventory view (Registry 1.4.0). Optional: an Oathweave set up before it
+    # has no policy for this client, which the command then skips and names instead of failing.
+    (if .components["hive-registry"] then [{id:"hivexui-registry",audience:"hive-registry",permissions:["registry:inventory"],optional:true}] else [] end) |
     map(.+{redirectUris:[$redirect],firstParty:true})' "$HIVE_CONFIG"
 }
 
@@ -25,7 +28,7 @@ hive_console_clients() {
   # With the gateway's terminal grant, Magnus's client carries magnus:terminal; that stays with fresh setup.
   ! jq -e '.bootstrap.magnusGateway.grantTerminalToInitialOperator==true' "$HIVE_CONFIG" >/dev/null || hive_die 'This installation grants the web terminal; its Magnus client is managed by fresh setup'
   clients=$(hive_console_clients_wanted)
-  [[ "$clients" != '[]' ]] || hive_die 'No product here needs a console client from this command: it covers Magnus (the component or external), Cindertrace, Embermend and Ardent Project Studio'
+  [[ "$clients" != '[]' ]] || hive_die 'No product here needs a console client from this command: it covers Magnus (the component or external), Cindertrace, Embermend, Ardent Project Studio and the Hive Registry inventory'
   host=$(jq -r .components.oathweave.host "$HIVE_CONFIG")
   printf 'Oathweave on %s: create any missing public browser client among %s, and add their permissions to the SUITE_ADMIN role.\n' "$host" "$(jq -r 'map(.id)|join(", ")' <<< "$clients")"
   if [[ "${HIVE_CONFIRMED:-false}" != true ]]; then
@@ -36,6 +39,10 @@ hive_console_clients() {
   jq -e '.existingRecordsUnchanged==true' <<< "$result" >/dev/null || hive_die 'Oathweave did not confirm the change'
   printf 'Created clients: %s. Added to SUITE_ADMIN: %s. Sign out of the console and in again to use them.\n' \
     "$(jq -r '.createdClients|if length==0 then "none" else join(", ") end' <<< "$result")" "$(jq -r '.addedPermissions|if length==0 then "none" else join(", ") end' <<< "$result")"
+  if jq -e '(.skippedClients // [])|length>0' <<< "$result" >/dev/null; then
+    printf 'Skipped %s: the running Oathweave has no browser policy for it. To use the Installed software view, add it to IAM_BROWSER_CLIENT_POLICIES in config/oathweave.env, recreate Oathweave and run this command again; see deployment/FULL.md, "Hive Registry inventory".\n' \
+      "$(jq -r '.skippedClients|join(", ")' <<< "$result")" >&2
+  fi
   # Every wanted client now exists, so the setup checklist item is done. Without a recorded
   # checklist (a registry before 1.3.0) nothing is recorded.
   local checklist

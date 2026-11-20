@@ -197,9 +197,9 @@ while a collector exists. --run makes ID the collector the installation runs (co
 cindertrace-collector, started by add cindertrace-collector) with the source settings in its
 owner-only ID.sources.env beside the credential. See deployment/FULL.md.
 console-clients add [--yes] creates the HiveXUI browser clients of Magnus (the component or an external
-Magnus), Cindertrace, Embermend and Ardent Project Studio in an existing Oathweave store, and adds
-their permissions to the SUITE_ADMIN role. Their policies must already be in
-IAM_BROWSER_CLIENT_POLICIES. See deployment/FULL.md.
+Magnus), Cindertrace, Embermend, Ardent Project Studio and the Hive Registry inventory in an existing
+Oathweave store, and adds their permissions to the SUITE_ADMIN role. Their policies must already be in
+IAM_BROWSER_CLIENT_POLICIES; the registry client is skipped, and named, without one. See deployment/FULL.md.
 admin-access setup [USERNAME] guides access for an existing active Oathweave administrator.
 It uses sudo, creates separate product identities, preserves existing grants and reconnects only
 changed services. admin-access list shows candidates; status USERNAME reads its retained receipt.

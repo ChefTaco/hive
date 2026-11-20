@@ -6,6 +6,22 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+### Added
+
+- Hive Registry 1.4.0 (image 2.0.10) serves an inventory to administrators: `GET /v1/inventory`
+  puts each product's signed release pin (version and image digest) beside what each host reports
+  it runs (the configured and local image, whether they match, state and health), for HiveXUI's
+  Installed software view. It accepts an Oathweave token for the new `hive-registry` audience with
+  `registry:inventory`, besides the shared credentials; every other route still refuses such a
+  token. The browser contract (version 4) adds the `inventory.v1` capability, and the inventory
+  has its own contract, `inventory-contract.ts`. No storage format change.
+- `hive.sh status`, `doctor` and completed lifecycle commands record what the hosts run in a
+  registry that serves the inventory (`PUT /v1/observations`), best effort.
+- The HiveXUI browser client `hivexui-registry`: created by fresh setup and `migrate-native`, and by
+  `console-clients add` on an existing installation once its policy is in Oathweave (skipped and
+  named otherwise). Every registry provisioning writes `identity.json` and `authority.pem` beside
+  the registry credentials. See `deployment/FULL.md`, "Hive Registry inventory".
+
 ## [3.12.9] - 2026-11-20
 
 ### Security

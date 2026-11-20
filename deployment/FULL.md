@@ -123,6 +123,33 @@ pending at its end. A step HiveXUI finds done while the registry still says pend
 Registry 1.3.0 or later, which the release pins; with an earlier registry, nothing is recorded and
 the commands above say so.
 
+## Hive Registry inventory
+
+HiveXUI's Installed software view reads the Hive Registry's
+[inventory](../docs/hive-registry-api.md#inventory) (Registry 1.4.0): the signed release's pins
+beside the image each host reports it runs. It signs in to the registry with the browser client
+`hivexui-registry` (audience `hive-registry`, permission `registry:inventory`, held by
+`SUITE_ADMIN`); the registry verifies that token with Oathweave itself.
+
+- **Fresh setup and `migrate-native`** create the client, its policy and the permission with the
+  console's other clients.
+- **Every install, upgrade, rollback, adoption and rehearsal** writes
+  `config/hive-registry/identity.json` (the browser issuer and Oathweave's internal JWKS and
+  userinfo URLs) and `config/hive-registry/authority.pem` (a copy of the ingress's
+  `backend-ca.pem`), replacing either when it differs. They hold no secret, and the registry's
+  environment file is not touched.
+- **An existing installation** gets the client in two steps, as for the
+  [external Magnus clients](#adding-an-external-magnus-and-studio-to-an-existing-installation).
+  Before the upgrade, merge
+  `"hivexui-registry":{"audience":"hive-registry","permissions":["registry:inventory"]}` into the
+  JSON of `IAM_BROWSER_CLIENT_POLICIES` in `config/oathweave.env`, keeping every existing key,
+  so the upgrade starts Oathweave with it. After the upgrade, run
+  `./hive.sh console-clients add`, which creates the public client and adds `registry:inventory`
+  to `SUITE_ADMIN`, then sign out of the console and in again. Without the policy,
+  `console-clients add` skips the registry client and names it; the other clients are unaffected.
+- `hive.sh status`, `doctor` and every completed lifecycle command record what they observe, so
+  the view shows the state as of the last of them (`observedAt`).
+
 ## Magnus web terminal
 
 The browser terminal gives a person a shell on a fleet node, so it is off in every

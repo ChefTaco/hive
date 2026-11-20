@@ -93,6 +93,21 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Unreleased: Hive Registry 1.4.0 and the inventory view
+
+The release that pins Hive Registry 1.4.0 adds HiveXUI's Installed software view. Its storage
+format is unchanged and it needs no flag. For an existing installation:
+
+1. Before the upgrade, add the `hivexui-registry` policy to `IAM_BROWSER_CLIENT_POLICIES` in
+   `config/oathweave.env`, as `deployment/FULL.md`, "Hive Registry inventory", describes.
+2. Upgrade. The controller writes `config/hive-registry/identity.json` and `authority.pem`.
+3. Run `./hive.sh console-clients add` (or `./hive.sh post-upgrade` where it runs it), then sign
+   out of the console and in again.
+4. Run `./hive.sh status` once, so the registry records what the hosts run.
+
+A rollback to a release with an older registry keeps both files and the recorded observations;
+that registry ignores them.
+
 ## Suite 3.12.9: effect 3.22.1 in the Prisma-based products
 
 Suite 3.12.9 pins Oathweave 2.3.2, Emberpath 2.5.4, Embermend 0.3.4, Magnus 3.1.5 (the server,

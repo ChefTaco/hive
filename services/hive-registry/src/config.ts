@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
+import { loadIdentity, type IdentityFile } from './identity.js';
 
 const id = z.string().regex(/^[a-z][a-z0-9-]{0,47}$/);
 const environment = z.object({
@@ -9,6 +10,8 @@ const environment = z.object({
   HIVE_REGISTRY_PORT: z.coerce.number().int().min(1).max(65535).default(8095),
   HIVE_REGISTRY_READ_TOKEN_FILE: z.string().startsWith('/').default('/config/read-token'),
   HIVE_REGISTRY_WRITE_TOKEN_FILE: z.string().startsWith('/').default('/config/write-token'),
+  // Optional: written by hive.sh beside the credentials. Absent, people cannot read the inventory.
+  HIVE_REGISTRY_IDENTITY_FILE: z.string().startsWith('/').default('/config/identity.json'),
   HIVE_AUTO_MIGRATE: z.enum(['true', 'false']).default('false'),
   HIVE_REHEARSAL: z.enum(['true', 'false']).default('false'),
 });
@@ -22,6 +25,7 @@ export type Config = {
   writeToken: string;
   autoMigrate: boolean;
   readOnly: boolean;
+  identity: IdentityFile | undefined;
 };
 
 function token(path: string): string {
@@ -46,5 +50,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     writeToken,
     autoMigrate: values.HIVE_AUTO_MIGRATE === 'true',
     readOnly: values.HIVE_REHEARSAL === 'true',
+    identity: loadIdentity(values.HIVE_REGISTRY_IDENTITY_FILE),
   };
 }

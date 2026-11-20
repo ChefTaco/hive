@@ -11,11 +11,14 @@ die() { printf 'Console clients: %s\n' "$*" >&2; exit 1; }
 jq -e '.placements.oathweave!=null' <<< "$input" >/dev/null || die 'Oathweave is not placed on this host'
 [[ -f "$directory/compose.json" ]] || die 'The suite is not active on this host'
 clients=$(jq -c .consoleClients <<< "$input")
-jq -e 'type=="array" and length>0 and all(.[]; (.id|test("^hivexui-[a-z][a-z0-9-]{0,47}$")) and (.permissions|type=="array" and length>0) and (.redirectUris|length==1))' <<< "$clients" >/dev/null || die 'Invalid client list'
+jq -e 'type=="array" and length>0 and all(.[]; (.id|test("^hivexui-[a-z][a-z0-9-]{0,47}$")) and (.permissions|type=="array" and length>0) and (.redirectUris|length==1) and ((.optional // false)|type=="boolean"))' <<< "$clients" >/dev/null || die 'Invalid client list'
 # shellcheck disable=SC2016
 code='import {prisma} from "/app/apps/iam-core/dist/db/client.js";import assert from "node:assert/strict";
-const clients=JSON.parse(process.argv[1]);
+const requested=JSON.parse(process.argv[1]);
 const policies=JSON.parse(process.env.IAM_BROWSER_CLIENT_POLICIES||"{}");
+// An optional client without a policy in this Oathweave is skipped and named, never created.
+const skippedClients=requested.filter(c=>c.optional&&!policies[c.id]).map(c=>c.id);
+const clients=requested.filter(c=>!skippedClients.includes(c.id));
 for(const c of clients){const p=policies[c.id];
  assert(p&&p.audience===c.audience&&JSON.stringify([...new Set(p.permissions)].sort())===JSON.stringify([...c.permissions].sort()),"Oathweave runs without the reviewed browser policy for "+c.id+": add it to IAM_BROWSER_CLIENT_POLICIES and recreate Oathweave first");}
 const ids=clients.map(c=>c.id);
@@ -37,5 +40,5 @@ await prisma.$transaction(async(tx)=>{
  if(addedPermissions.length)await tx.role.update({where:{id:role.id},data:{permissions:JSON.stringify([...current,...addedPermissions])}});
  assert.equal(await snapshot(tx),before,"Existing identity records would change");
 });
-console.log(JSON.stringify({createdClients,addedPermissions,existingRecordsUnchanged:true}));await prisma.$disconnect();process.exit(0);'
+console.log(JSON.stringify({createdClients,addedPermissions,skippedClients,existingRecordsUnchanged:true}));await prisma.$disconnect();process.exit(0);'
 docker compose -f "$directory/compose.json" exec -T oathweave node --input-type=module -e "$code" "$clients" | grep '^{' | tail -1

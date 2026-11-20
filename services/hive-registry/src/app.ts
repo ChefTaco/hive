@@ -1,12 +1,17 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import { z } from 'zod';
-import { externalProduct, productId, setupItemId, setupItemUpdate, syncRequest } from './schema.js';
+import type { InventoryAuthorizer } from './identity.js';
+import { externalProduct, observationsRequest, productId, setupItemId, setupItemUpdate, syncRequest } from './schema.js';
 import { findSecret } from './secrets.js';
 import { Conflict, Missing, type RegistryStore } from './store.js';
-import { historyView, privateConnection, privateInstallation, privateProduct, publicConnection, publicInstallation, publicProduct, publicProductVisible } from './views.js';
+import { historyView, inventoryView, privateConnection, privateInstallation, privateProduct, publicConnection, publicInstallation, publicProduct, publicProductVisible } from './views.js';
 
-export type AppOptions = { store: RegistryStore; installation: string; readToken: string; writeToken: string; readOnly: boolean; log?: (line: string) => void };
+export type AppOptions = {
+  store: RegistryStore; installation: string; readToken: string; writeToken: string; readOnly: boolean; log?: (line: string) => void;
+  /** Oathweave sign-in for GET /v1/inventory. Without it, only the shared credentials read it. */
+  inventoryAuthorizer?: InventoryAuthorizer;
+};
 type Access = 'public' | 'read' | 'write' | 'invalid';
 type Reply = { status: number; body: unknown; headers?: Record<string, string> };
 
@@ -92,6 +97,10 @@ export function createApp(options: AppOptions): RequestListener {
   }
 
   async function write(route: string[], method: string, request: IncomingMessage): Promise<Reply> {
+    if (route.length === 1 && route[0] === 'observations' && method === 'PUT') {
+      const body = validated(observationsRequest, await readBody(request));
+      return { status: 200, body: { schema: 1, ...store.recordObservations(body.hosts, 'hive.sh') } };
+    }
     if (route.length === 1 && route[0] === 'sync' && method === 'POST') {
       const result = store.sync(validated(syncRequest, await readBody(request)));
       return { status: 200, body: { schema: 1, ...result } };
@@ -122,6 +131,16 @@ export function createApp(options: AppOptions): RequestListener {
     if (!url.pathname.startsWith('/v1/')) return notFound();
     const route = url.pathname.slice(4).split('/');
     const level = access(request);
+    // The inventory is the one view a person may read, with an Oathweave token for this audience
+    // that carries registry:inventory. Any other route refuses such a token like any unknown one.
+    if (route.length === 1 && route[0] === 'inventory' && method === 'GET') {
+      if (level === 'read' || level === 'write') return { status: 200, body: inventoryView(store.installation(), options.installation, store) };
+      if (level === 'public') return failure(401, 'credential_required', 'The inventory requires an administrator sign-in', { 'WWW-Authenticate': 'Bearer' });
+      if (!options.inventoryAuthorizer) return failure(401, 'invalid_credential', 'Registry credential was not accepted');
+      const verdict = await options.inventoryAuthorizer(request.headers.authorization ?? '');
+      if (!verdict.ok) return failure(verdict.status, verdict.code, verdict.message, verdict.status === 401 ? { 'WWW-Authenticate': 'Bearer' } : undefined);
+      return { status: 200, body: inventoryView(store.installation(), options.installation, store) };
+    }
     if (level === 'invalid') return failure(401, 'invalid_credential', 'Registry credential was not accepted');
     if (method === 'GET') return read(route, url, level);
     if (method !== 'POST' && method !== 'PUT' && method !== 'DELETE') return failure(405, 'method_not_allowed', 'Method is not supported');

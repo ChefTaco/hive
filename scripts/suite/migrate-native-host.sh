@@ -383,7 +383,8 @@ action_configure() {
      {id:"hivexui-emberpath",audience:"emberpath",permissions:["router:providers:read","router:providers:write","router:routing:read","router:routing:write","router:testing:read","router:testing:write","router:keys:read","router:keys:write","router:settings:read","router:settings:write","router:admin:read","router:admin:write"]},
      {id:"hivexui-hivemem",audience:"hivemem",permissions:["hivemem:admin:all"]}]+
     (if $skills then [{id:"hivexui-hiveskills",audience:"hiveskills",permissions:["hiveskills:admin"]}] else [] end)+
-    (if $magnus!="" then [{id:"hivexui-magnus",audience:"magnus",permissions:["magnus:view","magnus:operate","magnus:admin"]}] else [] end)|map(.+{redirectUris:[$redirect],firstParty:true})')
+    (if $magnus!="" then [{id:"hivexui-magnus",audience:"magnus",permissions:["magnus:view","magnus:operate","magnus:admin"]}] else [] end)+
+    [{id:"hivexui-registry",audience:"hive-registry",permissions:["registry:inventory"]}]|map(.+{redirectUris:[$redirect],firstParty:true})')
   jq . <<< "$policies" | atomic "$state/browser-clients.json"
   local link_env
   link_env() { jq -c --arg product "$1" --arg issuer "$issuer" --argjson generation "${2:-null}" '[.applied[]|select(.product==$product)|{issuer:$issuer,subject,localId}+(if $generation!=null then {credentialGeneration:$generation} else {} end)]' <<< "$review"; }
