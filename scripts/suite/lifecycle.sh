@@ -78,8 +78,9 @@ hive_stage() {
 # keeps its transaction for recovery.
 hive_abort() {
   local step=$1 message=$2 host aborted=true
-  # migrate-native keeps its own staging and recovery unchanged.
-  ! jq -e '.nativeMigration!=null' "$HIVE_CONFIG" >/dev/null 2>&1 || hive_die "$message"
+  # migrate-native prepare keeps its own staging and recovery unchanged. An installation that has
+  # since moved onto the suite keeps its nativeMigration record and aborts like any other.
+  [[ "${HIVE_NATIVE_STAGING:-false}" != true ]] || hive_die "$message"
   for host in "${HIVE_PREPARED_HOSTS[@]}"; do
     if ! HIVE_ABORT_STEP=$step hive_action "$host" abort >/dev/null 2>&1; then
       aborted=false
@@ -98,7 +99,7 @@ hive_native_begin_all() {
   local host other aborted
   hive_all native-backup-begin && return 0
   host=${HIVE_FAILED_HOST:-}
-  if [[ -n "$host" && "$host" == "$(jq -r '.hosts|keys[0]' "$HIVE_CONFIG")" ]] && ! jq -e '.nativeMigration!=null' "$HIVE_CONFIG" >/dev/null 2>&1 &&
+  if [[ -n "$host" && "$host" == "$(jq -r '.hosts|keys[0]' "$HIVE_CONFIG")" && "${HIVE_NATIVE_STAGING:-false}" != true ]] &&
      HIVE_ABORT_STEP=native-backup-begin hive_action "$host" abort >/dev/null 2>&1; then
     aborted=true
     # Every other host was prepared and has run nothing since.
