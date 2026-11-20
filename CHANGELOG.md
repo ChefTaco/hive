@@ -31,6 +31,8 @@ All notable changes to this project are documented in this file. The format is b
 - `console-clients add` on an installation that grants the Magnus web terminal stopped before
   creating any client. It now leaves only `hivexui-magnus` to fresh setup and adds the others,
   the registry client among them, and `post-upgrade` runs it there too.
+- The ingress forwards Magnus's `GET /api/v1/system/installation` (Magnus 3.2.0) to the browser,
+  so HiveXUI's Installed software view can show the Magnus installation report.
 
 ## [3.12.9] - 2026-11-20
 

@@ -350,6 +350,7 @@ gateway.listen(4310,'0.0.0.0');
     ['/api/magnus/console/session', '/api/v1/console/session'],
     ['/api/magnus/nodes/node-1/gpu', '/api/v1/nodes/node-1/gpu'],
     ['/api/magnus/nodes/node-1/software', '/api/v1/nodes/node-1/software'],
+    ['/api/magnus/system/installation', '/api/v1/system/installation'],
     ['/api/magnus/agents/identity?actorId=actor-1', '/api/v1/agents/identity?actorId=actor-1'],
     ['/api/magnus/agents/node-1~main/identity', '/api/v1/agents/node-1~main/identity'],
     ['/api/magnus/hive/events?after=cursor-1&limit=50', '/api/v1/hive/events?after=cursor-1&limit=50'],
