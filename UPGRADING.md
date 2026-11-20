@@ -93,6 +93,22 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.12.8: HiveXUI 0.10.3, Embermend 0.3.3 and Magnus 3.1.4
+
+Suite 3.12.8 pins HiveXUI 0.10.3, Embermend 0.3.3 and Magnus 3.1.4 (the server, the fleet gateway
+and the host agent package, with Ardent 3.1.4). Every other product pin, the datastore profile,
+the storage recovery profile and the controller are those of 3.12.7, and none of these product
+versions has a database migration, so an upgrade from 3.12.7 needs no migration flag.
+
+```bash
+./hive.sh plan    --config ~/.config/hive/ID/installation.json --release 3.12.8
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.12.8
+```
+
+After upgrading, run `./hive.sh post-upgrade` from the retained 3.12.8 checkout to update the
+installer-owned Magnus host agent to 3.1.4. An external Magnus and other fleet nodes are upgraded by
+their own reviewed procedures, not by this upgrade.
+
 ## Suite 3.12.7: Oathweave client addresses
 
 Suite 3.12.7 pins the same products as 3.12.6 and changes only the controller, so run it from its
