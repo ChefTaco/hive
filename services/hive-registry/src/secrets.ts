@@ -2,7 +2,8 @@
 // raw request before schema validation, so a credential is refused by name or by shape
 // even in a field that would otherwise be rejected. It never echoes what it found.
 const forbiddenKey = /pass(word|phrase|wd)?$|secret|token|api[-_]?key|private[-_]?key|credential|authorization|cookie|session|bearer|signing[-_]?key/i;
-const digestFields = new Set(['manifestDigest', 'planDigest', 'imageDigest']);
+// `digest` is a host's activation receipt in an observation: the SHA-256 of a signed manifest.
+const digestFields = new Set(['manifestDigest', 'planDigest', 'imageDigest', 'digest']);
 const forbiddenValue: RegExp[] = [
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY/, // PEM private key
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*/, // JSON Web Token

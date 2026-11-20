@@ -25,9 +25,13 @@ hive_console_clients() {
   local subcommand=${1:-} clients host result
   [[ "$subcommand" == add ]] || hive_die 'Use: console-clients add [--yes]'
   jq -e '.components.oathweave!=null and .console!=null' "$HIVE_CONFIG" >/dev/null || hive_die 'console-clients needs Oathweave and the console in this installation'
-  # With the gateway's terminal grant, Magnus's client carries magnus:terminal; that stays with fresh setup.
-  ! jq -e '.bootstrap.magnusGateway.grantTerminalToInitialOperator==true' "$HIVE_CONFIG" >/dev/null || hive_die 'This installation grants the web terminal; its Magnus client is managed by fresh setup'
   clients=$(hive_console_clients_wanted)
+  # With the gateway's terminal grant, Magnus's client carries magnus:terminal; that one stays with
+  # fresh setup, and this command adds only the others.
+  if jq -e '.bootstrap.magnusGateway.grantTerminalToInitialOperator==true' "$HIVE_CONFIG" >/dev/null; then
+    clients=$(jq -c 'map(select(.id!="hivexui-magnus"))' <<< "$clients")
+    printf 'This installation grants the web terminal, so fresh setup manages hivexui-magnus; it is left as it is.\n'
+  fi
   [[ "$clients" != '[]' ]] || hive_die 'No product here needs a console client from this command: it covers Magnus (the component or external), Cindertrace, Embermend, Ardent Project Studio and the Hive Registry inventory'
   host=$(jq -r .components.oathweave.host "$HIVE_CONFIG")
   printf 'Oathweave on %s: create any missing public browser client among %s, and add their permissions to the SUITE_ADMIN role.\n' "$host" "$(jq -r 'map(.id)|join(", ")' <<< "$clients")"

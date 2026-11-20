@@ -104,8 +104,8 @@ hive_post_upgrade_ardent() {
 # creates only the missing ones and reports "none" when nothing was missing.
 hive_post_upgrade_clients() {
   jq -e '.components.oathweave!=null and .console!=null' "$HIVE_CONFIG" >/dev/null || return 0
-  ! jq -e '.bootstrap.magnusGateway.grantTerminalToInitialOperator==true' "$HIVE_CONFIG" >/dev/null || return 0
-  [[ $(hive_console_clients_wanted) != '[]' ]] || return 0
+  # With the terminal grant, console-clients leaves hivexui-magnus to fresh setup.
+  [[ $(hive_console_clients_wanted | jq -c --argjson terminal "$(jq '.bootstrap.magnusGateway.grantTerminalToInitialOperator==true' "$HIVE_CONFIG")" 'map(select($terminal|not or .id!="hivexui-magnus"))') != '[]' ]] || return 0
   printf -- '- HiveXUI browser clients in Oathweave:\n'
   if hive_post_upgrade_run console-clients add; then hive_post_upgrade_done oathweave-console-clients
   else printf '  Not applied; see above. Rerun: ./hive.sh console-clients add --config %s\n' "${HIVE_REGISTRY_ORIGINAL_CONFIG:-$HIVE_CONFIG}"; fi

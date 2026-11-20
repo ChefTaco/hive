@@ -87,6 +87,13 @@ cp "$HIVE_TEST_STORE" "$temporary/after-first.json"
 jq 'del(.external,.components.ardentstudio)' "$temporary/config.json" > "$temporary/none.json"
 "$ROOT/hive.sh" console-clients add --config "$temporary/none.json" --non-interactive --yes > "$temporary/none.log" 2>&1 || { cat "$temporary/none.log" >&2; fail 'A core installation run failed'; }
 grep -q 'Created clients: none' "$temporary/none.log" || { cat "$temporary/none.log" >&2; fail 'A core installation run changed clients'; }
+# An installation that grants the web terminal: hivexui-magnus stays with fresh setup, the rest are added.
+store
+jq --arg directory "$directory" 'del(.external)|.components+={magnus:{host:"control",envFile:($directory+"/config/magnus.env"),configDirectory:($directory+"/config/magnus")},"magnus-postgres":{host:"control",configDirectory:($directory+"/config/magnus-postgres")},"magnus-redis":{host:"control",configDirectory:($directory+"/config/magnus-redis")},"magnus-gateway":{host:"control",envFile:($directory+"/config/magnus-gateway.env"),configDirectory:($directory+"/config/magnus-gateway")}}|.bootstrap={adminUsername:"admin",adminEmail:"admin@example.com",certificateFile:($directory+"/console.crt"),privateKeyFile:($directory+"/console.key"),magnusGateway:{sshUsername:"deploy",sshPrivateKeyFile:($directory+"/gateway.key"),grantTerminalToInitialOperator:true}}' "$temporary/config.json" > "$temporary/terminal.json"
+HIVE_TEST_POLICIES=$(jq -c --argjson registry "$registry" '.+{"hivexui-registry":$registry}' <<< "$HIVE_TEST_POLICIES") "$ROOT/hive.sh" console-clients add --config "$temporary/terminal.json" --non-interactive --yes > "$temporary/terminal.log" 2>&1 || { cat "$temporary/terminal.log" >&2; fail 'A terminal-granting installation run failed'; }
+grep -q 'fresh setup manages hivexui-magnus' "$temporary/terminal.log" || { cat "$temporary/terminal.log" >&2; fail 'The Magnus client was not named as left to fresh setup'; }
+grep -q 'Created clients: hivexui-ardentstudio, hivexui-registry' "$temporary/terminal.log" || { cat "$temporary/terminal.log" >&2; fail 'The other clients were not created'; }
+jq -e 'all(.clients[];.id!="hivexui-magnus")' "$HIVE_TEST_STORE" >/dev/null || fail 'The Magnus client was created on a terminal-granting installation'
 # Oathweave still running without the new policy: refused, nothing changed.
 store
 HIVE_TEST_POLICIES='{}' refused 'Oathweave runs without the reviewed browser policy for hivexui-magnus' run --yes
