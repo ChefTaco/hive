@@ -727,6 +727,7 @@ gateway.listen(4310,'0.0.0.0');
   for (const [input, expected] of [
     ['/api/registry/health/ready', '/health/ready'],
     ['/api/registry/v1/installation', '/v1/installation'],
+    ['/api/registry/v1/inventory', '/v1/inventory'],
     ['/api/registry/v1/products', '/v1/products'],
     ['/api/registry/v1/products?installed=true', '/v1/products?installed=true'],
     ['/api/registry/v1/products/emberpath', '/v1/products/emberpath'],
@@ -745,11 +746,11 @@ gateway.listen(4310,'0.0.0.0');
     assert(!unsigned.authorization, input + ' invented a credential');
   }
   for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'])
-    for (const path of ['/api/registry/v1/sync', '/api/registry/v1/products', '/api/registry/v1/products/emberpath', '/api/registry/health/ready', '/api/registry/anything']) {
+    for (const path of ['/api/registry/v1/sync', '/api/registry/v1/observations', '/api/registry/v1/inventory', '/api/registry/v1/products', '/api/registry/v1/products/emberpath', '/api/registry/health/ready', '/api/registry/anything']) {
       const result = await request(path, { Authorization: headers.Authorization, 'Content-Type': 'application/json' }, method, ['POST', 'PUT', 'PATCH'].includes(method) ? '{}' : undefined);
       assert.equal(result.status, 405, method + ' ' + path + ' reached past the ingress');
     }
-  for (const path of ['/api/registry/v1/sync', '/api/registry/v1/history', '/api/registry/v1/unknown', '/api/registry/v2/products', '/api/registry/v1/products/Bad', '/api/registry/v1/products/emberpath/other', '/api/registry/health/live', '/api/registry/', '/api/registry/v1/products/%2e%2e/sync', '/api/registry/v1//products', '/api/registry/v1/products%2femberpath'])
+  for (const path of ['/api/registry/v1/sync', '/api/registry/v1/observations', '/api/registry/v1/inventory/x', '/api/registry/v1/history', '/api/registry/v1/unknown', '/api/registry/v2/products', '/api/registry/v1/products/Bad', '/api/registry/v1/products/emberpath/other', '/api/registry/health/live', '/api/registry/', '/api/registry/v1/products/%2e%2e/sync', '/api/registry/v1//products', '/api/registry/v1/products%2femberpath'])
     assert.equal((await request(path, headers)).status, 404, path + ' passed the registry allowlist');
   for (const authorization of ['Basic b2J2aW91c2x5OmZha2U=', 'Bearer two words', 'Bearer ', 'Bearer a,b'])
     assert.equal((await request('/api/registry/v1/products', { Authorization: authorization })).status, 401, authorization);
