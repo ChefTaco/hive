@@ -7,7 +7,7 @@
 // carried one. Capability names the contract does not know are dropped the same way.
 import { z } from 'zod';
 
-export const registryBrowserContractVersion = 3;
+export const registryBrowserContractVersion = 4;
 
 const productId = z.string().regex(/^[a-z][a-z0-9-]{0,47}$/);
 const localPath = z
@@ -75,9 +75,14 @@ export type RegistryInstallation = z.infer<typeof registryInstallationSchema>;
  * without any capability omits the field.
  *
  * `events.v1`: the product serves a HiveEvent v1 feed, `GET browserPrefix + path?after=&limit=`.
+ * `inventory.v1` (version 4, Hive Registry 1.4.0): the registry serves its inventory, the signed
+ * release's pins beside what the hosts report, at `GET browserPrefix + path` to a person with an
+ * Oathweave token for the `hive-registry` audience that carries `registry:inventory`. Its shape is
+ * the separate inventory contract (inventory-contract.ts); this public contract never carries it.
  */
 export const registryCapabilitiesSchema = z.object({
   'events.v1': z.object({ path: localPath }).optional(),
+  'inventory.v1': z.object({ path: localPath }).optional(),
 });
 export type RegistryCapabilities = z.infer<typeof registryCapabilitiesSchema>;
 

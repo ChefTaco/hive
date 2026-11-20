@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { migrate } from './migrations.js';
-import type { CatalogEntry, Connection, ExternalProduct, InstalledEntry, SetupItem, SyncRequest } from './schema.js';
+import type { CatalogEntry, Connection, ExternalProduct, InstalledEntry, ObservedHost, SetupItem, SyncRequest } from './schema.js';
 
 export class Conflict extends Error {}
 export class Missing extends Error {}
@@ -15,6 +15,7 @@ export type VersionRow = { product_id: string; version: string; image: string; i
 export type HistoryRow = { sequence: number; recorded_at: string; actor: string; operation: string; subject: string; change_json: string };
 export type WriteResult = { changes: number; revision: number };
 export type SetupState = { items: SetupItem[]; updatedAt: string };
+export type ObservationState = { hosts: ObservedHost[]; observedAt: string };
 
 const databaseFile = 'registry.sqlite';
 const emptyConnection: Connection = { consolePath: null, browserPrefix: null, nativeApis: {}, internalEndpoints: {} };
@@ -108,6 +109,32 @@ export class RegistryStore {
       if (!current?.items.some((item) => item.id === id)) throw new Missing(`No setup item ${id} is recorded`);
       this.writeSetup(current.items.map((item) => (item.id === id ? { ...item, status } : item)), record);
     });
+  }
+
+  /**
+   * The latest host observations, kept as history like the setup checklist, so the storage
+   * format is unchanged and an older image ignores them. `observedAt` is when they were recorded.
+   */
+  observations(): ObservationState | undefined {
+    const row = this.db.prepare("SELECT recorded_at, change_json FROM history WHERE subject = 'observations' ORDER BY sequence DESC LIMIT 1").get() as { recorded_at: string; change_json: string } | undefined;
+    if (!row) return undefined;
+    return { hosts: (JSON.parse(row.change_json) as { after: { hosts: ObservedHost[] } }).after.hosts, observedAt: row.recorded_at };
+  }
+
+  /**
+   * Replaces the observations. An identical set observed again within the hour adds no history,
+   * so frequent status checks do not grow it; a changed set, or an hour later, is recorded. The
+   * installation revision is unchanged: observations are not part of the catalog.
+   */
+  recordObservations(hosts: ObservedHost[], actor: string): WriteResult {
+    const timestamp = this.now();
+    const current = this.observations();
+    const next = JSON.stringify([...hosts].sort((a, b) => (a.host < b.host ? -1 : 1)));
+    const fresh = current && Date.parse(timestamp) - Date.parse(current.observedAt) < 3_600_000;
+    if (current && fresh && JSON.stringify(current.hosts) === next) return { changes: 0, revision: this.installation()?.revision ?? 0 };
+    this.db.prepare('INSERT INTO history (recorded_at, actor, operation, subject, change_json) VALUES (?, ?, ?, ?, ?)')
+      .run(timestamp, actor, 'observe', 'observations', JSON.stringify({ after: { hosts: JSON.parse(next) as unknown } }));
+    return { changes: 1, revision: this.installation()?.revision ?? 0 };
   }
 
   history(after: number, limit: number): HistoryRow[] {
