@@ -66,16 +66,27 @@ refused 'Unattended use needs --yes' run
 jq -e '.clients|length==1' "$HIVE_TEST_STORE" >/dev/null || fail 'An unconfirmed run changed the store'
 run --yes > "$temporary/first.log" 2>&1 || { cat "$temporary/first.log" >&2; fail 'console-clients failed'; }
 grep -q 'Created clients: hivexui-magnus, hivexui-ardentstudio' "$temporary/first.log" || { cat "$temporary/first.log" >&2; fail 'The run does not name the created clients'; }
+# The Hive Registry inventory client is optional: an Oathweave without its policy skips it by name.
+grep -q 'Skipped hivexui-registry: the running Oathweave has no browser policy for it' "$temporary/first.log" || { cat "$temporary/first.log" >&2; fail 'The registry client was not named as skipped'; }
+jq -e 'all(.clients[];.id!="hivexui-registry")' "$HIVE_TEST_STORE" >/dev/null || fail 'A client without a policy was created'
 jq -e '[.clients[]|select(.id=="hivexui-magnus" or .id=="hivexui-ardentstudio")|.clientType=="public" and .firstParty==true and .grantTypes=="[\"authorization_code\"]" and .redirectUris=="[\"https://console.example.com/auth/callback\"]" and .name==.id]|length==2 and all' "$HIVE_TEST_STORE" >/dev/null || fail 'The clients are not the reviewed public clients'
 jq -e --argjson magnus "$magnus" --argjson studio "$studio" '(.roles[]|select(.name=="SUITE_ADMIN")|.permissions|fromjson)==(["iam:users:read"]+$magnus.permissions+$studio.permissions)' "$HIVE_TEST_STORE" >/dev/null || fail 'SUITE_ADMIN did not gain exactly the client permissions'
 jq -e '(.users|length)==2 and (.assignments|length)==2 and (.roles[]|select(.name=="SUITE_ADMIN").id)=="r2" and (.roles[]|select(.name=="SUPER_ADMIN").permissions)=="[]"' "$HIVE_TEST_STORE" >/dev/null || fail 'Other identity records changed'
-cp "$HIVE_TEST_STORE" "$temporary/after-first.json"
+cp "$HIVE_TEST_STORE" "$temporary/after-magnus.json"
 run --yes > "$temporary/second.log" 2>&1 || fail 'A repeated run failed'
 grep -q 'Created clients: none. Added to SUITE_ADMIN: none' "$temporary/second.log" || fail 'A repeated run was not a no-op'
-cmp -s <(jq -S . "$HIVE_TEST_STORE") <(jq -S . "$temporary/after-first.json") || fail 'A repeated run changed the store'
-# Without the external Magnus or Studio there is nothing for it to do.
+cmp -s <(jq -S . "$HIVE_TEST_STORE") <(jq -S . "$temporary/after-magnus.json") || fail 'A repeated run changed the store'
+# With its policy in the running Oathweave, the registry client is created like the others.
+registry='{"audience":"hive-registry","permissions":["registry:inventory"]}'
+HIVE_TEST_POLICIES=$(jq -c --argjson registry "$registry" '.+{"hivexui-registry":$registry}' <<< "$HIVE_TEST_POLICIES") run --yes > "$temporary/registry.log" 2>&1 || { cat "$temporary/registry.log" >&2; fail 'The registry client run failed'; }
+grep -q 'Created clients: hivexui-registry. Added to SUITE_ADMIN: registry:inventory' "$temporary/registry.log" || { cat "$temporary/registry.log" >&2; fail 'The registry client was not created'; }
+! grep -q 'Skipped' "$temporary/registry.log" || fail 'A client with a policy was skipped'
+jq -e '[.clients[]|select(.id=="hivexui-registry")|.clientType=="public" and .redirectUris=="[\"https://console.example.com/auth/callback\"]"]==[true]' "$HIVE_TEST_STORE" >/dev/null || fail 'The registry client is not the reviewed public client'
+cp "$HIVE_TEST_STORE" "$temporary/after-first.json"
+# Without the external Magnus or Studio, only the optional registry client is wanted.
 jq 'del(.external,.components.ardentstudio)' "$temporary/config.json" > "$temporary/none.json"
-refused 'No product here needs a console client' "$ROOT/hive.sh" console-clients add --config "$temporary/none.json" --non-interactive --yes
+"$ROOT/hive.sh" console-clients add --config "$temporary/none.json" --non-interactive --yes > "$temporary/none.log" 2>&1 || { cat "$temporary/none.log" >&2; fail 'A core installation run failed'; }
+grep -q 'Created clients: none' "$temporary/none.log" || { cat "$temporary/none.log" >&2; fail 'A core installation run changed clients'; }
 # Oathweave still running without the new policy: refused, nothing changed.
 store
 HIVE_TEST_POLICIES='{}' refused 'Oathweave runs without the reviewed browser policy for hivexui-magnus' run --yes

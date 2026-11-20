@@ -125,6 +125,14 @@ printf 'OPERATOR_OWNED=retained\n' > "$directory/config/hive-registry.env"
 if (provision install) > "$temporary/result" 2>&1; then fail 'Provisioning overwrote a changed environment'; fi
 [[ $(cat "$directory/config/hive-registry.env") == OPERATOR_OWNED=retained ]] || fail 'The registry environment was overwritten'
 rm "$directory/config/hive-registry.env"; provision install
+# Oathweave sign-in for the inventory view: URLs and the audience beside the credentials, never a secret.
+jq -e --arg origin "$(jq -r .origin "$temporary/config.json")" '.=={schema:1,issuer:($origin+"/api/oathweave"),jwksUrl:"https://oathweave:4200/api/v1/oauth/jwks",userinfoUrl:"https://oathweave:4200/api/v1/oauth/userinfo",audience:"hive-registry"}' "$config/identity.json" >/dev/null || fail 'The registry identity file is wrong'
+[[ $(stat -c %a "$config/identity.json") == 600 && ! -e "$config/authority.pem" ]] || fail 'Registry identity file permissions, or an authority without the ingress one'
+grep -Eiq 'secret|password|token' "$config/identity.json" && fail 'The identity file holds a credential field'
+jq '.nativeMigration={browserIssuer:"https://native.example.com/api/oathweave"}|.bootstrap.productEndpoints={oathweave:{origin:"https://identity.example.com:4200"}}' "$temporary/config.json" > "$temporary/identity-elsewhere.json"
+HIVE_CONFIG=$temporary/identity-elsewhere.json hive_registry_identity | jq -e '.=={issuer:"https://native.example.com/api/oathweave",jwksUrl:"https://identity.example.com:4200/api/v1/oauth/jwks",userinfoUrl:"https://identity.example.com:4200/api/v1/oauth/userinfo"}' >/dev/null || fail 'The identity endpoints ignore a migrated issuer or a distributed Oathweave'
+jq 'del(.components.oathweave)' "$temporary/config.json" > "$temporary/no-identity.json"
+[[ $(HIVE_CONFIG=$temporary/no-identity.json hive_registry_identity) == null ]] || fail 'An installation without Oathweave got registry sign-in'
 
 # An upgrade gains an empty store and the ingress route, keeping the previous Caddyfile.
 install -d -m 700 "$directory/config/ingress" "$directory/config/.initializer"
@@ -135,6 +143,16 @@ HIVE_OPERATION=upgrade hive_registry_provision; HIVE_OPERATION=upgrade hive_regi
 cmp -s "$directory/config/ingress/Caddyfile" "$ROOT/deployment/Caddyfile" || fail 'Upgrade did not install the ingress route'
 [[ $(cat "$directory/config/ingress/Caddyfile.pre-registry") == previous-route-file ]] || fail 'The previous Caddyfile was not retained'
 [[ $(jq -r --arg path "$directory/config/ingress/Caddyfile" '.files[$path]' "$directory/config/.initializer/receipt.json") == $(sha256sum "$directory/config/ingress/Caddyfile"|cut -d ' ' -f1) ]] || fail 'The initializer receipt does not record the new Caddyfile'
+# With the ingress's internal authority on the host, the registry trusts Oathweave's certificate with it.
+printf 'fixture authority\n' > "$directory/config/ingress/backend-ca.pem"
+HIVE_OPERATION=upgrade hive_registry_provision
+cmp -s "$config/authority.pem" "$directory/config/ingress/backend-ca.pem" && jq -e '.authorityFile=="/config/authority.pem"' "$config/identity.json" >/dev/null || fail 'The registry did not get the internal authority'
+printf 'renewed authority\n' > "$directory/config/ingress/backend-ca.pem"
+HIVE_OPERATION=upgrade hive_registry_provision
+cmp -s "$config/authority.pem" "$directory/config/ingress/backend-ca.pem" || fail 'A changed authority was not replaced'
+(HIVE_CONFIG=$temporary/no-identity.json HIVE_OPERATION=upgrade hive_registry_provision)
+[[ ! -e "$config/identity.json" ]] || fail 'A stale identity file remained without Oathweave'
+HIVE_OPERATION=upgrade hive_registry_provision
 sha_before=$(sha256sum "$directory/config/ingress/Caddyfile"); printf 'altered\n' > "$directory/config/ingress/Caddyfile.pre-registry"
 HIVE_OPERATION=upgrade hive_registry_refresh_ingress
 [[ $(sha256sum "$directory/config/ingress/Caddyfile") == "$sha_before" && $(cat "$directory/config/ingress/Caddyfile.pre-registry") == altered ]] || fail 'A current Caddyfile was replaced again'
@@ -186,6 +204,7 @@ if [[ "$1" == compose ]]; then
     case " $* " in
       *' GET /v1/installation '*) cat "$state/installation.json";;
       *' GET /v1/products '*) cat "$state/products.json";;
+      *' PUT /v1/observations write '*) [[ ! -e "$state/refuse-observations" ]] || exit 1; cat > "$state/observations.json"; printf '{"schema":1,"changes":1,"revision":0}\n';;
       *) exit 1;;
     esac
     exit 0
@@ -228,6 +247,23 @@ jq '.setup={items:[{id:"first-admin",title:"Create your own administrator accoun
 jq -se '.[0].registry|.state=="in-sync" and .setup.pending==["first-admin"] and (.setup.items|length)==2' "$temporary/status.json" >/dev/null || fail 'Status JSON lacks the checklist'
 grep -q 'Setup checklist: 1 pending' "$temporary/status.err" && grep -q '  - first-admin: Create your own administrator account' "$temporary/status.err" &&
   grep -qF './hive.sh setup done first-admin' "$temporary/status.err" && ! grep -q 'certificate-renewal' "$temporary/status.err" || { cat "$temporary/status.err" >&2; fail 'Status did not list the pending items'; }
+reset_fixture
+# A registry that announces the inventory view records what the hosts run; an older one is left alone.
+rm -f "$HIVE_FIXTURE/observations.json"; status >/dev/null
+[[ ! -e "$HIVE_FIXTURE/observations.json" ]] || fail 'Observations were sent to a registry without the inventory view'
+jq '(.products[]|select(.id=="hive-registry"))+={capabilities:{"inventory.v1":{path:"/v1/inventory"}}}' "$HIVE_FIXTURE/products.json" > "$HIVE_FIXTURE/next"; mv "$HIVE_FIXTURE/next" "$HIVE_FIXTURE/products.json"
+[[ $(status | jq -r .state) == in-sync ]] || fail 'Recording observations changed the report'
+jq -e --arg version 0.1.0 '.schema==1 and (.hosts|length)==1 and (.hosts[0]|.host=="control" and .active and (.unreachable|not) and .receipt.version==$version and (.receipt|keys)==["digest","version"] and .transactionPhase=="complete" and
+  (.catalog|length>0 and all(.[];(keys)==["id","image","version"]))) and
+  (.hosts[0].services|map(select(.service=="emberpath"))[0]|.image==.runningImage and .imageMatches and .state=="running" and .health=="healthy" and .imageId==null)' "$HIVE_FIXTURE/observations.json" >/dev/null || { cat "$HIVE_FIXTURE/observations.json" >&2; fail 'The observation is not what the host runs'; }
+jq '.emberpath="running|healthy|example.com/other@sha256:'"$(printf 'b%.0s' {1..64})"'|sha256:'"$(printf 'd%.0s' {1..64})"'"' "$HIVE_FIXTURE/containers.json" > "$HIVE_FIXTURE/next"; mv "$HIVE_FIXTURE/next" "$HIVE_FIXTURE/containers.json"
+status >/dev/null
+jq -e '.hosts[0].services|map(select(.service=="emberpath"))[0]|.runningImage==("example.com/other@sha256:"+("b"*64)) and .imageId==("sha256:"+("d"*64)) and (.imageMatches|not)' "$HIVE_FIXTURE/observations.json" >/dev/null || fail 'A different running image was not observed'
+# A registry that refuses the write (a read-only rehearsal) never fails status; it says so.
+touch "$HIVE_FIXTURE/refuse-observations"
+"$ROOT/hive.sh" status --config "$temporary/config.json" 2> "$temporary/status.err" | jq -e '.registry.state=="drift"' >/dev/null || fail 'A refused observation changed status'
+grep -q 'did not record what the hosts run' "$temporary/status.err" || fail 'A refused observation was not reported'
+rm -f "$HIVE_FIXTURE/refuse-observations"
 reset_fixture
 # Each difference is reported by name.
 jq '.emberpath|="exited||"+(.|split("|")[2])+"|id-same"' "$HIVE_FIXTURE/containers.json" > "$HIVE_FIXTURE/next"; mv "$HIVE_FIXTURE/next" "$HIVE_FIXTURE/containers.json"; expect_drift not-running; reset_fixture

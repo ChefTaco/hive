@@ -327,7 +327,8 @@ jq -n --arg id "$subject" --arg redirect "$origin/auth/callback" --argjson selec
  {id:"hivexui-oathweave",audience:"oathweave",permissions:["iam:users:read","iam:users:write","iam:users:delete","iam:roles:read","iam:roles:write","iam:sa:read","iam:sa:write","iam:sa:delete","iam:clients:read","iam:clients:write","iam:sessions:revoke","iam:audit:read","iam:system:login","iam:policy:write"],redirectUris:[$redirect],firstParty:true},
  {id:"hivexui-emberpath",audience:"emberpath",permissions:["router:providers:read","router:providers:write","router:routing:read","router:routing:write","router:testing:read","router:testing:write","router:keys:read","router:keys:write","router:settings:read","router:settings:write","router:admin:read","router:admin:write"],redirectUris:[$redirect],firstParty:true},
  {id:"hivexui-hivemem",audience:"hivemem",permissions:["hivemem:admin:all"],redirectUris:[$redirect],firstParty:true},
- {id:"hivexui-hiveskills",audience:"hiveskills",permissions:["hiveskills:admin"],redirectUris:[$redirect],firstParty:true}]} |
+ {id:"hivexui-hiveskills",audience:"hiveskills",permissions:["hiveskills:admin"],redirectUris:[$redirect],firstParty:true},
+ {id:"hivexui-registry",audience:"hive-registry",permissions:["registry:inventory"],redirectUris:[$redirect],firstParty:true}]} |
  .clients += ((if $selection.cindertrace then [{id:"hivexui-cindertrace",audience:"cindertrace",permissions:["cindertrace:view","cindertrace:investigate","cindertrace:admin"],redirectUris:[$redirect],firstParty:true}] else [] end) +
  (if $selection.chattermost then [{id:"hivexui-chattermost",audience:"chattermost",permissions:["chattermost:session"],redirectUris:[$redirect],firstParty:true}] else [] end) +
  (if $selection.magnus then [{id:"hivexui-magnus",audience:"magnus",permissions:(["magnus:view","magnus:operate","magnus:admin"]+(if $terminal then ["magnus:terminal"] else [] end)),redirectUris:[$redirect],firstParty:true}] else [] end) +

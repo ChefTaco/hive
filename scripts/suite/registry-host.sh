@@ -38,6 +38,33 @@ credential() {
   [[ -f "$path" && $(cat "$path") =~ ^[a-f0-9]{64}$ ]] || die 'Invalid protected registry credential'
   permissions=$(stat -c %a "$path"); (( (8#$permissions & 077)==0 )) || die 'Registry credential must be owner-only'
 }
+# Oathweave sign-in for the inventory view (Hive Registry 1.4.0 and later): identity.json and the
+# internal authority that signs Oathweave's certificate, beside the credentials. Neither is a
+# secret and both derive from the configuration, so each is replaced whenever it differs. The
+# environment file stays as it was first written. An older registry image ignores both.
+config_file() {
+  local path=$1 owner=$2 temporary
+  [[ ! -L "$path" ]] || die 'Unsafe registry configuration path'
+  temporary=$(mktemp "$directory/config/.$component.XXXXXX")
+  cat > "$temporary"
+  if [[ -f "$path" ]] && cmp -s "$temporary" "$path"; then rm -f -- "$temporary"; return 0; fi
+  chown "$owner" "$temporary"; chmod 600 "$temporary"; sync -f "$temporary"; mv -T -- "$temporary" "$path"
+}
+identity() {
+  local owner=$1 config=$2 wanted authority="$directory/config/ingress/backend-ca.pem"
+  wanted=$(jq -c '.registry.identity // null' <<< "$input")
+  if [[ "$wanted" == null ]]; then
+    # No Oathweave here: people cannot sign in to the inventory, so no stale file may remain.
+    [[ ! -L "$config/identity.json" ]] || die 'Unsafe registry configuration path'
+    rm -f -- "$config/identity.json"
+    return 0
+  fi
+  if [[ -f "$authority" && ! -L "$authority" ]]; then
+    config_file "$config/authority.pem" "$owner" < "$authority"
+    wanted=$(jq -c '.+{authorityFile:"/config/authority.pem"}' <<< "$wanted")
+  fi
+  jq '{schema:1,issuer,jwksUrl,userinfoUrl,audience:"hive-registry"}+(if .authorityFile then {authorityFile} else {} end)' <<< "$wanted" | config_file "$config/identity.json" "$owner"
+}
 provision() {
   local owner uid gid installation environment temporary config
   owner=$(jq -er .registry.serviceUser <<< "$input"); uid=${owner%:*}; gid=${owner#*:}
@@ -54,6 +81,7 @@ provision() {
     cmp -s "$temporary" "$environment" || { rm -f -- "$temporary"; die 'Existing registry environment differs; it will not be overwritten'; }
     rm -f -- "$temporary"
   else chown "$owner" "$temporary"; chmod 600 "$temporary"; sync -f "$temporary"; mv -T -- "$temporary" "$environment"; fi
+  identity "$owner" "$config"
   case "$(jq -r .operation <<< "$input")" in
     upgrade|rollback|adopt|rehearse)
       # An existing installation gains an empty store before its pre-change backup.
@@ -90,7 +118,7 @@ refresh_ingress() {
 }
 # Reports what this host actually runs. Never fails on an absent or stopped service.
 observe() {
-  local compose="$directory/compose.json" services='[]' service image container state health running matches reference active=false receipt=null phase=null catalog=null version
+  local compose="$directory/compose.json" services='[]' service image container state health running local_image matches reference active=false receipt=null phase=null catalog=null version
   if [[ -f "$directory/receipt.json" && -f "$compose" ]] && jq -e '.services|type=="object"' "$compose" >/dev/null 2>&1; then
     active=true
     receipt=$(jq -c '{version,digest,plan}' "$directory/receipt.json")
@@ -100,12 +128,14 @@ observe() {
     while IFS= read -r service; do
       image=$(jq -r --arg name "$service" '.services[$name].image' "$compose")
       container=$(docker compose -f "$compose" ps -aq "$service" 2>/dev/null | head -n 1 || true)
-      state=missing health='' running='' matches=false
+      state=missing health='' running='' local_image='' matches=false
       if [[ -n "$container" ]] && reference=$(docker inspect -f '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}|{{.Config.Image}}|{{.Image}}' "$container" 2>/dev/null); then
-        IFS='|' read -r state health running container <<< "$reference"
-        [[ "$running" == "$image" && "$container" == "$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)" ]] && matches=true
+        IFS='|' read -r state health running local_image <<< "$reference"
+        [[ "$running" == "$image" && "$local_image" == "$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)" ]] && matches=true
       fi
-      services=$(jq -c --arg service "$service" --arg image "$image" --arg state "$state" --arg health "$health" --argjson matches "$matches" '.+[{service:$service,image:$image,state:$state,health:$health,imageMatches:$matches}]' <<< "$services")
+      # runningImage is the container's configured reference and imageId the local image it runs.
+      services=$(jq -c --arg service "$service" --arg image "$image" --arg state "$state" --arg health "$health" --argjson matches "$matches" --arg running "$running" --arg id "$local_image" \
+        '.+[{service:$service,image:$image,state:$state,health:$health,imageMatches:$matches,runningImage:(if $running=="" then null else $running end),imageId:(if ($id|test("^sha256:[a-f0-9]{64}$")) then $id else null end)}]' <<< "$services")
     done < <(jq -r '.services|keys[]' "$compose")
   fi
   jq -n --arg host "$host" --argjson active "$active" --argjson receipt "$receipt" --argjson phase "$phase" --argjson catalog "$catalog" --argjson services "$services" '{host:$host,active:$active,receipt:$receipt,transactionPhase:$phase,catalog:$catalog,services:$services}'

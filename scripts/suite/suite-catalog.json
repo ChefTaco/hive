@@ -16,6 +16,12 @@
       "internalEndpoints": {
         "api": "http://hive-registry:8095"
       }
+    },
+    "capabilities": {
+      "inventory.v1": {
+        "path": "/v1/inventory",
+        "since": "1.4.0"
+      }
     }
   },
   "oathweave": {

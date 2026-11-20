@@ -31,7 +31,10 @@ for selection in foundation skills models memory coordinated; do
   runtime="$temporary/$selection/config/runtime.json"
   jq -e --argjson extras "$extras" '(.products|keys)==(["oathweave"]+($extras|map(select(.!="hivemem-qdrant")))|sort)' "$runtime" >/dev/null || fail 'Unselected product reached browser runtime'
   clients="$temporary/$selection/config/oathweave/suite-bootstrap.json"
-  jq -e --slurpfile runtime "$runtime" '(.clients|map(.audience)|sort)==($runtime[0].products|keys)' "$clients" >/dev/null || fail 'Unselected product received browser client grants'
+  # Every console product's client, plus the Hive Registry inventory client, which every
+  # installation has and HiveXUI finds through the registry rather than runtime.json.
+  jq -e --slurpfile runtime "$runtime" '(.clients|map(.audience)|sort)==(($runtime[0].products|keys)+["hive-registry"]|sort)' "$clients" >/dev/null || fail 'Unselected product received browser client grants'
+  jq -e '.products["hive-registry"]==null and .identity.clients["hive-registry"]==null' "$runtime" >/dev/null || fail 'The registry client reached runtime.json'
   if [[ "$selection" == coordinated ]]; then
     rg -q '^IAM_ENROLLMENT_PRODUCTS_JSON=' "$temporary/$selection/config/oathweave.env" || fail 'Selected coordinated enrollment missing'
     jq -e '.enrollmentInstallationId=="custom-proof"' "$runtime" >/dev/null

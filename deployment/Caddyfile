@@ -555,7 +555,7 @@
 			header Allow GET
 			respond "Method not allowed" 405
 		}
-		@registry_read path_regexp ^/v1/(installation|products(/[a-z][a-z0-9-]{0,47}(/connection)?)?)$
+		@registry_read path_regexp ^/v1/(installation|inventory|products(/[a-z][a-z0-9-]{0,47}(/connection)?)?)$
 		handle @registry_read {
 			@registry_not_bearer {
 				header Authorization *
