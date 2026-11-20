@@ -6,6 +6,24 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.12.8] - 2026-11-20
+
+### Security
+
+- Pins Magnus 3.1.4 for the server, the fleet gateway and the host agent package. Its images and
+  agent lockfile carry `ws` 8.23.0 (GHSA-37g9-w4hg-h9qr) and drop the vulnerable dev-only Vite
+  build chain; its API, browser contract and schema are those of 3.1.3, with Ardent 3.1.4.
+- Pins Embermend 0.3.3, which redacts private-key blocks in linear time instead of with a regex
+  that was quadratic on many unmatched `-----BEGIN …PRIVATE KEY-----` markers. No migration.
+
+### Changed
+
+- Pins HiveXUI 0.10.3, which vendors ChatterMost 0.7.1's browser conversation contract: requests
+  ChatterMost 0.7.1 refuses, such as reaction names with path, query or markup characters, stop in
+  the browser, and reaction removal encodes every path segment. Every other product pin, the
+  datastore profile, the storage recovery profile and the controller are those of 3.12.7, so an
+  upgrade from 3.12.7 needs no flag. See `UPGRADING.md`, "Suite 3.12.8".
+
 ## [3.12.7] - 2026-11-19
 
 ### Fixed
