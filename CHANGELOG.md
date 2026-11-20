@@ -6,7 +6,29 @@ All notable changes to this project are documented in this file. The format is b
 
 ## Unreleased
 
+## [3.12.9] - 2026-11-20
+
+### Security
+
+- Pins Oathweave 2.3.2, Emberpath 2.5.4, Embermend 0.3.4, Magnus 3.1.5 (the server, the fleet
+  gateway and the host agent package) and ChatterMost 0.7.2 (application and migrator). Each
+  forces the npm package `effect` to 3.22.1, which fixes CVE-2026-121707 (cubic regular-expression
+  backtracking in `Schema.TemplateLiteral`). In these images `effect` is loaded only by the Prisma
+  command-line tool's configuration loader, which runs migrations from files in the image, so no
+  request reached it; the release image gate flags it nonetheless. No product has a migration.
+
+### Changed
+
+- Pins HiveXUI 0.10.3 (ChatterMost 0.7.1's browser conversation contract and encoded reaction
+  removal), as the unpublished 3.12.8 did. Every other product pin, the datastore profile, the
+  storage recovery profile and the controller are those of 3.12.7, so an upgrade from 3.12.7 needs
+  no flag. See `UPGRADING.md`, "Suite 3.12.9".
+
 ## [3.12.8] - 2026-11-20
+
+3.12.8 was tagged and signed but never published: the tagged release's image gate found
+CVE-2026-121707 (published after the release was built) in five of its images. 3.12.9 carries its
+changes and the fix.
 
 ### Security
 
