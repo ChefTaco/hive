@@ -93,6 +93,19 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.13.5: agent checklist item
+
+3.13.5 is a controller release with the product pins, datastore profile and storage recovery profile
+of 3.13.4 (Magnus 3.2.1, Hive Registry 1.4.2). Upgrade from 3.13.0 or later with `plan` and
+`upgrade` as usual; no flag is needed.
+
+- After an upgrade that changes the Magnus agent pin, an unattended `post-upgrade` without `--yes`
+  still does not update the agent on the Magnus host, and now says that unattended use needs
+  `--yes`. Run `./hive.sh post-upgrade --yes`, or `./hive.sh magnus-agent install`.
+- `./hive.sh magnus-agent install` on the Magnus host now records `magnus-agent-enrolled` as done once
+  the pinned agent runs and Magnus has accepted its heartbeat. Previously the item stayed pending
+  until `post-upgrade` ran again. An agent on a fleet host never settles it.
+
 ## Suite 3.13.4: Hive Registry 1.4.2
 
 3.13.4 pins the Hive Registry 1.4.2 (image 2.0.12) and is otherwise 3.13.3: Magnus 3.2.1, the same
