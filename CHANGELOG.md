@@ -12,6 +12,15 @@ All notable changes to this project are documented in this file. The format is b
   value read from the environment, so no environment-derived value is logged as is. It still
   carries only the port, `readOnly` and `inventorySignIn`.
 
+## [3.13.3] - 2026-11-21
+
+### Changed
+
+- Pins Magnus 3.2.1 (server, fleet gateway and host agent; production-only package
+  shrinkwraps, no settings or migrations). Every other product, the datastore profile, the
+  storage recovery profile and the controller are as in 3.13.2. See `UPGRADING.md`,
+  "Suite 3.13.3".
+
 ## [3.13.2] - 2026-11-21
 
 ### Changed
