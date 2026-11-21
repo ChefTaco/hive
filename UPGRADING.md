@@ -93,6 +93,22 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.13.3: Magnus 3.2.1
+
+3.13.3 pins Magnus 3.2.1 for the server, the fleet gateway and the host agent. Every other product,
+the datastore profile, the storage recovery profile and the controller are the same as in 3.13.2.
+Magnus 3.2.1 changes no settings or migrations: its server and console packages ship
+production-only `npm-shrinkwrap.json` files, so a native npm install no longer records their
+development tooling as `extraneous` lock entries.
+
+- Upgrade from 3.13.0, 3.13.1 or 3.13.2 with `plan` and `upgrade` as usual; no flag is needed.
+- Host agents: `./hive.sh post-upgrade` (or `./hive.sh magnus-agent install`) moves the agents
+  the suite installs to 3.2.1. Fleet agents that Magnus manages move with
+  `magnus-server agents upgrade --to 3.2.1`.
+- An external Magnus is upgraded outside this release. The **Installed software** page compares
+  it with this release's pins: a Magnus and agents on 3.2.1 match 3.13.3, and ones still on 3.2.0
+  are listed as differing until they are upgraded.
+
 ## Suite 3.13.2: console-clients checklist
 
 Suite 3.13.2 pins the same products as 3.13.0 and 3.13.1, and only the controller changes, so run it
