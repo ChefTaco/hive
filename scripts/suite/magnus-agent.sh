@@ -70,6 +70,16 @@ hive_magnus_agent_confirm() { # FLAG QUESTION
   hive_confirm "$2"
 }
 
+# The setup checklist's agent item is the agent on the Magnus host at the release's pin. Once an
+# install leaves exactly that version running and Magnus has accepted its heartbeat, the item is
+# recorded as done, as post-upgrade and guided setup record it; an agent on a fleet host never
+# settles it. Without a recorded checklist (a registry before 1.3.0) nothing is recorded.
+hive_magnus_agent_settle_checklist() { # INSTALLED_VERSION PINNED_VERSION
+  local checklist
+  [[ "$HIVE_AGENT_HOST" == "$HIVE_MAGNUS_HOST" && -n "$1" && "$1" == "$2" ]] || return 0
+  if checklist=$(hive_checklist_recorded 2>/dev/null); then hive_checklist_settle "$checklist" magnus-agent-enrolled done || true; fi
+}
+
 hive_magnus_agent_node_record() { # FQDN
   local directory
   directory=$(jq -r --arg host "$HIVE_MAGNUS_HOST" '.hosts[$host].directory' "${HIVE_AGENT_BASE_CONFIG:-$HIVE_CONFIG}")
@@ -278,7 +288,7 @@ hive_magnus_agent() {
       { [[ -z "$secrets" ]] || rm -f -- "$secrets"; hive_die "The node key on $HIVE_AGENT_HOST could not be read; see above"; }
     hive_magnus_agent_credential_plan "$inspect" "$identity"
   fi
-  hive_magnus_agent_confirm "$HIVE_CONFIRMED" "Install or update the Magnus agent $(jq -r .version <<< "$package") on $HIVE_AGENT_HOST as $fqdn?" || { [[ -z "$secrets" ]] || rm -f -- "$secrets"; hive_die 'Cancelled; nothing was changed'; }
+  hive_magnus_agent_confirm "$HIVE_CONFIRMED" "Install or update the Magnus agent $(jq -r .version <<< "$package") on $HIVE_AGENT_HOST as $fqdn?" || { [[ -z "$secrets" ]] || rm -f -- "$secrets"; [[ -t 0 ]] || hive_die 'Cancelled; nothing was changed. Unattended use needs --yes'; hive_die 'Cancelled; nothing was changed'; }
   if [[ "$HIVE_AGENT_CREDENTIALS" == token ]]; then
     # The token goes from the Magnus host straight into an owner-only file, then into the secret
     # file of the install request; hive_cleanup removes both on every exit, an interrupt included.
@@ -311,6 +321,7 @@ hive_magnus_agent() {
   done
   [[ -n "$record" ]] || hive_die "Magnus has not accepted a heartbeat from $fqdn within 2 minutes. Check: journalctl -u magnus-agent on $HIVE_AGENT_HOST, and ./hive.sh magnus-agent status --config FILE"
   printf 'Magnus accepted the heartbeat: node %s (%s), %s.\n' "$(jq -r .id <<< "$record")" "$fqdn" "$(jq -r .status <<< "$record")"
+  hive_magnus_agent_settle_checklist "$(jq -r '.version // empty' <<< "$result")" "$(jq -r .version <<< "$package")"
 
   if jq -e '.components["magnus-gateway"]!=null' "$HIVE_CONFIG" >/dev/null; then
     fingerprint=$(hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-host-key '{}' | jq -r .fingerprint) || hive_die 'The host key could not be read'

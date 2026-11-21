@@ -285,6 +285,11 @@ controller() { (
   export HIVE_ROOT=$ROOT; source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/magnus-gateway.sh"; source "$ROOT/scripts/suite/magnus-agent.sh"
   HIVE_CONFIG=$temporary/config.json HIVE_MANIFEST=$temporary/release.json HIVE_VERSION=9.9.9 HIVE_ID=example-suite
   HIVE_AGENT_TARGET=${HIVE_AGENT_TARGET:-} HIVE_AGENT_SSH_CONFIG='' HIVE_AGENT_SUDO_FILE='' HIVE_AGENT_INSTALL_NODE=false HIVE_AGENT_TRUST=${HIVE_AGENT_TRUST:-false} HIVE_CONFIRMED=true
+  if [[ -n "${CHECKLIST_CALLS:-}" ]]; then
+    source "$ROOT/scripts/suite/setup-checklist.sh"
+    hive_checklist_recorded() { printf '%s\n' '[{"id":"magnus-agent-enrolled","status":"pending"}]'; }
+    hive_registry_write() { printf '%s %s\n' "$1" "$2" >> "$CHECKLIST_CALLS"; }
+  fi
   hive_magnus_agent "$@"
 ) < /dev/null > "$temporary/controller.log" 2>&1; }
 jq -n '{components:{magnus:{agentPackage:{name:"@hivemagnus/magnus-agent",version:"2.1.1",integrity:("sha512-"+("A"*86)+"==")}}}}' > "$temporary/release.json"
@@ -314,7 +319,8 @@ mkdir -p "$temporary/install/config"; cp "$temporary/magnus.env" "$temporary/ins
 jq '.hosts.fleet={target:"deploy@node-1.example.com",directory:"/opt/magnus-agent"}' "$temporary/config.json" > "$temporary/next.json"; mv "$temporary/next.json" "$temporary/config.json"
 jq --arg i "$(integrity 2.1.1)" '.components.magnus.agentPackage={name:"@hivemagnus/magnus-agent",version:"2.1.1",integrity:$i}' "$temporary/release.json" > "$temporary/next.json"; mv "$temporary/next.json" "$temporary/release.json"
 rm -f "$temporary/active"; : > "$log"
-HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install || { cat "$temporary/controller.log" >&2; fail 'A fleet host install failed'; }
+CHECKLIST_CALLS=$temporary/checklist-calls HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install || { cat "$temporary/controller.log" >&2; fail 'A fleet host install failed'; }
+[[ ! -s "$temporary/checklist-calls" ]] || fail 'An agent on a fleet host settled the Magnus host checklist item'
 grep -q 'Magnus accepted the heartbeat: node node-1 (node-1.example.com), ONLINE' "$temporary/controller.log" || { cat "$temporary/controller.log" >&2; fail 'The accepted heartbeat was not reported'; }
 /usr/bin/grep -qx "NODE_MANAGER_SECRET=$node_secret" "$agent/.env" && grep -qx 'MAGNUS_AGENT_TLS_RENEWAL=tailscale' "$agent/.env" && grep -qx 'HOST_FQDN=node-1.example.com' "$agent/.env" || fail 'The fleet host environment is wrong'
 [[ $(stat -c %a "$agent/certs/agent.key") == 600 ]] || fail 'The tailscale key is not owner-only'
@@ -475,4 +481,23 @@ if HIVE_MAGNUS_AGENT_ROOT=$agent HIVE_AGENT_TARGET=fleet controller install; the
 no_token "$log" "$temporary/controller.log" "$temporary/controller-tmp"
 cp "$temporary/release-2.json" "$temporary/release.json"
 
+# The checklist item settles only for the Magnus host's agent at the pinned version.
+(
+  source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/setup-checklist.sh"; source "$ROOT/scripts/suite/magnus-agent.sh"
+  calls=$temporary/settle-calls; : > "$calls"
+  hive_checklist_recorded() { printf '%s\n' '[{"id":"magnus-agent-enrolled","status":"pending"},{"id":"first-admin","status":"pending"}]'; }
+  hive_registry_write() { printf '%s %s %s\n' "$1" "$2" "$3" >> "$calls"; }
+  HIVE_MAGNUS_HOST=control
+  HIVE_AGENT_HOST=fleet hive_magnus_agent_settle_checklist 3.2.1 3.2.1; [[ ! -s "$calls" ]] || fail 'A fleet host agent settled the item'
+  HIVE_AGENT_HOST=control hive_magnus_agent_settle_checklist 3.2.0 3.2.1; [[ ! -s "$calls" ]] || fail 'An agent behind the pin settled the item'
+  HIVE_AGENT_HOST=control hive_magnus_agent_settle_checklist '' 3.2.1; [[ ! -s "$calls" ]] || fail 'An unreported version settled the item'
+  HIVE_AGENT_HOST=control hive_magnus_agent_settle_checklist 3.2.1 3.2.1
+  [[ $(cat "$calls") == 'PUT /v1/setup/items/magnus-agent-enrolled {"status":"done"}' ]] || { cat "$calls" >&2; fail 'The Magnus host agent at its pin did not settle the item'; }
+  : > "$calls"; hive_checklist_recorded() { printf '%s\n' '[{"id":"magnus-agent-enrolled","status":"done"}]'; }
+  HIVE_AGENT_HOST=control hive_magnus_agent_settle_checklist 3.2.1 3.2.1; [[ ! -s "$calls" ]] || fail 'A done item was written again'
+  hive_checklist_recorded() { return 1; }
+  HIVE_AGENT_HOST=control hive_magnus_agent_settle_checklist 3.2.1 3.2.1 || fail 'A missing checklist failed the install'
+  hive_checklist_recorded() { printf '%s\n' '[{"id":"magnus-agent-enrolled","status":"pending"}]'; }; hive_registry_write() { return 1; }
+  HIVE_AGENT_HOST=control hive_magnus_agent_settle_checklist 3.2.1 3.2.1 2>/dev/null || fail 'A failed checklist write failed the install'
+) || exit 1
 printf 'Passed: Magnus agent Node.js range and NodeSource key, pinned package integrity, root-only credentials never in arguments or output, idempotent repair and upgrade, removal with revocation, the web terminal approval kept out of the terminal, controller refusals, and one-time token enrollment of new agents (token never an argument or output, removed on failure and interrupt, no re-enrollment on rerun, legacy flow without node credentials); with Magnus 3.0.0 pinned, no fleet-wide secret written, the token required and read with --token-file -, existing secret lines kept.\n'
