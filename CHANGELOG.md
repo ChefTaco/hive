@@ -6,11 +6,18 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [3.13.4] - 2026-11-21
+
+### Changed
+
+- Pins the Hive Registry 1.4.2 (image 2.0.12); otherwise 3.13.3 (Magnus 3.2.1, the same other
+  products, profiles and controller). See `UPGRADING.md`, "Suite 3.13.4".
+
 ### Fixed
 
-- Hive Registry 1.4.2 (image 2.0.12): the startup line reports the port the server is bound to, not the configured
-  value read from the environment, so no environment-derived value is logged as is. It still
-  carries only the port, `readOnly` and `inventorySignIn`.
+- Hive Registry 1.4.2 (image 2.0.12): the startup line reports the port the server is bound
+  to, not the configured value read from the environment, so no environment-derived value is
+  logged as is. It still carries only the port, `readOnly` and `inventorySignIn`.
 
 ## [3.13.3] - 2026-11-21
 
