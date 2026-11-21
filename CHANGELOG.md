@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`post-upgrade` leaves the browser-clients checklist item pending when nothing is missing.**
+  `hive.sh console-clients add` now reads Oathweave before it asks for confirmation. When every
+  wanted client exists and `SUITE_ADMIN` already has their permissions, it reports "Nothing to
+  add", changes nothing and records `oathweave-console-clients` as done, with or without `--yes`.
+  Previously, an unattended `post-upgrade` was cancelled at the confirmation, so the item stayed
+  pending after every upgrade until it was settled by hand. When something is missing, the
+  command names it before the confirmation, and a client that conflicts is refused before it.
+
 ## [3.13.1] - 2026-11-20
 
 ### Changed

@@ -22,6 +22,20 @@ const clients=requested.filter(c=>!skippedClients.includes(c.id));
 for(const c of clients){const p=policies[c.id];
  assert(p&&p.audience===c.audience&&JSON.stringify([...new Set(p.permissions)].sort())===JSON.stringify([...c.permissions].sort()),"Oathweave runs without the reviewed browser policy for "+c.id+": add it to IAM_BROWSER_CLIENT_POLICIES and recreate Oathweave first");}
 const ids=clients.map(c=>c.id);
+// What is missing: clients to create and SUITE_ADMIN permissions to add. Existing clients must
+// already be the reviewed public clients with this console callback.
+const inspect=async(db)=>{
+ const role=await db.role.findUnique({where:{name:"SUITE_ADMIN"}});
+ assert(role,"This Oathweave store has no SUITE_ADMIN role: fresh setup and migrate-native create it; grant the permissions through Oathweave instead");
+ const missingClients=[];
+ for(const c of clients){const existing=await db.client.findUnique({where:{id:c.id}});
+  if(existing){assert.equal(existing.clientType,"public",c.id+" exists and is not a public client");assert(JSON.parse(existing.redirectUris).includes(c.redirectUris[0]),c.id+" exists with another console callback");continue;}
+  missingClients.push(c);}
+ const current=JSON.parse(role.permissions);
+ return {role,current,missingClients,missingPermissions:[...new Set(clients.flatMap(c=>c.permissions))].filter(p=>!current.includes(p))};};
+// The check reads only: nothing is written and no transaction is opened.
+if(process.argv[2]==="check"){const {missingClients,missingPermissions}=await inspect(prisma);
+ console.log(JSON.stringify({check:true,missingClients:missingClients.map(c=>c.id),missingPermissions,skippedClients}));await prisma.$disconnect();process.exit(0);}
 const snapshot=async(tx)=>JSON.stringify([
  (await tx.user.findMany()).sort((a,b)=>a.id<b.id?-1:1),
  (await tx.role.findMany()).filter(r=>r.name!=="SUITE_ADMIN").sort((a,b)=>a.id<b.id?-1:1),
@@ -31,14 +45,14 @@ const createdClients=[];let addedPermissions=[];
 // Compared inside the transaction: anything else that would change rolls everything back.
 await prisma.$transaction(async(tx)=>{
  const before=await snapshot(tx);
- const role=await tx.role.findUnique({where:{name:"SUITE_ADMIN"}});
- assert(role,"This Oathweave store has no SUITE_ADMIN role: fresh setup and migrate-native create it; grant the permissions through Oathweave instead");
- for(const c of clients){const existing=await tx.client.findUnique({where:{id:c.id}});
-  if(existing){assert.equal(existing.clientType,"public",c.id+" exists and is not a public client");assert(JSON.parse(existing.redirectUris).includes(c.redirectUris[0]),c.id+" exists with another console callback");continue;}
+ const {role,current,missingClients,missingPermissions}=await inspect(tx);
+ for(const c of missingClients){
   await tx.client.create({data:{id:c.id,name:c.id,description:"HiveXUI "+c.audience+" browser client",clientType:"public",active:true,firstParty:c.firstParty,redirectUris:JSON.stringify(c.redirectUris),grantTypes:JSON.stringify(["authorization_code"]),allowedIps:"[]"}});createdClients.push(c.id);}
- const current=JSON.parse(role.permissions);addedPermissions=[...new Set(clients.flatMap(c=>c.permissions))].filter(p=>!current.includes(p));
+ addedPermissions=missingPermissions;
  if(addedPermissions.length)await tx.role.update({where:{id:role.id},data:{permissions:JSON.stringify([...current,...addedPermissions])}});
  assert.equal(await snapshot(tx),before,"Existing identity records would change");
 });
 console.log(JSON.stringify({createdClients,addedPermissions,skippedClients,existingRecordsUnchanged:true}));await prisma.$disconnect();process.exit(0);'
-docker compose -f "$directory/compose.json" exec -T oathweave node --input-type=module -e "$code" "$clients" | grep '^{' | tail -1
+mode=apply
+if jq -e '.consoleClientsCheck==true' <<< "$input" >/dev/null; then mode=check; fi
+docker compose -f "$directory/compose.json" exec -T oathweave node --input-type=module -e "$code" "$clients" "$mode" | grep '^{' | tail -1

@@ -35,6 +35,18 @@ hive_console_clients() {
   [[ "$clients" != '[]' ]] || hive_die 'No product here needs a console client from this command: it covers Magnus (the component or external), Cindertrace, Embermend, Ardent Project Studio and the Hive Registry inventory'
   host=$(jq -r .components.oathweave.host "$HIVE_CONFIG")
   printf 'Oathweave on %s: create any missing public browser client among %s, and add their permissions to the SUITE_ADMIN role.\n' "$host" "$(jq -r 'map(.id)|join(", ")' <<< "$clients")"
+  # Read first, so that a store that already has everything needs no confirmation: an unattended
+  # post-upgrade then records the checklist item as done instead of being cancelled.
+  result=$(HIVE_HOST_ACTION=console-clients HIVE_CONSOLE_CLIENTS_INPUT=$clients HIVE_CONSOLE_CLIENTS_CHECK=true hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/console-clients-host.sh")") ||
+    hive_die 'Oathweave could not be checked and was not changed; see the reason above'
+  jq -e '.check==true and (.missingClients|type=="array") and (.missingPermissions|type=="array")' <<< "$result" >/dev/null || hive_die 'Oathweave did not report its browser clients'
+  if jq -e '(.missingClients|length)==0 and (.missingPermissions|length)==0' <<< "$result" >/dev/null; then
+    printf 'Nothing to add: every client exists and SUITE_ADMIN has their permissions. Oathweave was not changed.\n'
+    hive_console_clients_finish "$result"
+    return 0
+  fi
+  printf 'To create: %s. To add to SUITE_ADMIN: %s.\n' \
+    "$(jq -r '.missingClients|if length==0 then "none" else join(", ") end' <<< "$result")" "$(jq -r '.missingPermissions|if length==0 then "none" else join(", ") end' <<< "$result")"
   if [[ "${HIVE_CONFIRMED:-false}" != true ]]; then
     [[ -t 0 ]] && hive_confirm 'Apply this identity change?' || hive_die 'Cancelled; nothing was changed. Unattended use needs --yes'
   fi
@@ -43,12 +55,17 @@ hive_console_clients() {
   jq -e '.existingRecordsUnchanged==true' <<< "$result" >/dev/null || hive_die 'Oathweave did not confirm the change'
   printf 'Created clients: %s. Added to SUITE_ADMIN: %s. Sign out of the console and in again to use them.\n' \
     "$(jq -r '.createdClients|if length==0 then "none" else join(", ") end' <<< "$result")" "$(jq -r '.addedPermissions|if length==0 then "none" else join(", ") end' <<< "$result")"
-  if jq -e '(.skippedClients // [])|length>0' <<< "$result" >/dev/null; then
-    printf 'Skipped %s: the running Oathweave has no browser policy for it. To use the Installed software view, add it to IAM_BROWSER_CLIENT_POLICIES in config/oathweave.env, recreate Oathweave and run this command again; see deployment/FULL.md, "Hive Registry inventory".\n' \
-      "$(jq -r '.skippedClients|join(", ")' <<< "$result")" >&2
-  fi
-  # Every wanted client now exists, so the setup checklist item is done. Without a recorded
-  # checklist (a registry before 1.3.0) nothing is recorded.
+  hive_console_clients_finish "$result"
+}
+
+# Names the optional clients that were skipped and, since every wanted client now exists, records
+# the setup checklist item as done. Without a recorded checklist (a registry before 1.3.0) nothing
+# is recorded.
+hive_console_clients_finish() { # RESULT
   local checklist
+  if jq -e '(.skippedClients // [])|length>0' <<< "$1" >/dev/null; then
+    printf 'Skipped %s: the running Oathweave has no browser policy for it. To use the Installed software view, add it to IAM_BROWSER_CLIENT_POLICIES in config/oathweave.env, recreate Oathweave and run this command again; see deployment/FULL.md, "Hive Registry inventory".\n' \
+      "$(jq -r '.skippedClients|join(", ")' <<< "$1")" >&2
+  fi
   if checklist=$(hive_checklist_recorded 2>/dev/null); then hive_checklist_settle "$checklist" oathweave-console-clients done || true; fi
 }

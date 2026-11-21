@@ -65,7 +65,9 @@ case "$1" in
     done;;
   compose)
     [[ "$4 $5 $6" == "exec -T oathweave" ]] || exit 99
-    printf '%s\n' "${@: -1}" > "$HIVE_TEST_CLIENTS"
+    # The last two arguments are the client list and the mode: add applies, it never only checks.
+    [[ "${@: -1}" == apply ]] || exit 98
+    printf '%s\n' "${@: -2:1}" > "$HIVE_TEST_CLIENTS"
     printf '{"createdClients":["hivexui-cindertrace"],"addedPermissions":["cindertrace:view"],"existingRecordsUnchanged":true}\n';;
   *) exit 99;;
 esac
