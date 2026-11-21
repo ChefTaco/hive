@@ -26,7 +26,12 @@ for unchanged in 'https://archive.ubuntu.com/ubuntu priority:2' 'http://mirror.e
 done
 [[ $(sha256sum "$fixture/etc/apt/sources.list.d/ubuntu.sources") == "$before" ]] || fail 'Distribution signing keys were changed'
 [[ $(grep -cxF $'https://mirrors.kernel.org/ubuntu\tpriority:0' "$mirrors") == 1 ]] || fail 'Independent authenticated mirror is absent or duplicated'
-config="$fixture/etc/apt/apt.conf.d/99hive-ci-network"
+config="$fixture/etc/apt/apt.conf.d/zz-hive-ci-network"
+# A runner-provided setting must not override ours: APT reads the parts in byte order.
+printf 'Acquire::Retries "1";\nAcquire::https::Timeout "15";\n' > "$fixture/etc/apt/apt.conf.d/99timeout"
+printf 'Dir::Etc::Parts "%s";\n' "$fixture/etc/apt/apt.conf.d" > "$temporary/apt-main.conf"
+[[ $(APT_CONFIG="$temporary/apt-main.conf" apt-config shell R Acquire::Retries T Acquire::https::Timeout) == $'R=\'3\'\nT=\'30\'' ]] || fail 'A runner-provided APT setting overrides the CI settings'
+rm "$fixture/etc/apt/apt.conf.d/99timeout"
 [[ $(stat -c %a "$config") == 644 ]] || fail 'APT sandbox cannot read the configuration'
 apt-config -c "$config" dump > "$temporary/parsed-apt-config"
 grep -qxF 'Acquire::Retries "3";' "$temporary/parsed-apt-config" || fail 'Retry configuration was not accepted by APT'
@@ -76,4 +81,25 @@ if run >/dev/null 2>&1; then fail 'A mirror symlink was accepted'; fi
 rm "$mirrors" "$config"; ln -s "$temporary/outside" "$config"
 if run >/dev/null 2>&1; then fail 'A configuration symlink was accepted'; fi
 if HIVE_CI_APT_ROOT=/ GITHUB_ACTIONS=false bash "$root/scripts/ci-apt-setup.sh" >/dev/null 2>&1; then fail 'System configuration was changed outside CI'; fi
-printf 'Passed: bounded authenticated APT setup, independent Ubuntu mirror fallback, custom-source and signing-key preservation, repeatability and symlink refusal.\n'
+install() { HIVE_CI_APT_GET="$temporary/apt-get" HIVE_CI_APT_UPDATE_SECONDS=2 HIVE_CI_APT_INSTALL_SECONDS=2 bash "$root/scripts/ci-apt-install.sh" "$@"; }
+cat > "$temporary/apt-get" <<'STUB'
+#!/usr/bin/env bash
+log="$(dirname "$0")/apt-calls"
+printf '%s\n' "$*" >> "$log"
+# The first update stalls past its limit, as a hung mirror does; later calls succeed.
+if [[ $1 == update && $(grep -c '^update' "$log") == 1 ]]; then exec sleep 30; fi
+exit 0
+STUB
+chmod 700 "$temporary/apt-get"
+started=$SECONDS
+install ripgrep redis-server 2>"$temporary/install-errors" || fail 'A stalled first attempt was not retried'
+(( SECONDS - started < 20 )) || fail 'A stalled apt-get was not cut off'
+[[ $(cat "$temporary/apt-calls") == $'update\nupdate\ninstall -y ripgrep redis-server' ]] || fail 'Unexpected apt-get calls'
+grep -qF 'attempt 1 of 3 failed or exceeded its time limit' "$temporary/install-errors" || fail 'The cut-off attempt was not reported'
+printf '#!/usr/bin/env bash\nexit 100\n' > "$temporary/apt-get"
+if install jq 2>"$temporary/install-errors"; then fail 'Repeated apt-get failures were accepted'; fi
+grep -qF 'failed after 3 attempts' "$temporary/install-errors" || fail 'The final failure was not reported'
+if install 'jq;rm' >/dev/null 2>&1; then fail 'An invalid package name was accepted'; fi
+if install >/dev/null 2>&1; then fail 'An empty package list was accepted'; fi
+if GITHUB_ACTIONS=false bash "$root/scripts/ci-apt-install.sh" jq >/dev/null 2>&1; then fail 'Packages were installed outside CI'; fi
+printf 'Passed: bounded authenticated APT setup read after the runner settings, time-limited retried installs, independent Ubuntu mirror fallback, custom-source and signing-key preservation, repeatability and symlink refusal.\n'

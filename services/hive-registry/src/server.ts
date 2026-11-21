@@ -12,7 +12,13 @@ const server = createServer(createApp({ store, installation: config.installation
   ...(config.identity ? { inventoryAuthorizer: createInventoryAuthorizer(config.identity) } : {}) }));
 server.headersTimeout = 10_000;
 server.requestTimeout = 30_000;
-server.listen(config.port, config.host, () => console.log(JSON.stringify({ message: 'hive-registry listening', port: config.port, readOnly: config.readOnly, inventorySignIn: config.identity !== undefined })));
+// The startup line carries only the bound port and two flags. Nothing read from the environment
+// (where the credential file paths also come from) is logged as is.
+server.listen(config.port, config.host, () => {
+  const address = server.address();
+  const port = typeof address === 'object' && address !== null ? address.port : null;
+  console.log(JSON.stringify({ message: 'hive-registry listening', port, readOnly: config.readOnly === true, inventorySignIn: config.identity !== undefined }));
+});
 
 let stopping = false;
 function stop(): void {
