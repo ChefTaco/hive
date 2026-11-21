@@ -6,6 +6,15 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Magnus agent checklist item stays pending after the agent is updated by hand.**
+  `./hive.sh magnus-agent install` on the Magnus host now records `magnus-agent-enrolled` as done
+  once the release's pinned agent runs there and Magnus has accepted its heartbeat, as
+  `post-upgrade` and guided setup already did. An agent on a fleet host never settles it. When an
+  unattended `post-upgrade` or `magnus-agent install` stops at the agent confirmation, the message
+  now says that unattended use needs `--yes`; an agent update still never runs without it.
+
 ## [3.13.4] - 2026-11-21
 
 ### Changed
