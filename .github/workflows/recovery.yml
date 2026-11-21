@@ -33,7 +33,8 @@ jobs:
         with:
           node-version: 24.22.3
       - name: Install recovery verification tools
-        run: sudo apt-get update -qq && sudo apt-get install -y jq openssl sqlite3 util-linux
+        timeout-minutes: 20
+        run: sudo env GITHUB_ACTIONS=true bash scripts/ci-apt-install.sh jq openssl sqlite3 util-linux
       - name: Runner comparison metadata
         run: node --input-type=module -e 'import {arch,availableParallelism} from "node:os"; console.log(JSON.stringify({image:process.env.ImageOS,version:process.env.ImageVersion,arch:arch(),cpus:availableParallelism()}))'
       - name: ${{ inputs.full != false && 'Installation-size' || 'Focused-corpus' }} backup, rehearsals, failure recovery and two restores through sudo

@@ -13,7 +13,9 @@ apt="${root%/}/etc/apt"
 for directory in "${root%/}/etc" "$apt" "$apt/apt.conf.d"; do
   [[ -d "$directory" && ! -L "$directory" ]] || die 'Expected a regular APT configuration directory'
 done
-config="$apt/apt.conf.d/99hive-ci-network"
+# APT reads apt.conf.d in byte order and the last setting wins. Hosted runners ship their own
+# 99-prefixed network settings (1 retry, 15-second timeouts), so a 99 name was overridden.
+config="$apt/apt.conf.d/zz-hive-ci-network"
 mirrors="$apt/apt-mirrors.txt"
 for file in "$config" "$mirrors"; do
   [[ ! -L "$file" && ( ! -e "$file" || -f "$file" ) ]] || die 'Refusing a non-regular configuration file'

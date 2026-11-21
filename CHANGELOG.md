@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Hive Registry: the startup line reports the port the server is bound to, not the configured
+  value read from the environment, so no environment-derived value is logged as is. It still
+  carries only the port, `readOnly` and `inventorySignIn`.
+
 ## [3.13.2] - 2026-11-21
 
 ### Changed
