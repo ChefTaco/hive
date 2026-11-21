@@ -93,6 +93,24 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.13.1: controller fixes
+
+Suite 3.13.1 pins the same products as 3.13.0, and only the controller changes, so run it from its
+own release checkout. Upgrading from 3.13.0 needs no flag and no configuration change. From 3.12.9,
+follow the 3.13.0 steps below with 3.13.1, including the `hivexui-registry` policy before any
+`plan`, `rehearse` or `upgrade`.
+
+- `rehearse` followed by `upgrade` under one plan works again when the release changes the ingress
+  Caddyfile. 3.13.0 refused the upgrade with "Deployment input artifacts changed for this plan".
+- A failed read-only check (stage, compatibility, preflight, native preparation) closes its
+  transaction as aborted on an installation migrated from native services, as it does on others.
+  3.13.1 does not close a transaction that a 3.13.0 controller already left prepared; `doctor`
+  reports it as an incomplete transaction.
+
+```bash
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.13.1
+```
+
 ## Suite 3.13.0: Hive Registry 1.4.1 and the Installed software view
 
 Suite 3.13.0 pins the Hive Registry 1.4.1, HiveXUI 0.11.0 and Magnus 3.2.0 (the server, the fleet

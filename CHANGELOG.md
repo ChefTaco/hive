@@ -4,7 +4,12 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [3.13.1] - 2026-11-20
+
+### Changed
+
+- Pins the same products, datastore profile and storage recovery profile as 3.13.0; only the
+  controller changes. See `UPGRADING.md`, "Suite 3.13.1".
 
 ### Fixed
 
