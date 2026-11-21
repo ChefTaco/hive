@@ -93,6 +93,16 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.13.4: Hive Registry 1.4.2
+
+3.13.4 pins the Hive Registry 1.4.2 (image 2.0.12) and is otherwise 3.13.3: Magnus 3.2.1, the same
+other products, datastore and storage recovery profiles, and the same controller. The Registry's
+startup line now reports the port it is bound to and its two flags, and logs nothing taken from
+its environment. There are no Registry schema or API changes.
+
+- Upgrade from 3.13.0 or later with `plan` and `upgrade` as usual; no flag is needed. An
+  installation on 3.13.2 or earlier also gets Magnus 3.2.1; see "Suite 3.13.3" below.
+
 ## Suite 3.13.3: Magnus 3.2.1
 
 3.13.3 pins Magnus 3.2.1 for the server, the fleet gateway and the host agent. Every other product,
