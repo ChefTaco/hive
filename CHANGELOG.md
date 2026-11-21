@@ -8,7 +8,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
-- Hive Registry: the startup line reports the port the server is bound to, not the configured
+- Hive Registry 1.4.2 (image 2.0.12): the startup line reports the port the server is bound to, not the configured
   value read from the environment, so no environment-derived value is logged as is. It still
   carries only the port, `readOnly` and `inventorySignIn`.
 
