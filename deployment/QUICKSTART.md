@@ -422,7 +422,8 @@ completes as done; `./hive.sh status` lists what is still pending.
 single-host installation that command can request full-node enrollment. Use the individual
 commands above when maintaining a limited or Ardent-only node. The scope-preserving
 `post-upgrade` fix in 3.2.2 and later uses `magnus-agent install` for all
-package updates and `console-clients add` for missing clients. Each change asks for confirmation;
+package updates and `console-clients add` for missing clients. Each change asks for confirmation
+(in releases after 3.13.1, `console-clients add` asks only when a client or permission is missing);
 `--yes` confirms these maintenance steps and does not authorize full-node enrollment.
 
 ## 9. Keep the certificate current

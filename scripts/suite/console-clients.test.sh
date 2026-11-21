@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # hive.sh console-clients: the transaction it runs in the Oathweave container, against an
 # in-memory stand-in for Oathweave's store. It creates only the missing reviewed public clients,
-# adds only their permissions to SUITE_ADMIN, repeats as a no-op, and refuses without the
+# adds only their permissions to SUITE_ADMIN, repeats as a no-op that needs no --yes, and refuses without the
 # running policy, without SUITE_ADMIN or with a conflicting client. No containers are started.
 set -Eeuo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -40,7 +40,7 @@ cat > "$temporary/bin/docker" <<'SH'
 printf '%s\n' "$1 $2 $3 $4 $5 $6 $7" >> "$HIVE_TEST_DOCKER_LOG"
 [[ "$1 $2 $4 $5 $6 $7 $8" == "compose -f exec -T oathweave node --input-type=module" && "$9" == -e ]] || exit 99
 code=${10//\/app\/apps\/iam-core\/dist\/db\/client.js/$HIVE_TEST_PRISMA}
-IAM_BROWSER_CLIENT_POLICIES=$HIVE_TEST_POLICIES exec node --input-type=module -e "$code" "${11}"
+IAM_BROWSER_CLIENT_POLICIES=$HIVE_TEST_POLICIES exec node --input-type=module -e "$code" "${@:11}"
 SH
 chmod 700 "$temporary/bin/docker"
 export PATH="$temporary/bin:$PATH" HIVE_TEST_PRISMA="$temporary/prisma.mjs" HIVE_TEST_STORE="$temporary/store.json" HIVE_TEST_DOCKER_LOG="$temporary/docker.log"
@@ -64,6 +64,7 @@ run() { "$ROOT/hive.sh" console-clients add --config "$temporary/config.json" --
 store
 refused 'Unattended use needs --yes' run
 jq -e '.clients|length==1' "$HIVE_TEST_STORE" >/dev/null || fail 'An unconfirmed run changed the store'
+grep -q 'To create: hivexui-magnus, hivexui-ardentstudio. To add to SUITE_ADMIN: magnus:view' "$temporary/result" || { cat "$temporary/result" >&2; fail 'An unconfirmed run did not name what is missing'; }
 run --yes > "$temporary/first.log" 2>&1 || { cat "$temporary/first.log" >&2; fail 'console-clients failed'; }
 grep -q 'Created clients: hivexui-magnus, hivexui-ardentstudio' "$temporary/first.log" || { cat "$temporary/first.log" >&2; fail 'The run does not name the created clients'; }
 # The Hive Registry inventory client is optional: an Oathweave without its policy skips it by name.
@@ -74,8 +75,23 @@ jq -e --argjson magnus "$magnus" --argjson studio "$studio" '(.roles[]|select(.n
 jq -e '(.users|length)==2 and (.assignments|length)==2 and (.roles[]|select(.name=="SUITE_ADMIN").id)=="r2" and (.roles[]|select(.name=="SUPER_ADMIN").permissions)=="[]"' "$HIVE_TEST_STORE" >/dev/null || fail 'Other identity records changed'
 cp "$HIVE_TEST_STORE" "$temporary/after-magnus.json"
 run --yes > "$temporary/second.log" 2>&1 || fail 'A repeated run failed'
-grep -q 'Created clients: none. Added to SUITE_ADMIN: none' "$temporary/second.log" || fail 'A repeated run was not a no-op'
+grep -q 'Nothing to add: every client exists and SUITE_ADMIN has their permissions' "$temporary/second.log" || { cat "$temporary/second.log" >&2; fail 'A repeated run was not a no-op'; }
 cmp -s <(jq -S . "$HIVE_TEST_STORE") <(jq -S . "$temporary/after-magnus.json") || fail 'A repeated run changed the store'
+# With nothing missing, an unattended run without --yes succeeds: post-upgrade runs it that way
+# and records the checklist item as done. The optional client is still named as skipped.
+run > "$temporary/unattended.log" 2>&1 || { cat "$temporary/unattended.log" >&2; fail 'An unattended run with nothing to add failed'; }
+grep -q 'Nothing to add' "$temporary/unattended.log" || { cat "$temporary/unattended.log" >&2; fail 'An unattended run did not report nothing to add'; }
+grep -q 'Skipped hivexui-registry' "$temporary/unattended.log" || { cat "$temporary/unattended.log" >&2; fail 'An unattended run did not name the skipped client'; }
+! grep -q 'Created clients' "$temporary/unattended.log" || fail 'An unattended run with nothing to add applied a change'
+cmp -s <(jq -S . "$HIVE_TEST_STORE") <(jq -S . "$temporary/after-magnus.json") || fail 'An unattended run changed the store'
+# A permission removed from SUITE_ADMIN is missing again: named, and not applied without --yes.
+jq '.roles|=map(if .name=="SUITE_ADMIN" then .permissions=(.permissions|fromjson|map(select(.!="magnus:admin"))|tojson) else . end)' "$HIVE_TEST_STORE" > "$temporary/next.json"; mv "$temporary/next.json" "$HIVE_TEST_STORE"
+cp "$HIVE_TEST_STORE" "$temporary/missing-permission.json"
+refused 'Unattended use needs --yes' run
+grep -q 'To create: none. To add to SUITE_ADMIN: magnus:admin.' "$temporary/result" || { cat "$temporary/result" >&2; fail 'The missing permission was not named before confirmation'; }
+cmp -s "$HIVE_TEST_STORE" "$temporary/missing-permission.json" || fail 'An unconfirmed run changed the store'
+run --yes > "$temporary/permission.log" 2>&1 || { cat "$temporary/permission.log" >&2; fail 'Restoring the permission failed'; }
+grep -q 'Created clients: none. Added to SUITE_ADMIN: magnus:admin' "$temporary/permission.log" || { cat "$temporary/permission.log" >&2; fail 'The permission was not added back'; }
 # With its policy in the running Oathweave, the registry client is created like the others.
 registry='{"audience":"hive-registry","permissions":["registry:inventory"]}'
 HIVE_TEST_POLICIES=$(jq -c --argjson registry "$registry" '.+{"hivexui-registry":$registry}' <<< "$HIVE_TEST_POLICIES") run --yes > "$temporary/registry.log" 2>&1 || { cat "$temporary/registry.log" >&2; fail 'The registry client run failed'; }
@@ -86,7 +102,7 @@ cp "$HIVE_TEST_STORE" "$temporary/after-first.json"
 # Without the external Magnus or Studio, only the optional registry client is wanted.
 jq 'del(.external,.components.ardentstudio)' "$temporary/config.json" > "$temporary/none.json"
 "$ROOT/hive.sh" console-clients add --config "$temporary/none.json" --non-interactive --yes > "$temporary/none.log" 2>&1 || { cat "$temporary/none.log" >&2; fail 'A core installation run failed'; }
-grep -q 'Created clients: none' "$temporary/none.log" || { cat "$temporary/none.log" >&2; fail 'A core installation run changed clients'; }
+grep -q 'Nothing to add' "$temporary/none.log" || { cat "$temporary/none.log" >&2; fail 'A core installation run changed clients'; }
 # An installation that grants the web terminal: hivexui-magnus stays with fresh setup, the rest are added.
 store
 jq --arg directory "$directory" 'del(.external)|.components+={magnus:{host:"control",envFile:($directory+"/config/magnus.env"),configDirectory:($directory+"/config/magnus")},"magnus-postgres":{host:"control",configDirectory:($directory+"/config/magnus-postgres")},"magnus-redis":{host:"control",configDirectory:($directory+"/config/magnus-redis")},"magnus-gateway":{host:"control",envFile:($directory+"/config/magnus-gateway.env"),configDirectory:($directory+"/config/magnus-gateway")}}|.bootstrap={adminUsername:"admin",adminEmail:"admin@example.com",certificateFile:($directory+"/console.crt"),privateKeyFile:($directory+"/console.key"),magnusGateway:{sshUsername:"deploy",sshPrivateKeyFile:($directory+"/gateway.key"),grantTerminalToInitialOperator:true}}' "$temporary/config.json" > "$temporary/terminal.json"
@@ -104,10 +120,11 @@ refused 'no SUITE_ADMIN role' run --yes
 store
 jq '.clients+=[{id:"hivexui-magnus",name:"hivexui-magnus",clientType:"confidential",redirectUris:"[]"}]' "$HIVE_TEST_STORE" > "$temporary/next.json"; mv "$temporary/next.json" "$HIVE_TEST_STORE"
 cp "$HIVE_TEST_STORE" "$temporary/conflict.json"
+refused 'hivexui-magnus exists and is not a public client' run
 refused 'hivexui-magnus exists and is not a public client' run --yes
 cmp -s "$HIVE_TEST_STORE" "$temporary/conflict.json" || fail 'A refused run changed the store'
 # Unknown subcommands are refused before any host is contacted.
 : > "$HIVE_TEST_DOCKER_LOG"
 refused 'Use: console-clients add' "$ROOT/hive.sh" console-clients remove --config "$temporary/config.json" --non-interactive --yes
 [[ ! -s "$HIVE_TEST_DOCKER_LOG" ]] || fail 'A refused subcommand reached the host'
-printf 'Passed: console clients created once with the reviewed grants, SUITE_ADMIN extended by exactly their permissions, a no-op repeat, and refusals that leave the store unchanged.\n'
+printf 'Passed: console clients created once with the reviewed grants, SUITE_ADMIN extended by exactly their permissions, a no-op repeat that needs no confirmation, and refusals that leave the store unchanged.\n'
