@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [3.13.5] - 2026-11-21
+
+### Changed
+
+- Pins the products, datastore profile and storage recovery profile of 3.13.4; only the
+  controller changes. See `UPGRADING.md`, "Suite 3.13.5".
+
 ### Fixed
 
 - **The Magnus agent checklist item stays pending after the agent is updated by hand.**
