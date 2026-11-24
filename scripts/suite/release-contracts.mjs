@@ -49,6 +49,14 @@ export const DATASTORE_RELEASE_PROFILES = Object.freeze({
     postgres17: { image: 'ghcr.io/cheftaco/hive-postgres:17.12-2', version: '17.12' },
     postgres18: { image: 'ghcr.io/cheftaco/hive-postgres:18.7-2', version: '18.7' },
   }),
+  // A library patch (Zstandard 1.6.0, CVE-2026-124851): the major, collation receipt and storage
+  // format are those of runtime-2026-11-pg1712-xslt, so an upgrade from it changes only the image.
+  'runtime-2026-11-pg1712-zstd': Object.freeze({
+    redis: { image: 'ghcr.io/cheftaco/hive-redis:8.2.10-2', version: '8.2.10' },
+    qdrant: { image: 'ghcr.io/cheftaco/hive-qdrant:1.18.3-3', version: '1.18.3' },
+    postgres17: { image: 'ghcr.io/cheftaco/hive-postgres:17.12-3', version: '17.12' },
+    postgres18: { image: 'ghcr.io/cheftaco/hive-postgres:18.7-3', version: '18.7' },
+  }),
 });
 // A superseded profile names the last suite release that may select it, so later releases
 // cannot carry a known-vulnerable datastore forward. Signed historical inputs still rebuild.
@@ -56,6 +64,7 @@ export const DATASTORE_PROFILE_LAST_RELEASE = Object.freeze({
   'runtime-2026-11': '3.2.1',
   'runtime-2026-11-xslt': '3.6.1',
   'runtime-2026-11-pg1712': '3.7.0',
+  'runtime-2026-11-pg1712-xslt': '3.14.0',
 });
 export function assertDatastoreProfileCurrent(version, profile) {
   const last = typeof profile === 'string' && Object.hasOwn(DATASTORE_PROFILE_LAST_RELEASE, profile) ? DATASTORE_PROFILE_LAST_RELEASE[profile] : undefined;

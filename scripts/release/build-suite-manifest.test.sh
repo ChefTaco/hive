@@ -155,7 +155,17 @@ assert.equal(patch['datastore:postgres17'].version, minor['datastore:postgres17'
 assert.equal(patch['datastore:postgres18'].version, minor['datastore:postgres18'].version);
 assert.deepEqual(patch['datastore:redis'], minor['datastore:redis']);
 assert.deepEqual(patch['datastore:qdrant'], minor['datastore:qdrant']);
-current('9.9.9', 'runtime-2026-11-pg1712-xslt');
+current('3.14.0', 'runtime-2026-11-pg1712-xslt');
+assert.throws(() => current('3.14.1', 'runtime-2026-11-pg1712-xslt'), /superseded/);
+// The Zstandard patch of the same minor releases: new immutable PostgreSQL tags only.
+const zstd = references('runtime-2026-11-pg1712-zstd');
+assert.equal(zstd['datastore:postgres17'].image, 'ghcr.io/cheftaco/hive-postgres:17.12-3');
+assert.equal(zstd['datastore:postgres18'].image, 'ghcr.io/cheftaco/hive-postgres:18.7-3');
+assert.equal(zstd['datastore:postgres17'].version, patch['datastore:postgres17'].version);
+assert.equal(zstd['datastore:postgres18'].version, patch['datastore:postgres18'].version);
+assert.deepEqual(zstd['datastore:redis'], patch['datastore:redis']);
+assert.deepEqual(zstd['datastore:qdrant'], patch['datastore:qdrant']);
+current('9.9.9', 'runtime-2026-11-pg1712-zstd');
 NODE
 jq '.datastoreProfile="runtime-2026-11-xslt"' "$temporary/inputs.json" > "$temporary/xslt-inputs.json"
 jq '.datastoreProfile="runtime-2026-11-pg1712"' "$temporary/inputs.json" > "$temporary/minor-inputs.json"

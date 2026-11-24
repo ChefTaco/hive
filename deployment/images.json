@@ -24,8 +24,8 @@
     },
     {
       "image": "hive-postgres",
-      "version": "17.12-2",
-      "upgradeFrom": "ghcr.io/cheftaco/hive-postgres:17.12-1@sha256:2b15e59bf845c4661c5523dc7f2aeeeb573aa8a99a8258179dbdcf1bdb9c2ad1",
+      "version": "17.12-3",
+      "upgradeFrom": "ghcr.io/cheftaco/hive-postgres:17.12-2@sha256:21a7f409c3304ae34b4d8fc38343656ab650d76ea5db2d932a4773373eaf1058",
       "context": "deployment/datastores",
       "file": "deployment/datastores/postgres.Dockerfile",
       "check": [
@@ -41,8 +41,8 @@
     },
     {
       "image": "hive-postgres",
-      "version": "18.7-2",
-      "upgradeFrom": "ghcr.io/cheftaco/hive-postgres:18.7-1@sha256:2f261bd6c38d75119f57fddfbe1af7452e514421e94d216932a805f4bde8c7d6",
+      "version": "18.7-3",
+      "upgradeFrom": "ghcr.io/cheftaco/hive-postgres:18.7-2@sha256:e52f7dd870240e2ab2c6be2f3bafbcba9b686ec05781c1d8f3f92388af56e30a",
       "context": "deployment/datastores",
       "file": "deployment/datastores/postgres.Dockerfile",
       "check": [
