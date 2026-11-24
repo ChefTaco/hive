@@ -669,7 +669,7 @@
       }
     },
     "magnus": {
-      "image": "ghcr.io/cheftaco/magnus-server@sha256:8324317023be831469258d8255bbb5a02ba29af84d1d05e37ccba3ee8ff43dbd",
+      "image": "ghcr.io/cheftaco/magnus-server@sha256:894342af9ed27ce8ec48ad9539bce54bb4a139aa2db495d8334ce8171eafec22",
       "kind": "application",
       "storageFormat": "magnus-v1",
       "requiresLocal": [
@@ -704,7 +704,7 @@
         }
       },
       "initialization": {
-        "image": "ghcr.io/cheftaco/magnus-server@sha256:8324317023be831469258d8255bbb5a02ba29af84d1d05e37ccba3ee8ff43dbd",
+        "image": "ghcr.io/cheftaco/magnus-server@sha256:894342af9ed27ce8ec48ad9539bce54bb4a139aa2db495d8334ce8171eafec22",
         "command": [
           "migrate"
         ],
@@ -712,12 +712,12 @@
           "verify-initialization"
         ]
       },
-      "version": "3.3.2",
+      "version": "3.3.3",
       "embermendProtocol": 1,
       "agentPackage": {
         "name": "@hivemagnus/magnus-agent",
-        "version": "3.3.2",
-        "integrity": "sha512-wTzw4l0ihxdnzIqUgqX8F4MheqjcquTRQgLMjnCCi4n+VBufX52E/oiobKNzCffdJqWyPckhYVZ9vD8eBiiKiQ=="
+        "version": "3.3.3",
+        "integrity": "sha512-06d3023+y/5Z3rxiGSm8Cz152zGHj4N4qU0MZRBXzx+ZZkL7TuLhhsUZ8ecB/ZPfrbrymQaf02YCGayUilvQKg=="
       },
       "catalog": {
         "displayName": "Magnus",
@@ -1175,7 +1175,7 @@
       }
     },
     "magnus-gateway": {
-      "image": "ghcr.io/cheftaco/magnus-fleet-gateway@sha256:6378d05d4c889d0e84dc66711d0c8e05e8607b352109f3568cc263f0c1556d80",
+      "image": "ghcr.io/cheftaco/magnus-fleet-gateway@sha256:3ae855e0fc70c4b2d9766a82e47c429130ba41df775d95207d237871550dadca",
       "kind": "application",
       "storageFormat": "magnus-gateway-known-hosts-v1",
       "requiresLocal": [
@@ -1200,7 +1200,7 @@
           "start_period": "5s"
         }
       },
-      "version": "3.3.2",
+      "version": "3.3.3",
       "catalog": {
         "displayName": "Magnus Fleet Gateway",
         "description": "Optional web terminal for the Magnus console. Holds the restricted SSH key. Off unless selected.",
