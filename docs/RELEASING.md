@@ -153,3 +153,11 @@ Suite 3.8.0 and later select `runtime-2026-11-pg1712-xslt`: the same PostgreSQL 
 runtime and its collation receipt, so an upgrade from `runtime-2026-11-pg1712` has no storage
 transition; the image workflow starts data written by 17.12-1 and 18.7-1 on the candidate.
 `runtime-2026-11-pg1712` remains selectable up to suite 3.7.0.
+
+Suite 3.14.1 and later select `runtime-2026-11-pg1712-zstd`: the same PostgreSQL 17.12 and 18.7 as
+`hive-postgres` 17.12-3 and 18.7-3 with Zstandard 1.6.0 (`libzstd1` 1.6.0-r0), which fixes
+CVE-2026-124851 in zstd 1.5.1 to 1.5.7. A library patch keeps the major, the runtime and its
+collation receipt, so an upgrade from `runtime-2026-11-pg1712-xslt` has no storage transition; the
+image workflow starts data written by 17.12-2 and 18.7-2 on the candidate. Redis and Qdrant keep
+their images: Qdrant 1.18.3 bundles Zstandard 1.5.x inside its binary, and no Qdrant release ships
+1.6.0 yet. `runtime-2026-11-pg1712-xslt` remains selectable up to suite 3.14.0.
