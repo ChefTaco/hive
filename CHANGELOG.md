@@ -51,10 +51,10 @@ views. See `UPGRADING.md`, "Suite 3.14.0".
   `emberpath-managed-format-2` with Emberpath's own `migrate`, so the upgrade needs
   `--allow-migrations`; fresh installs create the new format directly. An installation still on
   `emberpath-v1` (a release before 3.4.0) upgrades to a 3.4.0 to 3.13.5 release first.
-- **Studio names itself by the installation.** A fresh Ardent Project Studio, and one added with
-  `hive.sh add ardentstudio`, gets `ARDENT_STUDIO_INSTANCE_ID` set to the installation ID, so its
-  execution references read `hx1:studio:<installation>:…`. An existing Studio keeps `local` unless
-  you set it.
+- **Studio names itself by the installation.** The Ardent Project Studio of a fresh installation
+  gets `ARDENT_STUDIO_INSTANCE_ID` set to the installation ID, so its execution references read
+  `hx1:studio:<installation>:…`. An existing Studio keeps `local` unless you set it. (The 3.14.0
+  notes as tagged also named `hive.sh add ardentstudio`; `hive.sh add` does not add Studio.)
 
 ### Added
 
