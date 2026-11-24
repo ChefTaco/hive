@@ -406,7 +406,7 @@ Then finish maintenance from the retained release checkout with the individual c
 ./hive.sh magnus-agent status --config ~/.config/hive/hive/installation.json --release 3.14.1
 ./hive.sh magnus-agent install --config ~/.config/hive/hive/installation.json --release 3.14.1
 ./hive.sh console-clients add --config ~/.config/hive/hive/installation.json --release 3.14.1
-./hive.sh doctor --config ~/.config/hive/hive/installation.json --release 3.14.0
+./hive.sh doctor --config ~/.config/hive/hive/installation.json --release 3.14.1
 ```
 
 Run the Magnus commands only when this installation hosts Magnus and has a host agent to update;
