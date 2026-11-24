@@ -109,6 +109,26 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.14.2: Magnus 3.3.5, agent definitions and Ardent 3.2.1
+
+3.14.2 pins Magnus 3.3.5 for the server, the fleet gateway and the host agent package (its agent
+stages Ardent 3.2.1). Every other product, the datastore and storage recovery profiles and the
+controller are those of 3.14.1.
+
+- **Migration.** A suite-managed Magnus (the full profile) applies
+  `20261124190000_ardent_agent_operation_definition_kind`, a fast additive change to one check
+  constraint, so on such an installation `plan`, `rehearse` and `upgrade` from 3.14.1 need
+  `--allow-migrations`. An installation without Magnus, or with an external Magnus, needs none (an
+  external Magnus is upgraded on its own host). Existing rows are unchanged; a rollback restores the
+  pre-upgrade backup.
+- **Agent definitions.** Installing a portable agent definition
+  (`POST /api/v1/ardent/agent-definitions/install`, Studio's "Create agent from definition") works
+  again; on 3.14.0 and 3.14.1 it failed with 500.
+- **Host agents.** `./hive.sh post-upgrade --yes` (or `./hive.sh magnus-agent install`) moves the
+  agents the suite installs to 3.3.5; fleet agents that you installed yourself are upgraded from
+  Magnus as before. Ardent profiles keep running the version they have until you update them in
+  Magnus > Ardent; 3.2.1 changes only the client package, not the runtime.
+
 ## Suite 3.14.1: agent model route, Magnus 3.3.3 and Zstandard 1.6.0
 
 3.14.1 pins Magnus 3.3.3 (server, fleet gateway and host agent), HiveSkills 1.9.1 and Cindertrace

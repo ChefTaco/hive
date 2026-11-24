@@ -6,6 +6,30 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [3.14.2] - 2026-11-24
+
+Product update: Magnus 3.3.5 (server, fleet gateway and host agent; Ardent 3.2.1 for the agents).
+Everything else is as in 3.14.1. A suite-managed Magnus applies one fast, additive migration
+(`--allow-migrations`); the controller is unchanged. See `UPGRADING.md`, "Suite 3.14.2".
+
+### Changed
+
+- Pins Magnus 3.3.5.
+  - **Magnus 3.3.4:** portable agent-definition installs work. Magnus 3.3.0-3.3.3 recorded a
+    definition install as an operation kind its database refused, so every
+    `POST /api/v1/ardent/agent-definitions/install` failed with 500 after its preflight passed,
+    before anything was created on the node. Migration
+    `20261124190000_ardent_agent_operation_definition_kind` widens the check; existing rows already
+    satisfy it.
+  - **Magnus 3.3.5:** the host agent and New Agent stage Ardent 3.2.1, whose only change is
+    `@hivemagnus/ardent-client`: `viaMagnus` takes `apiBase`, so a client reaches Magnus through a
+    console at `https://<console>/api/magnus`. The Ardent runtime is unchanged.
+
+### Fixed
+
+- `deployment/FULL.md` ("Agent dependencies") no longer says the suite leaves Emberpath's address
+  unset; since 3.14.1 a fresh installation's Magnus gets `MAGNUS_ARDENT_EMBERPATH_URL`.
+
 ## [3.14.1] - 2026-11-24
 
 Product, datastore and controller update: Magnus 3.3.3 (server, fleet gateway and host agent),
