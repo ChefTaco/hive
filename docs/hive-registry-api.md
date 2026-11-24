@@ -139,12 +139,22 @@ tell the product version apart; the public connection never carries them.
 
 - `name` matches `[a-z0-9.-]{1,64}`; readers ignore names they do not know. `since` is the first
   product version that offers it.
-- `confirmed: true`: the registry recorded a numeric version for this product (`X.Y.Z`) and it is
-  `since` or newer. Entries whose `since` is newer than the recorded version are left out.
-- `confirmed: false`: the registry cannot tell the version, as for an
+- With a numeric recorded version (`X.Y.Z`), entries whose `since` is newer than it are left out.
+- `confirmed: true`: the product is recorded as running that version, and it is `since` or newer.
+  For a product this installation runs, that is once its status is `installed`: the sync that
+  completes an install, upgrade, rollback or adoption, which `hive.sh` sends only after it observed
+  the signed image running and healthy. An externally managed product with a `version` is
+  confirmed as recorded.
+- `confirmed: false` while the product is `activating`: `hive.sh` records the new version before
+  it starts the products, so until the completion sync the product may still run its previous
+  version, or none. A failed or held activation stays unconfirmed until a repeated command or a
+  rollback completes; a completed rollback confirms the entries its version offers. Entries are
+  listed as for the recorded version.
+- `confirmed: false` also when the registry cannot tell the version, as for an
   [external Magnus](../deployment/FULL.md#external-magnus), an externally managed product without
-  a `version` or a version such as `3.3.0-rc.1`. Every declared entry is listed; the reader
-  compares `since` with the version the product itself reports before relying on it.
+  a `version` or a version such as `3.3.0-rc.1`. Every declared entry is listed.
+- Unconfirmed, the reader compares `since` with the version the product itself reports (such as
+  its health or version endpoint) before relying on it.
 - An offered capability makes an endpoint available, nothing more. It never grants a permission or
   enables an integration: the existing credentials and enrollment steps still apply.
 
@@ -167,6 +177,8 @@ invalid_request` for a malformed name):
 - `GET /v1/products?capability=NAME` lists only the products whose connection offers it, combined
   with `?installed=` when both are given. The list entries themselves do not carry
   `serviceCapabilities`; read each product's connection for them.
+- An unconfirmed entry, such as one of an `activating` product, still counts as offered by both
+  filters. Check its `confirmed` before relying on it.
 
 The suite catalog (`scripts/suite/suite-catalog.json`) declares them per product as
 `"serviceCapabilities": [{"name": "...", "since": "X.Y.Z"}]`, where `"since": null` declares one

@@ -371,8 +371,8 @@ describe('Hive Registry API', () => {
   describe('service capabilities', () => {
     const declared = [{ name: 'emberpath.execution-trace.v1', since: '2.6.0' }, { name: 'retry-signal.v1', since: '2.6.0' }, { name: 'memory.v1', since: '1.0.0' }];
     // Emberpath at VERSION with the declared service capabilities, and an external Magnus with its own.
-    const offering = (version: string, capabilities: unknown = declared) => {
-      const body = syncBody('complete', 'installed') as any;
+    const offering = (version: string, capabilities: unknown = declared, phase: 'begin' | 'complete' = 'complete') => {
+      const body = syncBody(phase, phase === 'begin' ? 'activating' : 'installed') as any;
       const emberpath = body.installed.find((item: any) => item.id === 'emberpath');
       emberpath.version = version;
       emberpath.connection.serviceCapabilities = capabilities;
@@ -401,6 +401,51 @@ describe('Hive Registry API', () => {
       assert.equal('serviceCapabilities' in (await connection('hive-registry')).body, false);
       assert.equal((await sync(offering('0.9.0'))).status, 200);
       assert.equal('serviceCapabilities' in (await connection('emberpath')).body, false);
+    });
+    it('confirms them only once activation completes', async () => {
+      const confirmed = async () => (await connection('emberpath')).body.serviceCapabilities.map((item: any) => `${item.name}:${item.confirmed}`);
+      const listed = async (query: string) => (await call('GET', `/v1/products${query}`, { token: readToken })).body.products.map((item: any) => item.id);
+      // An install records the version before the products start: listed, but not confirmed.
+      assert.equal((await sync(offering('2.6.0', declared, 'begin'))).status, 200);
+      assert.deepEqual(await confirmed(), ['emberpath.execution-trace.v1:false', 'retry-signal.v1:false', 'memory.v1:false']);
+      // Still offered to the filters, unconfirmed.
+      const pending = await connection('emberpath', '?capability=retry-signal.v1');
+      assert.equal(pending.status, 200);
+      assert.deepEqual(pending.body.serviceCapabilities, [{ name: 'retry-signal.v1', since: '2.6.0', confirmed: false }]);
+      assert.deepEqual(await listed('?capability=retry-signal.v1'), ['emberpath']);
+      // A retried begin, as from a controller that never completes, never confirms them.
+      assert.equal((await sync(offering('2.6.0', declared, 'begin'))).status, 200);
+      assert.deepEqual(await confirmed(), ['emberpath.execution-trace.v1:false', 'retry-signal.v1:false', 'memory.v1:false']);
+      // The completion sync, sent once hive.sh observed the signed images running, confirms them.
+      assert.equal((await sync(offering('2.6.0'))).status, 200);
+      assert.deepEqual(await confirmed(), ['emberpath.execution-trace.v1:true', 'retry-signal.v1:true', 'memory.v1:true']);
+      // Repeating an installed deployment's begin keeps it installed, and confirmed.
+      assert.equal((await sync(offering('2.6.0', declared, 'begin'))).status, 200);
+      assert.deepEqual(await confirmed(), ['emberpath.execution-trace.v1:true', 'retry-signal.v1:true', 'memory.v1:true']);
+    });
+    it('keeps them unconfirmed through a failed upgrade until a rollback completes', async () => {
+      const view = async (id = 'emberpath') => (await connection(id)).body.serviceCapabilities.map((item: any) => `${item.name}:${item.confirmed}`);
+      // The registry fixture offers one too, at a version no upgrade below changes.
+      const upgrade = (version: string, phase: 'begin' | 'complete' = 'complete') => {
+        const body = offering(version, declared, phase);
+        body.installed.find((item: any) => item.id === 'hive-registry').connection.serviceCapabilities = [{ name: 'memory.v1', since: '1.0.0' }];
+        return body;
+      };
+      await sync(upgrade('2.5.4'));
+      assert.deepEqual(await view(), ['memory.v1:true']);
+      // The upgrade records 2.6.0 before activating it: the product may still run 2.5.4.
+      await sync(upgrade('2.6.0', 'begin'));
+      assert.equal(store!.installedProduct('emberpath')?.status, 'activating');
+      assert.deepEqual(await view(), ['emberpath.execution-trace.v1:false', 'retry-signal.v1:false', 'memory.v1:false']);
+      // A product the upgrade does not change keeps running its version, confirmed.
+      assert.deepEqual(await view('hive-registry'), ['memory.v1:true']);
+      // The activation fails and the transaction is held: nothing completes, nothing is confirmed.
+      // A rollback records 2.5.4 as activating, then completes it.
+      await sync(upgrade('2.5.4', 'begin'));
+      assert.deepEqual(await view(), ['memory.v1:false']);
+      assert.equal((await connection('emberpath', '?capability=retry-signal.v1')).status, 404);
+      await sync(upgrade('2.5.4'));
+      assert.deepEqual(await view(), ['memory.v1:true']);
     });
     it('needs the existing credential, like the internal endpoints', async () => {
       await sync(offering('2.6.0'));
