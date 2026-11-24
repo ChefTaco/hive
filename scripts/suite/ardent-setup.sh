@@ -90,7 +90,7 @@ hive_ardent_check() {
 
 hive_ardent() (
   umask 077
-  local subcommand=${1:-setup} requested_operation=${2:-} record inventory existing original parent lock phase plan operation result installation
+  local subcommand=${1:-setup} requested_operation=${2:-} record inventory existing original parent lock phase plan operation result installation dependencies
   case "$subcommand" in setup|status|check|resume) ;; *) hive_die 'Use: ardent setup|status|check|resume OPERATION_ID [--profile NAME] [--model-url URL --model MODEL]';; esac
   [[ "$subcommand" == setup || ( -z "$HIVE_ARDENT_MODEL_URL" && -z "$HIVE_ARDENT_MODEL" ) ]] || hive_die 'Model settings apply only to ardent setup'
   [[ $# -le 2 && ( "$subcommand" == resume || -z "$requested_operation" ) ]] || hive_die 'Unexpected Ardent arguments'
@@ -119,7 +119,15 @@ hive_ardent() (
     fi
     hive_ardent_load_state "$installation"
     inventory=$(hive_ardent_api inspect) || hive_die 'Ardent could not be inspected'
-    jq -n --argjson inventory "$inventory" --argjson receipt "${HIVE_ARDENT_STATE:-null}" '{inventory:$inventory,setup:$receipt}'
+    # The agent dependencies Magnus resolved; null when it did not answer. The JSON stays
+    # machine-readable and the section is for the operator, as with status.
+    if dependencies=$(hive_magnus_ardent_dependencies 2>/dev/null) && jq -e 'type=="object" and (.supported==false or (.dependencies|type=="array"))' <<< "$dependencies" >/dev/null 2>&1; then
+      hive_agent_dependencies_print "$dependencies" >&2
+    else
+      dependencies=null
+      printf 'WARNING: Agent dependencies: Magnus did not answer.\n' >&2
+    fi
+    jq -n --argjson inventory "$inventory" --argjson receipt "${HIVE_ARDENT_STATE:-null}" --argjson dependencies "$dependencies" '{inventory:$inventory,setup:$receipt,dependencies:$dependencies}'
     return
   fi
   if [[ ! -e "$HIVE_ARDENT_STATE_DIRECTORY" ]]; then mkdir -m 700 -- "$HIVE_ARDENT_STATE_DIRECTORY"; fi

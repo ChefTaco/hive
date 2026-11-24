@@ -69,9 +69,13 @@ hive_registry_release() {
     # Optional, version-gated in the suite catalog: {"events.v1":{"path":"/hive/events"}}, relative to browserPrefix.
     def capabilities: type=="object" and length>0 and length<=32 and all(to_entries[]; (.key|test("^[a-z0-9.-]{1,64}$")) and
       (.value|type=="object" and (keys==["path"]) and (.path|type=="string" and length<=256 and test("^/[A-Za-z0-9._~/-]*$") and (split("/")|index("..")|not))));
+    # Optional, from the suite catalog: [{"name":"retry-signal.v1","since":"2.6.0"}], each released one with its first version.
+    def service_capabilities: type=="array" and length>0 and length<=32 and (map(.name?)|unique|length)==length and
+      all(.[]; type=="object" and keys==["name","since"] and (.name|type=="string" and test("^[a-z0-9.-]{1,64}$")) and (.since|type=="string" and test("^[0-9]{1,9}(\\.[0-9]{1,9}){0,3}$")));
     all(.components|to_entries[]; .value.catalog as $meta |
-      ($meta|type=="object" and (keys-["displayName","description","repository","documentation","license","licenseSpdx","consoleSection","required","dependencies","connection","capabilities"]|length==0)) and
+      ($meta|type=="object" and (keys-["displayName","description","repository","documentation","license","licenseSpdx","consoleSection","required","dependencies","connection","capabilities","serviceCapabilities"]|length==0)) and
       ($meta.capabilities==null or (($meta.capabilities|capabilities) and ($meta.connection.browserPrefix|type=="string"))) and
+      ($meta.serviceCapabilities==null or ($meta.serviceCapabilities|service_capabilities)) and
       ($meta.displayName|type=="string" and length>0 and length<=120) and ($meta.description|type=="string" and length<=500) and
       ($meta.repository|nullable_url) and ($meta.documentation|nullable_url) and ($meta.license|nullable_url) and
       ($meta.required|type=="boolean") and ($meta.dependencies|type=="array" and all(.[];type=="string")) and
@@ -129,7 +133,11 @@ hive_registry_body() {
     def identity: split("@")[1];
     def product_version($name): $r.components[$name].version // $r.version;
     # Capabilities travel with the connection, so the registry keeps them with the installed product.
-    def capabilities($meta): if ($meta.capabilities // {})|length>0 then {capabilities:$meta.capabilities} else {} end;
+    # Service capabilities too, for a registry that knows them (1.5.0 or later; an older one refuses
+    # the field). The registry compares each since with the version it records.
+    ((product_version("hive-registry")|[scan("[0-9]+")|tonumber]) >= [1,5,0]) as $services |
+    def capabilities($meta): (if ($meta.capabilities // {})|length>0 then {capabilities:$meta.capabilities} else {} end) +
+      (if $services and (($meta.serviceCapabilities // [])|length>0) then {serviceCapabilities:$meta.serviceCapabilities} else {} end);
     {schema:1,phase:$phase,operation:$operation,actor:"hive.sh",
      installation:{id:$c.installation,origin:$c.origin,profile:$c.profile},
      release:{version:$version,manifestDigest:$digest,planDigest:$plan},
@@ -277,6 +285,8 @@ hive_registry_doctor() {
   local report state
   report=$(hive_registry_report)
   state=$(jq -r .state <<< "$report")
+  # Later doctor checks that need a running installation read it.
+  HIVE_REGISTRY_STATE=$state
   case "$state" in
     in-sync) printf 'Hive Registry: in sync with this installation (%s products)\n' "$(jq -r .products <<< "$report")";;
     not-active)

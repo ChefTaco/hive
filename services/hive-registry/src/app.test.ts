@@ -368,6 +368,95 @@ describe('Hive Registry API', () => {
     });
   });
 
+  describe('service capabilities', () => {
+    const declared = [{ name: 'emberpath.execution-trace.v1', since: '2.6.0' }, { name: 'retry-signal.v1', since: '2.6.0' }, { name: 'memory.v1', since: '1.0.0' }];
+    // Emberpath at VERSION with the declared service capabilities, and an external Magnus with its own.
+    const offering = (version: string, capabilities: unknown = declared) => {
+      const body = syncBody('complete', 'installed') as any;
+      const emberpath = body.installed.find((item: any) => item.id === 'emberpath');
+      emberpath.version = version;
+      emberpath.connection.serviceCapabilities = capabilities;
+      body.catalog.find((item: any) => item.id === 'emberpath').version.version = version;
+      body.installed.push({ id: 'not-selected', status: 'external', connection: { consolePath: '/fleet', browserPrefix: '/api/magnus', nativeApis: {}, internalEndpoints: { api: 'https://magnus.example.com:4000' },
+        serviceCapabilities: [{ name: 'ardent.recovery.v1', since: '3.3.0' }] } });
+      return body;
+    };
+    const connection = (id: string, query = '', token: string | undefined = readToken) => call('GET', `/v1/products/${id}/connection${query}`, token ? { token } : {});
+
+    it('serves the capabilities the recorded version offers next to the internal endpoints', async () => {
+      assert.equal((await sync(offering('2.5.4'))).status, 200);
+      const older = (await connection('emberpath')).body;
+      assert.deepEqual(older.serviceCapabilities, [{ name: 'memory.v1', since: '1.0.0', confirmed: true }]);
+      assert.deepEqual(Object.keys(older).slice(-3), ['inventoryHost', 'internalEndpoints', 'serviceCapabilities']);
+      assert.equal((await sync(offering('2.6.0'))).status, 200);
+      assert.deepEqual((await connection('emberpath')).body.serviceCapabilities.map((item: any) => [item.name, item.confirmed]),
+        [['emberpath.execution-trace.v1', true], ['retry-signal.v1', true], ['memory.v1', true]]);
+      assert.equal((await sync(offering('2.10.0'))).status, 200);
+      assert.equal((await connection('emberpath')).body.serviceCapabilities.length, 3, 'Versions compare numerically');
+      // Without a comparable version, every declared one, for the reader to compare with since.
+      assert.deepEqual((await connection('not-selected')).body.serviceCapabilities, [{ name: 'ardent.recovery.v1', since: '3.3.0', confirmed: false }]);
+      assert.equal((await sync(offering('2.6.0-rc.1'))).status, 200);
+      assert.ok((await connection('emberpath')).body.serviceCapabilities.every((item: any) => item.confirmed === false));
+      // A product that offers none, or none yet, omits the field.
+      assert.equal('serviceCapabilities' in (await connection('hive-registry')).body, false);
+      assert.equal((await sync(offering('0.9.0'))).status, 200);
+      assert.equal('serviceCapabilities' in (await connection('emberpath')).body, false);
+    });
+    it('needs the existing credential, like the internal endpoints', async () => {
+      await sync(offering('2.6.0'));
+      for (const path of ['/v1/products/emberpath/connection', '/v1/products/emberpath', '/v1/products', '/v1/installation', '/v1/products/not-selected/connection']) {
+        const body = JSON.stringify((await call('GET', path)).body);
+        assert.doesNotMatch(body, /serviceCapabilities|retry-signal|ardent\.recovery/, path);
+      }
+      for (const path of ['/v1/products/emberpath/connection?capability=retry-signal.v1', '/v1/products?capability=retry-signal.v1']) {
+        const refused = await call('GET', path);
+        assert.equal(refused.status, 401, path);
+        assert.equal(refused.body.error.code, 'credential_required');
+      }
+      assert.equal((await call('GET', '/v1/products/emberpath/connection', { token: 'x'.repeat(40) })).status, 401);
+      // Products and the product view carry no service capabilities, even with a credential.
+      assert.equal('serviceCapabilities' in (await call('GET', '/v1/products/emberpath', { token: readToken })).body, false);
+    });
+    it('filters connections and products by capability', async () => {
+      await sync(offering('2.6.0'));
+      const one = await connection('emberpath', '?capability=retry-signal.v1');
+      assert.equal(one.status, 200);
+      assert.deepEqual(one.body.serviceCapabilities, [{ name: 'retry-signal.v1', since: '2.6.0', confirmed: true }]);
+      assert.equal(one.body.internalEndpoints.admin, 'https://private-host.internal.example.com:9443');
+      const missing = await connection('emberpath', '?capability=artifact-transfer.v2');
+      assert.equal(missing.status, 404);
+      assert.equal(missing.body.error.code, 'capability_not_offered');
+      assert.equal((await connection('hive-registry', '?capability=retry-signal.v1')).status, 404);
+      assert.equal((await connection('Bad', '?capability=retry-signal.v1')).status, 404);
+      assert.equal((await connection('emberpath', '?capability=Retry.V1')).status, 422);
+      assert.equal((await call('GET', '/v1/products?capability=', { token: readToken })).status, 422);
+      const listed = async (query: string) => (await call('GET', `/v1/products${query}`, { token: readToken })).body.products.map((item: any) => item.id);
+      assert.deepEqual(await listed('?capability=retry-signal.v1'), ['emberpath']);
+      assert.deepEqual(await listed('?capability=ardent.recovery.v1'), ['not-selected']);
+      assert.deepEqual(await listed('?capability=ardent.recovery.v1&installed=true'), ['not-selected']);
+      assert.deepEqual(await listed('?capability=unknown.v9'), []);
+      // A version below since does not offer it.
+      await sync(offering('2.5.4'));
+      assert.equal((await connection('emberpath', '?capability=retry-signal.v1')).status, 404);
+      assert.deepEqual(await listed('?capability=retry-signal.v1'), []);
+    });
+    it('keeps connections recorded without service capabilities unchanged, and refuses malformed ones', async () => {
+      await sync();
+      assert.equal((await sync()).body.changes, 0);
+      assert.equal('serviceCapabilities' in (await connection('emberpath')).body, false);
+      for (const capabilities of [[], {}, [{ name: 'Retry.V1', since: '1.0.0' }], [{ name: 'retry-signal.v1', since: 'latest' }], [{ name: 'retry-signal.v1', since: null }],
+        [{ name: 'retry-signal.v1' }], [{ name: 'retry-signal.v1', since: '1.0.0', token: 'fake' }], [{ name: 'a.v1', since: '1.0.0' }, { name: 'a.v1', since: '2.0.0' }],
+        Array.from({ length: 33 }, (_, index) => ({ name: `c${index}.v1`, since: '1.0.0' }))])
+        assert.equal((await sync(offering('2.6.0', capabilities))).status, 422, JSON.stringify(capabilities));
+      assert.equal((await sync(offering('2.6.0'))).body.changes > 0, true);
+      assert.equal((await sync(offering('2.6.0'))).body.changes, 0, 'A retried sync with service capabilities changed rows');
+      // An externally managed product may declare its own, compared with its recorded version.
+      const put = await call('PUT', '/v1/products/shared-api', { token: writeToken, body: { displayName: 'Shared', version: '1.2.0', connection: { serviceCapabilities: [{ name: 'memory.v1', since: '1.0.0' }, { name: 'later.v1', since: '2.0.0' }] } } });
+      assert.equal(put.status, 200);
+      assert.deepEqual((await connection('shared-api')).body.serviceCapabilities, [{ name: 'memory.v1', since: '1.0.0', confirmed: true }]);
+    });
+  });
+
   describe('setup checklist', () => {
     const agent = { id: 'magnus-agent-enrolled', title: 'Install the Magnus agent on the Magnus host', status: 'pending', command: './hive.sh magnus-agent install', docs: 'deployment/FULL.md#installing-the-agent', product: 'magnus', check: 'magnus.agent' };
     const certificate = { id: 'certificate-renewal', title: 'Schedule the HTTPS certificate renewal', status: 'pending', command: 'sudo ./scripts/console-certificate.sh schedule --config FILE', docs: 'deployment/QUICKSTART.md#9-keep-the-certificate-current' };

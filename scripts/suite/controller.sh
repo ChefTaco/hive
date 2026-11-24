@@ -185,8 +185,9 @@ assistant profile through Magnus, including its identity, HiveMem, model connect
 It asks for an OpenAI-compatible model API URL and model name; --model-url URL --model NAME
 supplies them unattended. --profile NAME chooses another new profile. Existing profiles are
 preserved. Repeating setup follows its retained operation; uncertain requests are never repeated.
-ardent status shows the profile and retained setup, check tests its real model connection, and
-resume OPERATION_ID explicitly resumes a reviewed failed operation without repeating completed steps.
+ardent status shows the profile, retained setup and the agent dependencies Magnus resolved, check
+tests its real model connection, and resume OPERATION_ID explicitly resumes a reviewed failed
+operation without repeating completed steps. doctor lists the same agent dependencies.
 The setup needs Magnus, HiveMem and Oathweave, an enrolled host agent and a model endpoint that
 does not require a separate API key. API keys and authenticated model endpoints are not accepted
 by this guided path.
@@ -1054,7 +1055,7 @@ hive_main() {
       hive_checklist_print_pending "$(jq -c '.setup.items // []' <<< "$registry_report")" >&2
       return;;
     doctor)
-      hive_registry_preflight; hive_registry_doctor; return;;
+      hive_registry_preflight; hive_registry_doctor; hive_agent_dependencies_doctor; return;;
     registry) hive_registry_command "${registry_arguments[@]}"; return;;
     magnus-trust) hive_magnus_trust "${trust_arguments[@]}"; return;;
     migrate-native) hive_native_migrate "${registry_arguments[0]:-}" "$confirmed" "$hold_on_failure"; return;;

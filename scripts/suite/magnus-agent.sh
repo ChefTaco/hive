@@ -357,13 +357,53 @@ hive_magnus_node_summary() {
 # node agent stages, a failed staged package and whether the node answered. A suite-managed Magnus
 # is read on its host with its API secret; an external Magnus through Ardent Project Studio's own
 # service identity, when this installation runs Studio. Fails when neither is there, or on no answer.
-hive_magnus_ardent_installations() {
+hive_magnus_ardent_installations() { hive_magnus_ardent_read magnus-agent-ardent-installations; }
+
+# Runs one read-only Ardent host action (ACTION) where Magnus can be asked: a suite-managed Magnus
+# on its host with its API secret, an external Magnus through Studio's service identity on Studio's
+# host. Fails (status 1, no action) when neither is there.
+hive_magnus_ardent_read() { # ACTION
   local host service
   if jq -e '.components.magnus!=null' "$HIVE_CONFIG" >/dev/null; then host=$(jq -r .components.magnus.host "$HIVE_CONFIG"); service=magnus
   elif jq -e '.external.magnus!=null and .components.ardentstudio!=null' "$HIVE_CONFIG" >/dev/null; then host=$(jq -r .components.ardentstudio.host "$HIVE_CONFIG"); service=ardentstudio
   else return 1; fi
-  hive_magnus_agent_action "$host" magnus-agent-ardent-installations \
+  hive_magnus_agent_action "$host" "$1" \
     "$(jq -nc --arg compose "$(jq -r --arg host "$host" '.hosts[$host].directory' "$HIVE_CONFIG")/compose.json" --arg service "$service" '{compose:$compose,service:$service}')"
+}
+
+# The agent dependencies Magnus resolved for Ardent (magnus-agent-ardent-dependencies), read like
+# the installations: one JSON line, {"supported":false} from a Magnus before 3.3.0, otherwise
+# {"supported":true,"dependencies":[{name,status,source,endpoint,capabilities,reason}]}.
+hive_magnus_ardent_dependencies() { hive_magnus_ardent_read magnus-agent-ardent-dependencies; }
+
+# Prints the "Agent dependencies" section for REPORT (hive_magnus_ardent_dependencies output): each
+# dependency's name, status and source, and why it is not usable when Magnus says.
+hive_agent_dependencies_print() { # REPORT
+  printf 'Agent dependencies:\n'
+  jq -r '
+    if .supported!=true then "  Magnus is too old to report agent dependencies (needs 3.3.0)"
+    elif (.dependencies|length)==0 then "  Magnus reports no agent dependencies"
+    else .dependencies[]|"  \(.name): \(.status) (source: \(.source))"+(if .reason then " - \(.reason)" else "" end) end' <<< "$1"
+}
+
+# hive.sh doctor: the agent dependencies of an installed suite with a Magnus it can ask. A Magnus
+# that does not answer is a warning, as for an external Magnus; it never fails doctor.
+hive_agent_dependencies_doctor() {
+  local report error detail
+  [[ "${HIVE_REGISTRY_STATE:-}" == in-sync ]] || return 0
+  if jq -e '.components.magnus==null and .external.magnus==null' "$HIVE_CONFIG" >/dev/null; then return 0; fi
+  if jq -e '.components.magnus==null and .components.ardentstudio==null' "$HIVE_CONFIG" >/dev/null; then
+    printf 'Agent dependencies: not checked; the external Magnus is read through Ardent Project Studio, which this installation does not run\n'
+    return 0
+  fi
+  error=$(mktemp)
+  if report=$(hive_magnus_ardent_dependencies 2> "$error") && jq -e 'type=="object" and (.supported==false or (.dependencies|type=="array"))' <<< "$report" >/dev/null 2>&1; then
+    hive_agent_dependencies_print "$report"
+  else
+    detail=$(grep -v '^$' "$error" | tail -n 1 | cut -c1-300 || true)
+    printf 'WARNING: Agent dependencies: Magnus did not answer (%s). Check Magnus with ./hive.sh status.\n' "${detail:-no reply}" >&2
+  fi
+  rm -f -- "$error"
 }
 
 # VERSION is X.Y.Z (any suffix ignored) and at least MINIMUM.

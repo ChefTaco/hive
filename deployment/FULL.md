@@ -1251,3 +1251,26 @@ Magnus skips steps it already completed and refuses unresolved command owners. A
 before its operation ID was retained remains held for independent review. Do not delete its
 protected `ardent-setup/NAME.json` beside the owning installation file to force another creation.
 The `check` command performs a new real inference probe; it does not resume or replay a failed task.
+
+### Agent dependencies
+
+`./hive.sh doctor` and `./hive.sh ardent status` list the agent dependencies Magnus resolved for
+Ardent (`GET /api/v1/ardent/dependencies`, Magnus 3.3.0 and later), such as HiveMem, HiveSkills
+and Emberpath. Each line names the dependency, its status (`usable`, `missing`, `unsupported` or
+`awaiting_configuration`), its source (`override` for an explicit Magnus setting, `registry` for
+one Magnus found through the Hive Registry's [service capabilities](../docs/hive-registry-api.md#service-capabilities),
+or `none`) and, when it is not usable, why:
+
+```text
+Agent dependencies:
+  hivemem: usable (source: registry)
+  emberpath: unsupported (source: registry) - Emberpath 2.5.4 lacks emberpath.execution-trace.v1
+```
+
+`doctor` reads a suite-managed Magnus on its host and an external Magnus through Ardent Project
+Studio's service identity, once the installation is in sync. A Magnus before 3.3.0 prints
+`Magnus is too old to report agent dependencies (needs 3.3.0)`. A Magnus that does not answer is a
+warning; neither fails `doctor`. `ardent status` prints the section after its JSON, on standard
+error, and adds the report to the JSON as `dependencies` (`null` when Magnus did not answer). A
+resolved dependency is only available: HiveMem enrollment, skill installation and channel
+enablement still need their own steps and credentials.

@@ -29,7 +29,7 @@ already publishes: product names, same-origin paths and public links.
 | Installation ID, installed product IDs and the [setup checklist](#setup-checklist) | Origin, profile, release version and digests, revision, inventory hosts |
 | Product ID, display name, description, repository, documentation and license links | Product version, image reference and digest, storage format, version history |
 | Console section, required flag, dependencies, `installed`, capabilities | Kind, source, status, install and update times, release |
-| Console path, browser prefix, native API URLs on the console origin, documentation, capabilities | Inventory host, internal endpoints |
+| Console path, browser prefix, native API URLs on the console origin, documentation, capabilities | Inventory host, internal endpoints, [service capabilities](#service-capabilities) |
 
 The setup checklist's `updatedAt` is the one timestamp the public view carries.
 
@@ -47,9 +47,9 @@ Every response is JSON with `Cache-Control: no-store`. Paths are native; add the
 | `GET /health/live` | `{"status":"live"}`. Not served by the ingress |
 | `GET /health/ready` | `{"status":"ready","readOnly":false}` |
 | `GET /v1/installation` | Installation summary, with the [setup checklist](#setup-checklist) once one is recorded |
-| `GET /v1/products` | Catalog. `?installed=true` or `?installed=false` filters it |
+| `GET /v1/products` | Catalog. `?installed=true` or `?installed=false` filters it; with a credential, `?capability=NAME` keeps the products offering that [service capability](#service-capabilities) |
 | `GET /v1/products/{id}` | One product |
-| `GET /v1/products/{id}/connection` | Console path, browser prefix, native API URLs, documentation and [capabilities](#capabilities); with a credential also the inventory host and internal endpoints |
+| `GET /v1/products/{id}/connection` | Console path, browser prefix, native API URLs, documentation and [capabilities](#capabilities); with a credential also the inventory host, internal endpoints and [service capabilities](#service-capabilities), which `?capability=NAME` narrows to one |
 | `GET /v1/inventory` | The signed release's pins beside what each host reports. Read or write credential, or an administrator's Oathweave token; see [Inventory](#inventory) |
 | `GET /v1/history?after=N&limit=M` | Append-only change history entries after sequence `N` (default 0), at most `M` entries (1 to 1000, default 200). Credential required; not served by the ingress |
 
@@ -112,6 +112,70 @@ An externally managed product may declare its own in `connection.capabilities`, 
 The registry keeps capabilities in the stored connection, so no migration is involved: a
 connection recorded before they existed reads back without the field and is not rewritten, and a
 registry image from before them ignores a stored capability.
+
+## Service capabilities
+
+From Registry 1.5.0, a connection read with a credential may carry `serviceCapabilities` beside
+`internalEndpoints`: what the product offers other products over those endpoints, such as Magnus
+finding which Emberpath, HiveMem and HiveSkills it can use for Ardent. A product that offers none
+omits the field. They are private like the internal endpoints, because `since` and `confirmed`
+tell the product version apart; the public connection never carries them.
+
+```json
+{
+  "id": "emberpath",
+  "consolePath": null,
+  "browserPrefix": "/api/emberpath",
+  "nativeApis": { "model": "https://hive.example.com/v1" },
+  "documentation": "https://github.com/ChefTaco/Emberpath/blob/HEAD/README.md",
+  "inventoryHost": "control",
+  "internalEndpoints": { "admin": "https://emberpath:9443", "model": "https://emberpath:4020" },
+  "serviceCapabilities": [
+    { "name": "emberpath.execution-trace.v1", "since": "2.6.0", "confirmed": true },
+    { "name": "retry-signal.v1", "since": "2.6.0", "confirmed": true }
+  ]
+}
+```
+
+- `name` matches `[a-z0-9.-]{1,64}`; readers ignore names they do not know. `since` is the first
+  product version that offers it.
+- `confirmed: true`: the registry recorded a numeric version for this product (`X.Y.Z`) and it is
+  `since` or newer. Entries whose `since` is newer than the recorded version are left out.
+- `confirmed: false`: the registry cannot tell the version, as for an
+  [external Magnus](../deployment/FULL.md#external-magnus), an externally managed product without
+  a `version` or a version such as `3.3.0-rc.1`. Every declared entry is listed; the reader
+  compares `since` with the version the product itself reports before relying on it.
+- An offered capability makes an endpoint available, nothing more. It never grants a permission or
+  enables an integration: the existing credentials and enrollment steps still apply.
+
+| Name | Product | Since | Meaning |
+| --- | --- | --- | --- |
+| `emberpath.execution-trace.v1` | Emberpath | 2.6.0 | Traces and attempts filtered by execution |
+| `retry-signal.v1` | Emberpath | 2.6.0 | Emits the `x-hive-retry` header |
+| `memory.v1` | HiveMem | 1.9.1 | The memory API |
+| `skills.pinned-release.v1` | HiveSkills | 1.9.0 | The pinned skill archive route |
+| `ardent.recovery.v1` | Magnus | 3.3.0 | The Ardent recovery API and execution checkpoints |
+| `ardent.lineage.v1` | Magnus | 3.3.0 | The Ardent lineage API; accepts an execution context |
+| `artifact-transfer.v2` | Magnus | 3.3.0 | Artifact transfer with renditions (descriptor v2) |
+
+`?capability=NAME` needs a read or write credential (`401 credential_required` without one, `422
+invalid_request` for a malformed name):
+
+- `GET /v1/products/{id}/connection?capability=NAME` answers the connection with only that entry
+  in `serviceCapabilities`, or `404` with code `capability_not_offered` when the product does not
+  offer it (including a recorded version older than its `since`).
+- `GET /v1/products?capability=NAME` lists only the products whose connection offers it, combined
+  with `?installed=` when both are given. The list entries themselves do not carry
+  `serviceCapabilities`; read each product's connection for them.
+
+The suite catalog (`scripts/suite/suite-catalog.json`) declares them per product as
+`"serviceCapabilities": [{"name": "...", "since": "X.Y.Z"}]`, where `"since": null` declares one
+whose product version is not released yet and is never emitted. Unlike browser capabilities, a
+release manifest carries every released entry with its `since`, whatever version it pins, and
+`hive.sh` records them with the product's connection, an external Magnus included. A release that
+pins a registry before 1.5.0, which refuses the field, records none. An externally managed product
+may declare its own in `connection.serviceCapabilities`, compared with its recorded `version`. They
+are kept in the stored connection like capabilities, so no migration is involved.
 
 ## Setup checklist
 

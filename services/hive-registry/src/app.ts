@@ -2,10 +2,10 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import { z } from 'zod';
 import type { InventoryAuthorizer } from './identity.js';
-import { externalProduct, observationsRequest, productId, setupItemId, setupItemUpdate, syncRequest } from './schema.js';
+import { capabilityName, externalProduct, observationsRequest, productId, setupItemId, setupItemUpdate, syncRequest } from './schema.js';
 import { findSecret } from './secrets.js';
 import { Conflict, Missing, type RegistryStore } from './store.js';
-import { historyView, inventoryView, privateConnection, privateInstallation, privateProduct, publicConnection, publicInstallation, publicProduct, publicProductVisible } from './views.js';
+import { historyView, inventoryView, privateConnection, privateInstallation, privateProduct, publicConnection, publicInstallation, publicProduct, publicProductVisible, serviceCapabilitiesOf } from './views.js';
 
 export type AppOptions = {
   store: RegistryStore; installation: string; readToken: string; writeToken: string; readOnly: boolean; log?: (line: string) => void;
@@ -78,9 +78,17 @@ export function createApp(options: AppOptions): RequestListener {
       return { status: 200, body: { schema: 1, entries: store.history(after, limit).map(historyView) } };
     }
     if (route[0] !== 'products') return notFound();
+    // ?capability=NAME keeps the products, or the connection entry, offering that service
+    // capability. Service capabilities are private, so the filter needs a credential.
+    const capability = url.searchParams.get('capability');
+    if (capability !== null) {
+      if (!privileged) return failure(401, 'credential_required', 'Service capabilities require a registry read credential');
+      if (!capabilityName.safeParse(capability).success) return failure(422, 'invalid_request', 'capability: Expected a capability name');
+    }
+    const offers = (id: string): boolean => capability === null || serviceCapabilitiesOf(store.installedProduct(id), capability).length > 0;
     if (route.length === 1) {
       const installedFilter = url.searchParams.get('installed');
-      const items = store.products().filter((row) => privileged || publicProductVisible(row)).map((row) => {
+      const items = store.products().filter((row) => (privileged || publicProductVisible(row)) && offers(row.id)).map((row) => {
         const installed = store.installedProduct(row.id);
         return privileged ? privateProduct(row, installed, store) : publicProduct(row, installed, store);
       }).filter((item) => (installedFilter === 'true' ? item.installed : installedFilter === 'false' ? !item.installed : true));
@@ -93,6 +101,10 @@ export function createApp(options: AppOptions): RequestListener {
     const installed = store.installedProduct(id);
     if (route.length === 2) return { status: 200, body: privileged ? privateProduct(row, installed, store) : publicProduct(row, installed, store) };
     if (route[2] !== 'connection') return notFound();
+    if (capability !== null) {
+      if (!offers(id)) return failure(404, 'capability_not_offered', 'This product does not offer that service capability');
+      return { status: 200, body: privateConnection(row, installed, capability) };
+    }
     return { status: 200, body: privileged ? privateConnection(row, installed) : publicConnection(row, installed) };
   }
 

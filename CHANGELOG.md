@@ -6,6 +6,28 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- **Service capabilities in the Hive Registry (Registry 1.5.0, image 2.0.13).** The suite catalog
+  declares per product the capabilities it offers other products, each with the first version
+  offering it: Emberpath `emberpath.execution-trace.v1` and `retry-signal.v1` (2.6.0), HiveMem
+  `memory.v1` (1.9.1), HiveSkills `skills.pinned-release.v1` (1.9.0) and Magnus
+  `ardent.recovery.v1`, `ardent.lineage.v1` and `artifact-transfer.v2` (3.3.0). `hive.sh` records
+  them with each product's connection, and `GET /v1/products/{id}/connection` serves them with a
+  credential as `serviceCapabilities` beside `internalEndpoints`: those the recorded version
+  offers, or, when the registry cannot tell the version (an external Magnus), every one with its
+  `since` for the reader to compare. `?capability=NAME` narrows a connection to one entry (`404
+  capability_not_offered` otherwise) and `GET /v1/products?capability=NAME` lists the products
+  offering it. The public views and the browser contract are unchanged, and the browser
+  `capabilities` stay as they are. See `docs/hive-registry-api.md`, "Service capabilities".
+- **Agent dependencies in `doctor` and `ardent status`.** Both list the agent dependencies Magnus
+  resolved for Ardent (`GET /api/v1/ardent/dependencies`): each one's name, status, source and,
+  when it is not usable, the reason. They read Magnus the way the Ardent installation check does,
+  on its host with its API secret, or an external Magnus through Studio's service identity. A
+  Magnus before 3.3.0 prints `Magnus is too old to report agent dependencies (needs 3.3.0)`; a
+  Magnus that does not answer is a warning. Neither fails `doctor`. `ardent status` also adds the
+  report to its JSON as `dependencies`. See `deployment/FULL.md`, "Agent dependencies".
+
 ## [3.13.5] - 2026-11-21
 
 ### Changed

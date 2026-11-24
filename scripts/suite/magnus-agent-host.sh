@@ -17,6 +17,8 @@
 #   magnus-agent-node-summary  (Magnus host) the fleet's node-key readiness: mode, blocker codes, counts
 #   magnus-agent-ardent-installations  (Magnus host, or the Studio host for an external Magnus) each
 #                           Ardent installation's version and the one its node agent stages; read only
+#   magnus-agent-ardent-dependencies  (Magnus host, or the Studio host for an external Magnus) the
+#                           agent dependencies Magnus resolved: name, status, source and reason; read only
 #   magnus-agent-upgrade-readiness  (Magnus host) before an upgrade to Magnus 3: the active Magnus,
 #                           the NODE_AUTH_MODE of its configuration and what its start-up guard would block
 # A one-time enrollment token arrives like the credentials, in the request's secret on standard
@@ -530,13 +532,10 @@ node_summary() {
   docker compose -f "$compose" exec -T magnus node --input-type=module -e "$NODE_SUMMARY_SCRIPT"
 }
 
-# The Ardent installations as Magnus lists them for Magnus > Ardent > Installations (GET
-# /api/v1/ardent/installations), read only: inside the Magnus container with its API secret, or,
-# for an external Magnus, inside the Ardent Project Studio container as Studio's own service
-# identity, which Magnus allows that read. No credential leaves the container. Only each node's
-# name, its installed Ardent version, the version its node agent stages (what Update package
-# installs), whether that staged package failed its check, and whether the node answered.
-ARDENT_INSTALLATIONS_SCRIPT='const environment = process.env;
+# How a read-only Ardent request reaches Magnus: inside the Magnus container with its API secret,
+# or, for an external Magnus, inside the Ardent Project Studio container as Studio's own service
+# identity. It sets base (the Magnus origin) and headers; no credential leaves the container.
+MAGNUS_ARDENT_CLIENT='const environment = process.env;
 let base, headers;
 if (environment.HIVE_ARDENT_SOURCE === "magnus") {
   base = "https://localhost:" + (environment.CONTROL_API_PORT || "4000");
@@ -553,7 +552,13 @@ if (environment.HIVE_ARDENT_SOURCE === "magnus") {
   base = environment.ARDENT_STUDIO_MAGNUS_URL.replace(/\/+$/, "");
   headers = { authorization: "Bearer " + token };
 }
-const response = await fetch(base + "/api/v1/ardent/installations", { headers, redirect: "error", signal: AbortSignal.timeout(60000) });
+'
+
+# The Ardent installations as Magnus lists them for Magnus > Ardent > Installations (GET
+# /api/v1/ardent/installations), read only, which Magnus allows Studio's identity too. Only each
+# node's name, its installed Ardent version, the version its node agent stages (what Update package
+# installs), whether that staged package failed its check, and whether the node answered.
+ARDENT_INSTALLATIONS_SCRIPT=$MAGNUS_ARDENT_CLIENT'const response = await fetch(base + "/api/v1/ardent/installations", { headers, redirect: "error", signal: AbortSignal.timeout(60000) });
 if (response.status === 404) { console.log(JSON.stringify({ supported: false })); process.exit(0); }
 const body = await response.json().catch(() => ({}));
 if (response.status !== 200 || !Array.isArray(body?.data)) {
@@ -564,12 +569,39 @@ console.log(JSON.stringify({ supported: true, installations: body.data.filter(it
   name: String(item.nodeName ?? item.nodeId ?? "unknown").slice(0, 128), version: typeof item.version === "string" ? item.version : null,
   staged: typeof item.stagedPackage?.version === "string" ? item.stagedPackage.version : null,
   stagedError: Boolean(item.stagedPackageError), reachable: item.reachable === true })) }));'
-ardent_installations() {
+# The agent dependencies Magnus resolved for Ardent (GET /api/v1/ardent/dependencies, Magnus 3.3.0):
+# per dependency its name, status, source (an explicit override, the Hive Registry or none), the
+# endpoint it uses, the service capabilities it found and why it is not usable. A Magnus without
+# the route (404 or 405) is reported as {"supported":false}. Unknown statuses and sources are kept
+# as "unknown"; text fields are bounded and stripped of control characters.
+ARDENT_DEPENDENCIES_SCRIPT=$MAGNUS_ARDENT_CLIENT'let response;
+try { response = await fetch(base + "/api/v1/ardent/dependencies", { headers: { ...headers, accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(60000) }); }
+catch { console.error("Magnus did not answer the agent dependencies request"); process.exit(1); }
+if (response.status === 404 || response.status === 405) { console.log(JSON.stringify({ supported: false })); process.exit(0); }
+const body = await response.json().catch(() => ({}));
+const list = Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : null;
+if (response.status !== 200 || list === null) {
+  console.error("Magnus refused the agent dependencies: HTTP " + response.status + " " + String(body?.error?.code ?? "").replace(/[^A-Z0-9_]/g, "").slice(0, 64));
+  process.exit(1);
+}
+const text = (value, limit) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, limit) : null;
+const one = (value, allowed) => allowed.includes(value) ? value : "unknown";
+console.log(JSON.stringify({ supported: true, dependencies: list.slice(0, 64).map(item => ({
+  name: /^[a-z][a-z0-9._-]{0,63}$/.test(item?.name ?? "") ? item.name : "unknown",
+  status: one(item?.status, ["usable", "missing", "unsupported", "awaiting_configuration"]),
+  source: one(item?.source, ["override", "registry", "none"]),
+  endpoint: text(item?.endpoint, 2048),
+  capabilities: Array.isArray(item?.capabilities) ? item.capabilities.filter(name => typeof name === "string" && /^[a-z0-9.-]{1,64}$/.test(name)).slice(0, 32) : [],
+  reason: text(item?.reason, 300) || null })) }));'
+# Runs one read-only Ardent request (SCRIPT) in the Magnus or Studio container the request names.
+ardent_read() { # SCRIPT
   local compose service
   compose=$(jq -er .compose <<< "$request"); service=$(jq -er .service <<< "$request")
-  [[ "$service" == magnus || "$service" == ardentstudio ]] || die 'Unknown source of the Ardent installations'
-  docker compose -f "$compose" exec -T -e "HIVE_ARDENT_SOURCE=$service" "$service" node --input-type=module -e "$ARDENT_INSTALLATIONS_SCRIPT"
+  [[ "$service" == magnus || "$service" == ardentstudio ]] || die 'Unknown source of an Ardent read'
+  docker compose -f "$compose" exec -T -e "HIVE_ARDENT_SOURCE=$service" "$service" node --input-type=module -e "$1"
 }
+ardent_installations() { ardent_read "$ARDENT_INSTALLATIONS_SCRIPT"; }
+ardent_dependencies() { ardent_read "$ARDENT_DEPENDENCIES_SCRIPT"; }
 
 # What Magnus 3's start-up guard (services/node-auth-startup-guard.ts) would find, read on the
 # running Magnus before an upgrade moves it from 2.x: the version it runs and the blockers that
@@ -803,6 +835,7 @@ case "$action" in
   magnus-agent-node-credential) node_credential;;
   magnus-agent-node-summary) node_summary;;
   magnus-agent-ardent-installations) ardent_installations;;
+  magnus-agent-ardent-dependencies) ardent_dependencies;;
   magnus-agent-ardent-setup) ardent_setup;;
   magnus-agent-upgrade-readiness) upgrade_readiness;;
   magnus-agent-ardent-review) ardent_review;;

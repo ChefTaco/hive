@@ -34,6 +34,17 @@ globalThis.fetch = async (url, init = {}) => {
   if (!authorized) return json({ error: { code: 'UNAUTHORIZED' } }, 401);
   if (process.env.FIXTURE_ANSWER === 'missing') return json({ error: { code: 'NOT_FOUND' } }, 404);
   if (process.env.FIXTURE_ANSWER === 'down') return json({ error: { code: 'INTERNAL' } }, 500);
+  if (path === '/api/v1/ardent/dependencies') {
+    if (process.env.FIXTURE_DEPENDENCIES === 'old') return json({ error: { code: 'NOT_FOUND' } }, 404);
+    if (process.env.FIXTURE_DEPENDENCIES === 'method') return json({ error: { code: 'METHOD_NOT_ALLOWED' } }, 405);
+    if (process.env.FIXTURE_DEPENDENCIES === 'down') return json({ error: { code: 'INTERNAL' } }, 503);
+    if (process.env.FIXTURE_DEPENDENCIES === 'unreachable') throw new TypeError('fetch failed');
+    return json({ success: true, data: [
+      { name: 'hivemem', status: 'usable', source: 'registry', endpoint: 'https://hivemem:18790', capabilities: ['memory.v1'] },
+      { name: 'emberpath', status: 'unsupported', source: 'override', endpoint: 'https://models.example.com:9443', capabilities: ['retry-signal.v1', 'Bad Name'], reason: 'Emberpath 2.5.4 lacks\nemberpath.execution-trace.v1' },
+      { name: 'hiveskills', status: 'awaiting_configuration', source: 'none', capabilities: [], reason: 'No HiveSkills credential yet' },
+      { name: 'Not A Name', status: 'exploded', source: 'guess', extra: 'obviously-fake-extra-field' }] });
+  }
   if (path !== '/api/v1/ardent/installations') return json({ error: { code: 'NOT_FOUND' } }, 404);
   return json({ success: true, data: [installation('alpha', true, '3.1.3', '3.1.3'), installation('bravo', true, '3.1.2', '3.1.3'),
     installation('charlie', true, null, '3.1.3', { reachable: false, error: 'private diagnostic of an offline node' }),
@@ -56,9 +67,9 @@ case "\$8" in
 esac
 EOF
 chmod +x "$temporary/bin/docker"
-host_action() { # SERVICE
+host_action() { # SERVICE [ACTION]
   : > "$temporary/fetch.log"
-  jq -nc --arg compose "$temporary/host/compose.json" --arg service "$1" '{action:"magnus-agent-ardent-installations",magnusAgent:{compose:$compose,service:$service}}' |
+  jq -nc --arg compose "$temporary/host/compose.json" --arg service "$1" --arg action "${2:-magnus-agent-ardent-installations}" '{action:$action,magnusAgent:{compose:$compose,service:$service}}' |
     PATH="$temporary/bin:$PATH" bash "$ROOT/scripts/suite/magnus-agent-host.sh"
 }
 expected='{"supported":true,"installations":[{"name":"alpha","version":"3.1.3","staged":"3.1.3","stagedError":false,"reachable":true},{"name":"bravo","version":"3.1.2","staged":"3.1.3","stagedError":false,"reachable":true},{"name":"charlie","version":null,"staged":"3.1.3","stagedError":false,"reachable":false},{"name":"delta","version":"3.1.3","staged":"3.1.3","stagedError":true,"reachable":true}]}'
@@ -84,6 +95,24 @@ grep -q 'Magnus refused the Ardent installations: HTTP 500 INTERNAL' "$temporary
 if host_action hivemem 2>/dev/null; then fail 'An unknown container was used'; fi
 printf 'Passed: the Ardent installations are read only, in the Magnus or Studio container, and only versions and node names leave it.\n'
 
+# The agent dependencies, read the same way: name, status, source, endpoint, capabilities, reason.
+dependencies='{"supported":true,"dependencies":[{"name":"hivemem","status":"usable","source":"registry","endpoint":"https://hivemem:18790","capabilities":["memory.v1"],"reason":null},{"name":"emberpath","status":"unsupported","source":"override","endpoint":"https://models.example.com:9443","capabilities":["retry-signal.v1"],"reason":"Emberpath 2.5.4 lacks emberpath.execution-trace.v1"},{"name":"hiveskills","status":"awaiting_configuration","source":"none","endpoint":null,"capabilities":[],"reason":"No HiveSkills credential yet"},{"name":"unknown","status":"unknown","source":"unknown","endpoint":null,"capabilities":[],"reason":null}]}'
+result=$(host_action magnus magnus-agent-ardent-dependencies 2> "$temporary/err") || { cat "$temporary/err" >&2; fail 'The Magnus dependency read failed'; }
+[[ $(jq -c . <<< "$result") == "$dependencies" ]] || fail "The Magnus dependency read was misreported: $result"
+grep -qx 'https://localhost:4000/api/v1/ardent/dependencies true' "$temporary/fetch.log" || fail 'The Magnus container did not read its dependencies with its secret'
+result=$(host_action ardentstudio magnus-agent-ardent-dependencies 2> "$temporary/err") || { cat "$temporary/err" >&2; fail 'The Studio dependency read failed'; }
+[[ $(jq -c . <<< "$result") == "$dependencies" ]] || fail "The Studio dependency read was misreported: $result"
+[[ $(cat "$temporary/fetch.log") == $'token true\nhttps://magnus.example.com:4000/api/v1/ardent/dependencies true' ]] || fail 'Studio did not read the external Magnus dependencies with its own token'
+! grep -q 'obviously-fake' <<< "$result" || fail 'A credential or unknown field left the container'
+for answer in old method; do
+  [[ $(FIXTURE_DEPENDENCIES=$answer host_action magnus magnus-agent-ardent-dependencies) == '{"supported":false}' ]] || fail "A Magnus without the dependency report ($answer) was not reported unsupported"
+done
+if FIXTURE_DEPENDENCIES=down host_action magnus magnus-agent-ardent-dependencies 2> "$temporary/err" >/dev/null; then fail 'A failing Magnus was read as a dependency report'; fi
+grep -qx 'Magnus refused the agent dependencies: HTTP 503 INTERNAL' "$temporary/err" || fail 'A failing Magnus dependency read was not reported'
+if FIXTURE_DEPENDENCIES=unreachable host_action magnus magnus-agent-ardent-dependencies 2> "$temporary/err" >/dev/null; then fail 'An unreachable Magnus was read as a dependency report'; fi
+grep -qx 'Magnus did not answer the agent dependencies request' "$temporary/err" || fail 'An unreachable Magnus was not reported'
+printf 'Passed: the agent dependencies are read only, in the Magnus or Studio container, bounded to their documented fields.\n'
+
 # The controller's source: a suite-managed Magnus on its host; an external Magnus through Studio on
 # Studio's host; an external Magnus without Studio cannot be asked from here.
 source "$ROOT/scripts/suite/controller.sh"
@@ -101,3 +130,27 @@ source_of() { # CONFIG
 if source_of '{"components":{"hivemem":{"host":"console"}},"external":{"magnus":{"url":"https://magnus.example.com:4000"}},"hosts":{"console":{"directory":"/opt/console"}}}'; then fail 'An external Magnus without Studio was read'; fi
 [[ ! -e "$temporary/action" ]] || fail 'A host action ran without a source'
 printf 'Passed: the controller reads a suite-managed Magnus on its host and an external Magnus through Studio.\n'
+
+# doctor's "Agent dependencies" section: only for an installed suite with a Magnus it can ask; an
+# old Magnus is named, and a Magnus that does not answer is a warning, never a failure.
+printf '%s\n' '{"components":{"magnus":{"host":"data"}},"hosts":{"data":{"directory":"/opt/data"}}}' > "$temporary/config.json"
+doctor() { HIVE_CONFIG=$temporary/config.json HIVE_REGISTRY_STATE=${STATE-in-sync} hive_agent_dependencies_doctor > "$temporary/doctor.out" 2> "$temporary/doctor.err"; }
+hive_magnus_agent_action() { printf '%s\n' "$2" >> "$temporary/actions"; [[ -n ${ANSWER:-} ]] || { printf 'Magnus refused the agent dependencies: HTTP 503 INTERNAL\n' >&2; return 1; }; printf '%s\n' "$ANSWER"; }
+ANSWER=$dependencies doctor || fail 'Doctor failed on a dependency report'
+diff -u <(printf '%s\n' 'Agent dependencies:' '  hivemem: usable (source: registry)' '  emberpath: unsupported (source: override) - Emberpath 2.5.4 lacks emberpath.execution-trace.v1' \
+  '  hiveskills: awaiting_configuration (source: none) - No HiveSkills credential yet' '  unknown: unknown (source: unknown)') "$temporary/doctor.out" || fail 'Doctor printed the dependencies wrongly'
+[[ $(cat "$temporary/actions") == magnus-agent-ardent-dependencies ]] || fail 'Doctor did not read the dependencies with their host action'
+ANSWER='{"supported":false}' doctor || fail 'Doctor failed on a Magnus before 3.3.0'
+diff -u <(printf '%s\n' 'Agent dependencies:' '  Magnus is too old to report agent dependencies (needs 3.3.0)') "$temporary/doctor.out" || fail 'Doctor did not name the Magnus version'
+ANSWER='{"supported":true,"dependencies":[]}' doctor; grep -qx '  Magnus reports no agent dependencies' "$temporary/doctor.out" || fail 'Doctor did not report an empty list'
+ANSWER='' doctor || fail 'Doctor failed on a Magnus that did not answer'
+grep -qx 'WARNING: Agent dependencies: Magnus did not answer (Magnus refused the agent dependencies: HTTP 503 INTERNAL). Check Magnus with ./hive.sh status.' "$temporary/doctor.err" || { cat "$temporary/doctor.err" >&2; fail 'Doctor did not warn about a Magnus that did not answer'; }
+ANSWER='not json' doctor || fail 'Doctor failed on a malformed reply'
+grep -q '^WARNING: Agent dependencies: Magnus did not answer' "$temporary/doctor.err" || fail 'Doctor accepted a malformed reply'
+rm -f "$temporary/actions"
+for state in not-active drift ''; do STATE=$state ANSWER=$dependencies doctor; [[ ! -s "$temporary/doctor.out" && ! -e "$temporary/actions" ]] || fail "Doctor read Magnus on an installation that is $state"; done
+printf '%s\n' '{"components":{"hivemem":{"host":"data"}},"hosts":{"data":{"directory":"/opt/data"}}}' > "$temporary/config.json"
+ANSWER=$dependencies doctor; [[ ! -s "$temporary/doctor.out" && ! -e "$temporary/actions" ]] || fail 'Doctor read dependencies without a Magnus'
+printf '%s\n' '{"components":{"hivemem":{"host":"data"}},"external":{"magnus":{"url":"https://magnus.example.com:4000"}},"hosts":{"data":{"directory":"/opt/data"}}}' > "$temporary/config.json"
+ANSWER=$dependencies doctor; grep -q '^Agent dependencies: not checked; the external Magnus is read through Ardent Project Studio' "$temporary/doctor.out" && [[ ! -e "$temporary/actions" ]] || fail 'Doctor did not explain an external Magnus without Studio'
+printf 'Passed: doctor prints the agent dependencies, names a Magnus too old to report them, and only warns when Magnus does not answer.\n'

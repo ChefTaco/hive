@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { applySuiteCatalog, catalogFor, checkCapabilities, compareVersions, suiteCatalog } from './suite-catalog.mjs';
+import { applySuiteCatalog, catalogFor, checkCapabilities, checkServiceCapabilities, compareVersions, suiteCatalog } from './suite-catalog.mjs';
 import { assertDatastoreProfileCurrent } from './release-contracts.mjs';
 
 const withSince = (name, since, run) => {
@@ -30,7 +30,7 @@ test('emits a capability only from its since version, and only its path', () => 
     assert.equal('capabilities' in catalogFor('magnus', '2.7.9'), false);
     assert.deepEqual(catalogFor('magnus', '2.8.0').capabilities, { 'events.v1': { path: '/hive/events' } });
     assert.deepEqual(catalogFor('magnus', '2.10.0').capabilities, { 'events.v1': { path: '/hive/events' } });
-    assert.deepEqual(Object.keys(catalogFor('magnus', '3.0.0')).slice(-2), ['connection', 'capabilities']);
+    assert.deepEqual(Object.keys(catalogFor('magnus', '3.0.0')).slice(-3), ['connection', 'capabilities', 'serviceCapabilities']);
     const manifest = applySuiteCatalog({ version: '9.9.9', components: { magnus: { version: '2.8.1' }, cindertrace: { version: '0.4.0' }, emberpath: {} } });
     assert.deepEqual(manifest.components.magnus.catalog.capabilities, { 'events.v1': { path: '/hive/events' } });
     assert.equal(manifest.components.cindertrace.catalog.capabilities, undefined);
@@ -52,6 +52,43 @@ test('refuses malformed capability declarations', () => {
     entry({ 'events.v1': { path: '/x', since: null } }, null),
   ]) assert.throws(() => checkCapabilities('example', bad), /Suite catalog example/, JSON.stringify(bad));
   checkCapabilities('example', entry({ 'events.v1': { path: '/v1/hive/events', since: '1.6.0' } }));
+});
+
+test('declares the service capabilities other products negotiate, with the first version offering each', () => {
+  const declared = Object.fromEntries(Object.entries(suiteCatalog).filter(([, entry]) => entry.serviceCapabilities).map(([name, entry]) => [name, entry.serviceCapabilities]));
+  assert.deepEqual(declared, {
+    emberpath: [{ name: 'emberpath.execution-trace.v1', since: '2.6.0' }, { name: 'retry-signal.v1', since: '2.6.0' }],
+    hivemem: [{ name: 'memory.v1', since: '1.9.1' }],
+    hiveskills: [{ name: 'skills.pinned-release.v1', since: '1.9.0' }],
+    magnus: [{ name: 'ardent.recovery.v1', since: '3.3.0' }, { name: 'ardent.lineage.v1', since: '3.3.0' }, { name: 'artifact-transfer.v2', since: '3.3.0' }],
+  });
+  // Browser capabilities are a separate declaration and stay as they are.
+  assert.deepEqual(suiteCatalog.magnus.capabilities, { 'events.v1': { path: '/hive/events', since: '2.8.0' } });
+});
+
+test('emits every released service capability with its since, whatever the pinned version', () => {
+  // The registry compares since with the version it records; an external Magnus runs its own.
+  const magnus = [{ name: 'ardent.recovery.v1', since: '3.3.0' }, { name: 'ardent.lineage.v1', since: '3.3.0' }, { name: 'artifact-transfer.v2', since: '3.3.0' }];
+  assert.deepEqual(catalogFor('magnus', '3.2.1').serviceCapabilities, magnus);
+  assert.deepEqual(catalogFor('magnus', '3.3.0').serviceCapabilities, magnus);
+  assert.deepEqual(catalogFor('hivemem', '1.9.1').serviceCapabilities, [{ name: 'memory.v1', since: '1.9.1' }]);
+  assert.equal('serviceCapabilities' in catalogFor('hivexui', '0.11.0'), false);
+  const entry = suiteCatalog.hiveskills.serviceCapabilities[0];
+  const previous = entry.since;
+  entry.since = null;
+  try { assert.equal('serviceCapabilities' in catalogFor('hiveskills', '9.0.0'), false, 'since null is never emitted'); } finally { entry.since = previous; }
+  const manifest = applySuiteCatalog({ version: '9.9.9', components: { emberpath: { version: '2.5.4' }, oathweave: {} } });
+  assert.deepEqual(manifest.components.emberpath.catalog.serviceCapabilities.map(({ name }) => name), ['emberpath.execution-trace.v1', 'retry-signal.v1']);
+  assert.equal(manifest.components.oathweave.catalog.serviceCapabilities, undefined);
+});
+
+test('refuses malformed service capability declarations', () => {
+  for (const bad of [{}, [], Array.from({ length: 33 }, (_, index) => ({ name: `c${index}.v1`, since: null })),
+    [{ name: 'Retry.V1', since: null }], [{ name: 'retry-signal.v1', since: 'latest' }], [{ name: 'retry-signal.v1', since: '1.0.0', token: 'fake' }],
+    [{ since: '1.0.0' }], ['retry-signal.v1'], [{ name: 'retry-signal.v1', since: '1.0.0' }, { name: 'retry-signal.v1', since: '2.0.0' }]])
+    assert.throws(() => checkServiceCapabilities('example', { serviceCapabilities: bad }), /Suite catalog example/, JSON.stringify(bad));
+  checkServiceCapabilities('example', { serviceCapabilities: [{ name: 'retry-signal.v1', since: '2.6.0' }, { name: 'future.v1', since: null }] });
+  checkServiceCapabilities('example', {});
 });
 
 // The ingress mapping of each browser prefix, read from the Caddyfile: a handle_path block that

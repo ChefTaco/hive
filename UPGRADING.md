@@ -30,6 +30,20 @@ agent, the HiveXUI browser clients and the Ardent packages, in the registry's
 installation upgraded from a registry before 1.3.0 gets its first checklist with that upgrade.
 The registry keeps it without a migration, so the upgrade needs no `--allow-migrations` for it.
 
+## Service capabilities and agent dependencies
+
+From the release that pins the Hive Registry 1.5.0, an install or upgrade records each product's
+[service capabilities](docs/hive-registry-api.md#service-capabilities) with its connection. They
+are kept in the stored connection, so the upgrade needs no `--allow-migrations` for them, and a
+connection recorded before reads back without the field until the next install, upgrade or adopt
+records it. A rollback to a release with an older registry drops them again with its own record.
+Products read them only with the registry's existing read credential; nothing new is issued.
+
+`./hive.sh doctor` and `./hive.sh ardent status` list the [agent dependencies](deployment/FULL.md#agent-dependencies)
+that Magnus 3.3.0 or later resolves. With an older Magnus they say it is too old to report them,
+and `doctor` still passes. Discovery never enables an integration: HiveMem enrollment, skill
+installation and channel enablement keep their existing steps.
+
 ## Suite audit collection
 
 From the release that pins a Cindertrace whose collector reads the suite audit export, an upgrade
