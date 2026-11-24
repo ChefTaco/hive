@@ -8,19 +8,22 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [3.14.1] - 2026-11-24
 
-Product, datastore and controller update: Magnus 3.3.2 (server, fleet gateway and host agent),
+Product, datastore and controller update: Magnus 3.3.3 (server, fleet gateway and host agent),
 HiveSkills 1.9.1, Cindertrace 0.8.2 and the `runtime-2026-11-pg1712-zstd` datastore profile
 (`hive-postgres` 17.12-3 and 18.7-3); everything else is as in 3.14.0. No data migration. See
 `UPGRADING.md`, "Suite 3.14.1".
 
 ### Changed
 
-- Pins Magnus 3.3.2, HiveSkills 1.9.1 and Cindertrace 0.8.2, and selects the datastore profile
+- Pins Magnus 3.3.3, HiveSkills 1.9.1 and Cindertrace 0.8.2, and selects the datastore profile
   `runtime-2026-11-pg1712-zstd`.
-  - **Magnus 3.3.2:** the agent dependency report checks Emberpath at its model API, so a console
+  - **Magnus 3.3.3:** the agent dependency report checks Emberpath at its model API, so a console
     whose root health belongs to another service no longer makes Emberpath look usable; an Ardent task
     stream treats an empty `Last-Event-ID` as no cursor (the console's ingress always forwards the
-    header), so a stream opened through the console no longer fails with 400.
+    header), so a stream opened through the console no longer fails with 400; and the host agent's
+    native snapshot knows the Ardent 3.2.0 tables, so a native backup or upgrade of an installation
+    whose host agent owns an Ardent 3.2.0 profile (guided Ardent setup creates one) resumes the profile
+    instead of holding the suite.
   - **HiveSkills 1.9.1:** its health responses list `skills.pinned-release.v1`.
 
 ### Security
