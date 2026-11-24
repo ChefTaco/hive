@@ -138,6 +138,9 @@ The controller changes.
   ```
 
   An external Magnus is configured on its own host, as before.
+- **Setup waits for apt.** Installing prerequisites, Node.js for the Magnus agent and the full-node
+  packages now waits up to 10 minutes while another package manager, such as the unattended upgrades
+  of a freshly booted machine, holds apt's lock, instead of failing.
 
 ## Suite 3.14.0: Ardent execution recovery, lineage and artifact transfer v2
 

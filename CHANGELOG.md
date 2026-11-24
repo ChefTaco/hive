@@ -41,6 +41,11 @@ HiveSkills 1.9.1, Cindertrace 0.8.2 and the `runtime-2026-11-pg1712-zstd` datast
   `MAGNUS_ARDENT_EMBERPATH_URL=<console origin>/v1`, the model route agents reach from their hosts;
   before, New Agent and definition installs refused an Emberpath alias and the dependency report listed
   Emberpath as missing. Existing installations add the line by hand (see `UPGRADING.md`).
+- **Installing prerequisites, Node.js for the Magnus agent and full-node packages waits for apt.** On a
+  freshly booted machine, unattended upgrades can hold apt's lock for minutes; guided setup then failed
+  at "Node.js could not be installed". Every apt call now waits up to 10 minutes for another package
+  manager to finish (installs through `DPkg::Lock::Timeout`, `apt-get update` by retrying while the
+  lists lock is held) and says that it is waiting. Other apt failures are reported at once.
 
 ## [3.14.0] - 2026-11-24
 

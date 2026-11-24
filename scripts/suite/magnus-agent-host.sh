@@ -106,12 +106,29 @@ preflight() {
     '{node:$node,jq:$jq,tailscale:$tailscale,tailnetName:$magicDns,systemd:$systemd,root:$root,apt:$apt,arch:$arch,port:{state:$listener},service:$state,installedVersion:$version}'
 }
 
+# apt-get that waits up to 10 minutes for another package manager, such as the unattended upgrades
+# of a freshly booted machine, to release apt's locks. install and remove wait through
+# DPkg::Lock::Timeout; update does not honour it, so a held lists lock is retried here.
+apt_get() {
+  local err rc waited=false deadline=$((SECONDS + 600))
+  err=$(mktemp)
+  while :; do
+    rc=0
+    apt-get -o DPkg::Lock::Timeout=600 "$@" 2> "$err" || rc=$?
+    if ((rc)) && grep -q 'Could not get lock' "$err" && ((SECONDS < deadline)); then
+      [[ "$waited" == true ]] || printf 'Waiting for another package manager to release the apt lock\n' >&2
+      waited=true; sleep "${HIVE_APT_LOCK_RETRY_SECONDS:-5}"; continue
+    fi
+    cat -- "$err" >&2; rm -f -- "$err"; return "$rc"
+  done
+}
+
 install_node() {
   need_root
   command -v apt-get >/dev/null || die 'Installing Node.js here needs apt; install Node.js 24 yourself'
   local key arch
   export DEBIAN_FRONTEND=noninteractive
-  command -v gpg >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 || { apt-get update -qq; apt-get install -y --no-install-recommends gpg curl ca-certificates >/dev/null; }
+  command -v gpg >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 || { apt_get update -qq; apt_get install -y --no-install-recommends gpg curl ca-certificates >/dev/null; }
   key=$(mktemp)
   curl -fsSL --proto '=https' --tlsv1.2 https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o "$key"
   gpg --show-keys --with-colons "$key" 2>/dev/null | awk -F: '$1=="fpr" {print $10}' | grep -qx "$NODESOURCE_FINGERPRINT" ||
@@ -121,8 +138,8 @@ install_node() {
   arch=$(dpkg --print-architecture)
   printf 'Types: deb\nURIs: https://deb.nodesource.com/node_24.x\nSuites: nodistro\nComponents: main\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/nodesource.asc\n' "$arch" > /etc/apt/sources.list.d/nodesource.sources
   chmod 0644 /etc/apt/sources.list.d/nodesource.sources
-  apt-get update -qq
-  apt-get install -y nodejs >/dev/null
+  apt_get update -qq
+  apt_get install -y nodejs >/dev/null
   node_ok || die "Node.js $(node --version 2>/dev/null || echo missing) does not satisfy ^24.22.3 || ^26.13.1"
   jq -nc --arg version "$(node --version)" '{node:$version}'
 }
@@ -801,7 +818,7 @@ node_maintenance() {
   # These are prerequisites of the selected full-node capability, not controller-only installs.
   if ! command -v crontab >/dev/null || ! command -v script >/dev/null; then
     command -v apt-get >/dev/null || die 'Install cron and util-linux before full-node enrollment'
-    apt-get update -qq >&2; DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cron util-linux >&2
+    apt_get update -qq >&2; DEBIAN_FRONTEND=noninteractive apt_get install -y --no-install-recommends cron util-linux >&2
   fi
   systemctl enable --now cron >/dev/null 2>&1
   if [[ ! -f "$receipt" || $(jq -r .phase "$receipt") == resumed ]]; then

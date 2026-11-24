@@ -30,6 +30,13 @@ EOF
   cat > "$box/bin/apt-get" <<EOF
 #!/usr/bin/env bash
 printf 'apt-get %s\n' "\$*" >> "$box/log"
+while [[ "\$1" == -o ]]; do shift 2; done
+# A held lock (another package manager running) fails update the way apt does, for N calls.
+if [[ "\$1" == update && -s "$box/update-locked" ]]; then
+  n=\$(cat "$box/update-locked"); printf '%s\n' \$((n - 1)) > "$box/update-locked"
+  if ((n > 0)); then echo 'E: Could not get lock /var/lib/apt/lists/lock. It is held by process 42 (unattended-upgr)' >&2; exit 100; fi
+fi
+if [[ "\$1" == update && -f "$box/update-broken" ]]; then echo 'E: The repository is not signed.' >&2; exit 100; fi
 case "\$1" in
   install) for p in "\$@"; do [[ "\$p" == -* || "\$p" == install ]] || printf '%s\n' "\$p" >> "$box/installed"; done
     if grep -qx docker-ce-cli "$box/installed"; then cp "$box/docker.stub" "$box/bin/docker"; fi;;
@@ -84,7 +91,7 @@ boxes=0
 # Only these real tools are visible, so the machine's own Docker, snap or ufw never leak in.
 mkdir -p "$temporary/system"
 for tool in bash env cat grep sed awk tr cut head tail wc stat realpath mktemp install chmod chown mv rm cp touch \
-  mkdir dirname sort df timeout base64 sha256sum find cmp tar gzip flock ss jq openssl git ssh uname; do
+  mkdir dirname sort df timeout sleep base64 sha256sum find cmp tar gzip flock ss jq openssl git ssh uname; do
   path=$(command -v "$tool") || fail "test needs $tool"
   ln -s "$path" "$temporary/system/$tool"
 done
@@ -109,7 +116,7 @@ grep -qx 'Suites: noble' "$box/apt/sources.list.d/docker.sources" || fail 'wrong
 grep -qx 'URIs: https://download.docker.com/linux/ubuntu' "$box/apt/sources.list.d/docker.sources" || fail 'wrong repository'
 grep -qx "Signed-By: $box/apt/keyrings/docker.asc" "$box/apt/sources.list.d/docker.sources" || fail 'wrong keyring'
 [[ $(stat -c %a "$box/apt/keyrings/docker.asc") == 644 ]] || fail 'keyring mode'
-logged 'apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin'
+logged 'apt-get -o DPkg::Lock::Timeout=600 install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin'
 logged 'curl -fsSL --proto =https --tlsv1.2 https://download.docker.com/linux/ubuntu/gpg'
 logged "usermod -aG docker $(id -un)"
 [[ -d "$box/opt/hive" && $(stat -c %a "$box/opt/hive") == 750 ]] || fail 'installation directory'
@@ -180,8 +187,8 @@ run --yes && fail 'replaced docker.io without consent'
 expect '--replace-conflicting'
 [[ ! -s "$box/log" ]] || fail 'changed something before refusing'
 run --yes --replace-conflicting || { cat "$box/out" >&2; fail 'replacement failed'; }
-logged 'apt-get remove -y docker.io containerd runc'
-logged 'apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin'
+logged 'apt-get -o DPkg::Lock::Timeout=600 remove -y docker.io containerd runc'
+logged 'apt-get -o DPkg::Lock::Timeout=600 install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin'
 
 # docker.io that already has Compose is kept, with a warning.
 machine ubuntu 24.04 noble
@@ -189,6 +196,23 @@ printf 'docker.io\ndocker-compose-v2\n' >> "$box/installed"; cp "$box/docker.stu
 run --yes || { cat "$box/out" >&2; fail 'existing docker.io with Compose was not accepted'; }
 expect 'Keeping the existing Docker Engine (docker.io)'
 grep -q 'apt-get install' "$box/log" && fail 'reinstalled Docker over docker.io'
+
+# Another package manager holding apt's lock (unattended upgrades after a fresh boot) is waited
+# for; install and remove wait inside apt, a held lists lock on update is retried here.
+machine ubuntu 24.04 noble
+printf '2\n' > "$box/update-locked"
+HIVE_APT_LOCK_RETRY_SECONDS=0 run --yes || { cat "$box/out" >&2; fail 'did not wait for the apt lock'; }
+expect 'Waiting for another package manager to release the apt lock'
+[[ $(grep -c 'Waiting for another package manager' "$box/out") == 1 ]] || fail 'repeated the wait message'
+[[ $(grep -c '^apt-get -o DPkg::Lock::Timeout=600 update -qq$' "$box/log") -ge 3 ]] || { cat "$box/log" >&2; fail 'did not retry update'; }
+logged 'apt-get -o DPkg::Lock::Timeout=600 install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin'
+grep -q 'Could not get lock' "$box/out" && fail 'printed a lock error it recovered from'
+# Any other update failure is reported at once, not retried.
+machine ubuntu 24.04 noble
+touch "$box/update-broken"
+HIVE_APT_LOCK_RETRY_SECONDS=0 run --yes && fail 'ignored a failed update'
+expect 'The repository is not signed.'
+[[ $(grep -c ' update -qq$' "$box/log") == 1 ]] || fail 'retried an update that failed for another reason'
 
 # A controller needs no Docker at all.
 machine ubuntu 24.04 noble
