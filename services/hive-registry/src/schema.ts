@@ -39,14 +39,24 @@ export const capabilities = z.record(capabilityName, z.strictObject({ path: loca
   .refine((value) => Object.keys(value).length <= 32, 'At most 32 capabilities');
 export type Capabilities = z.infer<typeof capabilities>;
 
-// `capabilities` is optional and has no default, so a connection recorded before it existed
-// reads back unchanged and is stored byte for byte as before.
+// Optional service capabilities, such as [{"name": "retry-signal.v1", "since": "2.6.0"}]: what a
+// product offers other products over its internal endpoints, from the first product version that
+// offers it. The release records every one the suite catalog declares; the connection view keeps
+// those the recorded product version offers (see views.ts). Readers ignore names they do not know.
+export const capabilityVersion = z.string().regex(/^\d{1,9}(?:\.\d{1,9}){0,3}$/);
+export const serviceCapabilities = z.array(z.strictObject({ name: capabilityName, since: capabilityVersion })).min(1).max(32)
+  .refine((value) => new Set(value.map((capability) => capability.name)).size === value.length, 'Duplicate service capability');
+export type ServiceCapabilities = z.infer<typeof serviceCapabilities>;
+
+// `capabilities` and `serviceCapabilities` are optional and have no default, so a connection
+// recorded before they existed reads back unchanged and is stored byte for byte as before.
 export const connection = z.strictObject({
   consolePath: localPath.nullable().default(null),
   browserPrefix: localPath.nullable().default(null),
   nativeApis: z.record(productId, publicUrl).default({}),
   internalEndpoints: z.record(productId, internalUrl).default({}),
   capabilities: capabilities.optional(),
+  serviceCapabilities: serviceCapabilities.optional(),
 }).refine((value) => !value.capabilities || value.browserPrefix !== null, { message: 'Capabilities need a browserPrefix', path: ['capabilities'] });
 export type Connection = z.infer<typeof connection>;
 

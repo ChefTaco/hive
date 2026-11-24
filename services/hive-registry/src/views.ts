@@ -1,4 +1,5 @@
 import type { Capabilities, Connection } from './schema.js';
+import { capabilityVersion } from './schema.js';
 import { canonicalSetupItem, emptyConnection, type HistoryRow, type InstallationRow, type InstalledRow, type ProductRow, type RegistryStore, type VersionRow } from './store.js';
 
 // Field exposure lives here and only here. These are explicit allowlists: a new column
@@ -14,6 +15,33 @@ const capabilitiesOf = (connection: Connection): { capabilities?: Capabilities }
   connection.capabilities && Object.keys(connection.capabilities).length
     ? { capabilities: Object.fromEntries(Object.entries(connection.capabilities).map(([name, capability]) => [name, { path: capability.path }])) }
     : {};
+
+// Dotted numeric versions, compared part by part; a missing part counts as 0.
+function compareVersions(left: string, right: string): number {
+  const a = left.split('.').map(Number), b = right.split('.').map(Number);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0);
+    if (difference) return Math.sign(difference);
+  }
+  return 0;
+}
+
+export type ServiceCapabilityView = { name: string; since: string; confirmed: boolean };
+
+/**
+ * The service capabilities a product's connection offers. With a recorded numeric version, only
+ * those whose `since` it reaches, `confirmed: true`. Without one (an external product, an
+ * externally managed product without a version, or a version such as 3.3.0-rc.1), every declared
+ * one, `confirmed: false`: the reader compares `since` with the version the product reports.
+ * `name` narrows the list to that capability.
+ */
+export function serviceCapabilitiesOf(installed: InstalledRow | undefined, name?: string): ServiceCapabilityView[] {
+  const declared = connectionOf(installed).serviceCapabilities ?? [];
+  const version = installed?.version && capabilityVersion.safeParse(installed.version).success ? installed.version : null;
+  return declared
+    .filter((capability) => (version === null || compareVersions(version, capability.since) >= 0) && (name === undefined || capability.name === name))
+    .map((capability) => ({ name: capability.name, since: capability.since, confirmed: version !== null }));
+}
 
 export function publicProductVisible(row: ProductRow): boolean {
   return row.public === 1;
@@ -67,9 +95,15 @@ export function publicConnection(row: ProductRow, installed: InstalledRow | unde
   return connectionDetails(row, connectionOf(installed));
 }
 
-export function privateConnection(row: ProductRow, installed: InstalledRow | undefined) {
+// Service capabilities are private like internal endpoints and versions: their `since` and
+// `confirmed` tell the product version apart. A product that offers none omits the field.
+export function privateConnection(row: ProductRow, installed: InstalledRow | undefined, capability?: string) {
   const connection = connectionOf(installed);
-  return { ...connectionDetails(row, connection), inventoryHost: installed?.inventory_host ?? null, internalEndpoints: connection.internalEndpoints };
+  const offered = serviceCapabilitiesOf(installed, capability);
+  return {
+    ...connectionDetails(row, connection), inventoryHost: installed?.inventory_host ?? null, internalEndpoints: connection.internalEndpoints,
+    ...(offered.length ? { serviceCapabilities: offered } : {}),
+  };
 }
 
 // The setup checklist is public: HiveXUI shows it to administrators. Its items carry titles,
