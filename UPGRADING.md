@@ -145,9 +145,8 @@ it. Studio 0.5.1 still works with an older Magnus: task recovery, Ardent lineage
 v2 and definition deploy need Magnus 3.3.0 and agents that report those capabilities, and fall back
 otherwise.
 
-- A fresh Studio, or one added with `hive.sh add ardentstudio`, gets
-  `ARDENT_STUDIO_INSTANCE_ID=<installation ID>`, so its execution references name the
-  installation. An existing Studio keeps the default `local`, which is fine. To use the
+- The Studio of a fresh installation gets `ARDENT_STUDIO_INSTANCE_ID=<installation ID>`, so its
+  execution references name the installation (`hive.sh add` does not add Studio). An existing Studio keeps the default `local`, which is fine. To use the
   installation ID, add the line to `config/ardentstudio.env` before you run `plan`, so the
   pre-change backup and the plan include it. References recorded earlier keep `local`.
 
