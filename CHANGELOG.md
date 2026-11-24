@@ -6,6 +6,39 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [3.14.1] - 2026-11-24
+
+Product, datastore and controller update: Magnus 3.3.2 (server, fleet gateway and host agent),
+HiveSkills 1.9.1, Cindertrace 0.8.2 and the `runtime-2026-11-pg1712-zstd` datastore profile
+(`hive-postgres` 17.12-3 and 18.7-3); everything else is as in 3.14.0. No data migration. See
+`UPGRADING.md`, "Suite 3.14.1".
+
+### Changed
+
+- Pins Magnus 3.3.2, HiveSkills 1.9.1 and Cindertrace 0.8.2, and selects the datastore profile
+  `runtime-2026-11-pg1712-zstd`.
+  - **Magnus 3.3.2:** the agent dependency report checks Emberpath at its model API, so a console
+    whose root health belongs to another service no longer makes Emberpath look usable; an Ardent task
+    stream treats an empty `Last-Event-ID` as no cursor (the console's ingress always forwards the
+    header), so a stream opened through the console no longer fails with 400.
+  - **HiveSkills 1.9.1:** its health responses list `skills.pinned-release.v1`.
+
+### Security
+
+- **Zstandard 1.6.0 (CVE-2026-124851) in the PostgreSQL and Cindertrace images.** The 3.14.0 images
+  carried `libzstd1` 1.5.7. `hive-postgres` 17.12-3 and 18.7-3 (profile `runtime-2026-11-pg1712-zstd`)
+  and Cindertrace 0.8.2 carry 1.6.0-r0. A library patch: same PostgreSQL majors, runtime and collation
+  receipt, so the upgrade has no storage transition. Qdrant 1.18.3 still bundles Zstandard 1.5.x in its
+  binary; no Qdrant release ships 1.6.0 yet, and Qdrant is reached only by HiveMem on the private
+  network.
+
+### Fixed
+
+- **A fresh installation's Magnus can deploy agents with an Emberpath model alias.** Setup now writes
+  `MAGNUS_ARDENT_EMBERPATH_URL=<console origin>/v1`, the model route agents reach from their hosts;
+  before, New Agent and definition installs refused an Emberpath alias and the dependency report listed
+  Emberpath as missing. Existing installations add the line by hand (see `UPGRADING.md`).
+
 ## [3.14.0] - 2026-11-24
 
 Product highlights: execution recovery (interrupted Ardent tasks resume, or wait for a decision),
