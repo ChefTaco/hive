@@ -6,8 +6,58 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [3.14.0] - 2026-11-24
+
+Product highlights: execution recovery (interrupted Ardent tasks resume, or wait for a decision),
+execution ancestry and lineage across Studio, Magnus, Ardent and Emberpath, artifact transfer v2
+(resumable, digest-verified downloads with renditions), parallel tool scheduling, one retry policy
+with backoff, chat catch-up after an outage, portable agent definitions, agent dependency
+discovery, branch-and-join workflows in Studio, and the HiveXUI lineage, recovery and delivery
+views. See `UPGRADING.md`, "Suite 3.14.0".
+
+### Changed
+
+- Pins Magnus 3.3.0 (server, fleet gateway and host agent; Ardent 3.2.0 for the agents),
+  Ardent Project Studio 0.5.0, Emberpath 2.6.0, HiveSkills 1.9.0, HiveXUI 0.12.0 and the Hive
+  Registry 1.5.0 (image 2.0.13). Oathweave, HiveMem, Cindertrace, ChatterMost, Emberfold,
+  Embermend, the ingress image and the datastore and storage recovery profiles are as in 3.13.5.
+  - **Ardent 3.2.0 (through Magnus 3.3.0):** interrupted tasks resume after a restart by default
+    (`execution.recovery.enabled: false` restores the earlier behaviour); execution context and
+    lineage for every task; artifact transfer v2 with `Range`/`If-Range` and renditions;
+    independent read tool calls run in parallel; llama.cpp, A2A and channel retries share one
+    policy; Mattermost and ChatterMost channels catch up on posts missed during an outage.
+  - **Magnus 3.3.0:** portable agent definitions (`hive-agent-definition/1`: export, preflight,
+    install), the agent dependency report (`GET /api/v1/ardent/dependencies`), the Ardent 3.2.0
+    recovery, lineage and artifact routes, and pinned HiveSkills releases. New optional settings
+    `MAGNUS_HIVE_REGISTRY_URL` and `MAGNUS_HIVE_REGISTRY_TOKEN_FILE`; the suite does not set them.
+  - **Ardent Project Studio 0.5.0:** branch-and-join workflows, task recovery decisions, lineage,
+    resumable artifact imports with renditions, and agent definitions from templates. Its
+    migrations 7 to 10 run on first start and are one-way.
+  - **Emberpath 2.6.0:** traces record the caller's execution context and every upstream attempt;
+    retries back off with jitter and honour `Retry-After` within a request deadline. Its router
+    data format moves to `managed-format-3`.
+  - **HiveSkills 1.9.0:** exact pinned releases for enrolled targets (`skills.pinned-release.v1`);
+    archives are checked against their digest before they are served. No storage change.
+  - **HiveXUI 0.12.0:** Studio recovery chips and decisions, the lineage drawer, the workflows
+    drawer, resumable verified downloads with previews and provenance in Deliverable Review, an
+    Executions tab in Agent 360, and the agent dependency report on the Magnus Ardent overview.
+- **Emberpath storage transition.** Emberpath 2.6.0's `emberpath-managed-format-3` adds six
+  nullable `Trace` columns and two indexes. The release declares the transition from
+  `emberpath-managed-format-2` with Emberpath's own `migrate`, so the upgrade needs
+  `--allow-migrations`; fresh installs create the new format directly. An installation still on
+  `emberpath-v1` (a release before 3.4.0) upgrades to a 3.4.0 to 3.13.5 release first.
+- **Studio names itself by the installation.** A fresh Ardent Project Studio, and one added with
+  `hive.sh add ardentstudio`, gets `ARDENT_STUDIO_INSTANCE_ID` set to the installation ID, so its
+  execution references read `hx1:studio:<installation>:…`. An existing Studio keeps `local` unless
+  you set it.
+
 ### Added
 
+- **Ingress routes for Magnus 3.3.0.** The browser allowlist adds `GET /api/v1/ardent/dependencies`
+  and `POST /api/v1/ardent/agent-definitions/validate` and `/install`, the new browser rows of
+  Magnus's console API; the profile definition and artifact `content` reads were already covered.
+  `Range` and `If-Range` reach Magnus only when the browser sends them, so a resumed artifact
+  download continues where it stopped.
 - **Service capabilities in the Hive Registry (Registry 1.5.0, image 2.0.13).** The suite catalog
   declares per product the capabilities it offers other products, each with the first version
   offering it: Emberpath `emberpath.execution-trace.v1` and `retry-signal.v1` (2.6.0), HiveMem

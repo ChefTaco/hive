@@ -11,7 +11,9 @@ plan, takes a verified pre-change backup and rehearses data changes on a copy be
 Moving from 2.x to 3.x with existing PostgreSQL stores also needs `--allow-migrations`, described
 below, and so does moving an installation with Emberpath or HiveSkills from a release before
 3.4.0 to 3.4.0 or later, an installation with Embermend from a release before 3.6.0 to 3.6.0 or
-later, and an installation that runs Magnus from a release before 3.8.0 to 3.8.0 or later. An
+later, an installation that runs Magnus from a release before 3.8.0 to 3.8.0 or later, and every
+installation moving from a release before 3.14.0 to 3.14.0 or later (Emberpath 2.6.0's data
+format; see [Suite 3.14.0](#suite-3140-ardent-execution-recovery-lineage-and-artifact-transfer-v2)). An
 installation that runs Magnus moves to 3.9.0 or later (Magnus 3) from 3.8.1 only, after its nodes
 have their keys; see [Suite 3.9.0](#suite-390-magnus-301-node-keys-only). A failed or uncertain step
 holds its transaction for recovery, as described in
@@ -106,6 +108,76 @@ first, on the stopped store, after a backup.
 **Rolling back across this release.** A rollback restores the pre-upgrade backup, which holds the
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
+
+## Suite 3.14.0: Ardent execution recovery, lineage and artifact transfer v2
+
+3.14.0 pins Magnus 3.3.0 (server, fleet gateway and host agent, which carries Ardent 3.2.0),
+Ardent Project Studio 0.5.0, Emberpath 2.6.0, HiveSkills 1.9.0, HiveXUI 0.12.0 and the Hive
+Registry 1.5.0 (image 2.0.13). Oathweave, HiveMem, Cindertrace, ChatterMost, Emberfold, Embermend,
+the ingress image and the datastore and storage recovery profiles are those of 3.13.5. The
+controller changes too: the ingress allows the new Magnus browser routes, and a new Studio is
+named by its installation.
+
+**Take the upgrade with `--allow-migrations`.** Emberpath 2.6.0 moves its router data from
+`emberpath-managed-format-2` to `emberpath-managed-format-3`, which adds six nullable `Trace`
+columns and two indexes. The change is additive and fast. Every installation has Emberpath, so
+every upgrade to 3.14.0 needs the flag; without it the upgrade stops before any service is stopped:
+
+```bash
+./hive.sh plan --config ~/.config/hive/ID/installation.json --release 3.14.0 --allow-migrations
+./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.14.0 --allow-migrations
+```
+
+The installer takes and verifies the pre-change backup, runs `emberpath migrate` on the restored
+copy, then once on the stopped live store, as described in
+[Suite 3.4](#suite-34-emberpath-and-hiveskills-data-formats). The transition is declared from
+`managed-format-2` only: an installation still on a release before 3.4.0 (`emberpath-v1`) upgrades
+to a release from 3.4.0 to 3.13.5 first. A code-only `rollback` from 3.14.0 is refused, because no
+earlier release reads the new format; recover with the verified pre-upgrade backup.
+
+**Ardent Project Studio: back up, migrations 7 to 10 are one-way.** Studio 0.5.0 runs its
+migrations 7 to 10 on its first start. They are additive and keep existing rows, but Studio 0.4.x
+no longer starts on a database they have run on. The upgrade's pre-change backup covers Studio's
+data; keep it until you have checked Studio on 0.5.0, because going back to 0.4.x means restoring
+it. Studio 0.5.0 still works with an older Magnus: task recovery, Ardent lineage, artifact transfer
+v2 and definition deploy need Magnus 3.3.0 and agents that report those capabilities, and fall back
+otherwise.
+
+- A fresh Studio, or one added with `hive.sh add ardentstudio`, gets
+  `ARDENT_STUDIO_INSTANCE_ID=<installation ID>`, so its execution references name the
+  installation. An existing Studio keeps the default `local`, which is fine. To use the
+  installation ID, add the line to `config/ardentstudio.env` before you run `plan`, so the
+  pre-change backup and the plan include it. References recorded earlier keep `local`.
+
+**Ardent 3.2.0: interrupted tasks resume after a restart by default.** An agent's task that was
+`running` continues under the same ID from its last completed model or tool boundary instead of
+becoming `unknown`; a task with an unsettled effect is held for a decision, which Studio and
+HiveXUI offer. Set `execution.recovery.enabled: false` in the profile's Ardent configuration for
+the earlier behaviour. Release any extension package that pins an exact `@hivemagnus/ardent` peer
+for 3.2.0 before Magnus moves the agents: a managed upgrade holds the runtime when a peer differs.
+Profiles keep their installed Ardent until a managed upgrade moves them; until then the new
+recovery, lineage and artifact reads answer `409 unsupported_capability`.
+
+**Magnus 3.3.0** adds no migration. Host agents: `./hive.sh post-upgrade --yes` (or
+`./hive.sh magnus-agent install`) moves the agents the suite installs to 3.3.0; fleet agents that
+Magnus manages move with `magnus-server agents upgrade --to 3.3.0`. An external Magnus is upgraded
+outside this release, and the **Installed software** page lists it as differing until it runs
+3.3.0.
+
+- Magnus 3.3.0 has new optional settings `MAGNUS_HIVE_REGISTRY_URL` and
+  `MAGNUS_HIVE_REGISTRY_TOKEN_FILE` for [agent dependency discovery](deployment/FULL.md#agent-dependencies).
+  The suite does not set them, on a fresh Magnus or an existing one, and you do not need them: the
+  suite already configures HiveMem and HiveSkills for Magnus explicitly, and an explicit setting
+  always wins. The Registry's internal endpoints are addresses on the installation's private
+  network, which agents on fleet hosts cannot reach, so a Registry-resolved Emberpath would give
+  New Agent a model URL those agents cannot use. Until Magnus distinguishes the URL it uses from
+  the one it gives agents, `doctor` and `ardent status` report Emberpath as `missing` unless
+  `MAGNUS_ARDENT_EMBERPATH_URL` is set; neither fails because of it.
+
+**Ingress.** The Magnus browser allowlist adds `GET /api/v1/ardent/dependencies` and
+`POST /api/v1/ardent/agent-definitions/validate` and `/install`, and forwards `Range` and
+`If-Range` when the browser sends them, so HiveXUI can show the dependency report and resume an
+artifact download. The upgrade installs the new Caddyfile with the release.
 
 ## Suite 3.13.5: agent checklist item
 
