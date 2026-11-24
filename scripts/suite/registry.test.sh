@@ -218,6 +218,51 @@ cmp -s "$directory/config/ingress/Caddyfile" "$ROOT/deployment/Caddyfile" || fai
   [[ $(tail -1 "$temporary/calls") == complete ]] || fail 'Retry did not complete the transaction'
 ) || exit 1
 
+# Each lifecycle records the new versions as activating before the products start, and installed
+# (which confirms their service capabilities) only after activation, once the signed images are
+# observed running. A failed activation or observation sends no completion.
+(
+  # Adopt keeps its own local temporary directory, so the stubs write to their own paths.
+  lifecycle_calls=$temporary/lifecycle-calls lifecycle_log=$temporary/lifecycle.log
+  hive_doctor() { :; }; hive_stage() { :; }; hive_registry_provision() { :; }; hive_registry_refresh_ingress() { :; }; hive_registry_preflight() { :; }
+  hive_memory_credential_provision() { :; }; hive_audit_collection_provision() { :; }; hive_initialize() { :; }; hive_install_summary() { :; }
+  hive_checklist_prepare() { :; }; hive_checklist_report() { :; }; hive_native_begin_all() { :; }; hive_render() { printf '{}\n'; }; hive_transfer() { :; }
+  hive_retention_after_upgrade() { :; }; hive_retention_schedule_after() { :; }
+  hive_hold() { printf 'hold\n' >> "$lifecycle_calls"; exit 7; }
+  hive_all() { printf '%s\n' "$1" >> "$lifecycle_calls"; [[ "$1" != "${HIVE_FAIL_STEP:-}" ]]; }
+  hive_registry_action() { [[ "$2" == registry-start ]]; }
+  hive_registry_write() {
+    [[ "$2" == /v1/sync ]] || return 0
+    jq -r '"sync "+.phase+" "+.operation+" "+([.installed[]|select(.status!="external")|.status]|unique|join(","))+" "+(any(.installed[];.connection.serviceCapabilities!=null)|tostring)' <<< "$3" >> "$lifecycle_calls"
+  }
+  hive_registry_observed() {
+    hive_registry_body complete installed | jq --arg state "${HIVE_OBSERVED_STATE:-running}" '[{host:"control",active:true,services:[.installed[]|select(.status!="external")|{service:.id,state:$state,health:"healthy",imageMatches:true,image}]}]'
+  }
+  HIVE_MANIFEST=$temporary/new-registry-release.json
+  for operation in install upgrade rollback adopt; do
+    : > "$lifecycle_calls"
+    (HIVE_OPERATION=$operation hive_lifecycle "$operation") > "$lifecycle_log" 2>&1 || { cat "$lifecycle_log" >&2; fail "$operation failed"; }
+    case "$operation" in adopt) activated=adopt;; *) activated=adapters-accept;; esac
+    begin=$(grep -n "^sync begin $operation activating true$" "$lifecycle_calls" | cut -d: -f1)
+    start=$(grep -nx activate "$lifecycle_calls" | cut -d: -f1 || true)
+    ready=$(grep -nx "$activated" "$lifecycle_calls" | cut -d: -f1)
+    completion=$(grep -n "^sync complete $operation installed true$" "$lifecycle_calls" | cut -d: -f1)
+    finish=$(grep -nx complete "$lifecycle_calls" | cut -d: -f1)
+    [[ -n "$begin" && -n "$ready" && -n "$completion" && -n "$finish" ]] || { cat "$lifecycle_calls" >&2; fail "$operation did not record activating, then installed"; }
+    [[ "$operation" == adopt || ( -n "$start" && "$begin" -lt "$start" ) ]] || { cat "$lifecycle_calls" >&2; fail "$operation started products before recording them as activating"; }
+    (( ready < completion && completion < finish )) || { cat "$lifecycle_calls" >&2; fail "$operation recorded installed before activation finished"; }
+    [[ $(grep -c '^sync ' "$lifecycle_calls") == 2 ]] || { cat "$lifecycle_calls" >&2; fail "$operation sent unexpected syncs"; }
+  done
+  for operation in upgrade rollback; do
+    : > "$lifecycle_calls"
+    (HIVE_OPERATION=$operation HIVE_FAIL_STEP=activate hive_lifecycle "$operation") >/dev/null 2>&1 && fail "A failed $operation activation succeeded"
+    grep -q '^sync begin ' "$lifecycle_calls" && ! grep -q '^sync complete ' "$lifecycle_calls" || { cat "$lifecycle_calls" >&2; fail "A failed $operation activation recorded installed"; }
+    : > "$lifecycle_calls"
+    (HIVE_OPERATION=$operation HIVE_OBSERVED_STATE=restarting hive_lifecycle "$operation") >/dev/null 2>&1 && fail "An unobserved $operation succeeded"
+    ! grep -q '^sync complete ' "$lifecycle_calls" || { cat "$lifecycle_calls" >&2; fail "A $operation recorded installed for products not observed running"; }
+  done
+) || exit 1
+
 # Status and doctor compare the registry to what actually runs.
 cat > "$temporary/bin/docker" <<'SH'
 #!/usr/bin/env bash

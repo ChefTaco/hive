@@ -16,9 +16,13 @@ All notable changes to this project are documented in this file. The format is b
   them with each product's connection, and `GET /v1/products/{id}/connection` serves them with a
   credential as `serviceCapabilities` beside `internalEndpoints`: those the recorded version
   offers, or, when the registry cannot tell the version (an external Magnus), every one with its
-  `since` for the reader to compare. `?capability=NAME` narrows a connection to one entry (`404
-  capability_not_offered` otherwise) and `GET /v1/products?capability=NAME` lists the products
-  offering it. The public views and the browser contract are unchanged, and the browser
+  `since` for the reader to compare. An entry is `confirmed: true` only once the product is
+  recorded as running that version, after the install, upgrade, rollback or adoption completed;
+  while it is still `activating`, including a failed or held activation, its entries are
+  `confirmed: false`, so a caller never relies on a capability the running service may not have
+  yet. `?capability=NAME` narrows a connection to one entry (`404 capability_not_offered`
+  otherwise) and `GET /v1/products?capability=NAME` lists the products offering it, confirmed or
+  not. The public views and the browser contract are unchanged, and the browser
   `capabilities` stay as they are. See `docs/hive-registry-api.md`, "Service capabilities".
 - **Agent dependencies in `doctor` and `ardent status`.** Both list the agent dependencies Magnus
   resolved for Ardent (`GET /api/v1/ardent/dependencies`): each one's name, status, source and,

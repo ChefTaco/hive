@@ -30,17 +30,23 @@ export type ServiceCapabilityView = { name: string; since: string; confirmed: bo
 
 /**
  * The service capabilities a product's connection offers. With a recorded numeric version, only
- * those whose `since` it reaches, `confirmed: true`. Without one (an external product, an
- * externally managed product without a version, or a version such as 3.3.0-rc.1), every declared
- * one, `confirmed: false`: the reader compares `since` with the version the product reports.
- * `name` narrows the list to that capability.
+ * those whose `since` it reaches. They are `confirmed: true` only once the controller recorded the
+ * product as running that version: `installed` (a sync's completion, after hive.sh observed the
+ * signed image running and healthy) or `external` (an externally managed product, whose version
+ * the operator records). While it is `activating` (an install, upgrade or rollback that has not
+ * completed, or one that failed and is held) the product may still run its previous version, so
+ * they are `confirmed: false`. Without a comparable version (an external product, an externally
+ * managed product without a version, or a version such as 3.3.0-rc.1), every declared one,
+ * `confirmed: false`. Unconfirmed, the reader compares `since` with the version the product
+ * reports. `name` narrows the list to that capability; an unconfirmed entry is still offered.
  */
 export function serviceCapabilitiesOf(installed: InstalledRow | undefined, name?: string): ServiceCapabilityView[] {
   const declared = connectionOf(installed).serviceCapabilities ?? [];
   const version = installed?.version && capabilityVersion.safeParse(installed.version).success ? installed.version : null;
+  const running = version !== null && (installed?.status === 'installed' || installed?.status === 'external');
   return declared
     .filter((capability) => (version === null || compareVersions(version, capability.since) >= 0) && (name === undefined || capability.name === name))
-    .map((capability) => ({ name: capability.name, since: capability.since, confirmed: version !== null }));
+    .map((capability) => ({ name: capability.name, since: capability.since, confirmed: running }));
 }
 
 export function publicProductVisible(row: ProductRow): boolean {

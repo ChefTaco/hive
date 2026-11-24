@@ -79,7 +79,8 @@ export function createApp(options: AppOptions): RequestListener {
     }
     if (route[0] !== 'products') return notFound();
     // ?capability=NAME keeps the products, or the connection entry, offering that service
-    // capability. Service capabilities are private, so the filter needs a credential.
+    // capability, confirmed or not (an activating product still offers what its recorded version
+    // offers; see views.ts). Service capabilities are private, so the filter needs a credential.
     const capability = url.searchParams.get('capability');
     if (capability !== null) {
       if (!privileged) return failure(401, 'credential_required', 'Service capabilities require a registry read credential');
