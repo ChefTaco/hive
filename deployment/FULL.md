@@ -1274,3 +1274,9 @@ warning; neither fails `doctor`. `ardent status` prints the section after its JS
 error, and adds the report to the JSON as `dependencies` (`null` when Magnus did not answer). A
 resolved dependency is only available: HiveMem enrollment, skill installation and channel
 enablement still need their own steps and credentials.
+
+The suite configures HiveMem and HiveSkills for a suite-managed Magnus explicitly, so they report
+`source: override`. It does not set Magnus's Registry discovery (`MAGNUS_HIVE_REGISTRY_URL` and
+`MAGNUS_HIVE_REGISTRY_TOKEN_FILE`): the Registry's internal endpoints are private-network
+addresses that agents on fleet hosts cannot reach, so Emberpath reports `missing` unless
+`MAGNUS_ARDENT_EMBERPATH_URL` names an address those agents can use.

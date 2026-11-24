@@ -131,7 +131,13 @@ export function applyStorageRecovery(manifest, recovery) {
 // installs initialize with automatic migration and record the new format directly.
 // Releases pinning older product versions keep their original formats byte for byte.
 const PRODUCT_FORMATS = Object.freeze({
-  emberpath: Object.freeze([{ since: '2.2.0', storageFormat: 'emberpath-managed-format-2', from: 'emberpath-v1' }]),
+  // Emberpath 2.6.0's managed-format-3 adds the nullable execution columns and indexes of Trace;
+  // it migrates from managed-format-2, so an installation still on emberpath-v1 (a release before
+  // 3.4.0) upgrades through a release that pins Emberpath 2.2.0 to 2.5.x first.
+  emberpath: Object.freeze([
+    { since: '2.2.0', storageFormat: 'emberpath-managed-format-2', from: 'emberpath-v1' },
+    { since: '2.6.0', storageFormat: 'emberpath-managed-format-3', from: 'emberpath-managed-format-2' },
+  ]),
   hiveskills: Object.freeze([{ since: '1.5.0', storageFormat: 'hiveskills-managed-format-3', from: 'hiveskills-v1' }]),
 });
 const PRODUCT_MIGRATION = Object.freeze(['migrate', '--backup-dir', '/data/migration-backups']);

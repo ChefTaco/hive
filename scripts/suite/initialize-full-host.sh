@@ -162,6 +162,9 @@ hive_full_configuration() {
     {
       line NODE_ENV production; line NODE_EXTRA_CA_CERTS /config/authority.pem
       line ARDENT_STUDIO_HOST 0.0.0.0; line ARDENT_STUDIO_PORT 8097; line ARDENT_STUDIO_DATA /data
+      # Studio 0.5.0 names itself in execution references (hx1:studio:<instance>:...) by the
+      # installation ID the Hive Registry records; earlier versions ignore it.
+      line ARDENT_STUDIO_INSTANCE_ID "$installation"
       resource_identity
       line ARDENT_STUDIO_OATHWEAVE_IDENTITIES_JSON "$(jq -nc --arg issuer "$issuer" --arg subject "$subject" --arg id "$(secret studio-id)" --arg name "$username" '[{issuer:$issuer,subject:$subject,localUserId:$id,displayName:$name}]')"
       line ARDENT_STUDIO_OATHWEAVE_TOKEN_URL "$(product_endpoint oathweave https://oathweave:4200)/api/v1/oauth/token"

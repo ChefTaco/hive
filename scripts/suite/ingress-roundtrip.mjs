@@ -376,6 +376,12 @@ gateway.listen(4310,'0.0.0.0');
     ['/api/magnus/nodes/node-1/credentials/reset', '/api/v1/nodes/node-1/credentials/reset', 'POST', '{"synthetic":true}'],
     ['/api/magnus/node-credentials/pending-bindings/binding-1/approve', '/api/v1/node-credentials/pending-bindings/binding-1/approve', 'POST', '{"synthetic":true}'],
     ['/api/magnus/node-credentials/pending-bindings/binding-1/reject', '/api/v1/node-credentials/pending-bindings/binding-1/reject', 'POST', '{"synthetic":true}'],
+    // Magnus 3.3.0: agent dependencies, portable agent definitions and artifact transfer v2.
+    ['/api/magnus/ardent/dependencies?refresh=true', '/api/v1/ardent/dependencies?refresh=true'],
+    ['/api/magnus/ardent/agent-definitions/validate', '/api/v1/ardent/agent-definitions/validate', 'POST', '{"synthetic":true}'],
+    ['/api/magnus/ardent/agent-definitions/install', '/api/v1/ardent/agent-definitions/install', 'POST', '{"synthetic":true}'],
+    ['/api/magnus/ardent/installations/node-1/profiles/main/definition', '/api/v1/ardent/installations/node-1/profiles/main/definition'],
+    ['/api/magnus/ardent/installations/node-1/profiles/main/artifacts/' + 'a'.repeat(64) + '/content', '/api/v1/ardent/installations/node-1/profiles/main/artifacts/' + 'a'.repeat(64) + '/content'],
   ]) {
     const result = await request(input, magnusHeaders, method, payload);
     assert.equal(result.status, 200, input);
@@ -393,6 +399,22 @@ gateway.listen(4310,'0.0.0.0');
       assert.equal(body.headers[name], undefined, input + ' forwarded ' + name);
     assert.notEqual(body.headers['x-forwarded-for'], '192.0.2.1', 'Ingress trusted a browser forwarding header');
     assert.deepEqual((result.cookies || []).filter(Boolean), [], input + ' let Magnus set a cookie');
+    assert.equal(body.headers.range, undefined, input + ' invented a Range header');
+    assert.equal(body.headers['if-range'], undefined, input + ' invented an If-Range header');
+  }
+  {
+    // A resumed artifact download sends Range and If-Range through to Magnus.
+    const content = '/api/magnus/ardent/installations/node-1/profiles/main/artifacts/' + 'b'.repeat(64) + '/content';
+    const result = await request(content, { ...headers, Range: 'bytes=1024-', 'If-Range': '"sha256-synthetic"' });
+    assert.equal(result.status, 200, content);
+    const body = JSON.parse(result.body);
+    assert.equal(body.headers.range, 'bytes=1024-', 'Ingress dropped Range on an artifact download');
+    assert.equal(body.headers['if-range'], '"sha256-synthetic"', 'Ingress dropped If-Range on an artifact download');
+    const plain = JSON.parse((await request(content, { ...headers, Range: 'bytes=0-1023' })).body);
+    assert.equal(plain.headers.range, 'bytes=0-1023', 'Ingress dropped Range without If-Range');
+    assert.equal(plain.headers['if-range'], undefined, 'Ingress invented an If-Range header');
+    for (const name of ['x-api-secret', 'x-node-token', 'x-acting-subject', 'cookie'])
+      assert.equal(JSON.parse((await request(content, { ...magnusHeaders, Range: 'bytes=0-1', 'If-Range': '"x"' })).body).headers[name], undefined, 'A range request forwarded ' + name);
   }
   assert.equal((await request('/api/magnus/console/session', { Authorization: 'Basic b2JfdmlvdXNseQ==' })).status, 401, 'Non-bearer Authorization reached Magnus');
   for (const [input, method] of [
@@ -416,6 +438,11 @@ gateway.listen(4310,'0.0.0.0');
     ['/api/magnus/ardent/agents/operations/op-1', 'POST'],
     ['/api/magnus/ardent/agents/operations/op-1/resume'],
     ['/api/magnus/ardent/installations/node-1/profiles/main/hivemem/extra', 'POST'],
+    ['/api/magnus/ardent/dependencies', 'POST'],
+    ['/api/magnus/ardent/dependencies/hivemem'],
+    ['/api/magnus/ardent/agent-definitions/validate'],
+    ['/api/magnus/ardent/agent-definitions/install'],
+    ['/api/magnus/ardent/agent-definitions', 'POST'],
     ['/api/magnus/heartbeat/stream/stats'],
     ['/api/magnus/discovery/scan', 'POST'],
     ['/api/magnus/terminal/ticket', 'POST'],
