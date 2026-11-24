@@ -110,7 +110,7 @@
       }
     },
     "oathweave": {
-      "image": "ghcr.io/cheftaco/oathweave@sha256:e3ca47b71c3a9faf44c72d2721efe4926b0cc7abc679822a0afb906b1d5799e3",
+      "image": "ghcr.io/cheftaco/oathweave@sha256:f08d9329f8c6e48a76cdc8769fbec428a6b576c0730fed01fdf2e75b6dade822",
       "storageFormat": "oathweave-v1",
       "kind": "application",
       "service": {
@@ -139,7 +139,7 @@
       "requiresLocal": [
         "oathweave-redis"
       ],
-      "version": "2.3.2",
+      "version": "2.3.3",
       "catalog": {
         "displayName": "Oathweave",
         "description": "Identity, authentication, authorization, OAuth/OIDC and service identities.",
@@ -1224,7 +1224,7 @@
       }
     },
     "ardentstudio": {
-      "image": "ghcr.io/cheftaco/ardent-studio@sha256:ee45d66d5f627589de519041a52e5a770a82a74a77a6097c9bd62ab3debf81a2",
+      "image": "ghcr.io/cheftaco/ardent-studio@sha256:677637f572a47740bc8a8591ccf807c831c840b6afbbc05b8f2bcd7337745d4d",
       "kind": "application",
       "storageFormat": "ardentstudio-v1",
       "service": {
@@ -1241,7 +1241,7 @@
           "start_period": "5s"
         }
       },
-      "version": "0.5.0",
+      "version": "0.5.1",
       "catalog": {
         "displayName": "Ardent Project Studio",
         "description": "Team projects for Ardent agents: team assignment, the conversation room and deliverable review.",

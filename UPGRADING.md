@@ -112,9 +112,11 @@ rollback keeps the renamed data, which older HiveMem versions read, and the re-l
 ## Suite 3.14.0: Ardent execution recovery, lineage and artifact transfer v2
 
 3.14.0 pins Magnus 3.3.0 (server, fleet gateway and host agent, which carries Ardent 3.2.0),
-Ardent Project Studio 0.5.0, Emberpath 2.6.0, HiveSkills 1.9.0, HiveXUI 0.12.0 and the Hive
-Registry 1.5.0 (image 2.0.13). Oathweave, HiveMem, Cindertrace, ChatterMost, Emberfold, Embermend,
-the ingress image and the datastore and storage recovery profiles are those of 3.13.5. The
+Ardent Project Studio 0.5.1, Emberpath 2.6.0, HiveSkills 1.9.0, HiveXUI 0.12.0, Oathweave 2.3.3
+and the Hive Registry 1.5.0 (image 2.0.13). HiveMem, Cindertrace, ChatterMost, Emberfold, Embermend,
+the ingress image and the datastore and storage recovery profiles are those of 3.13.5. Oathweave
+2.3.3 fixes fresh installations, which failed on Oathweave's first start from 3.13.0 to 3.13.5;
+it changes nothing for an existing installation. The
 controller changes too: the ingress allows the new Magnus browser routes, and a new Studio is
 named by its installation.
 
@@ -135,11 +137,11 @@ copy, then once on the stopped live store, as described in
 to a release from 3.4.0 to 3.13.5 first. A code-only `rollback` from 3.14.0 is refused, because no
 earlier release reads the new format; recover with the verified pre-upgrade backup.
 
-**Ardent Project Studio: back up, migrations 7 to 10 are one-way.** Studio 0.5.0 runs its
+**Ardent Project Studio: back up, migrations 7 to 10 are one-way.** Studio 0.5.1 runs its
 migrations 7 to 10 on its first start. They are additive and keep existing rows, but Studio 0.4.x
 no longer starts on a database they have run on. The upgrade's pre-change backup covers Studio's
-data; keep it until you have checked Studio on 0.5.0, because going back to 0.4.x means restoring
-it. Studio 0.5.0 still works with an older Magnus: task recovery, Ardent lineage, artifact transfer
+data; keep it until you have checked Studio on 0.5.1, because going back to 0.4.x means restoring
+it. Studio 0.5.1 still works with an older Magnus: task recovery, Ardent lineage, artifact transfer
 v2 and definition deploy need Magnus 3.3.0 and agents that report those capabilities, and fall back
 otherwise.
 

@@ -344,7 +344,7 @@ Upgrading to 3.13.5 from 3.13.0 or later needs no flag either. It pins the produ
 `magnus-agent install` on the Magnus host records the agent checklist item. See
 [Suite 3.13.5](../UPGRADING.md#suite-3135-agent-checklist-item).
 Upgrading to 3.14.0 needs `--allow-migrations` for Emberpath 2.6.0's data format,
-`emberpath-managed-format-3`. Ardent Project Studio 0.5.0 also runs one-way migrations on its first
+`emberpath-managed-format-3`. Ardent Project Studio 0.5.1 also runs one-way migrations on its first
 start, so keep the pre-change backup. See
 [Suite 3.14.0](../UPGRADING.md#suite-3140-ardent-execution-recovery-lineage-and-artifact-transfer-v2).
 

@@ -20,8 +20,8 @@
       ]
     },
     "oathweave": {
-      "image": "ghcr.io/cheftaco/oathweave:2.3.2",
-      "version": "2.3.2",
+      "image": "ghcr.io/cheftaco/oathweave:2.3.3",
+      "version": "2.3.3",
       "platforms": [
         "linux/amd64",
         "linux/arm64"
@@ -109,8 +109,8 @@
       ]
     },
     "ardentstudio": {
-      "image": "ghcr.io/cheftaco/ardent-studio:0.5.0",
-      "version": "0.5.0",
+      "image": "ghcr.io/cheftaco/ardent-studio:0.5.1",
+      "version": "0.5.1",
       "platforms": [
         "linux/amd64",
         "linux/arm64"

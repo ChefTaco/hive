@@ -18,8 +18,8 @@ views. See `UPGRADING.md`, "Suite 3.14.0".
 ### Changed
 
 - Pins Magnus 3.3.0 (server, fleet gateway and host agent; Ardent 3.2.0 for the agents),
-  Ardent Project Studio 0.5.0, Emberpath 2.6.0, HiveSkills 1.9.0, HiveXUI 0.12.0 and the Hive
-  Registry 1.5.0 (image 2.0.13). Oathweave, HiveMem, Cindertrace, ChatterMost, Emberfold,
+  Ardent Project Studio 0.5.1, Emberpath 2.6.0, HiveSkills 1.9.0, HiveXUI 0.12.0, Oathweave
+  2.3.3 and the Hive Registry 1.5.0 (image 2.0.13). HiveMem, Cindertrace, ChatterMost, Emberfold,
   Embermend, the ingress image and the datastore and storage recovery profiles are as in 3.13.5.
   - **Ardent 3.2.0 (through Magnus 3.3.0):** interrupted tasks resume after a restart by default
     (`execution.recovery.enabled: false` restores the earlier behaviour); execution context and
@@ -30,9 +30,14 @@ views. See `UPGRADING.md`, "Suite 3.14.0".
     install), the agent dependency report (`GET /api/v1/ardent/dependencies`), the Ardent 3.2.0
     recovery, lineage and artifact routes, and pinned HiveSkills releases. New optional settings
     `MAGNUS_HIVE_REGISTRY_URL` and `MAGNUS_HIVE_REGISTRY_TOKEN_FILE`; the suite does not set them.
-  - **Ardent Project Studio 0.5.0:** branch-and-join workflows, task recovery decisions, lineage,
+  - **Ardent Project Studio 0.5.1:** branch-and-join workflows, task recovery decisions, lineage,
     resumable artifact imports with renditions, and agent definitions from templates. Its
-    migrations 7 to 10 run on first start and are one-way.
+    migrations 7 to 10 run on first start and are one-way. 0.5.1 retries a turn Magnus refuses
+    while another command runs on the same node, so parallel workflow branches no longer fail.
+  - **Oathweave 2.3.3:** a fresh full installation starts again. Since 3.13.0 the first-start
+    bootstrap included the Hive Registry inventory client, whose audience Oathweave 2.3.2 did not
+    accept, so a fresh installation stopped when Oathweave first started. Existing installations
+    never re-read that file and were not affected.
   - **Emberpath 2.6.0:** traces record the caller's execution context and every upstream attempt;
     retries back off with jitter and honour `Retry-After` within a request deadline. Its router
     data format moves to `managed-format-3`.
