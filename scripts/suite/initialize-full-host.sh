@@ -65,6 +65,9 @@ hive_full_configuration() {
       # Ardent skill installs fetch HiveSkills catalog releases over HTTPS from the registry's internal
       # address; its certificate is issued by the suite authority Magnus trusts (NODE_EXTRA_CA_CERTS).
       if selected hiveskills; then line MAGNUS_ARDENT_HIVESKILLS_URL "$(product_endpoint hiveskills https://hiveskills:4030)"; fi
+      # An agent given an Emberpath model alias calls Emberpath's OpenAI-compatible API itself, from its
+      # fleet host, so New Agent writes the console's model route (served under /v1), not an internal address.
+      if has_component emberpath; then line MAGNUS_ARDENT_EMBERPATH_URL "$origin/v1"; fi
       # DASHBOARD_PUBLIC_ORIGIN above is only for links in notifications: the console does not
       # answer drain challenges, the gateway does. With no gateway, say so explicitly, or every
       # node's resource drain waits for a participant that does not exist. CA trust for the

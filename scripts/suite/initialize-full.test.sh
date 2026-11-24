@@ -125,6 +125,8 @@ if rg -q 'MAGNUS_ARDENT_HIVEMEM_ENROLLMENT_TOKEN' "$install/magnus.env"; then fa
 # Ardent skill installs read the HiveSkills catalog at its internal HTTPS address, which the suite
 # authority Magnus trusts has certified; the registry needs no credential from Magnus.
 rg -q -F -x 'MAGNUS_ARDENT_HIVESKILLS_URL=https://hiveskills:4030' "$install/magnus.env" || fail 'Magnus lacks the HiveSkills registry for Ardent skill installs'
+# New Agent's Emberpath alias: agents call the model API at the console's /v1 route from their hosts.
+rg -q -F -x 'MAGNUS_ARDENT_EMBERPATH_URL=https://localhost:65426/v1' "$install/magnus.env" || fail 'Magnus lacks the Emberpath model route for agent aliases'
 rg -q -F -x 'NODE_EXTRA_CA_CERTS=/config/authority.pem' "$install/magnus.env" || fail 'Magnus does not trust the suite authority'
 openssl verify -CAfile "$install/magnus/authority.pem" -verify_hostname hiveskills "$install/hiveskills/tls.crt" >/dev/null || fail 'Magnus cannot verify the HiveSkills certificate'
 # Ardent command reconciliation: an independent generated key on the server, which the node agents copy.

@@ -109,6 +109,39 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.14.1: agent model route, Magnus 3.3.3 and Zstandard 1.6.0
+
+3.14.1 pins Magnus 3.3.3 (server, fleet gateway and host agent), HiveSkills 1.9.1 and Cindertrace
+0.8.2, and selects the datastore profile `runtime-2026-11-pg1712-zstd` (`hive-postgres` 17.12-3 and
+18.7-3 with Zstandard 1.6.0, CVE-2026-124851). Every other product, Redis, Qdrant and the storage
+recovery profile are those of 3.14.0. It adds no data migration, so an upgrade from 3.14.0 needs no
+`--allow-migrations`; the PostgreSQL images change only a library, so there is no storage transition.
+The controller changes.
+
+- **Magnus 3.3.3** checks Emberpath at its model API in the agent dependency report (a console's
+  root health is not Emberpath's), and treats an empty `Last-Event-ID` on an Ardent task stream as no
+  cursor, so a stream opened through the console no longer fails with 400. Its host agent's native
+  snapshot knows the Ardent 3.2.0 tables: on 3.14.0 with Magnus 3.3.0, a native backup or upgrade of
+  an installation whose host agent owns an Ardent 3.2.0 profile (guided Ardent setup creates one)
+  captured the profile and then held, leaving it stopped. Upgrade the host agent to 3.3.3 first
+  (`./hive.sh magnus-agent install --release 3.14.1`), then upgrade the suite.
+- **HiveSkills 1.9.1** lists `skills.pinned-release.v1` in its health responses, so a Magnus without
+  the Hive Registry can tell that pinned releases are available.
+- **A fresh installation's Magnus gets `MAGNUS_ARDENT_EMBERPATH_URL=<console origin>/v1`.** New Agent
+  writes that address into an agent that uses an Emberpath model alias, and the agent calls it from its
+  own host. An installation set up before 3.14.1 keeps its Magnus environment; to use Emberpath aliases
+  there, add the line to `config/magnus.env` before you run `plan`, so the pre-change backup and the
+  plan include it:
+
+  ```bash
+  printf 'MAGNUS_ARDENT_EMBERPATH_URL=%s/v1\n' "$(jq -r .origin ~/.config/hive/ID/installation.json)" >> /opt/hive/config/magnus.env
+  ```
+
+  An external Magnus is configured on its own host, as before.
+- **Setup waits for apt.** Installing prerequisites, Node.js for the Magnus agent and the full-node
+  packages now waits up to 10 minutes while another package manager, such as the unattended upgrades
+  of a freshly booted machine, holds apt's lock, instead of failing.
+
 ## Suite 3.14.0: Ardent execution recovery, lineage and artifact transfer v2
 
 3.14.0 pins Magnus 3.3.0 (server, fleet gateway and host agent, which carries Ardent 3.2.0),

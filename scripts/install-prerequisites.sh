@@ -212,10 +212,26 @@ fi
 
 # --- Apply ----------------------------------------------------------------------------------
 export DEBIAN_FRONTEND=noninteractive
+# apt-get that waits up to 10 minutes for another package manager, such as the unattended upgrades
+# of a freshly booted machine, to release apt's locks. install and remove wait through
+# DPkg::Lock::Timeout; update does not honour it, so a held lists lock is retried here.
+apt_get() {
+  local err rc waited=false deadline=$((SECONDS + 600))
+  err=$(mktemp)
+  while :; do
+    rc=0
+    apt-get -o DPkg::Lock::Timeout=600 "$@" 2> "$err" || rc=$?
+    if ((rc)) && grep -q 'Could not get lock' "$err" && ((SECONDS < deadline)); then
+      [[ "$waited" == true ]] || printf 'Waiting for another package manager to release the apt lock\n' >&2
+      waited=true; sleep "${HIVE_APT_LOCK_RETRY_SECONDS:-5}"; continue
+    fi
+    cat -- "$err" >&2; rm -f -- "$err"; return "$rc"
+  done
+}
 apt_updated=false
-apt_update() { if [[ "$apt_updated" != true ]]; then apt-get update -qq; apt_updated=true; fi; }
-if [[ "$remove_conflicts" == true ]]; then apt-get remove -y "${conflicts[@]}"; fi
-if ((${#missing_packages[@]})); then apt_update; apt-get install -y --no-install-recommends "${missing_packages[@]}"; fi
+apt_update() { if [[ "$apt_updated" != true ]]; then apt_get update -qq; apt_updated=true; fi; }
+if [[ "$remove_conflicts" == true ]]; then apt_get remove -y "${conflicts[@]}"; fi
+if ((${#missing_packages[@]})); then apt_update; apt_get install -y --no-install-recommends "${missing_packages[@]}"; fi
 if [[ "$add_repository" == true ]]; then
   install -d -m 0755 "$APT_DIR/keyrings"
   key=$(mktemp)
@@ -229,7 +245,7 @@ if [[ "$add_repository" == true ]]; then
   chmod 0644 "$APT_DIR/sources.list.d/docker.sources"
   apt_updated=false
 fi
-if [[ "$install_docker" == true ]]; then apt_update; apt-get install -y "${DOCKER_PACKAGES[@]}"; fi
+if [[ "$install_docker" == true ]]; then apt_update; apt_get install -y "${DOCKER_PACKAGES[@]}"; fi
 if [[ "$start_docker" == true ]]; then systemctl enable --now docker.service containerd.service; fi
 if [[ "$group_change" == true ]]; then usermod -aG docker "$target_user"; fi
 if [[ "$create_directory" == true ]]; then install -d -m 0750 -o "$target_user" -g "$(id -gn "$target_user")" "$directory"; fi

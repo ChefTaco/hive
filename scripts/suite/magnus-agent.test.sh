@@ -109,6 +109,24 @@ printf '0000000000000000000000000000000000000000\n' > "$temporary/fingerprint"
 if host magnus-agent-node '{}'; then fail 'Installed Node.js with a foreign key'; fi
 grep -q 'did not match fingerprint' "$temporary/err" || fail 'The key refusal is unclear'
 printf '6F71F525282841EEDAF851B42F59B5F99B1BE0B4\n' > "$temporary/fingerprint"
+# Another package manager holding apt's lists lock (unattended upgrades after a fresh boot) is
+# waited for, not reported as a failed Node.js installation. Every apt call goes through apt_get.
+! grep -nE '(^|[;{&|] *)(DEBIAN_FRONTEND=[a-z]+ )?apt-get (update|install|remove)' "$ROOT/scripts/suite/magnus-agent-host.sh" || fail 'An apt call does not wait for the apt lock'
+printf '1\n' > "$temporary/apt-locked"
+stub apt-get 'while [[ "$1" == -o ]]; do shift 2; done
+if [[ "$1" == update && $(cat "'"$temporary"'/apt-locked") -gt 0 ]]; then echo 0 > "'"$temporary"'/apt-locked"; echo "E: Could not get lock /var/lib/apt/lists/lock. It is held by process 42 (unattended-upgr)" >&2; exit 100; fi
+if [[ "$1" == update && -f "'"$temporary"'/apt-broken" ]]; then echo "E: The repository is not signed." >&2; exit 100; fi'
+(eval "$(sed -n '/^apt_get() {/,/^}/p' "$ROOT/scripts/suite/magnus-agent-host.sh")"
+  HIVE_APT_LOCK_RETRY_SECONDS=0 apt_get update -qq) 2> "$temporary/err" || { cat "$temporary/err" >&2; fail 'apt update did not wait for the lock'; }
+grep -q 'Waiting for another package manager' "$temporary/err" || fail 'The apt lock wait was not explained'
+! grep -q 'Could not get lock' "$temporary/err" || fail 'Printed a lock error it recovered from'
+[[ $(grep -c '^apt-get -o DPkg::Lock::Timeout=600 update -qq$' "$log") == 2 ]] || fail 'apt update was not retried once'
+touch "$temporary/apt-broken"
+if (eval "$(sed -n '/^apt_get() {/,/^}/p' "$ROOT/scripts/suite/magnus-agent-host.sh")"
+  HIVE_APT_LOCK_RETRY_SECONDS=0 apt_get update -qq) 2> "$temporary/err"; then fail 'Ignored a failed apt update'; fi
+grep -q 'not signed' "$temporary/err" || fail 'Hid the apt update failure'
+[[ $(grep -c '^apt-get -o DPkg::Lock::Timeout=600 update -qq$' "$log") == 3 ]] || fail 'Retried an update that failed for another reason'
+stub apt-get 'if [[ "$*" == *nodejs* ]]; then echo v24.22.3 > "'"$temporary"'/node-version"; fi'
 nodes v22.12.0
 
 # The package must match the pinned integrity.
