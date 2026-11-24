@@ -56,6 +56,18 @@ for patch in '.components.emberpath.catalog.capabilities={}' '.components.emberp
 done
 jq '.components.emberpath.catalog.capabilities={"events.v1":{path:"/v1/hive/events"},"future-thing.v2":{path:"/v2/x"}}' "$temporary/release.json" > "$temporary/capabilities-release.json"; sign "$temporary/capabilities-release.json"
 hive plan "$temporary/config.json" "$temporary/capabilities-release.json" > /dev/null 2>&1 || fail 'A release with valid capabilities was refused'
+# Optional service capabilities: a list of names, each with the first product version offering it.
+for patch in '.components.emberpath.catalog.serviceCapabilities=[]' '.components.emberpath.catalog.serviceCapabilities={"retry-signal.v1":"2.6.0"}' \
+  '.components.emberpath.catalog.serviceCapabilities=[{name:"Retry.V1",since:"2.6.0"}]' '.components.emberpath.catalog.serviceCapabilities=[{name:"retry-signal.v1",since:null}]' \
+  '.components.emberpath.catalog.serviceCapabilities=[{name:"retry-signal.v1",since:"latest"}]' '.components.emberpath.catalog.serviceCapabilities=[{name:"retry-signal.v1"}]' \
+  '.components.emberpath.catalog.serviceCapabilities=[{name:"retry-signal.v1",since:"2.6.0",token:"fake"}]' '.components.emberpath.catalog.serviceCapabilities=["retry-signal.v1"]' \
+  '.components.emberpath.catalog.serviceCapabilities=[{name:"retry-signal.v1",since:"2.6.0"},{name:"retry-signal.v1",since:"2.7.0"}]'; do
+  jq "$patch" "$temporary/release.json" > "$temporary/bad-release.json"; sign "$temporary/bad-release.json"
+  refused 'valid catalog metadata' hive plan "$temporary/config.json" "$temporary/bad-release.json"
+done
+service_capabilities='[{"name":"emberpath.execution-trace.v1","since":"2.6.0"},{"name":"retry-signal.v1","since":"2.6.0"}]'
+jq --argjson offered "$service_capabilities" '.components.emberpath.catalog.serviceCapabilities=$offered' "$temporary/release.json" > "$temporary/services-release.json"; sign "$temporary/services-release.json"
+hive plan "$temporary/config.json" "$temporary/services-release.json" > /dev/null 2>&1 || fail 'A release with valid service capabilities was refused'
 
 # Upgrading a configuration from before the registry adds it without rewriting the file.
 legacy_before=$(sha256sum "$temporary/legacy.json")
@@ -102,6 +114,23 @@ jq '.components.magnus=(.components.emberpath|.catalog.connection.browserPrefix=
 jq '.external={magnus:{url:"https://magnus.example.com:4000"}}' "$temporary/config.json" > "$temporary/external-capabilities.json"
 HIVE_CONFIG=$temporary/external-capabilities.json HIVE_MANIFEST=$temporary/magnus-release.json hive_registry_body complete installed | jq -e '
   .installed|map(select(.id=="magnus"))[0]|.status=="external" and .connection.capabilities=={"events.v1":{path:"/hive/events"}} and .connection.internalEndpoints=={api:"https://magnus.example.com:4000"}' >/dev/null || fail 'An external product lost its capabilities'
+
+# Service capabilities are recorded with the connection too, with their since, for the registry to
+# compare with the recorded version; also for an external product. A release pinning a registry
+# before 1.5.0, which refuses the field, records none.
+HIVE_MANIFEST=$temporary/services-release.json hive_registry_body complete installed | jq -e --argjson offered "$service_capabilities" '
+  (.installed|map(select(.id=="emberpath"))[0].connection|.serviceCapabilities==$offered and (has("capabilities")|not)) and
+  ([.installed[]|select(.id!="emberpath")|.connection|has("serviceCapabilities")]|any|not) and ([.catalog[]|has("serviceCapabilities")]|any|not)' >/dev/null || fail 'Service capabilities are not recorded with the connection'
+jq -e '[.installed[].connection|has("serviceCapabilities")]|any|not' "$temporary/body.json" >/dev/null || fail 'A release without service capabilities recorded some'
+jq --argjson offered '[{"name":"ardent.recovery.v1","since":"3.3.0"}]' '.components.magnus.catalog.serviceCapabilities=$offered' "$temporary/magnus-release.json" > "$temporary/magnus-services-release.json"
+HIVE_CONFIG=$temporary/external-capabilities.json HIVE_MANIFEST=$temporary/magnus-services-release.json hive_registry_body complete installed | jq -e '
+  .installed|map(select(.id=="magnus"))[0]|.status=="external" and .connection.serviceCapabilities==[{name:"ardent.recovery.v1",since:"3.3.0"}]' >/dev/null || fail 'An external product lost its service capabilities'
+for registry_version in 1.4.2 1.0.0; do
+  jq --arg version "$registry_version" '.components["hive-registry"].version=$version' "$temporary/services-release.json" > "$temporary/old-registry-release.json"
+  HIVE_MANIFEST=$temporary/old-registry-release.json hive_registry_body complete installed | jq -e '[.installed[].connection|has("serviceCapabilities")]|any|not' >/dev/null || fail "Registry $registry_version was sent service capabilities"
+done
+jq '.components["hive-registry"].version="1.5.0"' "$temporary/services-release.json" > "$temporary/new-registry-release.json"
+HIVE_MANIFEST=$temporary/new-registry-release.json hive_registry_body complete installed | jq -e '[.installed[].connection|has("serviceCapabilities")]|any' >/dev/null || fail 'Registry 1.5.0 was not sent service capabilities'
 
 # Credentials are generated once, protected, and stable across retries.
 provision() { HIVE_OPERATION=$1 hive_registry_provision; }

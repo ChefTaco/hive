@@ -36,19 +36,40 @@ export function checkCapabilities(name, entry) {
     if (capability.since !== null && !(typeof capability.since === 'string' && versionPattern.test(capability.since))) fail(`${key} since must be a version or null`);
   }
 }
-for (const [name, entry] of Object.entries(suiteCatalog)) checkCapabilities(name, entry);
+
+// Optional service capabilities: what a product offers to other products over its internal
+// endpoints, such as [{"name": "retry-signal.v1", "since": "2.6.0"}]. Unlike the browser
+// capabilities above, a manifest carries every released one with its `since`, whatever the pinned
+// version: the Hive Registry compares `since` with the version it records for the product, and an
+// external product (an external Magnus) runs a version the manifest does not pin. `"since": null`
+// declares one whose product version is not released yet, and is never emitted.
+export function checkServiceCapabilities(name, entry) {
+  const offered = entry.serviceCapabilities;
+  if (offered === undefined) return;
+  const fail = (message) => { throw Error(`Suite catalog ${name}: ${message}`); };
+  if (!Array.isArray(offered) || offered.length === 0 || offered.length > 32) fail('serviceCapabilities must be a list of 1 to 32 entries');
+  for (const capability of offered) {
+    if (!capability || typeof capability !== 'object' || Array.isArray(capability) || Object.keys(capability).some((field) => !['name', 'since'].includes(field))) fail('a service capability has only name and since');
+    if (typeof capability.name !== 'string' || !capabilityName.test(capability.name)) fail(`invalid service capability name ${capability.name}`);
+    if (capability.since !== null && !(typeof capability.since === 'string' && versionPattern.test(capability.since))) fail(`${capability.name} since must be a version or null`);
+  }
+  if (new Set(offered.map((capability) => capability.name)).size !== offered.length) fail('duplicate service capability');
+}
+for (const [name, entry] of Object.entries(suiteCatalog)) { checkCapabilities(name, entry); checkServiceCapabilities(name, entry); }
 
 // The catalog metadata of one product at one pinned version, as a manifest carries it.
 export function catalogFor(name, version) {
   const source = suiteCatalog[name] ?? (() => { throw Error('No suite catalog metadata for ' + name); })();
-  const { capabilities, ...entry } = source;
-  if (!capabilities) return entry;
+  const { capabilities, serviceCapabilities, ...entry } = source;
+  const released = (serviceCapabilities ?? []).filter((capability) => capability.since !== null).map(({ name: capability, since }) => ({ name: capability, since }));
+  const services = released.length ? { serviceCapabilities: released } : {};
+  if (!capabilities) return { ...entry, ...services };
   const offered = Object.entries(capabilities).filter(([, capability]) => {
     if (capability.since === null) return false;
     if (typeof version !== 'string' || !versionPattern.test(version)) throw Error(`Suite catalog ${name}: version ${version} cannot be compared with since`);
     return compareVersions(version, capability.since) >= 0;
   });
-  return offered.length ? { ...entry, capabilities: Object.fromEntries(offered.map(([key, { path }]) => [key, { path }])) } : entry;
+  return offered.length ? { ...entry, capabilities: Object.fromEntries(offered.map(([key, { path }]) => [key, { path }])), ...services } : { ...entry, ...services };
 }
 
 // Non-root, read-only service definition for the release manifest.

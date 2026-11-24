@@ -122,7 +122,17 @@
         "admin": "https://emberpath:9443",
         "model": "https://emberpath:4020"
       }
-    }
+    },
+    "serviceCapabilities": [
+      {
+        "name": "emberpath.execution-trace.v1",
+        "since": "2.6.0"
+      },
+      {
+        "name": "retry-signal.v1",
+        "since": "2.6.0"
+      }
+    ]
   },
   "hivemem": {
     "displayName": "HiveMem",
@@ -146,7 +156,13 @@
       "internalEndpoints": {
         "api": "https://hivemem:18790"
       }
-    }
+    },
+    "serviceCapabilities": [
+      {
+        "name": "memory.v1",
+        "since": "1.9.1"
+      }
+    ]
   },
   "hivemem-qdrant": {
     "displayName": "HiveMem Qdrant",
@@ -190,7 +206,13 @@
         "path": "/v1/hive/events",
         "since": "1.6.0"
       }
-    }
+    },
+    "serviceCapabilities": [
+      {
+        "name": "skills.pinned-release.v1",
+        "since": "1.9.0"
+      }
+    ]
   },
   "magnus": {
     "displayName": "Magnus",
@@ -219,7 +241,21 @@
         "path": "/hive/events",
         "since": "2.8.0"
       }
-    }
+    },
+    "serviceCapabilities": [
+      {
+        "name": "ardent.recovery.v1",
+        "since": "3.3.0"
+      },
+      {
+        "name": "ardent.lineage.v1",
+        "since": "3.3.0"
+      },
+      {
+        "name": "artifact-transfer.v2",
+        "since": "3.3.0"
+      }
+    ]
   },
   "magnus-gateway": {
     "displayName": "Magnus Fleet Gateway",
