@@ -90,7 +90,7 @@ hive_ardent_check() {
 
 hive_ardent() (
   umask 077
-  local subcommand=${1:-setup} requested_operation=${2:-} record inventory existing original parent lock phase plan operation result installation dependencies
+  local subcommand=${1:-setup} requested_operation=${2:-} record inventory existing original parent lock phase plan operation result installation dependencies code
   case "$subcommand" in setup|status|check|resume) ;; *) hive_die 'Use: ardent setup|status|check|resume OPERATION_ID [--profile NAME] [--model-url URL --model MODEL]';; esac
   [[ "$subcommand" == setup || ( -z "$HIVE_ARDENT_MODEL_URL" && -z "$HIVE_ARDENT_MODEL" ) ]] || hive_die 'Model settings apply only to ardent setup'
   [[ $# -le 2 && ( "$subcommand" == resume || -z "$requested_operation" ) ]] || hive_die 'Unexpected Ardent arguments'
@@ -195,7 +195,16 @@ hive_ardent() (
       jq -e '.installed==true' <<< "$result" >/dev/null || hive_die 'Magnus did not verify the installed package; the setup receipt was retained'
     fi
     hive_ardent_phase creating
-    result=$(hive_ardent_api create) || hive_die 'Profile creation did not return an operation ID. Keep the setup receipt and inspect Magnus; do not create it again'
+    if ! result=$(hive_ardent_api create); then
+      # Refused before any POST was sent (for example the node still settling another command):
+      # nothing was created, so the receipt is dropped and setup can simply run again.
+      if code=$(jq -er 'select(.success==false and .error.ambiguous==false) | .error.code | select(test("^ARDENT_SETUP_[A-Z_]{1,64}$"))' <<< "$result" 2>/dev/null); then
+        rm -f -- "$HIVE_ARDENT_STATE_FILE"
+        sync -f "$HIVE_ARDENT_STATE_DIRECTORY" || hive_die 'The setup receipt directory could not be flushed. Keep its files and inspect Magnus before continuing'
+        hive_die "Magnus refused the profile before any request was sent ($code); nothing was created. Run ./hive.sh ardent setup again once the node is ready"
+      fi
+      hive_die 'Profile creation did not return an operation ID. Keep the setup receipt and inspect Magnus; do not create it again'
+    fi
     operation=$(jq -er '.operationId|select(type=="string" and length>0)' <<< "$result") || hive_die 'Magnus returned no operation ID; inspect the retained setup before retrying'
     [[ $(jq -r .requestSHA256 <<< "$result") == "$(jq -r .requestSHA256 <<< "$plan")" ]] || hive_die 'Magnus setup request changed; inspect the retained operation before continuing'
     hive_ardent_phase operation "$operation"

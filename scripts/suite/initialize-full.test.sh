@@ -221,6 +221,7 @@ for setting in NODE_EXTRA_CA_CERTS=/config/authority.pem ARDENT_STUDIO_HOST=0.0.
   rg -q -F -x -- "$setting" "$studio/ardentstudio.env" || fail "Studio environment lacks ${setting%%=*}"
 done
 value "$studio/ardentstudio.env" ARDENT_STUDIO_OATHWEAVE_IDENTITIES_JSON | jq -e --arg subject "$(cat "$studio/.initializer/secrets/identity-id")" --arg id "$(cat "$studio/.initializer/secrets/studio-id")" '.==[{issuer:"https://localhost:65426/api/oathweave",subject:$subject,localUserId:$id,displayName:"admin"}]' >/dev/null || fail 'The operator is not an explicit Studio link'
+[[ $(value "$studio/ardentstudio.env" ARDENT_STUDIO_INSTANCE_ID) == synthetic-studio ]] || fail 'Studio is not named by its installation ID in execution references'
 [[ $(stat -c %a "$studio/ardentstudio.env") == 600 ]] || fail 'Studio environment is not owner-only'
 openssl verify -CAfile "$studio/ardentstudio/authority.pem" -verify_hostname magnus "$studio/magnus/tls.crt" >/dev/null || fail 'Studio cannot verify Magnus'
 openssl verify -CAfile "$studio/ardentstudio/authority.pem" -verify_hostname hivemem "$studio/hivemem/tls.crt" >/dev/null || fail 'Studio cannot verify HiveMem'

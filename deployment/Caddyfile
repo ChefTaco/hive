@@ -370,6 +370,7 @@
 				|| {path} == "/api/v1/anomalies/summary"
 				|| {path}.matches("^/api/v1/ardent/agents/operations/[^/]+$")
 				|| {path}.matches("^/api/v1/ardent/agents/operations/[^/]+/stream$")
+				|| {path} == "/api/v1/ardent/dependencies"
 				|| {path} == "/api/v1/ardent/installations"
 				|| {path}.matches("^/api/v1/ardent/installations/[^/]+$")
 				|| {path}.matches("^/api/v1/ardent/installations/[^/]+/profiles/[^/]+/.+$")
@@ -456,6 +457,8 @@
 				{path} == "/api/v1/agents/upgrade"
 				|| {path}.matches("^/api/v1/agents/upgrade/runs/[^/]+/retry$")
 				|| {path}.matches("^/api/v1/agents/upgrade/runs/[^/]+/stop$")
+				|| {path} == "/api/v1/ardent/agent-definitions/install"
+				|| {path} == "/api/v1/ardent/agent-definitions/validate"
 				|| {path} == "/api/v1/ardent/agents"
 				|| {path}.matches("^/api/v1/ardent/agents/operations/[^/]+/resume$")
 				|| {path}.matches("^/api/v1/ardent/installations/[^/]+/profiles/[^/]+/action$")
@@ -532,9 +535,36 @@
 				header Authorization *
 				not header_regexp Authorization "^Bearer [^ ,]+$"
 			}
-			respond @magnus_not_bearer "Bearer token required" 401
-			reverse_proxy {$MAGNUS_ENDPOINT:https://unconfigured.invalid} {
-				import magnus_backend {$MAGNUS_TLS_NAME:unconfigured.invalid}
+			handle @magnus_not_bearer {
+				respond "Bearer token required" 401
+			}
+			# Artifact transfer v2 (Magnus 3.3.0) resumes a download with Range and If-Range.
+			# Each is forwarded only when the browser sent it: Magnus refuses an empty one.
+			@magnus_range_if {
+				header Range *
+				header If-Range *
+			}
+			@magnus_range {
+				header Range *
+				not header If-Range *
+			}
+			handle @magnus_range_if {
+				reverse_proxy {$MAGNUS_ENDPOINT:https://unconfigured.invalid} {
+					import magnus_backend {$MAGNUS_TLS_NAME:unconfigured.invalid}
+					header_up Range {http.request.header.Range}
+					header_up If-Range {http.request.header.If-Range}
+				}
+			}
+			handle @magnus_range {
+				reverse_proxy {$MAGNUS_ENDPOINT:https://unconfigured.invalid} {
+					import magnus_backend {$MAGNUS_TLS_NAME:unconfigured.invalid}
+					header_up Range {http.request.header.Range}
+				}
+			}
+			handle {
+				reverse_proxy {$MAGNUS_ENDPOINT:https://unconfigured.invalid} {
+					import magnus_backend {$MAGNUS_TLS_NAME:unconfigured.invalid}
+				}
 			}
 		}
 		handle {
