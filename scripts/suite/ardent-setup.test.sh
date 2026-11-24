@@ -9,6 +9,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 cat > "$temporary/fixture.sh" <<'FIXTURE'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+source "$TEST_ROOT/scripts/suite/magnus-agent.sh"
 source "$TEST_ROOT/scripts/suite/ardent-setup.sh"
 HIVE_CONFIG=$TEST_CASE/installation.json
 HIVE_ROOT=$TEST_ROOT HIVE_CONFIRMED=${TEST_CONFIRMED:-true}
@@ -26,6 +27,12 @@ hive_magnus_agent_confirm() {
   [[ ${TEST_DECLINE:-false} != true ]]
 }
 hive_prompt() { hive_die 'Unexpected prompt: fixture should provide model settings'; }
+# Magnus's agent dependency report, read from its host: TEST_DEPENDENCIES, or no answer.
+hive_magnus_ardent_dependencies() {
+  printf 'dependencies\n' >> "$TEST_CASE/dependencies.calls"
+  [[ -n ${TEST_DEPENDENCIES:-} ]] || { printf 'Magnus refused the agent dependencies: HTTP 500 INTERNAL\n' >&2; return 1; }
+  printf '%s\n' "$TEST_DEPENDENCIES"
+}
 sleep() { :; }
 sync() {
   local kind=file
@@ -85,7 +92,9 @@ run() { # EXPECTED_EXIT [ENV=VALUE ...] -- ARGS...
   local -a settings=()
   while [[ ${1:-} != -- ]]; do settings+=("$1"); shift; done; shift
   local result=0
-  timeout 10 env TEST_ROOT="$ROOT" TEST_CASE="$case_directory" "${settings[@]}" bash "$temporary/fixture.sh" "$@" > "$case_directory/result" 2>&1 || result=$?
+  # The standard output alone is in result.json; result holds both.
+  timeout 10 env TEST_ROOT="$ROOT" TEST_CASE="$case_directory" "${settings[@]}" bash "$temporary/fixture.sh" "$@" > "$case_directory/result.json" 2> "$case_directory/result.err" || result=$?
+  cat "$case_directory/result.json" "$case_directory/result.err" > "$case_directory/result"
   if [[ "$result" != "$expected" ]]; then cat "$case_directory/result" >&2; fail "Expected exit $expected, got $result"; fi
 }
 refused() { local pattern=$1; shift; run 1 "$@"; grep -qi -- "$pattern" "$case_directory/result" || { cat "$case_directory/result" >&2; fail "Missing refusal: $pattern"; }; }
@@ -103,7 +112,20 @@ seed_receipt() {
 fixture status-without-state
 run 0 -- status
 sequence inspect
-[[ $(jq -r '.setup' "$case_directory/result") == null && ! -e "$case_directory/ardent-setup" ]] || fail 'Read-only status created local state'
+[[ $(jq -r '.setup' "$case_directory/result.json") == null && ! -e "$case_directory/ardent-setup" ]] || fail 'Read-only status created local state'
+# Status adds the agent dependencies Magnus resolved: in its JSON, and as a section for the operator.
+[[ $(jq -c '.dependencies' "$case_directory/result.json") == null ]] || fail 'Status invented dependencies Magnus did not report'
+grep -qx 'WARNING: Agent dependencies: Magnus did not answer.' "$case_directory/result.err" || fail 'Status did not report a Magnus that did not answer'
+fixture status-dependencies
+report='{"supported":true,"dependencies":[{"name":"hivemem","status":"usable","source":"registry","endpoint":"https://hivemem:18790","capabilities":["memory.v1"],"reason":null},{"name":"emberpath","status":"missing","source":"override","endpoint":"https://models.example.com:9443","capabilities":[],"reason":"Emberpath did not answer"}]}'
+run 0 TEST_DEPENDENCIES="$report" -- status
+sequence inspect
+[[ $(jq -c '.dependencies' "$case_directory/result.json") == "$(jq -c . <<< "$report")" ]] || fail 'Status JSON lacks the dependency report'
+diff -u <(printf '%s\n' 'Agent dependencies:' '  hivemem: usable (source: registry)' '  emberpath: missing (source: override) - Emberpath did not answer') "$case_directory/result.err" || fail 'Status printed the dependencies wrongly'
+fixture status-dependencies-old-magnus
+run 0 TEST_DEPENDENCIES='{"supported":false}' -- status
+[[ $(jq -c '.dependencies' "$case_directory/result.json") == '{"supported":false}' ]] || fail 'Status JSON lost an unsupported report'
+grep -qx '  Magnus is too old to report agent dependencies (needs 3.3.0)' "$case_directory/result.err" || fail 'Status did not name the Magnus version that reports dependencies'
 fixture status-concurrent-lock
 seed_receipt creating
 exec {status_lock}> "$case_directory/ardent-setup/assistant.lock"
@@ -139,7 +161,7 @@ run 0 -- setup
 sequence inspect
 cmp -s "$case_directory/receipt.before" "$case_directory/ardent-setup/assistant.json" || fail 'Repeated setup changed its completed receipt'
 run 0 -- status
-[[ $(jq -r '.setup.phase' "$case_directory/result") == complete ]] || fail 'Status did not expose the retained receipt'
+[[ $(jq -r '.setup.phase' "$case_directory/result.json") == complete ]] || fail 'Status did not expose the retained receipt'
 
 fixture already-installed
 touch "$case_directory/installed"

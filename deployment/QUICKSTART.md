@@ -182,8 +182,9 @@ following steps 5–10. Keep that directory: certificate renewal timers refer to
 ./hive.sh doctor --config ~/.config/hive/hive/installation.json    # host preflight and registry
 ```
 
-`status` lists each container with its state and health, and `doctor` ends with
-`Hive Registry: in sync with this installation`. After its JSON, `status` lists the
+`status` lists each container with its state and health, and `doctor` reports
+`Hive Registry: in sync with this installation`. With Magnus, `doctor` then lists the
+[agent dependencies](FULL.md#agent-dependencies) Magnus resolved. After its JSON, `status` lists the
 [setup checklist](FULL.md#setup-checklist) items still pending, such as the certificate renewal
 below; `install` and `upgrade` end with the same list, and HiveXUI shows it to administrators.
 `./hive.sh setup done ID` or `./hive.sh setup skip ID` settles one by hand.
