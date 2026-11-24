@@ -59,6 +59,10 @@ hive_ardent_api() {
       touch "$TEST_CASE/installed"; printf '{"installed":true}\n';;
     create)
       [[ ${TEST_CREATE_INTERRUPTED:-false} != true ]] || return 1
+      if [[ -n ${TEST_CREATE_REFUSED:-} ]]; then
+        jq -nc --arg code "$TEST_CREATE_REFUSED" --argjson ambiguous "${TEST_CREATE_AMBIGUOUS:-false}" '{schema:1,success:false,error:{code:$code,ambiguous:$ambiguous}}'
+        return 1
+      fi
       printf '{"operationId":"00000000-0000-4000-8000-000000000001","requestSHA256":"%064d"}\n' 0;;
     operation)
       [[ ${2:-} == 00000000-0000-4000-8000-000000000001 ]] || return 1
@@ -109,6 +113,22 @@ seed_receipt() {
   touch "$case_directory/installed" "$case_directory/profile-exists"
 }
 
+# A create refused before any POST leaves nothing to review: the receipt goes and a rerun succeeds.
+fixture create-refused-before-post
+refused 'refused the profile before any request was sent (ARDENT_SETUP_NODE_NOT_READY)' TEST_CREATE_REFUSED=ARDENT_SETUP_NODE_NOT_READY -- setup
+sequence inspect plan package-install create
+[[ ! -e "$case_directory/ardent-setup/assistant.json" ]] || fail 'An unambiguous create refusal kept a receipt that blocks the rerun'
+: > "$case_directory/api.calls"
+run 0 -- setup
+sequence inspect plan create "operation $operation" "operation $operation" "operation $operation" check
+[[ $(receipt .phase) == complete ]] || fail 'The rerun after an unambiguous refusal did not complete'
+# An ambiguous refusal (a POST may have reached Magnus) still keeps the receipt and repeats nothing.
+fixture create-refused-ambiguous
+refused 'do not create it again' TEST_CREATE_REFUSED=ARDENT_SETUP_API_REFUSED TEST_CREATE_AMBIGUOUS=true -- setup
+[[ $(receipt .phase) == creating ]] || fail 'An ambiguous create refusal lost its receipt'
+: > "$case_directory/api.calls"
+refused 'needs review' -- setup
+sequence inspect
 fixture status-without-state
 run 0 -- status
 sequence inspect

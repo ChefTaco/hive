@@ -87,6 +87,17 @@ views. See `UPGRADING.md`, "Suite 3.14.0".
   Magnus that does not answer is a warning. Neither fails `doctor`. `ardent status` also adds the
   report to its JSON as `dependencies`. See `deployment/FULL.md`, "Agent dependencies".
 
+### Fixed
+
+- **Guided Ardent setup no longer stops right after installing the Ardent package.** On a fresh
+  host, setup installs the staged package and then creates the profile at once, while Magnus is
+  still releasing the install command's node owner, so the create was refused before any request
+  was sent and the retained receipt then blocked every rerun ("do not create it again"). Setup now
+  waits up to 60 seconds for reserved or running owners to settle; an unknown owner is held work
+  and still refuses at once. A create refused before any request was sent now drops the receipt
+  and says so, so `./hive.sh ardent setup` can simply run again. An ambiguous refusal, where a
+  request may have reached Magnus, still keeps the receipt and repeats nothing.
+
 ## [3.13.5] - 2026-11-21
 
 ### Changed

@@ -80,6 +80,25 @@ test('create refuses existing profiles or held work before any POST', async () =
     await assert.rejects(runArdentSetup(request('create'), f.options)); assert.equal(f.calls.length, 1);
   }
 });
+test('create waits for a settling owner (the just-finished package install), but never for held work', async () => {
+  const busy = state(); busy.commandOwners = [{ commandId: 'native-install', state: 'running', profile: null, action: 'package-install', ardent: true }];
+  const f = fake([reply(busy), reply(busy), reply(state()), reply({ operationId }, 202)]); let slept = 0;
+  const result = await runArdentSetup(request('create'), { ...f.options, sleep: async () => { slept++; } });
+  assert.equal(result.operationId, operationId); assert.equal(slept, 2);
+  assert.deepEqual(f.calls.map(call => call.method ?? 'GET'), ['GET', 'GET', 'GET', 'POST']);
+  const held = state(); held.commandOwners = [{ commandId: 'native-one', state: 'unknown', profile: null, action: null, ardent: false }];
+  const h = fake([reply(held)]);
+  await assert.rejects(runArdentSetup(request('create'), { ...h.options, sleep: async () => assert.fail('waited for held work') }),
+    error => error.code === 'ARDENT_SETUP_NODE_NOT_READY' && error.ambiguous === false);
+  assert.equal(h.calls.length, 1);
+  const stuck = fake([reply(busy), reply(busy), reply(busy)]); let now = 0; const realNow = Date.now;
+  Date.now = () => now;
+  try {
+    await assert.rejects(runArdentSetup(request('create'), { ...stuck.options, settleMs: 3_000, pollMs: 1_500, sleep: async ms => { now += ms; } }),
+      error => error.code === 'ARDENT_SETUP_NODE_NOT_READY' && error.ambiguous === false);
+  } finally { Date.now = realNow; }
+  assert.equal(stuck.calls.filter(call => call.method === 'POST').length, 0);
+});
 test('create dispatches exactly once through New Agent and returns the planned request hash', async () => {
   const f = fake([reply(state()), reply({ operationId }, 202)]);
   const result = await runArdentSetup(request('create'), f.options);

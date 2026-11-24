@@ -128,7 +128,8 @@ async function responseJson(response) {
 }
 
 /** No transport retries. A failed or ambiguous POST remains the caller's durable intent. */
-export async function runArdentSetup(raw, { apiSecret, port = '4000', fetchImpl = globalThis.fetch, timeoutMs } = {}) {
+export async function runArdentSetup(raw, { apiSecret, port = '4000', fetchImpl = globalThis.fetch, timeoutMs,
+  settleMs = 60_000, pollMs = 2_000, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   const request = validateArdentSetupRequest(raw);
   requireValue(typeof apiSecret === 'string' && apiSecret.trim().length > 0 && apiSecret.length <= 8192
     && !/[\x00-\x1f\x7f]/.test(apiSecret), 'ARDENT_SETUP_AUTH_UNAVAILABLE');
@@ -167,7 +168,15 @@ export async function runArdentSetup(raw, { apiSecret, port = '4000', fetchImpl 
       result = { ...common, requestSHA256: payloadDigest(payload), model: payload.model };
     } else if (request.mode === 'inspect') result = { ...common, ...await installation() };
     else if (request.mode === 'create' || request.mode === 'package-install') {
-      const current = await installation();
+      let current = await installation();
+      // A command that just finished (such as this setup's own package install) releases its owner
+      // shortly after it answers. Wait a bounded time for reserved or running owners to settle; an
+      // unknown owner is held work and refuses at once, as does any owner still there afterwards.
+      for (const deadline = Date.now() + settleMs; current.reachable && current.commandOwners.length > 0
+        && current.commandOwners.every(owner => owner.state === 'reserved' || owner.state === 'running') && Date.now() < deadline;) {
+        await sleep(pollMs);
+        current = await installation();
+      }
       requireValue(current.reachable && current.commandOwners.length === 0, 'ARDENT_SETUP_NODE_NOT_READY');
       if (request.mode === 'create') {
         requireValue(current.installed && !current.profiles.some(profile => profile.id === request.profile), 'ARDENT_SETUP_PROFILE_CONFLICT');
