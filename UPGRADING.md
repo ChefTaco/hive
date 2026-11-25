@@ -109,6 +109,13 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.14.3: Magnus 3.3.6 XML dependency fixes
+
+3.14.3 pins Magnus 3.3.6 for the server, fleet gateway and host agent. An upgrade from 3.14.2
+requires no new migrations or settings. After upgrading the suite, run `./hive.sh post-upgrade --yes`
+with the same installation config to update the Hive-managed host agents. Update independently
+installed fleet agents from Magnus.
+
 ## Suite 3.14.2: Magnus 3.3.5, agent definitions and Ardent 3.2.1
 
 3.14.2 pins Magnus 3.3.5 for the server, the fleet gateway and the host agent package (its agent
