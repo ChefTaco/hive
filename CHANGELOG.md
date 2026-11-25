@@ -6,6 +6,15 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [3.14.3] - 2026-11-25
+
+### Security
+
+- Pins Magnus 3.3.6 for the server, fleet gateway and host agent. The host agent ships
+  `fast-xml-parser` 5.12.1 and `fast-xml-builder` 1.3.2, which fix the upstream denial-of-service
+  advisories [GHSA-7cfw-w2rf-f3jc](https://github.com/NaturalIntelligence/fast-xml-parser/security/advisories/GHSA-7cfw-w2rf-f3jc)
+  and [GHSA-g62r-xqpr-7fwx](https://github.com/NaturalIntelligence/fast-xml-parser/security/advisories/GHSA-g62r-xqpr-7fwx).
+
 ## [3.14.2] - 2026-11-24
 
 Product update: Magnus 3.3.5 (server, fleet gateway and host agent; Ardent 3.2.1 for the agents).

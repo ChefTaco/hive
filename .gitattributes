@@ -1,0 +1,2 @@
+releases/*.json text eol=lf
+releases/*.json.sig binary
