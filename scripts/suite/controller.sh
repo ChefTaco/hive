@@ -553,7 +553,7 @@ hive_validate() {
   jq -e '
     def id: type=="string" and test("^[a-z][a-z0-9-]{0,47}$");
     def path: type=="string" and startswith("/") and test("^/[A-Za-z0-9_./-]+$") and (split("/") | all(. != ".."));
-    (keys-["schema","installation","release","configurationRevision","profile","origin","hosts","components","console","bootstrap","agents","inference","skillsDeployment","nativeMigration","external","retention","containerLogs"]|length==0) and
+    (keys-["schema","installation","release","configurationRevision","profile","origin","hosts","components","console","bootstrap","agents","inference","skillsDeployment","nativeMigration","external","retention","containerLogs","containerLimits"]|length==0) and
     ((.configurationRevision // "1")|type=="string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")) and
     .schema==1 and (.installation|id) and (.profile|IN("core","full","custom")) and
     (.origin|type=="string" and test("^https://[A-Za-z0-9.-]+(:[0-9]+)?$")) and
@@ -578,6 +578,16 @@ hive_validate() {
       ((.maxSize // "10m")|type=="string" and test("^[1-9][0-9]{0,3}m$")) and
       ((.maxFiles // 3)|type=="number" and floor==. and .>=1 and .<=20)
     ' "$HIVE_CONFIG" >/dev/null || hive_die 'containerLogs is {"maxSize":"NNm","maxFiles":N}: the size at which Docker rotates each container log, in megabytes from "1m" to "9999m" (default "10m"), and the number of log files kept per container, from 1 to 20 (default 3). See deployment/README.md#container-logs'
+  fi
+  if jq -e 'has("containerLimits")' "$HIVE_CONFIG" >/dev/null; then
+    jq -e '
+      . as $c | .containerLimits|type=="object" and all(to_entries[];
+        (.key=="*" or $c.components[.key]!=null) and
+        (.value|type=="object" and length>0 and (keys-["memory","cpus","pids"]|length==0) and
+          ((.memory // "1g")|type=="string" and test("^[1-9][0-9]{0,6}[mg]$")) and
+          ((.cpus // 1)|type=="number" and .>0 and .<=1024) and
+          ((.pids // 4096)|type=="number" and floor==. and .>=64 and .<=1048576)))
+    ' "$HIVE_CONFIG" >/dev/null || hive_die 'containerLimits maps "*" (every container) or a selected component to {"memory":"NNNm"|"NNg","cpus":N,"pids":N}: a memory ceiling, a CPU share above 0, and a process limit from 64 (default 4096). A component entry overrides "*". See deployment/README.md#container-resource-limits'
   fi
   HIVE_ID=$(jq -r '.installation' "$HIVE_CONFIG")
   if [[ -z "${HIVE_VERSION:-}" ]]; then HIVE_VERSION=$(hive_default_release); fi
@@ -669,7 +679,10 @@ hive_manifest() {
       (if .value.kind=="static-ui" then .key=="hivexui" and ((.value.service.environment // {})|length==0) else true end) and
       (if .value.kind=="ingress" then .key=="ingress" else true end) and
       (.value.image|test("^[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}$")) and
-      (.value.service|type=="object" and (keys-["user","command","entrypoint","healthcheck","environment","depends_on","networks","expose","working_dir","labels","mem_limit","cpus","ulimits","tmpfs"]|length==0)) and
+      (.value.service|type=="object" and (keys-["user","command","entrypoint","healthcheck","environment","depends_on","networks","expose","working_dir","labels","mem_limit","cpus","pids_limit","ulimits","tmpfs"]|length==0)) and
+      ((.value.service.mem_limit // "1g")|type=="string" and test("^[1-9][0-9]{0,6}[mg]$")) and
+      ((.value.service.cpus // 1)|type=="number" and .>0 and .<=1024) and
+      ((.value.service.pids_limit // 4096)|type=="number" and floor==. and .>=64 and .<=1048576) and
       ((.value.service.environment // {})|type=="object" and all(to_entries[];(.key|test("^[A-Z][A-Z0-9_]*$")) and (.value|type=="string"))) and
       (.value.service.user|type=="string" and test("^[1-9][0-9]*:[1-9][0-9]*$")) and
       (.value.service.healthcheck.test|type=="array" and length>0) and
@@ -841,6 +854,12 @@ hive_render() {
     {oathweave:{RELAX_AUTH_LIMITS:"true"},cindertrace:{RELAX_AUTH_LIMITS:"true"},chattermost:{RELAX_AUTH_LIMITS:"true",RATE_LIMIT_LOGIN_SOURCE_MAX:"10000",RATE_LIMIT_LOGIN_ACCOUNT_MAX:"10000"}} as $relaxedEnvironment |
     # Every container log is bounded: Docker'"'"'s json-file driver otherwise grows without limit.
     {driver:"json-file",options:{"max-size":($c.containerLogs.maxSize // "10m"),"max-file":(($c.containerLogs.maxFiles // 3)|tostring)}} as $logging |
+    # Resource limits: the installation file (containerLimits.COMPONENT, then containerLimits["*"])
+    # over the signed manifest, and a process limit on every container by default.
+    def limits($name): ($c.containerLimits // {}) as $l | (($l["*"] // {}) + ($l[$name] // {})) as $o |
+      {pids_limit:($o.pids // $r.components[$name].service.pids_limit // 4096)} +
+      (($o.memory // $r.components[$name].service.mem_limit) as $m | if $m then {mem_limit:$m} else {} end) +
+      (($o.cpus // $r.components[$name].service.cpus) as $u | if $u then {cpus:$u} else {} end);
     # ChatterMost limits sign-ins, sign-ups and WebSocket upgrades per client address, which it
     # takes from X-Forwarded-For only when the connecting peer is in TRUSTED_PROXIES. Behind the
     # ingress on its own host, with no published port, only suite containers can reach it: trust
@@ -871,7 +890,8 @@ hive_render() {
         # The registry starts first on its host, before the products it records.
         (if $name!="hive-registry" and $kind!="datastore" and $c.components["hive-registry"].host==$host then {depends_on:((($r.components[$name].service.depends_on // {})|if type=="array" then map({key:.,value:{condition:"service_started"}})|from_entries else . end)+{"hive-registry":{condition:"service_healthy"}})} else {} end))})|from_entries),networks:({default:({driver:"bridge"}+(if $c.console.networkSubnet then {ipam:{config:[{subnet:$c.console.networkSubnet}]}} else {} end)+(if $c.nativeMigration.rehearsal==true then {internal:true} else {} end))}+($r.networks // {})+(if $c.nativeMigration.rehearsal==true then {edge:{driver:"bridge",ipam:{config:[{subnet:$c.console.edgeSubnet}]}}} else {} end))} |
     # An explicit address plan for hosts whose Docker address pools are limited.
-    reduce (($c.nativeMigration.networkSubnets // {})|to_entries[]) as $net (.; if .networks[$net.key] then .networks[$net.key].ipam={config:[{subnet:$net.value}]} else . end)'
+    reduce (($c.nativeMigration.networkSubnets // {})|to_entries[]) as $net (.; if .networks[$net.key] then .networks[$net.key].ipam={config:[{subnet:$net.value}]} else . end) |
+    .services|=with_entries(.value+=limits(.key))'
 }
 
 hive_transfer() {

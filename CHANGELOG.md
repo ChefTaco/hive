@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- Container resource limits. Every container now runs with `pids_limit: 4096` by default, and
+  the installation file's new `containerLimits` sets `memory`, `cpus` and `pids` for every
+  container (`"*"`) or per component, over the signed manifest. The manifest contract accepts
+  `pids_limit` and checks the types of `mem_limit`, `cpus` and `pids_limit`. No memory ceiling is
+  set by default. See [container resource limits](deployment/README.md#container-resource-limits).
+  Upgrade note: the first upgrade with this controller recreates every container to add the
+  process limit; data is kept.
+
 ### Fixed
 
 - Guided setup checks each answer where it is asked: the installation name, directory, SSH

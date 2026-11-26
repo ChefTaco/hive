@@ -41,6 +41,30 @@ for patch in '.containerLogs={maxSize:"0m"}' '.containerLogs={maxSize:"10"}' '.c
   if ( HIVE_CONFIG=$temporary/bad-logs.json; hive_validate ) > "$temporary/result" 2>&1; then fail "Invalid container log settings were accepted: $patch"; fi
   grep -q 'containerLogs is' "$temporary/result" || fail "Invalid container log settings were not explained: $patch"
 done
+# Every container gets a process limit; the installation file adds memory and CPU ceilings,
+# per component over "*", and overrides the signed manifest's own values.
+jq -e 'all(.services[]; .pids_limit==4096 and (has("mem_limit")|not) and (has("cpus")|not))' "$temporary/compose.json" >/dev/null || fail 'A rendered service has no default process limit'
+jq '.containerLimits={"*":{memory:"2g",pids:2048},emberpath:{memory:"512m",cpus:1.5}}' "$temporary/installation.json" > "$temporary/limits.json"
+( HIVE_CONFIG=$temporary/limits.json; hive_validate; hive_render control ) > "$temporary/limits.compose.json" || fail 'Configured container limits were refused'
+jq -e '.services.emberpath|.mem_limit=="512m" and .cpus==1.5 and .pids_limit==2048' "$temporary/limits.compose.json" >/dev/null || fail 'Component limits did not override "*"'
+jq -e '[.services|to_entries[]|select(.key!="emberpath")|.value|.mem_limit=="2g" and .pids_limit==2048 and (has("cpus")|not)]|all' "$temporary/limits.compose.json" >/dev/null || fail 'The "*" limits were not rendered'
+[[ $(jq -Sc 'del(.services[].mem_limit,.services[].cpus,.services[].pids_limit)' "$temporary/compose.json") == "$(jq -Sc 'del(.services[].mem_limit,.services[].cpus,.services[].pids_limit)' "$temporary/limits.compose.json")" ]] || fail 'Container limits changed more than the limits'
+jq '.components.emberpath.service+={mem_limit:"1g",cpus:2,pids_limit:512}' "$temporary/release.json" > "$temporary/limits-release.json"
+openssl pkeyutl -sign -inkey "$temporary/private" -rawin -in "$temporary/limits-release.json" -out "$temporary/limits-release.sig"
+( HIVE_MANIFEST=$temporary/limits-release.json HIVE_SIGNATURE=$temporary/limits-release.sig; hive_manifest; hive_render control ) > "$temporary/manifest-limits.compose.json" || fail 'Manifest limits were refused'
+jq -e '.services.emberpath|.mem_limit=="1g" and .cpus==2 and .pids_limit==512' "$temporary/manifest-limits.compose.json" >/dev/null || fail 'The manifest limits were not rendered'
+( HIVE_CONFIG=$temporary/limits.json HIVE_MANIFEST=$temporary/limits-release.json HIVE_SIGNATURE=$temporary/limits-release.sig; hive_validate; hive_manifest; hive_render control ) > "$temporary/both.compose.json"
+jq -e '.services.emberpath|.mem_limit=="512m" and .cpus==1.5 and .pids_limit==2048' "$temporary/both.compose.json" >/dev/null || fail 'The installation file did not override the manifest limits'
+for patch in '.containerLimits={unknown:{pids:100}}' '.containerLimits={"*":{}}' '.containerLimits={"*":{memory:"2G"}}' '.containerLimits={"*":{memory:"0m"}}' '.containerLimits={"*":{cpus:0}}' '.containerLimits={"*":{pids:10}}' '.containerLimits={"*":{pids:2.5}}' '.containerLimits={"*":{swap:"1g"}}' '.containerLimits=[]'; do
+  jq "$patch" "$temporary/installation.json" > "$temporary/bad-limits.json"
+  if ( HIVE_CONFIG=$temporary/bad-limits.json; hive_validate ) > "$temporary/result" 2>&1; then fail "Invalid container limits were accepted: $patch"; fi
+  grep -q 'containerLimits maps' "$temporary/result" || fail "Invalid container limits were not explained: $patch"
+done
+for change in '.components.emberpath.service.pids_limit=1' '.components.emberpath.service.mem_limit="lots"' '.components.emberpath.service.cpus="2"'; do
+  jq "$change" "$temporary/release.json" > "$temporary/bad-release.json"
+  openssl pkeyutl -sign -inkey "$temporary/private" -rawin -in "$temporary/bad-release.json" -out "$temporary/bad-release.sig"
+  if ( HIVE_MANIFEST=$temporary/bad-release.json HIVE_SIGNATURE=$temporary/bad-release.sig; hive_manifest ) >/dev/null 2>&1; then fail "An invalid manifest limit was accepted: $change"; fi
+done
 cp "$temporary/release.json" "$temporary/valid.json"
 printf '\n' >> "$temporary/release.json"
 reject hive_manifest
