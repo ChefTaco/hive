@@ -27,7 +27,8 @@ npm run check:private
 ```
 
 - Follow the style of the surrounding code.
-- Add or update tests for behaviour changes. `npm run test:suite` runs the controller tests alone.
+- Add or update tests for behaviour changes. `npm run test:suite` runs the controller tests alone, in parallel, from `scripts/test-suite.json`;
+  `node scripts/run-tests.mjs suite NAME` runs the matching ones.
 - Never commit `.env` files, keys, certificates, databases, or other credentials, or details of
   private infrastructure (real hostnames, IPs, usernames, home paths). The git hooks in `.githooks/`
   enforce this. See [AGENTS.md](AGENTS.md) for the full rules, which apply to people and AI agents

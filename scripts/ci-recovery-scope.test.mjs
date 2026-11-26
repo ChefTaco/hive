@@ -5,7 +5,11 @@ const change = (path, extra = {}) => ({ path, status: 'M', oldMode: '100644', ne
 
 test('only prose-only PR changes select the small corpus', () => {
   assert.equal(recoveryScope([change('CONTRIBUTING.md'), change('README.md')]).full, false);
-  for (const path of ['hive.sh', 'scripts/suite/snapshot-data.mjs', 'deployment/Caddyfile', 'releases/2.4.0.json', '.github/workflows/hive-ci.yml', 'package.json', 'services/hive-registry/src/app.ts', 'docs/RELEASING.md', 'unknown/file', 'docs/../README.md']) {
+  for (const path of ['UPGRADING.md', 'CHANGELOG.md', 'SECURITY.md', 'docs/RELEASING.md', 'docs/runbooks/restore.md', 'deployment/QUICKSTART.md', 'deployment/BACKUPS.md']) {
+    assert.equal(recoveryScope([change(path)]).full, false, path);
+    assert.equal(recoveryScope([change('README.md'), change(path, { status: 'A' })]).full, false, path);
+  }
+  for (const path of ['hive.sh', 'scripts/suite/snapshot-data.mjs', 'deployment/Caddyfile', 'deployment/images.json', 'deployment/datastores/README.md', 'deployment/.md', 'docs/acceptance/3.14.0.json', 'docs/.hidden.md', 'docs/RELEASING.md.sh', 'examples/README.md', 'releases/2.4.0.json', '.github/workflows/hive-ci.yml', 'package.json', 'services/hive-registry/src/app.ts', 'services/hive-registry/README.md', 'LICENSE', 'unknown/file', 'docs/../README.md']) {
     assert.equal(recoveryScope([change(path)]).full, true, path);
     assert.equal(recoveryScope([change('README.md'), change(path)]).full, true, path);
   }

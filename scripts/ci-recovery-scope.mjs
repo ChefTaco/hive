@@ -1,4 +1,12 @@
-// Only known prose-only PRs may use the smaller real recovery corpus.
+// Only known prose-only PRs may use the smaller real recovery corpus: Markdown at the root
+// (README, CONTRIBUTING, UPGRADING, CHANGELOG, SECURITY, CODE_OF_CONDUCT), Markdown anywhere under
+// docs/, and the deployment guides (deployment/*.md). None of these is a controller runtime file
+// or read by the recovery corpus. Everything else, docs/acceptance JSON included, runs it in full.
+const prose = [
+  /^(README|CONTRIBUTING|UPGRADING|CHANGELOG|SECURITY|CODE_OF_CONDUCT)\.md$/,
+  /^docs\/([A-Za-z0-9_.-]+\/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\.md$/,
+  /^deployment\/[A-Za-z0-9_-][A-Za-z0-9_.-]*\.md$/,
+];
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -8,7 +16,7 @@ export function recoveryScope(changes) {
   for (const { status, oldMode, newMode, path } of changes) {
     if (!['A', 'M'].includes(status) || newMode !== '100644' || (status === 'M' && oldMode !== '100644')) return { full: true, reason: 'special-change' };
     if (!/^[A-Za-z0-9_./-]+$/.test(path) || path.split('/').some((part) => part === '..' || !part)) return { full: true, reason: 'ambiguous-path' };
-    if (!/^(README|CONTRIBUTING)\.md$/.test(path)) return { full: true, reason: 'installer-shared-or-unclassified-change' };
+    if (!prose.some((pattern) => pattern.test(path))) return { full: true, reason: 'installer-shared-or-unclassified-change' };
   }
   return { full: false, reason: 'prose-only-pr' };
 }

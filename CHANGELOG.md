@@ -34,6 +34,12 @@ All notable changes to this project are documented in this file. The format is b
   see, each bound to the upstream pin it was reviewed for; `scripts/release/check-residual-risks.sh`
   fails when that pin changes. It tracks Qdrant 1.18.3's bundled Zstandard 1.5.x
   (CVE-2026-124851).
+- `npm run test:suite` runs its controller tests with bounded parallelism (`HIVE_TEST_JOBS`,
+  default 4) from `scripts/test-suite.json` and reports every failure in a closing summary,
+  instead of stopping at the first one in a 51-step `&&` chain. Locally it takes about 4 minutes
+  instead of about 16.
+- The recovery CI job uses its small corpus for every prose-only pull request: Markdown at the
+  root, under `docs/` and the deployment guides, not only `README.md` and `CONTRIBUTING.md`.
 
 ### Documentation
 
