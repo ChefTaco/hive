@@ -63,7 +63,8 @@ hive_runtime_files() {
     scripts/suite/retention.sh scripts/suite/retention-host.sh scripts/suite/retention-schedule.sh scripts/suite/rehearsal-copy-host.sh \
     scripts/suite/add-product.sh scripts/suite/add-product-host.sh \
     scripts/suite/diagnostics.sh scripts/suite/diagnostics-host.sh \
-    scripts/suite/backup-transfer.sh scripts/suite/backup-transfer-host.sh
+    scripts/suite/backup-transfer.sh scripts/suite/backup-transfer-host.sh \
+    scripts/suite/uninstall.sh scripts/suite/uninstall-host.sh
 }
 hive_controller_digest() {
   local file
@@ -132,7 +133,7 @@ hive_setup_hosts_ready() {
 
 hive_usage() {
   cat <<'EOF'
-Usage: hive.sh [init|plan|install|status|doctor|logs|support-bundle|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|entry-point]
+Usage: hive.sh [init|plan|install|status|doctor|logs|support-bundle|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|remove|uninstall|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|entry-point]
   --config FILE          Installation JSON. Commands other than install, init and plan find
                          it themselves when there is exactly one under ~/.config/hive (or
                          $XDG_CONFIG_HOME/hive), or when HIVE_INSTALLATION names it
@@ -160,6 +161,8 @@ Usage: hive.sh [init|plan|install|status|doctor|logs|support-bundle|upgrade|post
   --keep-full N          backups prune: the newest N passed rehearsals keep their full restored
                          copy (default 1); the others keep only their evidence
   --apply                backups prune: remove what the dry run lists
+  --purge                uninstall: also delete every host's installation directory and the
+                         installation file, after you type the installation name
   --at HH:MM             backups schedule enable: the daily prune's local time (default
                          retention.schedule, else 03:40)
   --file FILE            Entry for registry add/update; entries never contain credentials
@@ -181,6 +184,14 @@ It backs up first, adds the product to the installation file and applies it as a
 installed release (rehearsal and schema migration included). Each step is journaled beside the
 installation file; repeat the command to continue an interrupted add.
 See deployment/FULL.md#adding-a-product-to-an-existing-installation.
+remove PRODUCT [--yes] takes a product out: it backs up, stops the product's containers, removes its
+components from the installation file (keeping the previous file) and applies that as an upgrade
+to the installed release; the product's data stays. It supports cindertrace-collector so far.
+uninstall [--purge] [--yes] stops and removes every host's containers, the installer's Magnus host
+agent, the daily prune crontab line, this machine's console certificate renewal service when it
+renews this installation, and the hive command's record. Data, configuration and backups stay;
+--purge also deletes them, only after you type the installation name (--yes never does).
+See deployment/README.md#uninstalling.
 magnus-agent install|status|remove [--host TARGET] [--install-node] [--trust] runs the Magnus agent on a
 fleet host (default: the Magnus host): Node.js check (and NodeSource install with consent), the
 release's verified agent package, its root-only environment and service, a new agent's own node
@@ -816,6 +827,7 @@ hive_host() {
     --argjson addProduct "${HIVE_ADD_INPUT:-null}" \
     --argjson diagnostics "${HIVE_DIAGNOSTICS_INPUT:-null}" \
     --argjson backupTransfer "${HIVE_BACKUP_TRANSFER_INPUT:-null}" \
+    --argjson uninstall "${HIVE_UNINSTALL_INPUT:-null}" \
     --arg abortStep "${HIVE_ABORT_STEP:-}" \
     --arg nativeBackupTool "${HIVE_NATIVE_BACKUP_TOOL:-}" \
     --argjson nativeRecovery "${HIVE_NATIVE_RECOVERY_INPUT:-null}" \
@@ -1068,6 +1080,7 @@ hive_main() {
   HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS='' HIVE_AGENT_ENROLLMENT='' HIVE_ADD_TEMPORARY='' HIVE_ADD_INPUT=''
   HIVE_JSON=false HIVE_LOGS_SINCE='' HIVE_LOGS_TAIL='' HIVE_BUNDLE_OUTPUT='' HIVE_DIAGNOSTICS_INPUT=''
   HIVE_BACKUP_TO='' HIVE_BACKUP_ENCRYPT='' HIVE_BACKUP_FROM='' HIVE_BACKUP_IDENTITY='' HIVE_BACKUP_TRANSFER_INPUT=''
+  HIVE_UNINSTALL_PURGE=false HIVE_UNINSTALL_INPUT=''
   local -a registry_arguments=() trust_arguments=()
   if (($#)) && [[ "$1" != --* ]]; then command=$1; shift; fi
   if [[ "$command" == entry-point ]]; then hive_entry_point_command "$@"; return; fi
@@ -1093,6 +1106,7 @@ hive_main() {
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
         case $1 in --to) HIVE_BACKUP_TO=$2;; --encrypt) HIVE_BACKUP_ENCRYPT=$2;; --from) HIVE_BACKUP_FROM=$2;; --identity) HIVE_BACKUP_IDENTITY=$2;; esac
         shift 2;;
+      --purge) [[ "$command" == uninstall ]] || hive_die '--purge applies only to uninstall'; HIVE_UNINSTALL_PURGE=true; shift;;
       --apply) [[ "$command" == backups ]] || hive_die '--apply applies only to backups prune'; HIVE_RETENTION_APPLY=true; shift;;
       --json) [[ "$command" == status || "$command" == doctor ]] || hive_die '--json applies only to status and doctor'; HIVE_JSON=true; shift;;
       --since|--tail)
@@ -1157,14 +1171,14 @@ hive_main() {
       *)
         [[ "$1" != --* ]] || hive_die 'Unknown option'
         case "$command" in
-          registry|migrate-native|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|setup|backups|add|logs) registry_arguments+=("$1");;
+          registry|migrate-native|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|setup|backups|add|logs|remove) registry_arguments+=("$1");;
           magnus-trust) trust_arguments=("$1" "${trust_arguments[@]}");;
           *) hive_die 'Unknown option';;
         esac
         shift;;
     esac
   done
-  case "$command" in init|plan|install|status|doctor|logs|support-bundle|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access) ;; *) hive_die 'Unknown command';; esac
+  case "$command" in init|plan|install|status|doctor|logs|support-bundle|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|remove|uninstall|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access) ;; *) hive_die 'Unknown command';; esac
   [[ "$HIVE_PREPARE_RECONCILIATION" != true || -z "$HIVE_RECONCILIATION" ]] || hive_die 'Choose --prepare-reconciliation or --reconciliation, not both'
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
     case "$command" in plan|install|upgrade) ;; *) hive_die '--relax-auth-limits applies only to plan, install and upgrade';; esac
@@ -1224,6 +1238,8 @@ hive_main() {
     backups) hive_backups_command "${registry_arguments[@]}"; return;;
     post-upgrade) hive_need openssl; hive_need sha256sum; hive_manifest; HIVE_CONFIRMED=$confirmed hive_post_upgrade; return;;
     add) hive_need openssl; hive_need sha256sum; hive_manifest; HIVE_CONFIRMED=$confirmed HIVE_ADD_INTERACTIVE=$interactive hive_add_product "${registry_arguments[@]}"; return;;
+    remove) HIVE_CONFIRMED=$confirmed HIVE_REMOVE_INTERACTIVE=$interactive hive_remove_product "${registry_arguments[@]}"; return;;
+    uninstall) HIVE_CONFIRMED=$confirmed HIVE_UNINSTALL_INTERACTIVE=$interactive hive_uninstall; return;;
   esac
   hive_need openssl; hive_need sha256sum; hive_manifest
   # Before the plan is confirmed and before anything changes: a Magnus 2.x that the pinned Magnus 3
