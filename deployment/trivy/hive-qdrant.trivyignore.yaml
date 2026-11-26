@@ -2,10 +2,14 @@
 # the upstream SBOM of the whole Cargo workspace, but neither crate is linked into the shipped
 # /qdrant/qdrant binary: of the 218 crate source paths embedded in the 1.18.3 binary, none is
 # pyo3 or quinn-proto. The SBOM is kept unmodified. See deployment/README.md.
+# Each exception expires so that it is re-reviewed against the then-pinned Qdrant: after
+# expired_at Trivy reports the finding again and the release gate and daily re-scan fail.
 vulnerabilities:
   - id: GHSA-36hh-v3qg-5jq4
     purls: ["pkg:cargo/pyo3@0.28.3"]
     statement: Listed in the upstream SBOM only; pyo3 is not linked into the Qdrant binary.
+    expired_at: 2027-03-01
   - id: GHSA-4w2j-m93h-cj5j
     purls: ["pkg:cargo/quinn-proto@0.11.14"]
     statement: Listed in the upstream SBOM only; quinn-proto is not linked into the Qdrant binary.
+    expired_at: 2027-03-01

@@ -32,6 +32,17 @@ All notable changes to this project are documented in this file. The format is b
   longer depend on each product for them, and limits request bodies to the static console to 16 KB
   (413 beyond). The Caddyfile is a controller runtime file: installations get this with the next
   release's upgrade. See [response security headers](deployment/README.md#response-security-headers).
+- Every third-party GitHub Action is pinned by commit SHA (with its version in a comment),
+  including the image-publishing and release jobs that hold `packages: write`, `id-token: write`
+  or `contents: write`. Dependabot's github-actions group keeps the pins current, and new
+  Dependabot `docker` updates cover the digest-pinned Dockerfile bases (ingress, Node.js runtime
+  and Hive Registry builder).
+- A daily *Published image re-scan* workflow scans every image the newest published release pins
+  with a fresh Trivy database and opens or updates an issue on HIGH/CRITICAL findings. The two
+  Qdrant Trivy exceptions now expire on 2027-03-01, so they are re-reviewed.
+- The release-publish job refuses a tag whose commit is not on `main` and a release whose
+  `CHANGELOG.md` section is empty, and leaves out the `chattermost-migrator` row for a release
+  without ChatterMost instead of printing `null`.
 - `hive-redis` 8.2.10-3 installs OpenSSL 3.5.9-r2 (`libssl3`, `libcrypto3`), which fixes
   CVE-2026-124709 in 3.5.9-r0. The new datastore profile `runtime-2026-11-pg1712-zstd-openssl`
   selects it with the PostgreSQL and Qdrant images of `runtime-2026-11-pg1712-zstd`, which remains

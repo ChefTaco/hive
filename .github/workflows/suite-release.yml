@@ -43,7 +43,7 @@ jobs:
       matrix: ${{ steps.select.outputs.matrix }}
       native_matrix: ${{ steps.select.outputs.native_matrix }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select from deployment/images.json
         id: select
         env:
@@ -75,9 +75,9 @@ jobs:
       IMAGE: ghcr.io/cheftaco/${{ matrix.image }}
       VERSION: ${{ matrix.version }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -92,7 +92,7 @@ jobs:
           fi
       - name: Build on the matching architecture
         if: steps.meta.outputs.exists == 'false'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
@@ -149,10 +149,10 @@ jobs:
       IMAGE: ghcr.io/cheftaco/${{ matrix.image }}
       VERSION: ${{ matrix.version }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -170,7 +170,7 @@ jobs:
       - name: Publish immutable image with provenance and SBOM
         id: build
         if: steps.meta.outputs.exists == 'false'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
@@ -188,7 +188,7 @@ jobs:
             type=gha,scope=suite-${{ matrix.image }}-${{ matrix.version }}-arm64
           provenance: mode=max
           sbom: true
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         if: env.DRY_RUN != 'true' && steps.meta.outputs.exists == 'false'
         with:
           subject-name: ${{ env.IMAGE }}
@@ -200,7 +200,21 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: echo "$IMAGE:$VERSION@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
 
+  tag-on-main:
+    name: Require the tagged commit on main
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Tag only commits that passed CI on main (docs/RELEASING.md)
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main; tag a commit of main"; exit 1; }
+
   recovery:
+    needs: tag-on-main
     if: github.event_name == 'push'
     uses: ./.github/workflows/recovery.yml
     with:
@@ -208,19 +222,19 @@ jobs:
 
   release:
     name: Verify and publish the signed release
-    needs: recovery
+    needs: [tag-on-main, recovery]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
       packages: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.22.3
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -240,7 +254,7 @@ jobs:
         env:
           HIVE_IMAGE_SECURITY_MODE: all
         run: bash scripts/release/scan-suite-images.sh "releases/${GITHUB_REF_NAME#v}.json" image-security-reports
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: release-image-security
@@ -252,15 +266,17 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then echo "::error::Release $GITHUB_REF_NAME already exists"; exit 1; fi
+          awk -v heading="## $version" -v bracketed="## [$version]" '$0==heading || index($0, heading " ")==1 || index($0, bracketed)==1 {on=1; next} on && /^## / {exit} on' CHANGELOG.md > changes.md
+          grep -q '[^[:space:]]' changes.md || { echo "::error::CHANGELOG.md has no notes under ## [$version]"; exit 1; }
           {
-            awk -v heading="## $version" -v bracketed="## [$version]" '$0==heading || index($0, heading " ")==1 || index($0, bracketed)==1 {on=1; next} on && /^## / {exit} on' CHANGELOG.md
+            cat changes.md
             printf '\n## Install\n\n```bash\ngit clone --branch %s https://github.com/%s.git hive && cd hive\n./hive.sh --release %s\n```\n\n' "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" "$version"
             printf 'The manifest, its signature and the publisher key are attached and also in the tagged tree.\n\n'
             printf -- '- Publisher key fingerprint (SHA-256 of the DER public key): `%s`\n' "$(openssl pkey -pubin -in trust/publisher.pub -outform DER | sha256sum | cut -d ' ' -f1)"
             printf -- '- Controller source SHA-256: `%s`\n\n' "$(jq -r .controllerSHA256 "releases/$version.json")"
             printf '| Component | Version | Image |\n|---|---|---|\n'
             jq -r '.components|to_entries[]|"| \(.key) | \(.value.version) | `\(.value.image)` |"' "releases/$version.json"
-            jq -r '.components.chattermost.initialization.image|"| chattermost-migrator | | `\(.)` |"' "releases/$version.json"
+            jq -r '.components.chattermost.initialization.image // empty|"| chattermost-migrator | | `\(.)` |"' "releases/$version.json"
           } > notes.md
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Hive $version" --notes-file notes.md \
             "releases/$version.json" "releases/$version.json.sig" trust/publisher.pub
