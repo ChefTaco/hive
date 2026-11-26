@@ -157,6 +157,12 @@
         "api": "https://hivemem:18790"
       }
     },
+    "capabilities": {
+      "events.v1": {
+        "path": "/hive/events",
+        "since": "1.11.0"
+      }
+    },
     "serviceCapabilities": [
       {
         "name": "memory.v1",
@@ -340,6 +346,10 @@
       "events.v1": {
         "path": "/hive/events",
         "since": "0.5.0"
+      },
+      "audit.v1": {
+        "path": "/audit/export",
+        "since": "0.10.0"
       }
     }
   },

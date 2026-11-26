@@ -527,7 +527,7 @@ describe('Hive Registry API', () => {
       assert.deepEqual((await call('GET', '/v1/installation', { token: readToken })).body.setup, summary.setup);
       const parsed = registryInstallationSchema.parse(summary);
       assert.equal(parsed.setup?.items[1]?.check, undefined);
-      assert.equal(registryBrowserContractVersion, 4);
+      assert.equal(registryBrowserContractVersion, 5);
     });
     it('keeps the recorded checklist when a sync omits it, and a retried sync adds no history', async () => {
       await sync(withSetup([agent]));
