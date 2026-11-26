@@ -8,6 +8,12 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- Guided setup checks each answer where it is asked: the installation name, directory, SSH
+  target, architecture, console origin, profile, bind address, port, configuration mode,
+  operator username and email. A typo is explained and the question is asked again, instead of
+  being found by the final validation after about 20 questions and discarding every answer. End
+  of input (Ctrl-D or a closed terminal) at any question now stops with a message naming that
+  question, instead of exiting silently.
 - `examples/installation.schema.json` matches what the controller accepts again. It lacked
   `external`, `nativeMigration`, `console.nativeListeners`, `console.edgeSubnet`,
   `hosts.*.sudoPasswordFile` and `bootstrap.magnusGateway`, so configurations that guided setup

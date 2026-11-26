@@ -270,9 +270,42 @@ hive_writable_directory() {
 }
 
 hive_prompt() {
-  local variable=$1 label=$2 fallback=${3:-} answer
-  read -r -p "$label${fallback:+ [$fallback]}: " answer
+  local variable=$1 label=$2 fallback=${3:-} answer=''
+  # End of input (Ctrl-D, a closed terminal or an exhausted answer file) stops with a message
+  # instead of exiting silently or taking the default.
+  if ! read -r -p "$label${fallback:+ [$fallback]}: " answer && [[ -z "$answer" ]]; then
+    printf '\n' >&2
+    hive_die "Input ended at \"$label\"; stopping. Run the command again to continue."
+  fi
   printf -v "$variable" '%s' "${answer:-$fallback}"
+}
+
+# Ask until the answer passes CHECK (a command given the answer), explaining each refusal, so a
+# typo costs one question instead of the whole guided setup.
+#   hive_prompt_valid VARIABLE LABEL FALLBACK MESSAGE CHECK [ARGUMENT...]
+hive_prompt_valid() {
+  local variable=$1 label=$2 fallback=$3 message=$4
+  shift 4
+  while :; do
+    hive_prompt "$variable" "$label" "$fallback"
+    "$@" "${!variable}" && return 0
+    printf '%s\n' "$message" >&2
+  done
+}
+hive_valid_id() { [[ $1 =~ ^[a-z][a-z0-9-]{0,47}$ ]]; }
+hive_valid_choice() { local value=${*: -1} choice; for choice in "${@:1:$#-1}"; do [[ $value == "$choice" ]] && return 0; done; return 1; }
+hive_valid_directory() { [[ $1 =~ ^/[A-Za-z0-9_./-]+$ && ${#1} -gt 4 && /$1/ != *'/../'* ]]; }
+hive_valid_target() { [[ $1 == local || $1 =~ ^[a-zA-Z_][a-zA-Z0-9_-]*@[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]; }
+hive_valid_origin() { [[ $1 =~ ^https://[A-Za-z0-9.-]+(:[1-9][0-9]{0,4})?$ ]]; }
+hive_valid_port() { [[ $1 =~ ^[1-9][0-9]{0,4}$ ]] && (($1 <= 65535)); }
+hive_valid_username() { [[ $1 =~ ^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$ ]]; }
+hive_valid_email() { [[ ${#1} -le 254 && $1 =~ ^[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; }
+hive_valid_bind_answer() { [[ $1 == tailscale && -n ${tailnet_bind:-} ]] || hive_valid_bind "$1"; }
+hive_valid_bind() {
+  local octet
+  [[ $1 == :: || $1 == ::1 ]] && return 0
+  [[ $1 =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+  for octet in "${BASH_REMATCH[@]:1}"; do ((10#$octet <= 255)) || return 1; done
 }
 
 hive_configure() {
@@ -298,8 +331,7 @@ hive_configure() {
   openssl pkeyutl -verify -pubin -inkey "$HIVE_TRUST_KEY" -rawin -in "$HIVE_MANIFEST" -sigfile "$HIVE_SIGNATURE" >/dev/null 2>&1 || hive_die 'Release signature verification failed'
   jq -e '.components["hive-registry"]!=null' "$HIVE_MANIFEST" >/dev/null || hive_die 'This release has no Hive Registry. The registry is mandatory: use a release whose signed manifest includes hive-registry.'
   jq -e --arg version "$HIVE_VERSION" '.schema==1 and .version==$version and (.components|keys|all(.[];test("^[a-z][a-z0-9-]{0,47}$")))' "$HIVE_MANIFEST" >/dev/null || hive_die 'Release metadata does not match the requested version'
-  hive_prompt id 'Installation name' hive
-  [[ "$id" =~ ^[a-z][a-z0-9-]{0,47}$ ]] || hive_die 'An installation name starts with a lowercase letter and has only lowercase letters, digits and hyphens'
+  hive_prompt_valid id 'Installation name' hive 'An installation name starts with a lowercase letter and has only lowercase letters, digits and hyphens (at most 48).' hive_valid_id
   # A setup that stopped after writing its configuration continues from that file.
   existing="${XDG_CONFIG_HOME:-${HOME:-$PWD}/.config}/hive/$id/installation.json"
   if [[ -e "$existing" || -L "$existing" ]]; then
@@ -311,29 +343,29 @@ hive_configure() {
     hive_setup_resume "$existing"
     return 0
   fi
-  hive_prompt directory 'Installation directory on the selected host (absolute)' "/opt/$id"
+  hive_prompt_valid directory 'Installation directory on the selected host (absolute)' "/opt/$id" 'The installation directory is an absolute path of letters, digits and ._/- without "..", such as /opt/hive.' hive_valid_directory
   if [[ ${HIVE_GUIDED_SETUP:-false} == true && ${HIVE_SETUP_LOCAL:-no} == yes ]]; then
     target=local
   else
-    hive_prompt target 'Host SSH target (local or deploy@host)' local
+    hive_prompt_valid target 'Host SSH target (local or deploy@host)' local 'Enter local, or USER@HOST such as deploy@hive.example.com.' hive_valid_target
   fi
   if [[ "$target" == local ]]; then
     hive_setup_directory "$directory"
     # Checked now, not after the plan: fresh setup creates this directory as the current account.
     while ! hive_writable_directory "$directory"; do
       printf '%s must be a canonical absolute path that %s can create or write. To use it, create it in another terminal with:\n  sudo install -d -m 0750 -o %s -g %s %s\n' "$directory" "$(id -un)" "$(id -un)" "$(id -gn)" "$directory"
-      hive_prompt directory 'Installation directory on the selected host (absolute)' "$directory"
+      hive_prompt_valid directory 'Installation directory on the selected host (absolute)' "$directory" 'The installation directory is an absolute path of letters, digits and ._/- without "..", such as /opt/hive.' hive_valid_directory
     done
   else
     hive_prompt control_ssh 'Protected SSH configuration for the selected host (blank for your default SSH settings)'
   fi
   architecture=$(uname -m); case "$architecture" in x86_64) architecture=amd64;; aarch64) architecture=arm64;; esac
   if [[ ${HIVE_GUIDED_SETUP:-false} != true || ${HIVE_SETUP_LOCAL:-no} != yes || ( "$architecture" != amd64 && "$architecture" != arm64 ) ]]; then
-    hive_prompt architecture 'Host architecture (amd64/arm64)' "$architecture"
+    hive_prompt_valid architecture 'Host architecture (amd64/arm64)' "$architecture" 'The host architecture is amd64 or arm64.' hive_valid_choice amd64 arm64
   fi
   if [[ "$target" == local ]]; then hive_setup_origin; else HIVE_SETUP_ORIGIN=''; fi
-  hive_prompt origin 'Console HTTPS origin' "${HIVE_SETUP_ORIGIN:-}"
-  hive_prompt profile 'Product profile (core/full/custom)' core
+  hive_prompt_valid origin 'Console HTTPS origin' "${HIVE_SETUP_ORIGIN:-}" 'The console origin is https://HOST or https://HOST:PORT, with no path, such as https://hive.example.com.' hive_valid_origin
+  hive_prompt_valid profile 'Product profile (core/full/custom)' core 'The product profile is core, full or custom.' hive_valid_choice core full custom
   if [[ "$profile" == custom ]]; then
     printf 'Available components: %s\n' "$(jq -r '.components|keys|join(",")' "$HIVE_MANIFEST")"
     hive_prompt selected 'Selected component names (comma-separated)'
@@ -350,15 +382,14 @@ hive_configure() {
       [[ "$tailnet_bind" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
     printf 'Enter "tailscale" to bind to the tailnet address (%s).\n' "$tailnet_bind"
   else tailnet_bind=''; fi
-  hive_prompt bind 'HTTPS bind address' 127.0.0.1
+  hive_prompt_valid bind 'HTTPS bind address' 127.0.0.1 "The bind address is an IPv4 address such as 127.0.0.1 or 0.0.0.0, :: or ::1${tailnet_bind:+, or tailscale}." hive_valid_bind_answer
   if [[ "$bind" == tailscale && -n "$tailnet_bind" ]]; then bind=$tailnet_bind; fi
   if [[ "$origin" =~ ^https://[A-Za-z0-9.-]+:([1-9][0-9]{0,4})$ ]]; then default_port=${BASH_REMATCH[1]}; fi
-  hive_prompt port 'HTTPS listener port' "$default_port"
-  [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] && ((port <= 65535)) || hive_die 'The HTTPS listener port is a number from 1 to 65535'
-  hive_prompt mode 'Configuration mode (fresh/distributed/prepared)' fresh
+  hive_prompt_valid port 'HTTPS listener port' "$default_port" 'The HTTPS listener port is a number from 1 to 65535.' hive_valid_port
+  hive_prompt_valid mode 'Configuration mode (fresh/distributed/prepared)' fresh 'The configuration mode is fresh, distributed or prepared.' hive_valid_choice fresh distributed prepared
   if [[ "$mode" == fresh || "$mode" == distributed ]]; then
-    hive_prompt username 'Initial operator username' admin
-    hive_prompt email 'Initial operator email for identity recovery'
+    hive_prompt_valid username 'Initial operator username' admin 'The username starts with a letter or underscore and has at most 64 letters, digits and ._- characters.' hive_valid_username
+    hive_prompt_valid email 'Initial operator email for identity recovery' '' 'Enter an email address such as alice@example.com; identity recovery sends to it.' hive_valid_email
     if [[ "$target" == local ]]; then
       hive_setup_certificate "$origin"
       certificate=$HIVE_SETUP_CERTIFICATE private_key=$HIVE_SETUP_PRIVATE_KEY
