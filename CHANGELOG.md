@@ -8,6 +8,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Hive Registry 1.6.0 (image `hive-registry` 2.0.14) carries the Registry changes listed below to
+  installations: the `audit.v1` capability (browser contract version 5), the case-insensitive
+  `Bearer` scheme, the Node.js 26.13.1 build and `@hivemagnus/hive-common` 0.7.x.
+
 - Diagnostics for monitoring and issue reports. `status --json` and `doctor --json` print one
   JSON document each; `doctor --json` reports every check, with `ok` false and exit status 1
   when one failed, instead of stopping at the first. `logs COMPONENT [--since D] [--tail N|all]`
