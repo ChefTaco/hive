@@ -377,6 +377,35 @@
           }
         }
       }
+    },
+    "containerLimits": {
+      "type": "object",
+      "description": "Container resource limits (deployment/README.md#container-resource-limits). \"*\" applies to every container and a component entry overrides it; both override the signed manifest. Every container has a 4096-process limit by default.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "memory": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,6}[mg]$",
+            "description": "Memory ceiling, such as \"512m\" or \"4g\" (Compose mem_limit)."
+          },
+          "cpus": {
+            "type": "number",
+            "minimum": 0.01,
+            "maximum": 1024,
+            "description": "CPU share (Compose cpus)."
+          },
+          "pids": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 1048576,
+            "default": 4096,
+            "description": "Process and thread limit (Compose pids_limit)."
+          }
+        }
+      }
     }
   },
   "$defs": {

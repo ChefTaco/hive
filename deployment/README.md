@@ -390,6 +390,27 @@ keep their own settings. A host-wide default for them belongs in Docker's `daemo
 (`"log-driver": "json-file"` with `"log-opts": {"max-size": "10m", "max-file": "3"}`), which
 applies to containers created after the Docker daemon restarts.
 
+## Container resource limits
+
+Every container runs with a process limit (Compose `pids_limit`) of 4096, so a runaway or
+compromised product cannot exhaust the host's process table and starve the ingress and Oathweave
+beside it. A signed manifest may set `mem_limit`, `cpus` and `pids_limit` for a component. The
+installation file overrides both, for every container with `"*"` or per component:
+
+```json
+"containerLimits": {
+  "*": { "pids": 2048 },
+  "hivemem-qdrant": { "memory": "4g" },
+  "magnus-postgres": { "memory": "2g", "cpus": 2 }
+}
+```
+
+`memory` is a Compose memory ceiling (`512m`, `4g`): a container that exceeds it is killed and
+restarted, so size it from the container's observed peak (`docker stats`) with headroom, and
+leave datastores unbounded unless you know their working set. `cpus` is a CPU share and `pids`
+a process and thread limit from 64. A changed limit is applied by the next `upgrade`, which
+recreates the affected containers.
+
 ## Relaxed authentication limits for testing
 
 `./hive.sh install --relax-auth-limits` and `./hive.sh upgrade --relax-auth-limits`

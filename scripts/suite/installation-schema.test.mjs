@@ -49,6 +49,15 @@ test('native migration, sudo password files and edge subnets are in the schema',
   assert.ok(controllerAccepts(native), 'the controller refused the native-migration sample');
 });
 
+test('container limits are in the schema', () => {
+  const config = { ...structuredClone(example), containerLimits: { '*': { pids: 2048 }, [Object.keys(example.components)[0]]: { memory: '512m', cpus: 1.5 } } };
+  assert.deepEqual(validateInstallation(config), []);
+  assert.ok(controllerAccepts(config));
+  config.containerLimits['*'].swap = '1g';
+  assert.notDeepEqual(validateInstallation(config), []);
+  assert.equal(controllerAccepts(config), false);
+});
+
 test('unknown keys are refused by both', () => {
   for (const mutate of [
     (c) => { c.unknown = true; },
