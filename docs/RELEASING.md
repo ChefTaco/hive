@@ -116,8 +116,39 @@ fingerprint, the SHA-256 of the DER public key:
 openssl pkey -pubin -in trust/publisher.pub -outform DER | sha256sum
 ```
 
-A rotated key is published as a new `trust/publisher.pub` in a new release. Older manifests remain
-verifiable with the key in their own tag.
+### Rotating the key
+
+A rotated key ships in a new release together with a rotation statement signed by the key it
+retires. Launchers trust a release key that differs from their own only through those statements:
+
+- **Newer releases from an older checkout.** The launcher follows `trust/rotations/NNNN.json`
+  statements from its own key, each verified with the key it retires, until it reaches the
+  release's `trust/publisher.pub`. The release must not be older than the statement's
+  `firstRelease`.
+- **Older releases (rollback) from a newer checkout.** A retired key is trusted only through the
+  launcher checkout's own statements, and only for releases before the `firstRelease` of the
+  statement that retired it. A downloaded release can never extend a retired key's validity, so
+  a leaked retired key cannot sign a later release.
+
+To rotate, offline, with the current private key:
+
+```bash
+openssl genpkey -algorithm ED25519 -out NEW.key
+openssl pkey -in NEW.key -pubout -out NEW.pub
+scripts/release/publisher-key-rotation.sh create --retired-key CURRENT.key --next-key NEW.pub --first-release X.Y.Z
+```
+
+`create` writes and signs the next statement and installs `NEW.pub` as `trust/publisher.pub`.
+Sign release X.Y.Z, and every later one, with `NEW.key`, and commit the statement, its signature
+and the new public key in that release. `scripts/release/publisher-key-rotation.sh check` (run by
+`npm test`) verifies that the statements are numbered without gaps, each is signed by the key it
+retires, their `firstRelease` values increase, and the newest introduces `trust/publisher.pub`.
+Publish the new fingerprint wherever the old one was published. Never delete or edit a committed
+statement: older and newer launchers depend on it.
+
+If the current key is compromised, do not rotate with it: a statement signed by a compromised key
+proves nothing. Publish a security advisory, and have operators replace `trust/publisher.pub` in
+their checkout after verifying the new fingerprint out of band.
 
 ## Datastore profile history
 

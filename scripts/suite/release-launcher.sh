@@ -23,6 +23,83 @@ hive_release_verify_source() {
   [[ $digest == "$(jq -er .controllerSHA256 "$checkout/releases/$version.json")" ]] || hive_die 'Release controller source digest does not match its signed manifest'
 }
 
+hive_release_key_fingerprint() {
+  local fingerprint
+  fingerprint=$(openssl pkey -pubin -in "$1" -outform DER 2>/dev/null | sha256sum | cut -d ' ' -f1) || return 1
+  [[ $fingerprint =~ ^[a-f0-9]{64}$ && $fingerprint != e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ]] || return 1
+  printf '%s\n' "$fingerprint"
+}
+
+hive_release_version_before() {
+  [[ $1 != "$2" && $(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1) == "$1" ]]
+}
+
+# Print "retiredSHA256 nextSHA256 firstRelease" for every rotation statement in a checkout's
+# trust/rotations. Each statement must be signed by the key it retires. Parsed with jq only.
+hive_release_rotations() (
+  set -Eeuo pipefail
+  local directory=$1/trust/rotations work statement retired next first
+  [[ -e "$directory" || -L "$directory" ]] || exit 0
+  [[ -d "$directory" && ! -L "$directory" ]] || hive_die 'Unsafe publisher key rotation directory'
+  work=$(mktemp -d) || hive_die 'Could not check publisher key rotations'
+  trap 'rm -rf -- "$work"' EXIT
+  for statement in "$directory"/*.json; do
+    [[ -e "$statement" || -L "$statement" ]] || continue
+    [[ -f "$statement" && ! -L "$statement" && -f "$statement.sig" && ! -L "$statement.sig" ]] || hive_die 'Publisher key rotation statement or signature is missing or unsafe'
+    jq -e '.schema==1 and .kind=="hive-publisher-key-rotation" and
+      (.retiredKeySHA256|type=="string" and test("^[a-f0-9]{64}$")) and (.nextKeySHA256|type=="string" and test("^[a-f0-9]{64}$")) and
+      .retiredKeySHA256!=.nextKeySHA256 and (.retiredKey|type=="string") and (.nextKey|type=="string") and
+      (.firstRelease|type=="string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' "$statement" >/dev/null 2>&1 || hive_die 'Invalid publisher key rotation statement'
+    { jq -j .retiredKey "$statement" > "$work/retired.pub" && jq -j .nextKey "$statement" > "$work/next.pub"; } || hive_die 'Cannot read a publisher key rotation statement'
+    retired=$(hive_release_key_fingerprint "$work/retired.pub") && next=$(hive_release_key_fingerprint "$work/next.pub") || hive_die 'Invalid key in a publisher key rotation statement'
+    [[ $retired == "$(jq -r .retiredKeySHA256 "$statement")" && $next == "$(jq -r .nextKeySHA256 "$statement")" ]] || hive_die 'Publisher key rotation fingerprints do not match their keys'
+    openssl pkeyutl -verify -pubin -inkey "$work/retired.pub" -rawin -in "$statement" -sigfile "$statement.sig" >/dev/null 2>&1 || hive_die 'Publisher key rotation statement is not signed by the key it retires'
+    first=$(jq -r .firstRelease "$statement")
+    printf '%s %s %s\n' "$retired" "$next" "$first"
+  done
+)
+
+# Succeed when the launcher may trust the release key of a checkout for this version:
+# the same key; a newer key reached from the launcher's key through statements each signed
+# by the key it retires; or a key this launcher's own history retired, for releases before
+# its retirement. A retired key can never vouch for a later release.
+hive_release_trust_key() (
+  set -Eeuo pipefail
+  local checkout=$1 version=$2 launcher target current edge retired next first edges steps=0 found
+  cmp -s "$HIVE_ROOT/trust/publisher.pub" "$checkout/trust/publisher.pub" && exit 0
+  launcher=$(hive_release_key_fingerprint "$HIVE_ROOT/trust/publisher.pub") || hive_die 'Invalid launcher publisher key'
+  target=$(hive_release_key_fingerprint "$checkout/trust/publisher.pub") || hive_die 'Invalid release publisher key'
+  [[ $launcher != "$target" ]] || exit 0
+  edges=$( { hive_release_rotations "$HIVE_ROOT"; hive_release_rotations "$checkout"; } | sort -u) || exit 1
+  current=$launcher
+  while ((steps++ < 64)); do
+    found=$(awk -v key="$current" '$1==key' <<< "$edges")
+    [[ -n "$found" ]] || break
+    [[ $(wc -l <<< "$found") == 1 ]] || hive_die 'Conflicting publisher key rotation statements'
+    read -r retired next first <<< "$found"
+    current=$next
+    if [[ $current == "$target" ]]; then
+      hive_release_version_before "$version" "$first" && hive_die "Release $version predates its publisher key (first valid for $first)"
+      exit 0
+    fi
+  done
+  # Only the launcher's own checkout may vouch for a retired key; downloaded statements cannot.
+  edges=$(hive_release_rotations "$HIVE_ROOT") || exit 1
+  found=$(awk -v key="$target" '$1==key' <<< "$edges")
+  if [[ -n "$found" && $(wc -l <<< "$found") == 1 ]]; then
+    read -r retired next first <<< "$found"
+    hive_release_version_before "$version" "$first" || hive_die "Release $version is signed by a publisher key retired before $first"
+    current=$next steps=0
+    while [[ $current != "$launcher" ]] && ((steps++ < 64)); do
+      edge=$(awk -v key="$current" '$1==key' <<< "$edges")
+      [[ -n "$edge" && $(wc -l <<< "$edge") == 1 ]] || break
+      read -r retired current first <<< "$edge"
+    done
+    [[ $current == "$launcher" ]] && exit 0
+  fi
+  hive_die 'Release publisher key differs from this checkout and no verified key rotation links them; review the release key before continuing'
+)
+
 hive_release_checkout() (
   set -Eeuo pipefail
   local version=$1 base checkout staging='' file head tag status
@@ -52,9 +129,10 @@ hive_release_checkout() (
   for file in hive.sh "releases/$version.json" "releases/$version.json.sig" trust/publisher.pub; do
     [[ -f "$checkout/$file" && ! -L "$checkout/$file" ]] || hive_die 'Release is missing regular controller, manifest, signature or publisher files'
   done
-  # Retain the launcher's trust anchor, including when launching an older release.
-  cmp -s "$HIVE_ROOT/trust/publisher.pub" "$checkout/trust/publisher.pub" || hive_die 'Release publisher key differs from this checkout; review the release key before continuing'
-  openssl pkeyutl -verify -pubin -inkey "$HIVE_ROOT/trust/publisher.pub" -rawin \
+  # Retain the launcher's trust anchor, including when launching an older release: a different
+  # key is accepted only through a verified rotation chain (docs/RELEASING.md#rotating-the-key).
+  hive_release_trust_key "$checkout" "$version" || exit 1
+  openssl pkeyutl -verify -pubin -inkey "$checkout/trust/publisher.pub" -rawin \
     -in "$checkout/releases/$version.json" -sigfile "$checkout/releases/$version.json.sig" >/dev/null 2>&1 || hive_die 'Release signature verification failed'
   jq -e --arg version "$version" '.schema==1 and .version==$version and (.controllerSHA256|type=="string" and test("^[a-f0-9]{64}$"))' \
     "$checkout/releases/$version.json" >/dev/null || hive_die 'Invalid suite release manifest'

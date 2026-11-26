@@ -165,4 +165,60 @@ help_text=$(sed -n '/--release VERSION/,/^  --manifest/p' "$ROOT/scripts/suite/c
 for command in $launcher_commands; do
   grep -qw -- "$command" <<< "$help_text" || fail "hive.sh --help does not say latest works for $command"
 done
-printf 'Passed: latest and explicit versions, exact forwarding, offline reuse, stdin, exit status, signed checkouts and fail-closed resolution.\n'
+# Publisher key rotation: a newer key is trusted only through statements signed by the key
+# they retire; a retired key only through the launcher's own history, before its retirement.
+openssl genpkey -algorithm ED25519 -out "$temporary/key2" >/dev/null 2>&1
+openssl pkey -in "$temporary/key2" -pubout -out "$temporary/key2.pub" >/dev/null 2>&1
+cp "$TEST_REMOTE/trust/publisher.pub" "$temporary/key1.pub"
+remote_release() { # version signing-key
+  jq -n --arg version "$1" --arg digest "$digest" '{schema:1,version:$version,controllerSHA256:$digest}' > "$TEST_REMOTE/releases/$1.json"
+  openssl pkeyutl -sign -inkey "$2" -rawin -in "$TEST_REMOTE/releases/$1.json" -out "$TEST_REMOTE/releases/$1.json.sig"
+  "$REAL_GIT" -C "$TEST_REMOTE" add -A
+  "$REAL_GIT" -C "$TEST_REMOTE" commit -qm "Synthetic $1"
+  "$REAL_GIT" -C "$TEST_REMOTE" tag "v$1"
+}
+HIVE_ROTATION_ROOT=$TEST_REMOTE bash "$ROOT/scripts/release/publisher-key-rotation.sh" create --retired-key "$temporary/key" --next-key "$temporary/key2.pub" --first-release 2.0.6 >/dev/null
+cmp -s "$TEST_REMOTE/trust/publisher.pub" "$temporary/key2.pub" || fail 'Rotation did not install the next key'
+HIVE_ROTATION_ROOT=$TEST_REMOTE bash "$ROOT/scripts/release/publisher-key-rotation.sh" check >/dev/null || fail 'A valid rotation chain failed its check'
+remote_release 2.0.6 "$temporary/key2"
+bash "$TEST_ROOT/hive.sh" --release 2.0.6 2>/dev/null || fail 'An old checkout could not launch a release signed by a rotated key'
+jq -e '.args==["--release","2.0.6"]' "$TEST_RESULT" >/dev/null || fail 'Rotated release did not run'
+# A newer key with no statement, or a statement not signed by the retired key, is refused.
+mv "$TEST_REMOTE/trust/rotations/0001.json.sig" "$temporary/0001.sig"
+openssl pkeyutl -sign -inkey "$temporary/key2" -rawin -in "$TEST_REMOTE/trust/rotations/0001.json" -out "$TEST_REMOTE/trust/rotations/0001.json.sig"
+remote_release 2.0.9 "$temporary/key2"
+reject bash "$TEST_ROOT/hive.sh" --release 2.0.9
+grep -q 'not signed by the key it retires' "$temporary/error" || fail 'A self-signed rotation was accepted'
+"$REAL_GIT" -C "$TEST_REMOTE" rm -rq trust/rotations
+remote_release 2.0.10 "$temporary/key2"
+reject bash "$TEST_ROOT/hive.sh" --release 2.0.10
+grep -q 'no verified key rotation' "$temporary/error" || fail 'An unlinked publisher key was accepted'
+# A release older than the new key's firstRelease cannot use the new key.
+mkdir -p "$TEST_REMOTE/trust/rotations"
+jq '.firstRelease="2.1.0"' <(git -C "$TEST_REMOTE" show v2.0.6:trust/rotations/0001.json) > "$TEST_REMOTE/trust/rotations/0001.json"
+openssl pkeyutl -sign -inkey "$temporary/key" -rawin -in "$TEST_REMOTE/trust/rotations/0001.json" -out "$TEST_REMOTE/trust/rotations/0001.json.sig"
+remote_release 2.0.11 "$temporary/key2"
+reject bash "$TEST_ROOT/hive.sh" --release 2.0.11
+grep -q 'predates its publisher key' "$temporary/error" || fail 'A release before the rotation used the new key'
+# Rollback from a rotated checkout to a release signed by the retired key.
+cp "$temporary/key2.pub" "$TEST_ROOT/trust/publisher.pub"
+rm -rf -- "$XDG_DATA_HOME/hive/releases/2.0.5"
+reject bash "$TEST_ROOT/hive.sh" --release 2.0.5
+grep -q 'no verified key rotation' "$temporary/error" || fail 'A retired key was trusted without the launcher history'
+mkdir -p "$TEST_ROOT/trust/rotations"
+git -C "$TEST_REMOTE" show v2.0.6:trust/rotations/0001.json > "$TEST_ROOT/trust/rotations/0001.json"
+git -C "$TEST_REMOTE" show v2.0.6:trust/rotations/0001.json.sig > "$TEST_ROOT/trust/rotations/0001.json.sig"
+bash "$TEST_ROOT/hive.sh" --release 2.0.5 2>/dev/null || fail 'A rotated checkout could not roll back to a release signed by the retired key'
+jq -e '.args==["--release","2.0.5"]' "$TEST_RESULT" >/dev/null || fail 'Rollback release did not run'
+bash "$TEST_ROOT/hive.sh" --release 2.0.6 2>/dev/null || fail 'The current key stopped working after rotation'
+# A retired key cannot sign a release from its retirement onwards, even with a downloaded statement.
+cp "$temporary/key1.pub" "$TEST_REMOTE/trust/publisher.pub"
+jq '.firstRelease="9.0.0"' "$TEST_ROOT/trust/rotations/0001.json" > "$TEST_REMOTE/trust/rotations/0001.json"
+openssl pkeyutl -sign -inkey "$temporary/key" -rawin -in "$TEST_REMOTE/trust/rotations/0001.json" -out "$TEST_REMOTE/trust/rotations/0001.json.sig"
+remote_release 2.0.12 "$temporary/key"
+reject bash "$TEST_ROOT/hive.sh" --release 2.0.12
+grep -q 'retired before 2.0.6' "$temporary/error" || fail 'A retired key signed a later release'
+cp "$temporary/key1.pub" "$TEST_ROOT/trust/publisher.pub"; rm -rf -- "$TEST_ROOT/trust/rotations"
+# The repository's own rotation history is a valid chain ending at trust/publisher.pub.
+bash "$ROOT/scripts/release/publisher-key-rotation.sh" check >/dev/null || fail 'The repository publisher key rotation history is invalid'
+printf 'Passed: latest and explicit versions, exact forwarding, offline reuse, stdin, exit status, signed checkouts, publisher key rotation and fail-closed resolution.\n'
