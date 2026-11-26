@@ -27,16 +27,19 @@ delete transaction or runtime receipts to force another attempt. See also
 ## Backup pruning on several hosts (next release)
 
 The next release's controller removes old backup and rehearsal pairs on installations with
-several hosts too; earlier controllers only listed them there and released restored copies. It
-removes in two phases, under each host's lock: every host first sets aside what it still finds
-removable, and a pair goes only when every host holding it did; see
+several hosts too; earlier controllers only listed them there and released restored copies.
+`backups prune --apply` sets the pairs aside on every host, records the decision on every host,
+and only then removes them, each step under that host's lock, so an interrupted prune is finished
+or put back by the next one and never leaves a restore point half-removed; see
 [pruning on several hosts](deployment/BACKUPS.md#pruning-on-several-hosts).
 
-- An installation file with `"retention": {"auto": true}` on several hosts now prunes after each
-  successful upgrade, from the first upgrade with this controller. Remove `auto` (or set it to
-  `false`) first if you relied on it doing nothing there.
-- `backups schedule enable` now works on several hosts, and needs every host to run the same
-  controller; `install` sets it up from `retention.schedule` there too.
+- Automatic pruning stays off on existing installations with several hosts. `retention.auto`
+  and the daily prune remove pairs there only when the installation file also sets
+  `"retention": {"multiHost": true}`; an installation file that sets `auto: true` without it keeps
+  doing nothing after upgrades, as before. `backups schedule enable` there needs `multiHost` and
+  every host running the same controller.
+- `multiHost` is new: remove it from the installation file before running the controller of
+  3.14.3 or earlier (for example for a rollback), which refuses unknown retention keys.
 - Preview with `./hive.sh backups prune` before the first `--apply`.
 
 ## Client addresses and OIDC discovery (next release)

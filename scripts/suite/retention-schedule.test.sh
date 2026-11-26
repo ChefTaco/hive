@@ -197,7 +197,7 @@ if run_line; then fail 'A run against a receipt without a controller succeeded';
 
 # Several hosts: enable checks every host's controller, and each run removes a pair only after
 # every host set it aside (retention.test.sh covers the refusals).
-jq --arg base "$temporary/multi/a" --arg other "$temporary/multi/b" '.hosts={a:{target:"deploy@a.example.com",directory:$base},b:{target:"deploy@b.example.com",directory:$other}} | .console.host="a" | .console.runtimeFile=($base+"/config/runtime.json") | .components|=with_entries(.key as $name|.value.host="a"|if .value.envFile then .value.envFile=($base+"/config/"+$name+".env") else . end|if .value.configDirectory then .value.configDirectory=($base+"/config/"+$name) else . end) | .retention={keep:2,keepDays:0}' "$config" > "$temporary/multi.json"
+jq --arg base "$temporary/multi/a" --arg other "$temporary/multi/b" '.hosts={a:{target:"deploy@a.example.com",directory:$base},b:{target:"deploy@b.example.com",directory:$other}} | .console.host="a" | .console.runtimeFile=($base+"/config/runtime.json") | .components|=with_entries(.key as $name|.value.host="a"|if .value.envFile then .value.envFile=($base+"/config/"+$name+".env") else . end|if .value.configDirectory then .value.configDirectory=($base+"/config/"+$name) else . end) | .retention={keep:2,keepDays:0,multiHost:true}' "$config" > "$temporary/multi.json"
 for host in a b; do
   directory="$temporary/multi/$host"
   fixture
@@ -206,6 +206,12 @@ for host in a b; do
   for receipt in "$directory"/backups/*/receipt.json; do jq --arg host "$host" '.host=$host' "$receipt" > "$temporary/next.json"; touch -r "$receipt" "$temporary/next.json"; mv "$temporary/next.json" "$receipt"; done
 done
 directory="$temporary/install"
+# Without retention.multiHost, automatic pruning stays off there, before any host is contacted.
+jq '.retention={keep:2,keepDays:0}' "$temporary/multi.json" > "$temporary/multi-off.json"
+: > "$temporary/ssh.log"; cp -- "$store" "$temporary/before-multi"
+refused 'automatic backup pruning every day is off on an installation with several hosts' "$ROOT/hive.sh" backups schedule enable --config "$temporary/multi-off.json" --non-interactive
+refused 'automatic backup pruning every day is off' "$ROOT/hive.sh" backups schedule run --config "$temporary/multi-off.json" --non-interactive
+[[ ! -s "$temporary/ssh.log" ]] && cmp -s "$store" "$temporary/before-multi" || fail 'A multi-host schedule without multiHost contacted a host or changed the crontab'
 : > "$temporary/ssh.log"
 "$ROOT/hive.sh" backups schedule enable --at 12:20 --config "$temporary/multi.json" --non-interactive > "$temporary/result" 2>&1 || { cat "$temporary/result" >&2; fail 'A multi-host enable failed'; }
 grep -q 'deploy@a.example.com\|retention' "$temporary/ssh.log" || true
@@ -268,7 +274,7 @@ after "$ROOT" upgrade "$temporary/scheduled.json"; grep -q 'sets retention.sched
 after "$ROOT" install "$temporary/scheduled.json" || fail 'The install hook failed'
 [[ $(marked "$temporary/scheduled.json") == 1 ]] && grep -F "config=$temporary/scheduled.json" "$store" | grep -v "config=$temporary/scheduled.json." | grep -q '^15 2 \* \* \* ' || { cat "$temporary/after.log" "$store" >&2; fail 'install did not schedule pruning'; }
 # With several hosts it does so once every host runs the same controller.
-jq '.retention={schedule:"02:15"}' "$temporary/multi.json" > "$temporary/multi-scheduled.json"
+jq '.retention={schedule:"02:15",multiHost:true}' "$temporary/multi.json" > "$temporary/multi-scheduled.json"
 after "$ROOT" install "$temporary/multi-scheduled.json"
 [[ $(marked "$temporary/multi-scheduled.json") == 0 ]] && grep -q 'host b runs another controller' "$temporary/after.log" || { cat "$temporary/after.log" >&2; fail 'install scheduled pruning on hosts with different controllers'; }
 jq --arg controller "$digest" '.controllerSourceSHA256=$controller' "$temporary/multi/b/receipt.json" > "$temporary/next.json"; mv "$temporary/next.json" "$temporary/multi/b/receipt.json"
@@ -312,4 +318,4 @@ for value in 00:00 03:40 23:59; do
 done
 jq -e '.properties.retention.properties.schedule | .type=="string" and .pattern=="^([01][0-9]|2[0-3]):[0-5][0-9]$"' "$ROOT/examples/installation.schema.json" >/dev/null || fail 'The schema does not define retention.schedule as the controller validates it'
 grep -qF 'test("^([01][0-9]|2[0-3]):[0-5][0-9]$")' "$ROOT/scripts/suite/retention.sh" || fail 'The controller and the schema disagree on retention.schedule'
-printf 'Passed: the daily prune keeps one marked crontab line per installation file and every other line byte for byte, prunes several hosts in two phases, prunes only through the host lock with no open transaction and the installed controller, logs each run without secrets, follows upgrade, rollback and adopt, and is set up by install from retention.schedule.\n'
+printf 'Passed: the daily prune keeps one marked crontab line per installation file and every other line byte for byte, prunes several hosts only with multiHost and in steps, prunes only through the host lock with no open transaction and the installed controller, logs each run without secrets, follows upgrade, rollback and adopt, and is set up by install from retention.schedule.\n'

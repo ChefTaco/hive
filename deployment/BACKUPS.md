@@ -411,22 +411,34 @@ entry any host keeps is shown as kept on every host.
 
 A plan reads each host under its lock in turn, so another command can protect an archive on one
 host after that host was read. Controllers of suite 3.14.3 and earlier therefore removed no pair
-on an installation with several hosts. From the release after 3.14.3, `prune --apply`, the
-[daily prune](#daily-pruning) and `retention.auto` remove pairs there in two phases:
+on an installation with several hosts. From the release after 3.14.3, `prune --apply` removes
+pairs there in three steps, each one on every host under that host's lock and with no transaction
+open:
 
-1. **Set aside.** Each host in turn, under its lock and with no transaction open, works out its
-   own plan again and sets aside the requested pairs that it still finds removable: they are
-   renamed to `.held-TOKEN-ID` beside them, recorded in `retention/hold-TOKEN.json`, and no other
-   command finds them. A host that now keeps an archive (a new reference, transaction or recovery
-   record) reports it instead.
-2. **Remove or put back.** A pair is removed only when every host whose plan holds it set it
-   aside; every host then removes those and puts everything else back. If any host refuses or
-   cannot be reached while setting aside, nothing is removed on any host.
+1. **Set aside.** Each host works out its own plan again and sets aside the requested pairs that
+   it still finds removable: it records them in `retention/hold-TOKEN.json`, then renames them to
+   `.held-TOKEN-ID` beside them, where no other command finds them. A host that now keeps an
+   archive (a new reference, transaction or recovery record) reports it instead. A pair goes
+   only when every host holding it set it aside. If any host refuses, holds the lock or cannot be
+   reached, nothing is removed on any host and every host puts back what it set aside.
+2. **Decide.** Each host records the pairs that go in its hold record, before any host removes
+   anything. From then on the prune only finishes forwards: a decided hold is never put back,
+   and an undecided one is never removed.
+3. **Remove.** Each host removes the decided pairs, records them in `retention/prune-*.json` and
+   puts everything else back.
 
-An archive set aside on one host is not restorable there until it is put back, so a `restore`
-of an archive that is being pruned refuses before it changes anything; run it again afterwards.
-When a prune is interrupted between the phases, `backups list` names what is set aside, and the
-next `prune --apply` (or the next daily prune) puts it back before it decides again.
+When a prune stops part-way, for example because a host became unreachable, `backups list` names
+what is set aside, `prune` refuses to start another one on that host, and the next
+`prune --apply` finishes the interrupted one first: forwards on every host when any host
+recorded the decision, otherwise by putting everything back. A restore point is therefore never
+left removed on some hosts and restorable on others. An archive set aside on a host is not
+restorable there until the prune ends, so a `restore` of an archive that is being pruned refuses
+before it changes anything.
+
+Automatic pruning (`retention.auto` and the [daily prune](#daily-pruning)) removes pairs on an
+installation with several hosts only when the installation file also sets
+`"retention": {"multiHost": true}`. Without it, both report that they are off and remove nothing;
+`prune --apply` by hand needs no opt-in.
 
 **What goes.** A pair goes as a whole: the rehearsal first, then its `rehearsal-history/ID`
 attempts, then the backup, so an interruption never leaves a rehearsal that claims a backup it no
@@ -442,7 +454,8 @@ upgrade. Configure it in the installation file:
 ```
 
 Each key is optional: `keep` from 2 to 1000, `keepDays` from 0 to 3650, and `auto` defaults to
-`false`. Set `auto` to `true` to prune after successful upgrades,
+`false`. Set `auto` to `true` to prune after successful upgrades (with several hosts, together
+with `multiHost`),
 or leave it off and use `--apply` after reviewing a dry run. `--keep` and `--keep-days` override
 the file for one run. `schedule`, a 24-hour local time, has `install` set up the
 [daily prune](#daily-pruning). Retention is available from suite 3.9.3, and `schedule` from 3.9.4.
@@ -461,8 +474,8 @@ digests to reconcile them.
 ### Daily pruning
 
 From suite 3.9.4, a single-host installation can run `backups prune --apply` every day from cron,
-and from the release after 3.14.3 an installation with several hosts too
-([several hosts](#pruning-on-several-hosts)):
+and from the release after 3.14.3 an installation with several hosts that sets
+`"retention": {"multiHost": true}` ([several hosts](#pruning-on-several-hosts)):
 
 ```bash
 ./hive.sh backups schedule enable --at 03:40    # add or replace the line; the default time is 03:40
