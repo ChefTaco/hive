@@ -280,3 +280,16 @@ jobs:
           } > notes.md
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Hive $version" --notes-file notes.md \
             "releases/$version.json" "releases/$version.json.sig" trust/publisher.pub
+
+  # The published release installed from the one before it, each by its own controller, then
+  # upgraded, checked and rolled back. Called here because a release published with GITHUB_TOKEN
+  # starts no other workflow. It reports; the release is already published.
+  upgrade-round-trip:
+    name: Upgrade round trip into the published release
+    needs: release
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-upgrade.yml
+    with:
+      to: ${{ github.ref_name }}

@@ -2,17 +2,29 @@ name: Release upgrade round trip
 
 # Installs a published signed release with its own tagged controller, upgrades it to a newer one
 # with that release's controller (--allow-migrations), runs post-upgrade and doctor, and rolls
-# back (scripts/suite/release-upgrade-roundtrip.sh). It pulls the published images, so it runs
-# weekly, when a release is published, by hand, and on pull requests that change the round trip.
+# back (scripts/suite/release-upgrade-roundtrip.sh). It pulls the published images. The Suite
+# release workflow calls it with the release it just published and the one before it (a release
+# published with GITHUB_TOKEN starts no other workflow by itself); it also runs weekly and on pull
+# requests that change the round trip for the two newest releases, and by hand for any pair.
+# scripts/release/upgrade-pair.sh chooses the pair.
 on:
+  workflow_call:
+    inputs:
+      to:
+        description: Release to upgrade to (X.Y.Z or vX.Y.Z)
+        type: string
+        required: true
+      from:
+        description: Release to install (default the published release before it)
+        type: string
+        required: false
+        default: ''
   schedule:
     - cron: '20 4 * * 1'
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       from:
-        description: Release to install (default the one before the newest)
+        description: Release to install (default the published release before "to")
         required: false
       to:
         description: Release to upgrade to (default the newest)
@@ -20,13 +32,14 @@ on:
   pull_request:
     paths:
       - scripts/suite/release-upgrade-roundtrip.sh
+      - scripts/release/upgrade-pair.sh
       - .github/workflows/release-upgrade.yml
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-upgrade-${{ github.ref }}
+  group: release-upgrade-${{ github.ref }}-${{ inputs.to || 'newest' }}
   cancel-in-progress: true
 
 jobs:
@@ -45,15 +58,10 @@ jobs:
           TO: ${{ inputs.to }}
         run: |
           set -euo pipefail
-          # The two newest tagged signed releases in releases/, skipping those the newest manifest
-          # withdraws and those tagged but never published (3.2.1, 3.12.8).
-          all=$(find releases -maxdepth 1 -name '[0-9]*.[0-9]*.[0-9]*.json' ! -name '*.inputs.json' -printf '%f\n' | sed 's/\.json$//' | sort -V)
-          skip=$( { jq -r '(.withdrawn // [])[].version' "releases/$(tail -n 1 <<< "$all").json"; printf '3.2.1\n3.12.8\n'; } )
-          # Only tagged ones: a release commit lands before its tag.
-          mapfile -t releases < <(grep -vxF -f <(printf '%s\n' "$skip") <<< "$all" | while read -r version; do git rev-parse -q --verify "refs/tags/v$version" >/dev/null && printf '%s\n' "$version"; done)
-          to=${TO:-${releases[-1]}}
-          from=${FROM:-${releases[-2]}}
-          [[ "$from" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$to" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid release pair $from -> $to" >&2; exit 1; }
+          arguments=()
+          [[ -z "${TO:-}" ]] || arguments+=(--to "$TO")
+          [[ -z "${FROM:-}" ]] || arguments+=(--from "$FROM")
+          read -r from to < <(bash scripts/release/upgrade-pair.sh "${arguments[@]}")
           echo "from=$from" >> "$GITHUB_OUTPUT"; echo "to=$to" >> "$GITHUB_OUTPUT"
           echo "Round trip: $from -> $to" >> "$GITHUB_STEP_SUMMARY"
 

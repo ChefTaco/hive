@@ -51,8 +51,10 @@ All notable changes to this project are documented in this file. The format is b
 - A real-image upgrade round trip in CI. `scripts/suite/release-upgrade-roundtrip.sh` installs a
   signed release with its own tagged controller (core or full profile), upgrades it with the next
   release's controller and `--allow-migrations`, runs `post-upgrade` and `doctor`, and rolls back.
-  The *Release upgrade round trip* workflow runs it for the two newest published releases weekly,
-  when a release is published, by hand (`from`/`to`) and on pull requests that change it.
+  The *Suite release* workflow runs it after publishing a release, from the release before it
+  (`scripts/release/upgrade-pair.sh` chooses the pair); the *Release upgrade round trip* workflow
+  also runs weekly and on pull requests that change it for the two newest releases, and by hand
+  for any pair.
 - HiveSkills 1.10.0 and later and Emberpath trust the ingress's `X-Forwarded-For` when they run on
   its host without a published port (`HIVE_SKILLS_TRUSTED_PROXIES`, `EMBERPATH_TRUSTED_PROXIES`:
   the pinned suite network or Docker's private ranges), so their sign-in throttles see the client,

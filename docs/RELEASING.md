@@ -108,7 +108,11 @@ release's bytes only from the controller source of that release's tag.
    table. Then push the tag `vX.Y.Z` on that commit of `main`; the workflow refuses a tag whose
    commit is not on `main`, and a release without notes under `## [X.Y.Z]` in `CHANGELOG.md`. The *Suite release* workflow checks the tagged tree again
    and checks every pinned digest against the published tag named in the inputs file. Then it publishes the GitHub
-   release with the manifest, the signature and the publisher key attached.
+   release with the manifest, the signature and the publisher key attached. Its last job runs the
+   [release upgrade round trip](../.github/workflows/release-upgrade.yml) for the published
+   release: installed from the release before it with that release's controller, upgraded with
+   `--allow-migrations` by the new one, checked, and rolled back, for the core and full profiles.
+   A failure there does not withdraw the release; review it before announcing the release.
 7. **Make new packages public.** A first push to GitHub Container Registry creates a private
    package. Set every new package to public before announcing the release.
 
