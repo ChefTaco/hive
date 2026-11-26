@@ -16,27 +16,14 @@ All notable changes to this project are documented in this file. The format is b
   Upgrade note: the first upgrade with this controller recreates every container to add the
   process limit; data is kept.
 
-### Fixed
-
-- Guided setup checks each answer where it is asked: the installation name, directory, SSH
-  target, architecture, console origin, profile, bind address, port, configuration mode,
-  operator username and email. A typo is explained and the question is asked again, instead of
-  being found by the final validation after about 20 questions and discarding every answer. End
-  of input (Ctrl-D or a closed terminal) at any question now stops with a message naming that
-  question, instead of exiting silently.
-- `examples/installation.schema.json` matches what the controller accepts again. It lacked
-  `external`, `nativeMigration`, `console.nativeListeners`, `console.edgeSubnet`,
-  `hosts.*.sudoPasswordFile` and `bootstrap.magnusGateway`, so configurations that guided setup
-  itself writes failed the published schema. `interactive.test.py` now validates every
-  configuration guided setup writes against the schema, and `installation-schema.test.mjs`
-  checks hand-written shapes against both the schema and `hive_validate`.
-- Hive Registry accepts the `Authorization` scheme in any letter case (`bearer ...`), as
-  RFC 9110 requires; a standards-compliant client no longer gets `invalid_credential`.
-- The ingress round trip waits for the console upstream before its first assertion, instead of
-  failing intermittently with "Service unavailable" while the HiveXUI container starts.
-
 ### Changed
 
+- Hive Registry accepts `@hivemagnus/hive-common` 0.7.x (`^0.7.0`). The Registry uses only its
+  Oathweave token verifier; 0.7.0's 15-second `createCaFetch` deadline applies to its key-set
+  fetches, which are short. It reaches installations with the next Hive Registry image version.
+- Hive Registry builds on Node.js 26.13.1, the major of its `hive-node-runtime` 26.13.1 runtime
+  image, and accepts `@hivemagnus/hive-common` 0.6.x (`^0.6.1`; the `^0.5.1` range excluded every
+  0.6 release). Both reach installations with the next Hive Registry image version.
 - Hive Registry builds on Node.js 26.13.1, the major of its `hive-node-runtime` 26.13.1 runtime
   image, and accepts `@hivemagnus/hive-common` 0.6.x (`^0.6.1`; the `^0.5.1` range excluded every
   0.6 release). Both reach installations with the next Hive Registry image version.
@@ -56,6 +43,25 @@ All notable changes to this project are documented in this file. The format is b
   instead of about 16.
 - The recovery CI job uses its small corpus for every prose-only pull request: Markdown at the
   root, under `docs/` and the deployment guides, not only `README.md` and `CONTRIBUTING.md`.
+
+### Fixed
+
+- Guided setup checks each answer where it is asked: the installation name, directory, SSH
+  target, architecture, console origin, profile, bind address, port, configuration mode,
+  operator username and email. A typo is explained and the question is asked again, instead of
+  being found by the final validation after about 20 questions and discarding every answer. End
+  of input (Ctrl-D or a closed terminal) at any question now stops with a message naming that
+  question, instead of exiting silently.
+- `examples/installation.schema.json` matches what the controller accepts again. It lacked
+  `external`, `nativeMigration`, `console.nativeListeners`, `console.edgeSubnet`,
+  `hosts.*.sudoPasswordFile` and `bootstrap.magnusGateway`, so configurations that guided setup
+  itself writes failed the published schema. `interactive.test.py` now validates every
+  configuration guided setup writes against the schema, and `installation-schema.test.mjs`
+  checks hand-written shapes against both the schema and `hive_validate`.
+- Hive Registry accepts the `Authorization` scheme in any letter case (`bearer ...`), as
+  RFC 9110 requires; a standards-compliant client no longer gets `invalid_credential`.
+- The ingress round trip waits for the console upstream before its first assertion, instead of
+  failing intermittently with "Service unavailable" while the HiveXUI container starts.
 
 ### Documentation
 
