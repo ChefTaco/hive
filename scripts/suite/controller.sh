@@ -61,7 +61,8 @@ hive_runtime_files() {
     scripts/suite/admin-access.sh scripts/suite/admin-access-host.sh scripts/suite/admin-access-files-host.sh scripts/suite/admin-access-data.mjs scripts/suite/admin-access-identity.mjs scripts/suite/admin-access-native.mjs \
     scripts/suite/post-upgrade.sh scripts/suite/setup-checklist.sh \
     scripts/suite/retention.sh scripts/suite/retention-host.sh scripts/suite/retention-schedule.sh scripts/suite/rehearsal-copy-host.sh \
-    scripts/suite/add-product.sh scripts/suite/add-product-host.sh
+    scripts/suite/add-product.sh scripts/suite/add-product-host.sh \
+    scripts/suite/backup-transfer.sh scripts/suite/backup-transfer-host.sh
 }
 hive_controller_digest() {
   local file
@@ -161,6 +162,10 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollb
   --at HH:MM             backups schedule enable: the daily prune's local time (default
                          retention.schedule, else 03:40)
   --file FILE            Entry for registry add/update; entries never contain credentials
+  --to DESTINATION       backups export: a directory, or USER@HOST:/PATH over SSH
+  --encrypt RECIPIENT    backups export: encrypt each host's file to an age recipient
+  --from DIRECTORY       backups import: an export directory on this machine
+  --identity FILE        backups import: the age identity of an encrypted export
   --help                 Show this help
 
 init prepares protected configuration for an explicitly fresh installation.
@@ -252,6 +257,11 @@ upgrade, rollback and adopt point the line at the controller they ran; install c
 installation.json sets "retention": {"schedule":"HH:MM"}. Before rolling back to a controller older
 than 3.9.4, run backups schedule disable and remove retention.schedule from the file.
 See deployment/BACKUPS.md#daily-pruning.
+backups export ARCHIVE --to DIRECTORY|USER@HOST:/PATH [--encrypt AGE_RECIPIENT] copies one verified
+backup of every host into a new owner-only directory with a SHA-256 manifest; backups import --from
+DIRECTORY [--identity FILE] puts it back on every host, which checks it first. With "retention":
+{"backup":{"keep":7}} the daily schedule takes an online backup (backups/scheduled-*) before it
+prunes, and keeps the newest 7. See deployment/BACKUPS.md#off-host-copies.
 setup [list] | setup done ID | setup skip ID shows and settles the setup checklist: the steps after an
 install or upgrade that still need a person, recorded in the Hive Registry (1.3.0 and later) and shown
 in HiveXUI. status lists the pending ones. See deployment/FULL.md#setup-checklist.
@@ -791,6 +801,7 @@ hive_host() {
     --argjson adminAccess "${HIVE_ADMIN_ACCESS_INPUT:-null}" \
     --argjson retention "${HIVE_RETENTION_INPUT:-null}" \
     --argjson addProduct "${HIVE_ADD_INPUT:-null}" \
+    --argjson backupTransfer "${HIVE_BACKUP_TRANSFER_INPUT:-null}" \
     --arg abortStep "${HIVE_ABORT_STEP:-}" \
     --arg nativeBackupTool "${HIVE_NATIVE_BACKUP_TOOL:-}" \
     --argjson nativeRecovery "${HIVE_NATIVE_RECOVERY_INPUT:-null}" \
@@ -817,25 +828,27 @@ IFS= read -r hive_program
 hive_program=$(printf "%s" "$hive_program" | base64 -d)
 source <(printf "%s\n" "$hive_program")'
   encoded=$(printf '%s' "$script" | base64 -w0)
+  # HIVE_HOST_STDIN_FILE: bytes the host program reads after its JSON input, such as an archive.
+  hive_host_frame() { printf '%s\n%s\n' "$encoded" "$payload"; [[ -z "${HIVE_HOST_STDIN_FILE:-}" ]] || cat -- "$HIVE_HOST_STDIN_FILE"; }
   if [[ "$target" == local && "${HIVE_HOST_LOCAL_SUDO:-false}" == true ]]; then
     # Root on this host, as the sudo password prompt allows; the payload follows on stdin.
     if [[ -n "$sudo_file" ]]; then
-      { hive_sudo_password "$sudo_file"; printf '%s\n%s\n' "$encoded" "$payload"; } | sudo -k -S -p '' bash -c "$launcher"
+      { hive_sudo_password "$sudo_file"; hive_host_frame; } | sudo -k -S -p '' bash -c "$launcher"
     else
       sudo -v || hive_die 'This step needs root through sudo; use --sudo-password-file for unattended agent commands'
-      printf '%s\n%s\n' "$encoded" "$payload" | sudo -n bash -c "$launcher"
+      hive_host_frame | sudo -n bash -c "$launcher"
     fi
   elif [[ "$target" == local ]]; then
-    printf '%s\n%s\n' "$encoded" "$payload" | bash -c "$launcher"
+    hive_host_frame | bash -c "$launcher"
   else
     # The remote command is fixed; the program and JSON travel only on stdin.
     if [[ -n "$sudo_file" ]]; then
       # sudo reads exactly its password line from standard input; the payload follows it.
-      { hive_sudo_password "$sudo_file"; printf '%s\n%s\n' "$encoded" "$payload"; } | ssh "${ssh_options[@]}" -- "$target" "sudo -k -S -p '' bash -c '$launcher'"
+      { hive_sudo_password "$sudo_file"; hive_host_frame; } | ssh "${ssh_options[@]}" -- "$target" "sudo -k -S -p '' bash -c '$launcher'"
     elif [[ "${HIVE_HOST_REMOTE_SUDO:-false}" == true ]]; then
-      printf '%s\n%s\n' "$encoded" "$payload" | ssh "${ssh_options[@]}" -- "$target" "sudo -n bash -c '$launcher'"
+      hive_host_frame | ssh "${ssh_options[@]}" -- "$target" "sudo -n bash -c '$launcher'"
     else
-      printf '%s\n%s\n' "$encoded" "$payload" | ssh "${ssh_options[@]}" -- "$target" "bash -c '$launcher'"
+      hive_host_frame | ssh "${ssh_options[@]}" -- "$target" "bash -c '$launcher'"
     fi
   fi
 }
@@ -1004,6 +1017,7 @@ hive_main() {
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
   HIVE_RELEASE_SUMMARY='' HIVE_REGISTRY_FILE='' HIVE_REGISTRY_ORIGINAL_CONFIG='' HIVE_REGISTRY_TEMPORARY='' HIVE_OPERATION='' HIVE_CHECKLIST=''
   HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS='' HIVE_AGENT_ENROLLMENT='' HIVE_ADD_TEMPORARY='' HIVE_ADD_INPUT=''
+  HIVE_BACKUP_TO='' HIVE_BACKUP_ENCRYPT='' HIVE_BACKUP_FROM='' HIVE_BACKUP_IDENTITY='' HIVE_BACKUP_TRANSFER_INPUT=''
   local -a registry_arguments=() trust_arguments=()
   if (($#)) && [[ "$1" != --* ]]; then command=$1; shift; fi
   if [[ "$command" == entry-point ]]; then hive_entry_point_command "$@"; return; fi
@@ -1024,6 +1038,11 @@ hive_main() {
         [[ "$command" == backups ]] || hive_die '--at applies only to backups schedule enable'
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
         HIVE_RETENTION_AT=$2; shift 2;;
+      --to|--encrypt|--from|--identity)
+        [[ "$command" == backups ]] || hive_die "$1 applies only to backups export and import"
+        (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
+        case $1 in --to) HIVE_BACKUP_TO=$2;; --encrypt) HIVE_BACKUP_ENCRYPT=$2;; --from) HIVE_BACKUP_FROM=$2;; --identity) HIVE_BACKUP_IDENTITY=$2;; esac
+        shift 2;;
       --apply) [[ "$command" == backups ]] || hive_die '--apply applies only to backups prune'; HIVE_RETENTION_APPLY=true; shift;;
       --stopped) [[ "$command" == backup ]] || hive_die '--stopped applies only to backup'; HIVE_BACKUP_STOPPED=true; shift;;
       --prepare-reconciliation) [[ "$command" == restore ]] || hive_die '--prepare-reconciliation applies only to restore'; HIVE_PREPARE_RECONCILIATION=true; shift;;

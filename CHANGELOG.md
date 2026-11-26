@@ -8,6 +8,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Daily backups and off-host copies. With `"retention": {"backup": {"keep": 7}}` the daily prune
+  first takes an online backup (`backups/scheduled-*`), and retention keeps the newest `keep`
+  scheduled backups. `backups export ARCHIVE --to DIRECTORY|USER@HOST:/PATH [--encrypt
+  AGE_RECIPIENT]` copies a verified backup of every host into an owner-only directory with a
+  SHA-256 manifest; `backups import --from DIRECTORY [--identity FILE]` checks every file and
+  member before it puts the backup back on every host. See
+  [off-host copies](deployment/BACKUPS.md#off-host-copies).
 - Backup pruning on installations with several hosts. `backups prune --apply` now removes old
   backup and rehearsal pairs there in three steps, each under every host's lock: every host sets
   aside the pairs it still finds removable, every host records the decision, then every host

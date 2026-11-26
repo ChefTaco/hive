@@ -104,6 +104,9 @@ hive_retention_schedule_rules() {
   read -r keep days <<< "$settings"
   printf 'keep the newest %s restorable backup and rehearsal pairs and everything newer than %s days (%s)\n' "$keep" "$days" \
     "$(jq -e '.retention.keep!=null or .retention.keepDays!=null' "$HIVE_CONFIG" >/dev/null 2>&1 && printf 'the installation file' || printf 'the defaults')"
+  if jq -e '.retention.backup' "$HIVE_CONFIG" >/dev/null 2>&1; then
+    printf 'each run first takes an online backup (backups/scheduled-*) and keeps the newest %s of them\n' "$(hive_retention_backup_keep)"
+  fi
 }
 
 # The release and controller the installation's receipt names. Read under the host lock.
@@ -271,15 +274,33 @@ hive_retention_schedule_status() {
   fi
 }
 
-# The command the crontab line runs. It prunes with the installation file's settings only.
+# The online backup a scheduled run takes first when the installation file sets retention.backup:
+# this controller's own backup command, as an operator would run it, under its own transaction.
+hive_retention_schedule_backup() { # CONFIG
+  local archive
+  archive="scheduled-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 4)"
+  printf '%s scheduled backup start: %s\n' "$(date -u +%FT%TZ)" "$archive"
+  if "$HIVE_ROOT/hive.sh" backup --config "$1" --archive "$archive" --yes --non-interactive; then
+    printf '%s scheduled backup end: %s verified\n' "$(date -u +%FT%TZ)" "$archive"
+  else
+    printf '%s scheduled backup end: failed; see above. Older scheduled backups are kept\n' "$(date -u +%FT%TZ)"
+    return 1
+  fi
+}
+
+# The command the crontab line runs. It backs up when retention.backup asks, then prunes, with the
+# installation file's settings only.
 hive_retention_schedule_run() (
-  local digest status=0 config
+  local digest status=0 backup_status=0 config
   config=$(hive_retention_schedule_config) || hive_die 'The installation file cannot be resolved'
   digest=$(hive_controller_digest)
   printf '%s scheduled prune start: installation %s, %s, controller %s (%s)\n' "$(date -u +%FT%TZ)" "$(jq -r .installation "$HIVE_CONFIG")" "$config" "$(realpath -e -- "$HIVE_ROOT/hive.sh")" "${digest:0:12}"
   if ! hive_retention_automatic 'every day'; then status=1
+  elif jq -e '.retention.backup' "$HIVE_CONFIG" >/dev/null && ! hive_retention_schedule_backup "$config"; then backup_status=1; fi
+  if ((status != 0)); then :
   elif HIVE_RETENTION_APPLY=true HIVE_RETENTION_KEEP='' HIVE_RETENTION_KEEP_DAYS='' HIVE_RETENTION_KEEP_FULL='' HIVE_RETENTION_CONTROLLER=$digest HIVE_RETENTION_TRIGGER=schedule \
       hive_backups_command prune; then status=0; else status=$?; fi
+  ((status != 0 || backup_status == 0)) || status=1
   if ((status == 0)); then
     printf '%s scheduled prune end: succeeded\n' "$(date -u +%FT%TZ)"
   else

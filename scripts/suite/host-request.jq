@@ -55,4 +55,5 @@
 + (if $adminAccess!=null then {adminAccess:$adminAccess} else {} end)
 + (if $retention!=null then {retention:$retention} else {} end)
 + (if $addProduct!=null then {addProduct:$addProduct} else {} end)
++ (if $backupTransfer!=null then {backupTransfer:$backupTransfer} else {} end)
 + (if $magnusNodeKeysOnly==true then {magnusNodeKeysOnly:true} else {} end)
