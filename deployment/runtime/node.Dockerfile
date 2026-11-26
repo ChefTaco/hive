@@ -1,7 +1,7 @@
 # Shared glibc runtime: patched distribution packages and no npm build tooling.
 # Keep apk metadata for independent inventory and vulnerability scanning.
 FROM node:26.13.1-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1 AS node
-FROM cgr.dev/chainguard/wolfi-base@sha256:b7787f1d3f29dcfb48730372d3515391ac3b218723201a765c94949922676099
+FROM cgr.dev/chainguard/wolfi-base@sha256:43f53fe2a02ba1a9484cc560ccf188da32f4a4b38055752514d78a3923ff05c8
 # The distribution package can lag a Node security release. Copy only the official
 # binary, retaining the hardened glibc userspace and no package-manager tooling.
 RUN apk add --no-cache openssl libssl3 libcrypto3 flock bash gzip ca-certificates libstdc++ libatomic && addgroup -g 1000 node && adduser -D -u 1000 -G node node
