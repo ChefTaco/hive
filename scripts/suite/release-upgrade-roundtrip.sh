@@ -2,7 +2,8 @@
 # Real-image upgrade round trip between two signed releases, each run by its own tagged
 # controller: install FROM with the core profile, check it, upgrade to TO with
 # --allow-migrations, run post-upgrade and doctor, then roll back to FROM (unless --no-rollback or
-# the releases cross a storage format that refuses code-only rollback) and check again. It pulls
+# the releases cross a storage format that refuses code-only rollback, which
+# scripts/release/rollback-crossing.sh decides) and check again. It pulls
 # the published images of both releases and needs Docker, jq, openssl, git and an unprivileged
 # account that can use Docker; it binds the console to 127.0.0.1 on a free port and removes its
 # containers at the end. The workflow release-upgrade.yml runs it.
@@ -96,6 +97,13 @@ run "$old" status --release "$from" > /dev/null
 run "$new" upgrade --release "$to" --yes --allow-migrations
 run "$new" post-upgrade --release "$to" --yes
 run "$new" doctor --release "$to"
+# A code-only rollback is refused across a storage format the older release cannot read; the way
+# back from such an upgrade is its pre-upgrade backup, so the round trip ends after the upgrade.
+crossing=$(bash "$ROOT/scripts/release/rollback-crossing.sh" "$old/releases/$from.json" "$new/releases/$to.json" | tr '\n' ' ')
+if [[ "$rollback" == true && -n "$crossing" ]]; then
+  step "rollback skipped: $from cannot read the storage format of ${crossing% } after $to"
+  rollback=false
+fi
 if [[ "$rollback" == true ]]; then
   run "$old" rollback --release "$from" --yes
   run "$old" doctor --release "$from"

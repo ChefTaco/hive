@@ -157,6 +157,10 @@ deleting old posts in channels that have a retention limit.
 
 ### Fixed
 
+- The upgrade round trip (`release-upgrade-roundtrip.sh`) skips its rollback step when the older
+  release cannot read a storage format of the newer one, as its description said; it ran the
+  rollback anyway, which the host refuses, so every round trip into 3.15.0 would have failed.
+  `scripts/release/rollback-crossing.sh` decides.
 - A product's own storage migration runs with the private datastores it requires started, in the
   rehearsal and on the live store, and stopped again afterwards. Oathweave 2.5.0 and later reach
   their Redis from `migrate`, which failed with the datastores stopped, so the first upgrade with an
