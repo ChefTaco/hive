@@ -27,7 +27,7 @@ git clone https://github.com/ChefTaco/hive.git && cd hive
 ./hive.sh --release latest
 ```
 
-Replace `latest` with an exact version, such as `3.14.3`, to select it explicitly. The launcher
+Replace `latest` with an exact version, such as `3.15.0`, to select it explicitly. The launcher
 resolves `latest` for `install`/`init`, `plan`, `upgrade` and `admin-access`, and reports the exact
 version before starting setup. It retains matching tagged controllers under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`, verifies their clean Git checkout and signed
@@ -272,6 +272,14 @@ is never passed on.
 - HiveSkills 1.10.0 and later (`HIVE_SKILLS_TRUSTED_PROXIES`) and Emberpath
   (`EMBERPATH_TRUSTED_PROXIES`) get the same list under the same conditions. An older HiveSkills,
   which accepts only single addresses, gets none.
+- **Cindertrace.** Cindertrace 0.9.0 and later key sign-in throttling, the API rate limits and
+  authentication audit records on the client address, which they read from `X-Forwarded-For`
+  only when the connecting peer is listed in `CINDERTRACE_TRUSTED_PROXIES` (default `loopback`).
+  From 3.15.0, when the ingress runs on Cindertrace's host and Cindertrace has no directly
+  published endpoint, the controller sets `CINDERTRACE_TRUSTED_PROXIES=ingress` in Cindertrace's
+  container environment on every install and upgrade. Cindertrace resolves that name to the
+  ingress container's address, and looks it up again when the address changes, so it trusts the
+  ingress alone. Otherwise it keeps its default and uses the connecting address.
 
 ### Response security headers
 

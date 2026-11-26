@@ -173,9 +173,21 @@ HIVE_CONFIG=$temporary/suite-published-identity.json hive_render control | jq -e
 jq '.bootstrap.productEndpoints.chattermost={origin:"https://chat.example.com:8065",bindAddress:"192.0.2.10"}' "$temporary/suite.json" > "$temporary/suite-published-chat.json"
 HIVE_CONFIG=$temporary/suite-published-chat.json hive_render control | jq -e '.services.chattermost.environment|has("TRUSTED_PROXIES")|not' >/dev/null ||
   fail 'A published ChatterMost port trusts forwarded addresses'
+# Cindertrace trusts exactly the ingress container by name, with or without a pinned network,
+# so per-client sign-in throttling works behind the ingress; nothing else gets the setting.
+jq -e '.services.cindertrace.environment.CINDERTRACE_TRUSTED_PROXIES=="ingress" and
+  ([.services|to_entries[]|select(.key!="cindertrace" and ((.value.environment // {})|has("CINDERTRACE_TRUSTED_PROXIES")))]|length==0)' \
+  "$temporary/suite-default.compose.json" >/dev/null || fail 'Cindertrace does not trust the ingress on its host'
+jq -e '.services.cindertrace.environment|.CINDERTRACE_TRUSTED_PROXIES=="ingress" and .RELAX_AUTH_LIMITS=="true"' \
+  "$temporary/suite-relaxed.compose.json" >/dev/null || fail 'Relaxed limits dropped the Cindertrace proxy trust'
+HIVE_CONFIG=$temporary/suite-subnet.json hive_render control | jq -e '.services.cindertrace.environment.CINDERTRACE_TRUSTED_PROXIES=="ingress"' >/dev/null ||
+  fail 'A pinned suite network changed the Cindertrace proxy trust'
+jq '.bootstrap.productEndpoints.cindertrace={origin:"https://security.example.com:4101",bindAddress:"192.0.2.10"}' "$temporary/suite.json" > "$temporary/suite-published-security.json"
+HIVE_CONFIG=$temporary/suite-published-security.json hive_render control | jq -e '.services.cindertrace.environment|has("CINDERTRACE_TRUSTED_PROXIES")|not' >/dev/null ||
+  fail 'A published Cindertrace port trusts forwarded addresses'
 jq '.components.ingress.host="edge"' "$temporary/suite.json" > "$temporary/suite-remote-ingress.json"
-HIVE_CONFIG=$temporary/suite-remote-ingress.json hive_render control | jq -e '(.services.chattermost.environment|has("TRUSTED_PROXIES")|not) and (.services.oathweave.environment|has("TRUSTED_PROXY_IPS")|not)' >/dev/null ||
-  fail 'ChatterMost or Oathweave trusts forwarded addresses with the ingress on another host'
+HIVE_CONFIG=$temporary/suite-remote-ingress.json hive_render control | jq -e '(.services.chattermost.environment|has("TRUSTED_PROXIES")|not) and (.services.oathweave.environment|has("TRUSTED_PROXY_IPS")|not) and (.services.cindertrace.environment|has("CINDERTRACE_TRUSTED_PROXIES")|not)' >/dev/null ||
+  fail 'ChatterMost, Oathweave or Cindertrace trusts forwarded addresses with the ingress on another host'
 # Only the product environment differs: env files and mounted inputs stay pinned as they are.
 [[ $(jq -Sc 'del(.services[].environment)' "$temporary/suite-default.compose.json") == "$(jq -Sc 'del(.services[].environment)' "$temporary/suite-relaxed.compose.json")" ]] || fail 'Relaxed limits changed more than the product environment'
 # Setup reaches each SSH host before the plan and checks its installation directory.
