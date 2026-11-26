@@ -270,6 +270,15 @@ is never passed on.
   `fc00::/7`), which only the installation's own containers can use to reach it. A ChatterMost
   with a published endpoint gets no trusted proxies and uses the connecting address.
 
+### Response security headers
+
+The ingress adds `Strict-Transport-Security: max-age=31536000`, `X-Content-Type-Options: nosniff`
+and `Referrer-Policy: strict-origin-when-cross-origin` to every response of the console origin
+that does not already carry its own (HiveXUI keeps its CSP and `no-referrer`, Oathweave its HSTS).
+HSTS names the console host only, without `includeSubDomains`; Oathweave already sent it for that
+host. Requests to the static console (everything outside `/api`, `/v1`, `/memory` and the other
+product routes) may carry at most 16 KB of body and are otherwise answered with 413.
+
 ## When a command stops: transactions and recovery
 
 `install`, `upgrade`, `rollback`, `backup`, `rehearse`, `restore` and `adopt` each open a

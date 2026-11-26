@@ -16,6 +16,8 @@ All notable changes to this project are documented in this file. The format is b
   checks hand-written shapes against both the schema and `hive_validate`.
 - Hive Registry accepts the `Authorization` scheme in any letter case (`bearer ...`), as
   RFC 9110 requires; a standards-compliant client no longer gets `invalid_credential`.
+- The ingress round trip waits for the console upstream before its first assertion, instead of
+  failing intermittently with "Service unavailable" while the HiveXUI container starts.
 
 ### Changed
 
@@ -25,6 +27,11 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Security
 
+- The ingress sets `Strict-Transport-Security`, `X-Content-Type-Options: nosniff` and
+  `Referrer-Policy` on every console-origin response that has none of its own, so product APIs no
+  longer depend on each product for them, and limits request bodies to the static console to 16 KB
+  (413 beyond). The Caddyfile is a controller runtime file: installations get this with the next
+  release's upgrade. See [response security headers](deployment/README.md#response-security-headers).
 - `hive-redis` 8.2.10-3 installs OpenSSL 3.5.9-r2 (`libssl3`, `libcrypto3`), which fixes
   CVE-2026-124709 in 3.5.9-r0. The new datastore profile `runtime-2026-11-pg1712-zstd-openssl`
   selects it with the PostgreSQL and Qdrant images of `runtime-2026-11-pg1712-zstd`, which remains
