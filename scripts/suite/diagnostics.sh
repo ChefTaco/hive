@@ -121,6 +121,22 @@ hive_redact() {
     -e 's/(password|passwd|passphrase|secret|token|api[_-]?key|authorization|cookie|credential|private[_-]?key|client[_-]?secret)([A-Za-z0-9_-]*"?[[:space:]]*[:=][[:space:]]*"?)[^"[:space:],;&}]+/\1\2[REDACTED]/Ig'
 }
 
+# The same redaction for every string in a JSON document, and the whole value of a string field
+# named like a secret: preflight errors, warnings, registry drift details and container fields
+# are free-form text too.
+hive_redact_json() {
+  jq '
+    def redact: gsub("-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----"; "[REDACTED PRIVATE KEY]") |
+      gsub("-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]*$"; "[REDACTED PRIVATE KEY]") |
+      gsub("(?<a>bearer|basic)(?<b>\\s+)[A-Za-z0-9._~+/=-]+"; "\(.a)\(.b)[REDACTED]"; "i") |
+      gsub("eyJ[A-Za-z0-9_-]{6,}\\.[A-Za-z0-9_-]{6,}(\\.[A-Za-z0-9_-]*)?"; "[REDACTED-JWT]") |
+      gsub("(?<a>://[^/:@\\s]+:)[^@/\\s]+@"; "\(.a)[REDACTED]@") |
+      gsub("(?<a>password|passwd|passphrase|secret|token|api[_-]?key|authorization|cookie|credential|private[_-]?key|client[_-]?secret)(?<b>[A-Za-z0-9_-]*\"?\\s*[:=]\\s*\"?)[^\"\\s,;&}]+"; "\(.a)\(.b)[REDACTED]"; "i");
+    walk(if type=="string" then redact
+      elif type=="object" then with_entries(if (.key|test("password|passwd|passphrase|secret|token|api[_-]?key|authorization|cookie|credential|private[_-]?key";"i")) and (.value|type=="string") then .value="[REDACTED]" else . end)
+      else . end)'
+}
+
 # What the bundle keeps of the installation file: product placement and logical host names, never
 # SSH targets, files or bootstrap answers.
 hive_bundle_installation_summary() {
@@ -145,7 +161,8 @@ hive_support_bundle() {
   mkdir -m 700 "$bundle" "$bundle/hosts"
   : > "$bundle/errors.txt"
   # Each step runs on its own; a failed one is recorded and the bundle continues. FILTER is
-  # hive_redact for text from products (logs, errors) and cat for the controller's own JSON.
+  # hive_redact for text (logs) and hive_redact_json for JSON reports, whose strings carry
+  # free-form errors and warnings from hosts and products.
   hive_bundle_step() { # NAME FILE FILTER COMMAND...
     local name=$1 file=$2 filter=$3 error
     shift 3
@@ -158,12 +175,12 @@ hive_support_bundle() {
     --arg checkout "$( (hive_checkout_release) 2>/dev/null || true)" --arg controller "$( (hive_controller_digest) 2>/dev/null || true)" \
     --arg bash "$BASH_VERSION" --arg jq "$(jq --version 2>/dev/null || true)" \
     '{schema:1,generatedAt:$generated,installationRelease:$release,controllerRelease:$checkout,controllerSHA256:$controller,bash:$bash,jq:$jq}' > "$bundle/controller.json"
-  hive_bundle_installation_summary > "$bundle/installation.json"
-  hive_bundle_step status "$bundle/status.json" cat hive_status_json
-  hive_bundle_step doctor "$bundle/doctor.json" cat hive_doctor_json
+  hive_bundle_installation_summary | hive_redact_json > "$bundle/installation.json"
+  hive_bundle_step status "$bundle/status.json" hive_redact_json hive_status_json
+  hive_bundle_step doctor "$bundle/doctor.json" hive_redact_json hive_doctor_json
   while IFS= read -r host; do
     request=$(jq -nc '{action:"summary"}')
-    hive_bundle_step "host $host" "$bundle/hosts/$host.json" cat hive_diagnostics_host "$host" "$request"
+    hive_bundle_step "host $host" "$bundle/hosts/$host.json" hive_redact_json hive_diagnostics_host "$host" "$request"
     jq -e . "$bundle/hosts/$host.json" >/dev/null 2>&1 || continue
     mkdir -m 700 "$bundle/hosts/$host-logs"
     while IFS= read -r service; do
@@ -175,7 +192,8 @@ hive_support_bundle() {
 Hive support bundle, written by hive.sh support-bundle. It holds the status and doctor reports,
 each host's transaction and receipt phases, compose ps, and the tail of every container log.
 Credentials, bearer tokens, JSON Web Tokens, passwords in URLs, private keys and the values of
-settings named like passwords, secrets, tokens or keys were redacted. Redaction is pattern-based:
+settings named like passwords, secrets, tokens or keys were redacted from the logs and from every
+string of the JSON reports. Redaction is pattern-based:
 read every file before you share the bundle. Host names, paths, the console origin and log text
 are kept. errors.txt lists every step that failed.
 EOF

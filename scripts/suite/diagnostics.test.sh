@@ -28,7 +28,10 @@ case "\$*" in
   *" ps "*) printf '[{"Service":"oathweave","Name":"diagnostics-proof-oathweave-1","State":"running","Health":"healthy","Labels":"x"}]\n';;
   "version --format"*) printf '27.0.0\n';;
   "compose version --short") printf '2.30.0\n';;
-  "info") exit 1;;
+  "info")
+    # A free-form host message that carries credentials; doctor --json reports it as a warning.
+    printf 'WARNING: proxy https://admin:synthetic-proxy-pass@proxy.example.com token=synthetic-warning-token\n' >&2
+    exit 1;;
   *) printf '[]\n';;
 esac
 DOCKER
@@ -65,6 +68,10 @@ jq -e '.schema==1 and .ok==false and .hosts[0].host=="control" and .hosts[0].pre
   hive_magnus_ardent_dependencies() { printf 'Magnus refused: HTTP 503\n' >&2; return 1; }
   hive_doctor_json > "$temporary/doctor-warning.json" || exit 4
   jq -e '.ok==true and .agentDependencies.checked==false and (.agentDependencies.warning|test("HTTP 503"))' "$temporary/doctor-warning.json" >/dev/null || exit 5
+  # Every string of a JSON report is redacted for the bundle, and secret-named string fields whole.
+  printf '{"hosts":[{"error":"connect postgres://app:synthetic-db-pass@db.example.com/x failed; Authorization: Bearer synthetic-json-bearer"}],"apiToken":"synthetic-field-token","nested":{"detail":"password: synthetic-colon-pass"},"count":3,"tokenCount":4}' | hive_redact_json > "$temporary/redacted.json"
+  ! grep -q 'synthetic-db-pass\|synthetic-json-bearer\|synthetic-field-token\|synthetic-colon-pass' "$temporary/redacted.json" || { cat "$temporary/redacted.json" >&2; exit 9; }
+  jq -e '.count==3 and .tokenCount==4 and (.hosts[0].error|test("failed"))' "$temporary/redacted.json" >/dev/null || exit 10
   # Duration and line options.
   [[ $(hive_logs_since 7d) == 168h && $(hive_logs_since 15m) == 15m && $(hive_logs_since 2026-01-31T12:00:00Z) == 2026-01-31T12:00:00Z ]] || exit 6
   if (hive_logs_since '1h; rm -rf /') 2>/dev/null; then exit 7; fi
@@ -97,13 +104,15 @@ root=$(find "$temporary/extract" -mindepth 1 -maxdepth 1 -type d)
 for file in README.txt controller.json installation.json status.json doctor.json errors.txt hosts/control.json hosts/control-logs/oathweave.log hosts/control-logs/hivexui.log; do
   [[ -f "$root/$file" ]] || fail "The support bundle lacks $file"
 done
-jq -e '.ok==false' "$root/doctor.json" >/dev/null || fail 'The bundle doctor report is not JSON'
+jq -e '.ok==false and (.warnings|length)>0' "$root/doctor.json" >/dev/null || fail 'The bundle doctor report is not JSON or lost its warnings'
 jq -e '.hosts[0].host=="control"' "$root/status.json" >/dev/null || fail 'The bundle status report is not JSON'
 jq -e '.transaction.phase=="committed" and .transaction.operation=="upgrade" and .receipt.version=="0.1.0" and (.receipt|has("privateExtra")|not) and .services==["hivexui","oathweave"] and .backupDirectories==1 and .docker=="27.0.0" and .containers[0].Service=="oathweave" and (.containers[0]|has("Labels")|not)' "$root/hosts/control.json" >/dev/null || { cat "$root/hosts/control.json" >&2; fail 'The host summary is incomplete or carries private fields'; }
 jq -e '(.hosts==["control"]) and (tostring|test("target|sudoPasswordFile|certificateFile")|not)' "$root/installation.json" >/dev/null || fail 'The installation summary carries SSH targets or file paths'
 grep -q -- '--tail 50 oathweave' "$temporary/docker.calls" || fail 'support-bundle ignored --tail'
 log=$root/hosts/control-logs/oathweave.log
-for secret in hunter2-synthetic synthetic-token-value eyJhbGciOiJIUzI1NiJ9 synthetic-pass MIIsyntheticprivatekeymaterial synthetic-client-secret must-not-be-read; do
+# The plain doctor --json keeps the host's message; the shareable bundle never does.
+grep -q 'synthetic-warning-token' "$temporary/doctor.json" || fail 'The credential fixture did not reach doctor --json'
+for secret in hunter2-synthetic synthetic-token-value eyJhbGciOiJIUzI1NiJ9 synthetic-pass MIIsyntheticprivatekeymaterial synthetic-client-secret must-not-be-read synthetic-proxy-pass synthetic-warning-token; do
   ! grep -rq -- "$secret" "$root" || fail "The support bundle kept $secret"
 done
 grep -q 'ordinary line kept' "$log" && grep -q '\[REDACTED PRIVATE KEY\]' "$log" && grep -q '"count": 3' "$log" || fail 'Redaction removed ordinary log text'

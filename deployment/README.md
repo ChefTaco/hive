@@ -403,7 +403,7 @@ file.
   formats, Docker version, free space and `compose ps`, and the last 200 lines (or `--tail`) of
   every container log. Credentials, bearer tokens, JSON Web Tokens, passwords in URLs, private
   keys and the values of settings named like passwords, secrets, tokens or keys are redacted from
-  the logs. Redaction is pattern-based, and host names, paths, the console origin and log text
+  the logs and from every string of the JSON reports, including preflight errors and warnings. Redaction is pattern-based, and host names, paths, the console origin and log text
   are kept: read the files before you share the bundle. `errors.txt` lists every step that
   failed.
 
