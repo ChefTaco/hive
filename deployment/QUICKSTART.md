@@ -305,6 +305,7 @@ across several releases needs the flag when any release it crosses does):
 | [3.14.1](../UPGRADING.md#suite-3141-agent-model-route-magnus-333-and-zstandard-160) | 3.14.0 | No | Magnus 3.3.3, HiveSkills 1.9.1, Cindertrace 0.8.2 and PostgreSQL images with Zstandard 1.6.0; new controller. Upgrade the Magnus host agent first. |
 | [3.14.2](../UPGRADING.md#suite-3142-magnus-335-agent-definitions-and-ardent-321) | 3.14.0 or 3.14.1 | Only when the installation has a suite-managed Magnus (the full profile): one fast, additive Magnus migration | Magnus 3.3.5, agent definitions and Ardent 3.2.1. |
 | [3.14.3](../UPGRADING.md#suite-3143-magnus-336-xml-dependency-fixes) | 3.14.2 | No | Magnus 3.3.6. From 3.14.0 or 3.14.1, the flag of 3.14.2 applies. |
+| [3.15.0](../UPGRADING.md#suite-3150-product-security-round) | 3.14.0 or later | Yes | Oathweave 2.6.0 (`oathweave-managed-format-2`, one-way) and HiveSkills 1.11.1 (`hiveskills-managed-format-5`) change their data formats; full installations also apply Cindertrace, Embermend and Magnus migrations, and Ardent Project Studio 0.7.0 runs one-way migrations on its first start. ChatterMost moves from 0.7.2 to 0.10.0 directly. The way back is the pre-upgrade backup. Upgrade the Magnus host agent first. |
 <!-- upgrade-matrix:end -->
 
 Use an exact version instead of `latest` to review and apply a specific release. Existing
