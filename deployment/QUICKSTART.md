@@ -370,7 +370,8 @@ Then finish maintenance from the retained release checkout with the individual c
 ```
 
 Run the Magnus commands only when this installation hosts Magnus and has a host agent to update;
-run `console-clients add` when it hosts Oathweave and needs missing HiveXUI browser clients.
+run `console-clients add` when it hosts Oathweave: it adds missing browser sign-in settings and
+HiveXUI browser clients ([browser sign-in settings](FULL.md#browser-sign-in-settings)).
 `magnus-agent install` updates the package while preserving the node's existing enrollment scope.
 Full-node enrollment is a separate authorization through `magnus-agent enroll`; a package update
 must not enable commands, cron or web terminals on an intentionally limited node. See

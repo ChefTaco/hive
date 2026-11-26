@@ -180,6 +180,72 @@ first, on the stopped store, after a backup.
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
 
+## Suite 3.15.1: browser sign-in on every installation, no password relay
+
+Every sign-in and every re-authentication before a sensitive action (such as an upgrade or a
+credential change) goes through Oathweave's own sign-in page, so MFA and passkey-only accounts can
+re-authenticate too, and no product handles a password: Emberpath no longer relays one to
+Oathweave. That needs Oathweave's browser sign-in settings and every HiveXUI browser client on the
+installation, which fresh setup has always written but an installation moved with
+`migrate-native`, extended with `add` or edited by hand may lack. `post-upgrade` adds what is
+missing; see [browser sign-in settings](deployment/FULL.md#browser-sign-in-settings).
+
+**What `post-upgrade` does** (it runs `./hive.sh console-clients add`), adding only what is
+missing and keeping every key you set:
+
+- In the environment file Oathweave's Compose service reads (`components.oathweave.envFile`, which
+  need not be `config/oathweave.env`): `IAM_BROWSER_ISSUER` (the issuer the console's
+  `runtime.json` already uses), `IAM_BROWSER_AUTHORIZATION_URL` and `IAM_BROWSER_API_BASE_URL`
+  (browser discovery on the console origin), and the reviewed policy of every HiveXUI browser
+  client of the installed products in `IAM_BROWSER_CLIENT_POLICIES`, merged into the JSON there.
+- In Emberpath's environment file: `EMBERPATH_PASSWORD_RELAY=false`.
+- It copies each file it changes to `config/.browser-signin/STAMP/`, moves the active plan's
+  pinned deployment inputs with the change, recreates Oathweave and Emberpath when their
+  environment changed and waits until they are healthy.
+- Then it creates the missing public browser clients in Oathweave's store and adds their
+  permissions to `SUITE_ADMIN`, as before.
+
+It reads first and asks once; `--yes` applies unattended. An installation that already has
+everything (every fresh installation) shows "nothing to add" and is not changed.
+
+**Steps.** `ID` is your installation; `/opt/hive` its directory on the Oathweave host.
+
+1. Before the upgrade, preview with the new controller; it only reads:
+
+   ```bash
+   ./hive.sh console-clients check --config ~/.config/hive/ID/installation.json --release 3.15.1
+   ```
+
+   `To add ...` lines are what `post-upgrade` will add. Resolve every `Needs attention` line by
+   hand first (for example a `runtime.json` issuer that is not Oathweave's browser issuer). On an
+   installation owned by root, set `hosts.HOST.sudoPasswordFile` in the installation file so the
+   command can write the environment files.
+2. Upgrade as usual (`./hive.sh upgrade ... --release 3.15.1`); it takes the pre-change backup.
+3. Run `./hive.sh post-upgrade --config ~/.config/hive/ID/installation.json --release 3.15.1`
+   (add `--yes` when unattended).
+4. Every `Kept on HOST` line is a value you set that differs from the reviewed one. In particular
+   `EMBERPATH_PASSWORD_RELAY=true` keeps the relay on: remove the line (the default is off), then
+   run `post-upgrade` again.
+5. Sign out of the console and in again.
+
+**Verify.**
+
+- `./hive.sh console-clients check --config ...` prints `Browser sign-in settings: nothing to add`
+  and `Nothing to add`, and exits 0. `./hive.sh doctor` passes.
+- Browser discovery answers on the console:
+  `curl -fsS "https://console.example.com/api/oathweave/oauth/.well-known/openid-configuration?client_id=hivexui-emberpath" | jq '{issuer,authorization_endpoint}'`
+  shows the browser issuer and `https://console.example.com/auth/authorize`.
+- In HiveXUI, sign out and in: the sign-in is Oathweave's page. Start a sensitive action (for
+  example an Emberpath key change): it sends you to Oathweave's page again, also with MFA or a
+  passkey, and never shows a password form of its own.
+
+**Rolling back.** Undo the settings first, because a rollback restores the pre-upgrade backup,
+which refuses configuration that changed since it was taken: copy the files in
+`config/.browser-signin/STAMP/` back as its `changes.json` lists them (the environment files, and
+`receipt.json` and the plan's `deployment-inputs` file when listed under `pinned`), keeping owner
+and mode, and recreate Oathweave and Emberpath. Then roll back as usual. The browser clients that
+were created stay in Oathweave's store; they are harmless without their policies.
+
 ## Suite 3.15.0: product security round
 
 3.15.0 pins Oathweave 2.6.0, Emberpath 2.9.0, HiveMem 1.12.0, HiveSkills 1.11.1, HiveXUI 0.13.0,

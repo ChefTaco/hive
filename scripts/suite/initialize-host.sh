@@ -357,6 +357,9 @@ if has_component oathweave; then
   common_environment; line HOST 0.0.0.0; line PORT 4200; line DATABASE_URL file:/data/iam/iam.db
   line REDIS_URL "redis://:$(secret redis-password)@oathweave-redis:6379"
   line JWT_ISSUER "$native_issuer"; line IAM_BROWSER_ISSUER "$issuer"; line IAM_BROWSER_CLIENT_POLICIES "$policies"
+  # Browser discovery for authorization-code + PKCE clients: the console serves the sign-in page and
+  # Oathweave's browser API, on the issuer's origin.
+  line IAM_BROWSER_AUTHORIZATION_URL "$origin/auth/authorize"; line IAM_BROWSER_API_BASE_URL "$origin/api/oathweave"
   # Native OIDC discovery advertises this base: Oathweave's own HTTPS endpoint, which serves /api/v1
   # (the ingress serves it under /api/oathweave instead). Older Oathweave images ignore it.
   line IAM_PUBLIC_URL "$(product_endpoint oathweave https://oathweave:4200)"
@@ -409,6 +412,8 @@ if has_component emberpath; then
   line EMBERPATH_INITIAL_ADMIN_IDENTITIES_JSON "$(jq -nc --arg username "$username" --arg id "$model_id" '[{username:$username,localId:$id}]')"
   line EMBERPATH_OATHWEAVE_IDENTITIES_JSON "$(jq -nc --arg issuer "$issuer" --arg subject "$subject" --arg id "$model_id" '[{issuer:$issuer,subject:$subject,localId:$id}]')"
   line TLS_CERT_PATH /config/tls.crt; line TLS_KEY_PATH /config/tls.key; line PUBLIC_API_URL "$origin"; line PUBLIC_ADMIN_URL "$origin"
+  # People sign in and re-authenticate on Oathweave's own page; Emberpath never relays a password.
+  line EMBERPATH_PASSWORD_RELAY false
 } | publish_file emberpath "$directory/config/emberpath.env"
 fi
 if has_component hivemem; then

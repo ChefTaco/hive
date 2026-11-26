@@ -19,10 +19,13 @@ const requested=JSON.parse(process.argv[1]);
 const firstPartyIds=JSON.parse(process.argv[3]||"[]");const callback=process.argv[4]||"";
 const policies=JSON.parse(process.env.IAM_BROWSER_CLIENT_POLICIES||"{}");
 // An optional client without a policy in this Oathweave is skipped and named, never created.
+const reviewed=(p,c)=>!!p&&p.audience===c.audience&&JSON.stringify([...new Set(p.permissions)].sort())===JSON.stringify([...new Set(c.permissions)].sort());
 const skippedClients=requested.filter(c=>c.optional&&!policies[c.id]).map(c=>c.id);
-const clients=requested.filter(c=>!skippedClients.includes(c.id));
-for(const c of clients){const p=policies[c.id];
- assert(p&&p.audience===c.audience&&JSON.stringify([...new Set(p.permissions)].sort())===JSON.stringify([...c.permissions].sort()),"Oathweave runs without the reviewed browser policy for "+c.id+": add it to IAM_BROWSER_CLIENT_POLICIES and recreate Oathweave first");}
+// An optional client whose running policy is another one (set by hand) is left alone and named.
+const differentClients=requested.filter(c=>c.optional&&policies[c.id]&&!reviewed(policies[c.id],c)).map(c=>c.id);
+const clients=requested.filter(c=>!skippedClients.includes(c.id)&&!differentClients.includes(c.id));
+for(const c of clients){
+ assert(reviewed(policies[c.id],c),"Oathweave runs without the reviewed browser policy for "+c.id+": add it to IAM_BROWSER_CLIENT_POLICIES and recreate Oathweave first");}
 const ids=clients.map(c=>c.id);
 // What is missing: clients to create and SUITE_ADMIN permissions to add. Existing clients must
 // already be the reviewed public clients with this console callback.
@@ -42,7 +45,7 @@ const inspect=async(db)=>{
  return {role,current,missingClients,notFirstParty,missingPermissions:[...new Set(clients.flatMap(c=>c.permissions))].filter(p=>!current.includes(p))};};
 // The check reads only: nothing is written and no transaction is opened.
 if(process.argv[2]==="check"){const {missingClients,missingPermissions,notFirstParty}=await inspect(prisma);
- console.log(JSON.stringify({check:true,missingClients:missingClients.map(c=>c.id),missingPermissions,notFirstParty,skippedClients}));await prisma.$disconnect();process.exit(0);}
+ console.log(JSON.stringify({check:true,missingClients:missingClients.map(c=>c.id),missingPermissions,notFirstParty,skippedClients,differentClients}));await prisma.$disconnect();process.exit(0);}
 const snapshot=async(tx)=>JSON.stringify([
  (await tx.user.findMany()).sort((a,b)=>a.id<b.id?-1:1),
  (await tx.role.findMany()).filter(r=>r.name!=="SUITE_ADMIN").sort((a,b)=>a.id<b.id?-1:1),
@@ -62,7 +65,7 @@ await prisma.$transaction(async(tx)=>{
  if(addedPermissions.length)await tx.role.update({where:{id:role.id},data:{permissions:JSON.stringify([...current,...addedPermissions])}});
  assert.equal(await snapshot(tx),before,"Existing identity records would change");
 });
-console.log(JSON.stringify({createdClients,addedPermissions,firstPartyClients,skippedClients,existingRecordsUnchanged:true}));await prisma.$disconnect();process.exit(0);'
+console.log(JSON.stringify({createdClients,addedPermissions,firstPartyClients,skippedClients,differentClients,existingRecordsUnchanged:true}));await prisma.$disconnect();process.exit(0);'
 mode=apply
 if jq -e '.consoleClientsCheck==true' <<< "$input" >/dev/null; then mode=check; fi
 owned=$(jq -c '.consoleClientsFirstParty // []' <<< "$input")

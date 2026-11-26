@@ -410,7 +410,9 @@ action_configure() {
       HIVE_IAM_INTERNAL_URL:"https://oathweave:4200",HIVEMEM_INTERNAL_URL:"https://hivemem:18790",
       HIVE_ROUTER_IAM_CA_CERT_PATH:"/config/authority.pem",HIVEMEM_CA_CERT_PATH:"/config/authority.pem",
       OATHWEAVE_ISSUER:$issuer,OATHWEAVE_JWKS_URL:"https://oathweave:4200/api/v1/oauth/jwks",OATHWEAVE_USERINFO_URL:"https://oathweave:4200/api/v1/oauth/userinfo",
-      EMBERPATH_OATHWEAVE_IDENTITIES_JSON:($links|tojson)} +
+      EMBERPATH_OATHWEAVE_IDENTITIES_JSON:($links|tojson),
+      # People sign in and re-authenticate on the Oathweave sign-in page; Emberpath never relays a password.
+      EMBERPATH_PASSWORD_RELAY:"false"} +
       # Accounts move to Oathweave: Emberpath sign-in uses it, never PAM on the host.
       (if ((.HIVE_ROUTER_IAM_CLIENT_ID // "")|length)>0 and ((.HIVE_ROUTER_IAM_CLIENT_SECRET // "")|length)>=24 then {HIVE_ROUTER_AUTH_MODE:"iam-oidc"} else {} end) + (if $rehearsal=="true" then {HIVE_ROUTER_DECISION_MODE:"off",OTEL_SDK_DISABLED:"true"} else {} end) | if $rehearsal=="true" then del(.HIVE_ROUTER_OPENROUTER_KEY,.HIVE_TYPESAFE_AI_KEY) else . end' <<< "$router")
   write_env emberpath "$directory/config/emberpath.env" "$ember_env"

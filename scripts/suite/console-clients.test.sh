@@ -15,7 +15,9 @@ refused() { # MESSAGE COMMAND...
 }
 directory="$temporary/install"
 mkdir -p "$directory/config" "$temporary/bin"
-printf '{"services":{"oathweave":{}}}\n' > "$directory/compose.json"
+jq -n --arg directory "$directory" '{services:{oathweave:{env_file:[($directory+"/config/oathweave.env")]},hivexui:{}}}' > "$directory/compose.json"
+printf '{"schema":1}\n' > "$directory/receipt.json"
+jq -n '{schema:1,mode:"suite",products:{oathweave:"/api/oathweave"},identity:{issuer:"https://console.example.com/api/oathweave",apiPrefix:"/api/oathweave",clients:{oathweave:"hivexui-oathweave"}}}' > "$directory/config/runtime.json"
 # Oathweave's Prisma client, in memory, saved to a file between runs; a failed transaction is not saved.
 cat > "$temporary/prisma.mjs" <<'JS'
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -59,6 +61,16 @@ jq -n --arg directory "$directory" '{schema:1,installation:"example-suite",relea
   components:{"hive-registry":{host:"control",envFile:($directory+"/config/hive-registry.env"),configDirectory:($directory+"/config/hive-registry")},oathweave:{host:"control",envFile:($directory+"/config/oathweave.env"),configDirectory:($directory+"/config/oathweave")},"oathweave-redis":{host:"control",configDirectory:($directory+"/config/oathweave-redis")},hivexui:{host:"control"},ingress:{host:"control",envFile:($directory+"/config/ingress.env"),configDirectory:($directory+"/config/ingress")},
     hivemem:{host:"control",envFile:($directory+"/config/hivemem.env"),configDirectory:($directory+"/config/hivemem")},"hivemem-qdrant":{host:"control",configDirectory:($directory+"/config/hivemem-qdrant")},ardentstudio:{host:"control",envFile:($directory+"/config/ardentstudio.env"),configDirectory:($directory+"/config/ardentstudio")}},
   console:{host:"control",bindAddress:"127.0.0.1",httpsPort:8443,runtimeFile:($directory+"/config/runtime.json")},agents:[],inference:[],external:{magnus:{url:"https://magnus.example.com:4000"}}}' > "$temporary/config.json"
+# The browser sign-in settings are already complete here (browser-signin.test.sh covers them), so
+# only the clients step acts. The running Oathweave's policies are HIVE_TEST_POLICIES.
+settings() { # CONFIG
+  local policies
+  policies=$(HIVE_CONFIG=$1 bash -c 'source "$0/scripts/suite/console-clients.sh"; hive_console_clients_reviewed' "$ROOT" | jq -c 'map({key:.id,value:{audience,permissions}})|from_entries')
+  { printf "IAM_BROWSER_ISSUER='https://console.example.com/api/oathweave'\nIAM_BROWSER_AUTHORIZATION_URL='https://console.example.com/auth/authorize'\n"
+    printf "IAM_BROWSER_API_BASE_URL='https://console.example.com/api/oathweave'\nIAM_BROWSER_CLIENT_POLICIES='%s'\n" "$policies"; } > "$directory/config/oathweave.env"
+  chmod 600 "$directory/config/oathweave.env"
+}
+settings "$temporary/config.json"
 run() { "$ROOT/hive.sh" console-clients add --config "$temporary/config.json" --non-interactive "$@"; }
 
 store
@@ -68,8 +80,9 @@ grep -q 'To create: hivexui-magnus, hivexui-ardentstudio. To add to SUITE_ADMIN:
 run --yes > "$temporary/first.log" 2>&1 || { cat "$temporary/first.log" >&2; fail 'console-clients failed'; }
 grep -q 'Created clients: hivexui-magnus, hivexui-ardentstudio' "$temporary/first.log" || { cat "$temporary/first.log" >&2; fail 'The run does not name the created clients'; }
 # The Hive Registry inventory client is optional: an Oathweave without its policy skips it by name.
-grep -q 'Skipped hivexui-registry: the running Oathweave has no browser policy for it' "$temporary/first.log" || { cat "$temporary/first.log" >&2; fail 'The registry client was not named as skipped'; }
-jq -e 'all(.clients[];.id!="hivexui-registry")' "$HIVE_TEST_STORE" >/dev/null || fail 'A client without a policy was created'
+grep -q 'Skipped hivexui-hivemem, hivexui-registry: the running Oathweave has no browser policy for it' "$temporary/first.log" || { cat "$temporary/first.log" >&2; fail 'The registry client was not named as skipped'; }
+grep -q 'Left as it is: hivexui-oathweave, whose browser policy in the running Oathweave differs' "$temporary/first.log" || { cat "$temporary/first.log" >&2; fail 'A core client with another policy was not named'; }
+jq -e 'all(.clients[];.id!="hivexui-registry" and .id!="hivexui-hivemem")' "$HIVE_TEST_STORE" >/dev/null || fail 'A client without a policy was created'
 jq -e '[.clients[]|select(.id=="hivexui-magnus" or .id=="hivexui-ardentstudio")|.clientType=="public" and .firstParty==true and .grantTypes=="[\"authorization_code\"]" and .redirectUris=="[\"https://console.example.com/auth/callback\"]" and .name==.id]|length==2 and all' "$HIVE_TEST_STORE" >/dev/null || fail 'The clients are not the reviewed public clients'
 jq -e --argjson magnus "$magnus" --argjson studio "$studio" '(.roles[]|select(.name=="SUITE_ADMIN")|.permissions|fromjson)==(["iam:users:read"]+$magnus.permissions+$studio.permissions)' "$HIVE_TEST_STORE" >/dev/null || fail 'SUITE_ADMIN did not gain exactly the client permissions'
 jq -e '(.users|length)==2 and (.assignments|length)==2 and (.roles[]|select(.name=="SUITE_ADMIN").id)=="r2" and (.roles[]|select(.name=="SUPER_ADMIN").permissions)=="[]"' "$HIVE_TEST_STORE" >/dev/null || fail 'Other identity records changed'
@@ -81,7 +94,7 @@ cmp -s <(jq -S . "$HIVE_TEST_STORE") <(jq -S . "$temporary/after-magnus.json") |
 # and records the checklist item as done. The optional client is still named as skipped.
 run > "$temporary/unattended.log" 2>&1 || { cat "$temporary/unattended.log" >&2; fail 'An unattended run with nothing to add failed'; }
 grep -q 'Nothing to add' "$temporary/unattended.log" || { cat "$temporary/unattended.log" >&2; fail 'An unattended run did not report nothing to add'; }
-grep -q 'Skipped hivexui-registry' "$temporary/unattended.log" || { cat "$temporary/unattended.log" >&2; fail 'An unattended run did not name the skipped client'; }
+grep -q 'Skipped hivexui-hivemem, hivexui-registry' "$temporary/unattended.log" || { cat "$temporary/unattended.log" >&2; fail 'An unattended run did not name the skipped client'; }
 ! grep -q 'Created clients' "$temporary/unattended.log" || fail 'An unattended run with nothing to add applied a change'
 cmp -s <(jq -S . "$HIVE_TEST_STORE") <(jq -S . "$temporary/after-magnus.json") || fail 'An unattended run changed the store'
 # A permission removed from SUITE_ADMIN is missing again: named, and not applied without --yes.
@@ -96,7 +109,7 @@ grep -q 'Created clients: none. Added to SUITE_ADMIN: magnus:admin' "$temporary/
 registry='{"audience":"hive-registry","permissions":["registry:inventory"]}'
 HIVE_TEST_POLICIES=$(jq -c --argjson registry "$registry" '.+{"hivexui-registry":$registry}' <<< "$HIVE_TEST_POLICIES") run --yes > "$temporary/registry.log" 2>&1 || { cat "$temporary/registry.log" >&2; fail 'The registry client run failed'; }
 grep -q 'Created clients: hivexui-registry. Added to SUITE_ADMIN: registry:inventory' "$temporary/registry.log" || { cat "$temporary/registry.log" >&2; fail 'The registry client was not created'; }
-! grep -q 'Skipped' "$temporary/registry.log" || fail 'A client with a policy was skipped'
+grep -q 'Skipped hivexui-hivemem: ' "$temporary/registry.log" || fail 'A client with a policy was skipped'
 jq -e '[.clients[]|select(.id=="hivexui-registry")|.clientType=="public" and .redirectUris=="[\"https://console.example.com/auth/callback\"]"]==[true]' "$HIVE_TEST_STORE" >/dev/null || fail 'The registry client is not the reviewed public client'
 cp "$HIVE_TEST_STORE" "$temporary/after-first.json"
 # Without the external Magnus or Studio, only the optional registry client is wanted.
@@ -106,6 +119,7 @@ grep -q 'Nothing to add' "$temporary/none.log" || { cat "$temporary/none.log" >&
 # An installation that grants the web terminal: hivexui-magnus stays with fresh setup, the rest are added.
 store
 jq --arg directory "$directory" 'del(.external)|.components+={magnus:{host:"control",envFile:($directory+"/config/magnus.env"),configDirectory:($directory+"/config/magnus")},"magnus-postgres":{host:"control",configDirectory:($directory+"/config/magnus-postgres")},"magnus-redis":{host:"control",configDirectory:($directory+"/config/magnus-redis")},"magnus-gateway":{host:"control",envFile:($directory+"/config/magnus-gateway.env"),configDirectory:($directory+"/config/magnus-gateway")}}|.bootstrap={adminUsername:"admin",adminEmail:"admin@example.com",certificateFile:($directory+"/console.crt"),privateKeyFile:($directory+"/console.key"),magnusGateway:{sshUsername:"deploy",sshPrivateKeyFile:($directory+"/gateway.key"),grantTerminalToInitialOperator:true}}' "$temporary/config.json" > "$temporary/terminal.json"
+settings "$temporary/terminal.json"
 HIVE_TEST_POLICIES=$(jq -c --argjson registry "$registry" '.+{"hivexui-registry":$registry}' <<< "$HIVE_TEST_POLICIES") "$ROOT/hive.sh" console-clients add --config "$temporary/terminal.json" --non-interactive --yes > "$temporary/terminal.log" 2>&1 || { cat "$temporary/terminal.log" >&2; fail 'A terminal-granting installation run failed'; }
 grep -q 'fresh setup manages hivexui-magnus' "$temporary/terminal.log" || { cat "$temporary/terminal.log" >&2; fail 'The Magnus client was not named as left to fresh setup'; }
 grep -q 'Created clients: hivexui-ardentstudio, hivexui-registry' "$temporary/terminal.log" || { cat "$temporary/terminal.log" >&2; fail 'The other clients were not created'; }

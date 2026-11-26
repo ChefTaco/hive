@@ -196,6 +196,7 @@ env_of() { sed -n "s/^$2='\(.*\)'$/\1/p" "$directory/config/$1.env"; }
 [[ $(env_of emberpath HIVE_ROUTER_SECURITY_EXPORT_TOKEN_HASH) == '$argon2id$v=19$m=65536$fakesalt$fakehash' ]] || fail 'A dollar sign must survive literally'
 [[ $(env_of emberpath HIVE_ROUTER_SECURITY_EXPORTER_CLIENT_ID) == legacy-exporter-name ]] || fail 'The kept client name must carry over'
 ! grep -q OS_AUTH_COMMAND "$directory/config/emberpath.env" || fail 'The host authentication helper must not carry over'
+grep -qx "EMBERPATH_PASSWORD_RELAY='false'" "$directory/config/emberpath.env" || fail 'The migrated Emberpath keeps its password relay'
 [[ $(env_of emberpath EMBERPATH_OATHWEAVE_IDENTITIES_JSON) == "[{\"issuer\":\"https://$fqdn/api/oathweave\",\"subject\":\"subject-admin\",\"localId\":\"local-admin\"}]" ]] || fail 'Reviewed link'
 [[ $(env_of hivemem HIVEMEM_JWT_SECRET) == effective-fake-secret ]] || fail 'The last assignment wins, as in systemd'
 [[ $(env_of hivemem HIVEMEM_ADMIN_OS_LOGIN_ENABLED) == false ]] || fail 'Containers have no PAM'

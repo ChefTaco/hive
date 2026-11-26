@@ -57,7 +57,7 @@ hive_runtime_files() {
     scripts/suite/migrate-native.sh scripts/suite/migrate-native-host.sh scripts/suite/migrate-native-data.mjs scripts/suite/set-admin-password.sh \
     scripts/suite/cindertrace.sh scripts/suite/cindertrace-host.sh scripts/suite/ownership-host.sh \
     scripts/suite/magnus-agent.sh scripts/suite/magnus-agent-host.sh scripts/suite/ardent-setup.sh scripts/suite/ardent-setup.mjs scripts/suite/ardent-enrollment.mjs scripts/suite/node-enrollment.mjs scripts/suite/terminal-authority.mjs \
-    scripts/suite/console-clients.sh scripts/suite/console-clients-host.sh \
+    scripts/suite/console-clients.sh scripts/suite/console-clients-host.sh scripts/suite/browser-signin-host.sh \
     scripts/suite/admin-access.sh scripts/suite/admin-access-host.sh scripts/suite/admin-access-files-host.sh scripts/suite/admin-access-data.mjs scripts/suite/admin-access-identity.mjs scripts/suite/admin-access-native.mjs \
     scripts/suite/post-upgrade.sh scripts/suite/setup-checklist.sh \
     scripts/suite/retention.sh scripts/suite/retention-host.sh scripts/suite/retention-schedule.sh scripts/suite/rehearsal-copy-host.sh \
@@ -219,11 +219,13 @@ generated on the Cindertrace host into an owner-only file and never printed; Cin
 while a collector exists. --run makes ID the collector the installation runs (component
 cindertrace-collector, started by add cindertrace-collector) with the source settings in its
 owner-only ID.sources.env beside the credential. See deployment/FULL.md.
-console-clients add [--yes] creates the HiveXUI browser clients of Magnus (the component or an external
-Magnus), Cindertrace, Embermend, Ardent Project Studio and the Hive Registry inventory in an existing
-Oathweave store, and adds their permissions to the SUITE_ADMIN role. Their policies must already be in
-IAM_BROWSER_CLIENT_POLICIES; the registry client is skipped, and named, without one. It reads Oathweave
-first and asks for confirmation only when something is missing. See deployment/FULL.md.
+console-clients add [--yes] gives an existing installation the console's browser sign-in, as fresh
+setup configures it: Oathweave's browser issuer, discovery URLs and a reviewed policy for every HiveXUI
+browser client in the environment file its Compose service reads, EMBERPATH_PASSWORD_RELAY=false for
+Emberpath (recreating either when it changed), then the missing public clients in Oathweave's store,
+with their permissions in the SUITE_ADMIN role. Only missing settings are added; keys you set are kept.
+It reads first and asks for confirmation only when something is missing. console-clients check only
+reads, and fails while something is missing. See deployment/FULL.md, "Browser sign-in settings".
 admin-access setup [USERNAME] guides access for an existing active Oathweave administrator.
 It uses sudo, creates separate product identities, preserves existing grants and reconnects only
 changed services. admin-access list shows candidates; status USERNAME reads its retained receipt.
@@ -245,7 +247,8 @@ set-admin-password|tls-refresh|refresh-memory-token. plan reads only, prepare st
 act only when named. --hold-on-failure keeps a failed cutover running for inspection.
 See deployment/MIGRATE_NATIVE.md.
 post-upgrade [--yes] finishes an upgrade: it upgrades Magnus host agents that run an older version
-than the release, adds missing HiveXUI browser clients to Oathweave, and lists the remaining
+than the release, adds missing browser sign-in settings and HiveXUI browser clients
+(console-clients add), and lists the remaining
 steps, such as updating Ardent packages in HiveXUI. Each change is shown and confirmed first. It
 marks the setup checklist items it finishes as done.
 backups list shows each host's backups and restore rehearsals and what retention decides for them.
@@ -823,6 +826,7 @@ hive_host() {
     --argjson cindertrace "${HIVE_CINDERTRACE_INPUT:-null}" \
     --argjson magnusAgent "${HIVE_MAGNUS_AGENT_INPUT:-null}" \
     --argjson consoleClients "${HIVE_CONSOLE_CLIENTS_INPUT:-null}" \
+    --argjson browserSignin "${HIVE_BROWSER_SIGNIN_INPUT:-null}" \
     --argjson adminAccess "${HIVE_ADMIN_ACCESS_INPUT:-null}" \
     --argjson retention "${HIVE_RETENTION_INPUT:-null}" \
     --argjson addProduct "${HIVE_ADD_INPUT:-null}" \
