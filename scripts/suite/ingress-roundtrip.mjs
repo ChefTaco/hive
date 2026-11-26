@@ -236,6 +236,7 @@ gateway.listen(4310,'0.0.0.0');
           resolve({
             status: res.statusCode,
             cookies: res.headers['set-cookie'],
+            headers: res.headers,
             body: Buffer.concat(chunks).toString(),
             streamMilliseconds: Date.now() - first,
           }),
@@ -256,7 +257,21 @@ gateway.listen(4310,'0.0.0.0');
     assert.fail('Ingress did not become ready');
   }
   await waitReady(options);
-  assert.match((await request('/')).body, /HiveXUI/);
+  // The ingress answers before its upstream containers do; wait for the console itself.
+  let console_ = await request('/');
+  for (let attempt = 0; attempt < 100 && console_.status === 503; attempt++) { await delay(100); console_ = await request('/'); }
+  assert.match(console_.body, /HiveXUI/);
+  // Response security headers on the console origin, for the UI and the product APIs alike,
+  // and no request body on routes that never take one.
+  for (const path of ['/', '/api/hivemem/v1/health', '/api/unknown']) {
+    const response = path === '/' ? console_ : await request(path);
+    assert.equal(response.headers['strict-transport-security'], 'max-age=31536000', path + ' has no HSTS');
+    assert.equal(response.headers['x-content-type-options'], 'nosniff', path + ' has no nosniff');
+    // HiveXUI sends its own, stricter policy, which the ingress keeps.
+    assert.equal(response.headers['referrer-policy'], path === '/' ? 'no-referrer' : 'strict-origin-when-cross-origin', path + ' has the wrong referrer policy');
+  }
+  const oversized = 'x'.repeat(64 * 1024);
+  assert.equal((await request('/', { 'Content-Type': 'text/plain', 'Content-Length': String(oversized.length) }, 'POST', oversized)).status, 413, 'The static console accepted a large request body');
   const cookieNames = ['__Host-oathweave_sso', 'iam_refresh', 'hive_router_admin', 'hivemem_dash', 'hive_skills_session', 'cindertrace_session', 'MMSID', 'MMUSERID', 'MMCSRF'];
   const headers = {
     Authorization: 'Bearer obviously-fake-transport-fixture',

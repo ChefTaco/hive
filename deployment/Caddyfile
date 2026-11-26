@@ -195,6 +195,14 @@
 
 {$HIVE_CONSOLE_HOST} {
 	tls /config/console.crt /config/console.key
+	# Response security headers for everything the console origin serves. "?" sets a header only
+	# when the response has none, so a product's own value (HiveXUI's CSP, Oathweave's HSTS) wins.
+	# HSTS names this host only (no includeSubDomains): Oathweave already sends it for this host.
+	header {
+		?Strict-Transport-Security "max-age=31536000"
+		?X-Content-Type-Options "nosniff"
+		?Referrer-Policy "strict-origin-when-cross-origin"
+	}
 	handle /_hive/ready {
 		respond "ready" 200
 	}
@@ -664,6 +672,10 @@
 		respond "API unavailable" 404
 	}
 	handle {
+		# The static console never takes a request body.
+		request_body {
+			max_size 16KB
+		}
 		reverse_proxy http://hivexui:8080 {
 			import plain_backend
 			header_up -Cookie
@@ -672,7 +684,13 @@
 		}
 	}
 	handle_errors {
-		respond "Service unavailable" 503
+		@body_too_large expression {err.status_code} == 413
+		handle @body_too_large {
+			respond "Request body too large" 413
+		}
+		handle {
+			respond "Service unavailable" 503
+		}
 	}
 }
 
