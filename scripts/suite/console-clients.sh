@@ -4,7 +4,8 @@
 # existing store (an upgraded or migrated installation) gets them here: Magnus (the component or
 # an external Magnus), Cindertrace, Embermend and Ardent Project Studio. Each client's policy must already be in the
 # running Oathweave's IAM_BROWSER_CLIENT_POLICIES with exactly these permissions. The command
-# creates the missing public clients and adds their permissions to the SUITE_ADMIN role, in one
+# creates the missing public clients, marks the suite's existing ones first-party (no consent
+# prompt) when they are not, and adds their permissions to the SUITE_ADMIN role, in one
 # transaction inside the Oathweave container; any other identity record that would change
 # aborts it. No token or credential is needed, read or printed.
 
@@ -19,6 +20,22 @@ hive_console_clients_wanted() {
     # has no policy for this client, which the command then skips and names instead of failing.
     (if .components["hive-registry"] then [{id:"hivexui-registry",audience:"hive-registry",permissions:["registry:inventory"],optional:true}] else [] end) |
     map(.+{redirectUris:[$redirect],firstParty:true})' "$HIVE_CONFIG"
+}
+
+# The HiveXUI browser clients this suite creates for the products of this installation, fresh setup
+# and this command together. They are first-party: Oathweave asks no consent for them. An owned
+# client from before (a public client with this console callback) is marked first-party here.
+hive_console_clients_owned() {
+  jq -c '[(if .components.oathweave then "hivexui-oathweave" else empty end),
+    (if .components.emberpath then "hivexui-emberpath" else empty end),
+    (if .components.hivemem then "hivexui-hivemem" else empty end),
+    (if .components.hiveskills then "hivexui-hiveskills" else empty end),
+    (if .components["hive-registry"] then "hivexui-registry" else empty end),
+    (if .components.cindertrace then "hivexui-cindertrace" else empty end),
+    (if .components.chattermost then "hivexui-chattermost" else empty end),
+    (if .components.magnus or .external.magnus then "hivexui-magnus" else empty end),
+    (if .components.embermend then "hivexui-embermend" else empty end),
+    (if .components.ardentstudio then "hivexui-ardentstudio" else empty end)]' "$HIVE_CONFIG"
 }
 
 hive_console_clients() {
@@ -37,24 +54,30 @@ hive_console_clients() {
   printf 'Oathweave on %s: create any missing public browser client among %s, and add their permissions to the SUITE_ADMIN role.\n' "$host" "$(jq -r 'map(.id)|join(", ")' <<< "$clients")"
   # Read first, so that a store that already has everything needs no confirmation: an unattended
   # post-upgrade then records the checklist item as done instead of being cancelled.
-  result=$(HIVE_HOST_ACTION=console-clients HIVE_CONSOLE_CLIENTS_INPUT=$clients HIVE_CONSOLE_CLIENTS_CHECK=true hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/console-clients-host.sh")") ||
+  local owned
+  owned=$(hive_console_clients_owned)
+  result=$(HIVE_HOST_ACTION=console-clients HIVE_CONSOLE_CLIENTS_INPUT=$clients HIVE_CONSOLE_CLIENTS_OWNED=$owned HIVE_CONSOLE_CLIENTS_CHECK=true hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/console-clients-host.sh")") ||
     hive_die 'Oathweave could not be checked and was not changed; see the reason above'
   jq -e '.check==true and (.missingClients|type=="array") and (.missingPermissions|type=="array")' <<< "$result" >/dev/null || hive_die 'Oathweave did not report its browser clients'
-  if jq -e '(.missingClients|length)==0 and (.missingPermissions|length)==0' <<< "$result" >/dev/null; then
+  if jq -e '(.missingClients|length)==0 and (.missingPermissions|length)==0 and ((.notFirstParty // [])|length)==0' <<< "$result" >/dev/null; then
     printf 'Nothing to add: every client exists and SUITE_ADMIN has their permissions. Oathweave was not changed.\n'
     hive_console_clients_finish "$result"
     return 0
   fi
   printf 'To create: %s. To add to SUITE_ADMIN: %s.\n' \
     "$(jq -r '.missingClients|if length==0 then "none" else join(", ") end' <<< "$result")" "$(jq -r '.missingPermissions|if length==0 then "none" else join(", ") end' <<< "$result")"
+  if jq -e '((.notFirstParty // [])|length)>0' <<< "$result" >/dev/null; then
+    printf 'To mark first-party, so that Oathweave asks no consent for them: %s.\n' "$(jq -r '.notFirstParty|join(", ")' <<< "$result")"
+  fi
   if [[ "${HIVE_CONFIRMED:-false}" != true ]]; then
     [[ -t 0 ]] && hive_confirm 'Apply this identity change?' || hive_die 'Cancelled; nothing was changed. Unattended use needs --yes'
   fi
-  result=$(HIVE_HOST_ACTION=console-clients HIVE_CONSOLE_CLIENTS_INPUT=$clients hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/console-clients-host.sh")") ||
+  result=$(HIVE_HOST_ACTION=console-clients HIVE_CONSOLE_CLIENTS_INPUT=$clients HIVE_CONSOLE_CLIENTS_OWNED=$owned hive_host "$host" "$(cat "$HIVE_ROOT/scripts/suite/console-clients-host.sh")") ||
     hive_die 'Oathweave was not changed; see the reason above'
   jq -e '.existingRecordsUnchanged==true' <<< "$result" >/dev/null || hive_die 'Oathweave did not confirm the change'
-  printf 'Created clients: %s. Added to SUITE_ADMIN: %s. Sign out of the console and in again to use them.\n' \
-    "$(jq -r '.createdClients|if length==0 then "none" else join(", ") end' <<< "$result")" "$(jq -r '.addedPermissions|if length==0 then "none" else join(", ") end' <<< "$result")"
+  printf 'Created clients: %s. Added to SUITE_ADMIN: %s. Marked first-party: %s. Sign out of the console and in again to use them.\n' \
+    "$(jq -r '.createdClients|if length==0 then "none" else join(", ") end' <<< "$result")" "$(jq -r '.addedPermissions|if length==0 then "none" else join(", ") end' <<< "$result")" \
+    "$(jq -r '(.firstPartyClients // [])|if length==0 then "none" else join(", ") end' <<< "$result")"
   hive_console_clients_finish "$result"
 }
 

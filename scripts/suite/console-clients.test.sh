@@ -123,6 +123,23 @@ cp "$HIVE_TEST_STORE" "$temporary/conflict.json"
 refused 'hivexui-magnus exists and is not a public client' run
 refused 'hivexui-magnus exists and is not a public client' run --yes
 cmp -s "$HIVE_TEST_STORE" "$temporary/conflict.json" || fail 'A refused run changed the store'
+# Suite clients from before are marked first-party, so Oathweave asks no consent: only owned
+# public clients with this console callback, and nothing else about them changes.
+store
+jq '.clients=[{id:"hivexui-oathweave",name:"hivexui-oathweave",clientType:"public",firstParty:false,redirectUris:"[\"https://console.example.com/auth/callback\"]",description:"kept"},
+  {id:"hivexui-hivemem",name:"hivexui-hivemem",clientType:"public",firstParty:false,redirectUris:"[\"https://elsewhere.example.com/auth/callback\"]"},
+  {id:"hivexui-partner",name:"hivexui-partner",clientType:"public",firstParty:false,redirectUris:"[\"https://console.example.com/auth/callback\"]"},
+  {id:"partner-app",name:"partner-app",clientType:"public",firstParty:false,redirectUris:"[\"https://console.example.com/auth/callback\"]"}]' "$HIVE_TEST_STORE" > "$temporary/next.json"; mv "$temporary/next.json" "$HIVE_TEST_STORE"
+refused 'Unattended use needs --yes' run
+grep -q 'To mark first-party, so that Oathweave asks no consent for them: hivexui-oathweave.' "$temporary/result" || { cat "$temporary/result" >&2; fail 'The client to mark first-party was not named'; }
+jq -e '.clients[0].firstParty==false' "$HIVE_TEST_STORE" >/dev/null || fail 'An unconfirmed run marked a client'
+run --yes > "$temporary/first-party.log" 2>&1 || { cat "$temporary/first-party.log" >&2; fail 'Marking first-party failed'; }
+grep -q 'Marked first-party: hivexui-oathweave' "$temporary/first-party.log" || { cat "$temporary/first-party.log" >&2; fail 'The marked client was not named'; }
+jq -e '(.clients[]|select(.id=="hivexui-oathweave")|.firstParty==true and .description=="kept") and (.clients[]|select(.id=="hivexui-hivemem")|.firstParty==false) and (.clients[]|select(.id=="hivexui-partner" or .id=="partner-app")|.firstParty==false)' "$HIVE_TEST_STORE" >/dev/null ||
+  fail 'A client the suite does not own, or one with another callback, was marked, or the owned client changed otherwise'
+cp "$HIVE_TEST_STORE" "$temporary/first-party.json"
+run > "$temporary/first-party-again.log" 2>&1 || { cat "$temporary/first-party-again.log" >&2; fail 'A repeat after marking needed confirmation'; }
+grep -q 'Nothing to add' "$temporary/first-party-again.log" && cmp -s <(jq -S . "$HIVE_TEST_STORE") <(jq -S . "$temporary/first-party.json") || fail 'The repeat was not a no-op'
 # Unknown subcommands are refused before any host is contacted.
 : > "$HIVE_TEST_DOCKER_LOG"
 refused 'Use: console-clients add' "$ROOT/hive.sh" console-clients remove --config "$temporary/config.json" --non-interactive --yes

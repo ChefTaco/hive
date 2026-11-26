@@ -15,6 +15,8 @@ jq -e 'type=="array" and length>0 and all(.[]; (.id|test("^hivexui-[a-z][a-z0-9-
 # shellcheck disable=SC2016
 code='import {prisma} from "/app/apps/iam-core/dist/db/client.js";import assert from "node:assert/strict";
 const requested=JSON.parse(process.argv[1]);
+// The browser clients this suite owns: they are first-party, so Oathweave asks no consent for them.
+const firstPartyIds=JSON.parse(process.argv[3]||"[]");const callback=process.argv[4]||"";
 const policies=JSON.parse(process.env.IAM_BROWSER_CLIENT_POLICIES||"{}");
 // An optional client without a policy in this Oathweave is skipped and named, never created.
 const skippedClients=requested.filter(c=>c.optional&&!policies[c.id]).map(c=>c.id);
@@ -31,28 +33,39 @@ const inspect=async(db)=>{
  for(const c of clients){const existing=await db.client.findUnique({where:{id:c.id}});
   if(existing){assert.equal(existing.clientType,"public",c.id+" exists and is not a public client");assert(JSON.parse(existing.redirectUris).includes(c.redirectUris[0]),c.id+" exists with another console callback");continue;}
   missingClients.push(c);}
+ // An owned client from before every suite client was first-party: the same public client with
+ // this console callback, only without the flag.
+ const notFirstParty=[];
+ for(const id of firstPartyIds){const existing=await db.client.findUnique({where:{id}});
+  if(existing&&existing.clientType==="public"&&existing.firstParty!==true&&callback&&JSON.parse(existing.redirectUris).includes(callback))notFirstParty.push(id);}
  const current=JSON.parse(role.permissions);
- return {role,current,missingClients,missingPermissions:[...new Set(clients.flatMap(c=>c.permissions))].filter(p=>!current.includes(p))};};
+ return {role,current,missingClients,notFirstParty,missingPermissions:[...new Set(clients.flatMap(c=>c.permissions))].filter(p=>!current.includes(p))};};
 // The check reads only: nothing is written and no transaction is opened.
-if(process.argv[2]==="check"){const {missingClients,missingPermissions}=await inspect(prisma);
- console.log(JSON.stringify({check:true,missingClients:missingClients.map(c=>c.id),missingPermissions,skippedClients}));await prisma.$disconnect();process.exit(0);}
+if(process.argv[2]==="check"){const {missingClients,missingPermissions,notFirstParty}=await inspect(prisma);
+ console.log(JSON.stringify({check:true,missingClients:missingClients.map(c=>c.id),missingPermissions,notFirstParty,skippedClients}));await prisma.$disconnect();process.exit(0);}
 const snapshot=async(tx)=>JSON.stringify([
  (await tx.user.findMany()).sort((a,b)=>a.id<b.id?-1:1),
  (await tx.role.findMany()).filter(r=>r.name!=="SUITE_ADMIN").sort((a,b)=>a.id<b.id?-1:1),
- (await tx.client.findMany()).filter(c=>!ids.includes(c.id)).sort((a,b)=>a.id<b.id?-1:1),
+ // An owned client may change only its firstParty flag.
+ (await tx.client.findMany()).filter(c=>!ids.includes(c.id)).map(c=>firstPartyIds.includes(c.id)?{...c,firstParty:null}:c).sort((a,b)=>a.id<b.id?-1:1),
  (await tx.userRoleAssignment.findMany()).sort((a,b)=>(a.userId+" "+a.roleId)<(b.userId+" "+b.roleId)?-1:1)]);
-const createdClients=[];let addedPermissions=[];
+const createdClients=[];let addedPermissions=[];let firstPartyClients=[];
 // Compared inside the transaction: anything else that would change rolls everything back.
 await prisma.$transaction(async(tx)=>{
  const before=await snapshot(tx);
- const {role,current,missingClients,missingPermissions}=await inspect(tx);
+ const {role,current,missingClients,missingPermissions,notFirstParty}=await inspect(tx);
+ for(const id of notFirstParty){await tx.client.update({where:{id},data:{firstParty:true}});}
+ firstPartyClients=notFirstParty;
  for(const c of missingClients){
   await tx.client.create({data:{id:c.id,name:c.id,description:"HiveXUI "+c.audience+" browser client",clientType:"public",active:true,firstParty:c.firstParty,redirectUris:JSON.stringify(c.redirectUris),grantTypes:JSON.stringify(["authorization_code"]),allowedIps:"[]"}});createdClients.push(c.id);}
  addedPermissions=missingPermissions;
  if(addedPermissions.length)await tx.role.update({where:{id:role.id},data:{permissions:JSON.stringify([...current,...addedPermissions])}});
  assert.equal(await snapshot(tx),before,"Existing identity records would change");
 });
-console.log(JSON.stringify({createdClients,addedPermissions,skippedClients,existingRecordsUnchanged:true}));await prisma.$disconnect();process.exit(0);'
+console.log(JSON.stringify({createdClients,addedPermissions,firstPartyClients,skippedClients,existingRecordsUnchanged:true}));await prisma.$disconnect();process.exit(0);'
 mode=apply
 if jq -e '.consoleClientsCheck==true' <<< "$input" >/dev/null; then mode=check; fi
-docker compose -f "$directory/compose.json" exec -T oathweave node --input-type=module -e "$code" "$clients" "$mode" | grep '^{' | tail -1
+owned=$(jq -c '.consoleClientsFirstParty // []' <<< "$input")
+jq -e 'type=="array" and all(.[]; test("^hivexui-[a-z][a-z0-9-]{0,47}$"))' <<< "$owned" >/dev/null || die 'Invalid owned client list'
+callback="$(jq -r .origin <<< "$input")/auth/callback"
+docker compose -f "$directory/compose.json" exec -T oathweave node --input-type=module -e "$code" "$clients" "$mode" "$owned" "$callback" | grep '^{' | tail -1
