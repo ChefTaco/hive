@@ -64,6 +64,9 @@ jobs:
         run: npm ci
         working-directory: services/hive-registry
 
+      - name: Privacy scanner output test
+        run: bash scripts/privacy-output.test.sh
+
       - name: Secret scan
         run: npm run scan:secrets
 

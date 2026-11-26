@@ -97,6 +97,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Security
 
+- The repository privacy checks (`scripts/check-private-data.sh` and `scripts/scan-secrets.sh`) now report a finding as `path:line: rule` and never print the matching text or the line around it, so a failing check cannot copy a private term or a credential into a public CI log. A path that itself contains a private term is shown as `(path redacted)`. Exit codes are unchanged, and `scripts/privacy-output.test.sh` (run in CI) plants fake values and checks they stay out of the output. Repository tooling only; nothing to do when upgrading.
 - The ingress sets `Strict-Transport-Security`, `X-Content-Type-Options: nosniff` and
   `Referrer-Policy` on every console-origin response that has none of its own, so product APIs no
   longer depend on each product for them, and limits request bodies to the static console to 16 KB
