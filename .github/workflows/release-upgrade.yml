@@ -1,0 +1,118 @@
+name: Release upgrade round trip
+
+# Installs a published signed release with its own tagged controller, upgrades it to a newer one
+# with that release's controller (--allow-migrations), runs post-upgrade and doctor, and rolls
+# back (scripts/suite/release-upgrade-roundtrip.sh). It pulls the published images. The Suite
+# release workflow calls it with the release it just published and the one before it (a release
+# published with GITHUB_TOKEN starts no other workflow by itself); it also runs weekly and on pull
+# requests that change the round trip for the two newest releases, and by hand for any pair.
+# scripts/release/upgrade-pair.sh chooses the pair.
+on:
+  workflow_call:
+    inputs:
+      to:
+        description: Release to upgrade to (X.Y.Z or vX.Y.Z)
+        type: string
+        required: true
+      from:
+        description: Release to install (default the published release before it)
+        type: string
+        required: false
+        default: ''
+  schedule:
+    - cron: '20 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      from:
+        description: Release to install (default the published release before "to")
+        required: false
+      to:
+        description: Release to upgrade to (default the newest)
+        required: false
+  pull_request:
+    paths:
+      - scripts/suite/release-upgrade-roundtrip.sh
+      - scripts/release/upgrade-pair.sh
+      - .github/workflows/release-upgrade.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-upgrade-${{ github.ref }}-${{ inputs.to || 'newest' }}
+  cancel-in-progress: true
+
+jobs:
+  pair:
+    runs-on: ubuntu-24.04
+    outputs:
+      from: ${{ steps.pair.outputs.from }}
+      to: ${{ steps.pair.outputs.to }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: pair
+        env:
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+        run: |
+          set -euo pipefail
+          arguments=()
+          [[ -z "${TO:-}" ]] || arguments+=(--to "$TO")
+          [[ -z "${FROM:-}" ]] || arguments+=(--from "$FROM")
+          read -r from to < <(bash scripts/release/upgrade-pair.sh "${arguments[@]}")
+          echo "from=$from" >> "$GITHUB_OUTPUT"; echo "to=$to" >> "$GITHUB_OUTPUT"
+          echo "Round trip: $from -> $to" >> "$GITHUB_STEP_SUMMARY"
+
+  round-trip:
+    needs: pair
+    name: ${{ matrix.profile }} ${{ needs.pair.outputs.from }} -> ${{ needs.pair.outputs.to }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [core, full]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Configure bounded authenticated package downloads
+        run: sudo env GITHUB_ACTIONS=true bash scripts/ci-apt-setup.sh
+      - name: Install controller tools
+        timeout-minutes: 20
+        run: sudo env GITHUB_ACTIONS=true bash scripts/ci-apt-install.sh jq openssl
+      # The release's application containers run as 1000:1000, and fresh setup runs as that service
+      # owner: an operator account with that ID, Docker access and, for the Magnus host's
+      # lifecycle steps, sudo, as on a prepared host.
+      - name: Operator account
+        run: |
+          set -euo pipefail
+          operator=$(getent passwd 1000 | cut -d: -f1 || true)
+          if [[ -z "$operator" ]]; then sudo groupadd -g 1000 hive-operator 2>/dev/null || true; sudo useradd -m -u 1000 -g 1000 -s /bin/bash hive-operator; operator=hive-operator; fi
+          sudo usermod -aG docker "$operator"
+          # sudo -v checks every rule for the account; !authenticate covers rules of its groups too.
+          printf 'Defaults:%s !authenticate\n%s ALL=(ALL) NOPASSWD:ALL\n' "$operator" "$operator" | sudo tee /etc/sudoers.d/hive-round-trip >/dev/null
+          sudo chmod 0440 /etc/sudoers.d/hive-round-trip
+          sudo -u "$operator" sudo -n -v
+          echo "Operator account: $operator ($(id "$operator"))"
+          sudo install -d -o 1000 -g 1000 -m 0750 /srv/hive-round-trip
+          sudo cp -a "$GITHUB_WORKSPACE" /srv/hive-round-trip/source
+          sudo chown -R 1000:1000 /srv/hive-round-trip/source
+          echo "OPERATOR=$operator" >> "$GITHUB_ENV"
+      - name: Round trip
+        env:
+          FROM: ${{ needs.pair.outputs.from }}
+          TO: ${{ needs.pair.outputs.to }}
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          sudo -u "$OPERATOR" -H env PATH="$PATH" bash -c 'cd /srv/hive-round-trip/source && bash scripts/suite/release-upgrade-roundtrip.sh --profile "$1" --from "$2" --to "$3" --output /srv/hive-round-trip/run' _ "$PROFILE" "$FROM" "$TO"
+      - name: Steps
+        if: always()
+        run: |
+          if sudo test -f /srv/hive-round-trip/run/steps.log; then { echo '```'; sudo cat /srv/hive-round-trip/run/steps.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"; fi
+      - name: Command logs
+        if: failure()
+        run: |
+          for log in $(sudo find /srv/hive-round-trip/run -maxdepth 1 -name '*.log'); do echo "::group::${log##*/}"; sudo tail -n 200 "$log"; echo '::endgroup::'; done
