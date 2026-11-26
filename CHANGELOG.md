@@ -43,6 +43,10 @@ All notable changes to this project are documented in this file. The format is b
   instead of about 16.
 - The recovery CI job uses its small corpus for every prose-only pull request: Markdown at the
   root, under `docs/` and the deployment guides, not only `README.md` and `CONTRIBUTING.md`.
+- The request `hive_host` sends to every host script is built by `scripts/suite/host-request.jq`,
+  one field per line, instead of a 2 KB single-line jq program, and its arguments are listed one
+  per line, so the security-relevant payload can be reviewed. The payload is byte-for-byte the
+  same. `host-request.jq` is a new controller runtime file.
 
 ### Fixed
 

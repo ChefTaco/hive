@@ -245,6 +245,11 @@ done
 external_config '{"magnus":{"url":"https://magnus.example.com:4000"}}'
 (HIVE_CONFIG=$temporary/external.json; hive_validate; hive_manifest) > "$temporary/result" 2>&1 && fail 'An external Magnus was accepted by a release without Magnus'
 grep -q 'needs a release that offers Magnus' "$temporary/result" || fail 'A release without Magnus lacks a clear refusal'
+# The host request builder stays reviewable: its program lives in host-request.jq, a runtime file,
+# one field per line, and hive_host passes one argument per line.
+awk '/^hive_host\(\) \{/,/^}/' "$ROOT/scripts/suite/controller.sh" | awk 'length($0) > 240 {exit 1}' || fail 'hive_host has an unreadable line; keep its request program in scripts/suite/host-request.jq'
+grep -q 'scripts/suite/host-request.jq' <(sed -n '/^hive_runtime_files() {$/,/^}$/p' "$ROOT/scripts/suite/controller.sh") || fail 'host-request.jq is not a controller runtime file'
+awk 'length($0) > 200 {exit 1}' "$ROOT/scripts/suite/host-request.jq" || fail 'host-request.jq has an unreadable line'
 printf 'Passed: planning, unattended guards, input injection, signature tampering, pinned rendering, privileged-mount rejection and digest-bound relaxed authentication limits and checkout release lookup.\n'
 
 # Commands other than install, init and plan find the installation file themselves.
