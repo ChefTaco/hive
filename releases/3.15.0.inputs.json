@@ -4,8 +4,8 @@
   "user": "1000:1000",
   "products": {
     "hive-registry": {
-      "image": "ghcr.io/cheftaco/hive-registry:2.0.13",
-      "version": "1.5.0",
+      "image": "ghcr.io/cheftaco/hive-registry:2.0.14",
+      "version": "1.6.0",
       "platforms": [
         "linux/amd64",
         "linux/arm64"

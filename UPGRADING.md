@@ -184,9 +184,10 @@ rollback keeps the renamed data, which older HiveMem versions read, and the re-l
 
 3.15.0 pins Oathweave 2.6.0, Emberpath 2.9.0, HiveMem 1.12.0, HiveSkills 1.11.1, HiveXUI 0.13.0,
 Cindertrace 0.10.0, ChatterMost 0.10.0, Emberfold 0.5.0, Ardent Project Studio 0.7.0,
-Embermend 0.6.1 and Magnus 3.4.0 (server, fleet gateway and host agent, which stages Ardent 3.5.1),
-and selects the datastore profile `runtime-2026-11-pg1712-zstd-openssl`. The Hive Registry, the
-ingress image and the storage recovery profile are those of 3.14.3. The controller changes; the
+Embermend 0.6.1, Magnus 3.4.0 (server, fleet gateway and host agent, which stages Ardent 3.5.1),
+the Hive Registry 1.6.0 (image 2.0.14, which advertises Cindertrace's `audit.v1` export), and
+selects the datastore profile `runtime-2026-11-pg1712-zstd-openssl`. The ingress image and the
+storage recovery profile are those of 3.14.3. The controller changes; the
 generic sections above marked "from 3.15.0" describe its new features. Read all of this before you
 run `plan`.
 
