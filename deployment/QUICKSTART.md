@@ -347,6 +347,17 @@ Upgrading to 3.14.0 needs `--allow-migrations` for Emberpath 2.6.0's data format
 `emberpath-managed-format-3`. Ardent Project Studio 0.5.1 also runs one-way migrations on its first
 start, so keep the pre-change backup. See
 [Suite 3.14.0](../UPGRADING.md#suite-3140-ardent-execution-recovery-lineage-and-artifact-transfer-v2).
+Upgrading from 3.14.0 to 3.14.1 needs no flag. It pins Magnus 3.3.3, HiveSkills 1.9.1 and
+Cindertrace 0.8.2 and PostgreSQL images with Zstandard 1.6.0, and the controller changes; upgrade
+the Magnus host agent first. See
+[Suite 3.14.1](../UPGRADING.md#suite-3141-agent-model-route-magnus-333-and-zstandard-160).
+Upgrading to 3.14.2 from 3.14.0 or 3.14.1 needs `--allow-migrations` on an installation with a
+suite-managed Magnus (the full profile), for one fast, additive Magnus migration; other
+installations need no flag. See
+[Suite 3.14.2](../UPGRADING.md#suite-3142-magnus-335-agent-definitions-and-ardent-321).
+Upgrading from 3.14.2 to 3.14.3 needs no flag; from 3.14.0 or 3.14.1 it needs the same
+`--allow-migrations` as 3.14.2. It pins Magnus 3.3.6. See
+[Suite 3.14.3](../UPGRADING.md#suite-3143-magnus-336-xml-dependency-fixes).
 
 Use an exact version instead of `latest` to review and apply a specific release. Existing
 PostgreSQL stores need explicit migration approval when moving from 2.x to 3.6.0, and so do

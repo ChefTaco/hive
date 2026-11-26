@@ -13,7 +13,10 @@ below, and so does moving an installation with Emberpath or HiveSkills from a re
 3.4.0 to 3.4.0 or later, an installation with Embermend from a release before 3.6.0 to 3.6.0 or
 later, an installation that runs Magnus from a release before 3.8.0 to 3.8.0 or later, and every
 installation moving from a release before 3.14.0 to 3.14.0 or later (Emberpath 2.6.0's data
-format; see [Suite 3.14.0](#suite-3140-ardent-execution-recovery-lineage-and-artifact-transfer-v2)). An
+format; see [Suite 3.14.0](#suite-3140-ardent-execution-recovery-lineage-and-artifact-transfer-v2)),
+and an installation with a suite-managed Magnus (the full profile) moving from a release before
+3.14.2 to 3.14.2 or later (one Magnus migration; see
+[Suite 3.14.2](#suite-3142-magnus-335-agent-definitions-and-ardent-321)). An
 installation that runs Magnus moves to 3.9.0 or later (Magnus 3) from 3.8.1 only, after its nodes
 have their keys; see [Suite 3.9.0](#suite-390-magnus-301-node-keys-only). A failed or uncertain step
 holds its transaction for recovery, as described in
@@ -34,7 +37,7 @@ The registry keeps it without a migration, so the upgrade needs no `--allow-migr
 
 ## Service capabilities and agent dependencies
 
-From the release that pins the Hive Registry 1.5.0, an install or upgrade records each product's
+From suite 3.14.0, which pins the Hive Registry 1.5.0, an install or upgrade records each product's
 [service capabilities](docs/hive-registry-api.md#service-capabilities) with its connection. They
 are kept in the stored connection, so the upgrade needs no `--allow-migrations` for them, and a
 connection recorded before reads back without the field until the next install, upgrade or adopt
@@ -48,8 +51,10 @@ installation and channel enablement keep their existing steps.
 
 ## Suite audit collection
 
-From the release that pins a Cindertrace whose collector reads the suite audit export, an upgrade
-of an installation with Cindertrace configures [suite audit collection](deployment/FULL.md#suite-audit-collection)
+No published suite release enables this yet: `hive_audit_collection_releases`
+(`scripts/suite/audit-collection.sh`) names no Cindertrace or product version, so through 3.14.3
+`install` and `upgrade` configure nothing for it. From the release that first names them (its
+section below will say so), an upgrade of an installation with Cindertrace configures [suite audit collection](deployment/FULL.md#suite-audit-collection)
 for each included product whose pinned version serves the export: an Oathweave machine client
 per product with a generated secret, the product setting that accepts it, and Cindertrace's
 collector settings with the `suite-audit` collector credential. It adds settings only, keeps every
@@ -64,7 +69,7 @@ products.
 
 ## Emberpath's memory principal: hive-router becomes emberpath
 
-From the release that pins HiveMem 1.9.0, HiveMem data owned by `hive-router`, the HiveMem
+From suite 3.12.0, which pins HiveMem 1.9.0, HiveMem data owned by `hive-router`, the HiveMem
 principal of Emberpath on an installation migrated from the native Hive Router, moves to
 `emberpath`, the principal fresh installations already use. HiveMem keys ownership on that
 principal, so the data must move with it. The upgrade does it as HiveMem's signed initialization
@@ -112,7 +117,9 @@ rollback keeps the renamed data, which older HiveMem versions read, and the re-l
 ## Suite 3.14.3: Magnus 3.3.6 XML dependency fixes
 
 3.14.3 pins Magnus 3.3.6 for the server, fleet gateway and host agent. An upgrade from 3.14.2
-requires no new migrations or settings. After upgrading the suite, run `./hive.sh post-upgrade --yes`
+requires no new migrations or settings. An upgrade from 3.14.1 or earlier includes the 3.14.2 Magnus
+migration, so on an installation with a suite-managed Magnus (the full profile) it needs
+`--allow-migrations`. After upgrading the suite, run `./hive.sh post-upgrade --yes`
 with the same installation config to update the Hive-managed host agents. Update independently
 installed fleet agents from Magnus.
 

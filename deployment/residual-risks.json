@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "description": "Known vulnerabilities that remain in a pinned image because no fixed upstream release exists, and that image scanners cannot see. Each entry is bound to the exact upstream pin it was reviewed for: scripts/release/check-residual-risks.sh fails when that pin changes, so the next upstream release is reviewed deliberately. See docs/RELEASING.md#residual-risks.",
+  "risks": [
+    {
+      "id": "qdrant-bundled-zstd-1.5",
+      "advisory": "CVE-2026-124851",
+      "image": "hive-qdrant",
+      "buildArg": "QDRANT_IMAGE",
+      "reviewedPin": "qdrant/qdrant:v1.18.3@sha256:0bd98fa7977f1e75694779359ca4e212822e5a71334e28421182f72f209d5286",
+      "reviewed": "2026-11-26",
+      "summary": "Qdrant 1.18.3 links Zstandard 1.5.x statically into /qdrant/qdrant, where Trivy does not report it. zstd 1.5.1 to 1.5.7 are affected; 1.6.0 fixes it. No Qdrant release bundles 1.6.0 yet. Exploitability in Qdrant is unverified.",
+      "resolveWhen": "A Qdrant release bundles zstd 1.6.0 or later: pin it in a new hive-qdrant version and a datastore profile, then remove this entry."
+    }
+  ]
+}

@@ -25,8 +25,9 @@ advisory will credit you unless you ask not to be named.
 
 ## Hardening notes for operators
 
-- Install only signed releases, and check the publisher key fingerprint against the release notes
-  before using separately downloaded manifests.
+- Install only signed releases, and check the publisher key fingerprint against at least two
+  independent sources before using separately downloaded manifests: the release notes, the
+  [README](README.md#security) as published on GitHub, and the project site.
 - Keep the installation file, the generated product secrets and the TLS private key readable only
   by the installing account, and keep backup archives private.
 - Expose only the ingress; the suite's datastores stay on private Compose networks.
