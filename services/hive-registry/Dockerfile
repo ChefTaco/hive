@@ -2,7 +2,7 @@ ARG NODE_RUNTIME_IMAGE=ghcr.io/cheftaco/hive-node-runtime:26.13.1-1@sha256:7671a
 # Hive Registry: the per-installation install catalog and lookup API.
 # Build with services/hive-registry as the context. Runs under any non-root UID the
 # release manifest selects, with a read-only root filesystem; only /data is written.
-FROM node:24.22.3-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS builder
+FROM node:26.13.1-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1 AS builder
 WORKDIR /build
 COPY package.json package-lock.json tsconfig.json ./
 COPY src ./src

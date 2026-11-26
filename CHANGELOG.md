@@ -14,6 +14,14 @@ All notable changes to this project are documented in this file. The format is b
   itself writes failed the published schema. `interactive.test.py` now validates every
   configuration guided setup writes against the schema, and `installation-schema.test.mjs`
   checks hand-written shapes against both the schema and `hive_validate`.
+- Hive Registry accepts the `Authorization` scheme in any letter case (`bearer ...`), as
+  RFC 9110 requires; a standards-compliant client no longer gets `invalid_credential`.
+
+### Changed
+
+- Hive Registry builds on Node.js 26.13.1, the major of its `hive-node-runtime` 26.13.1 runtime
+  image, and accepts `@hivemagnus/hive-common` 0.6.x (`^0.6.1`; the `^0.5.1` range excluded every
+  0.6 release). Both reach installations with the next Hive Registry image version.
 
 ### Security
 

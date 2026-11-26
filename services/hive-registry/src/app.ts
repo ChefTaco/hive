@@ -57,7 +57,8 @@ export function createApp(options: AppOptions): RequestListener {
   function access(request: IncomingMessage): Access {
     const header = request.headers.authorization;
     if (!header) return 'public';
-    const token = /^Bearer ([^ ,]+)$/.exec(header)?.[1];
+    // The scheme is case-insensitive (RFC 9110 section 11.1); the credential is a single token.
+    const token = /^bearer +([^ ,]+)$/i.exec(header)?.[1];
     if (!token) return 'invalid';
     // Compare both so a request takes the same time whichever credential it holds.
     const read = matches(token, options.readToken);
