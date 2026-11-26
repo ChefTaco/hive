@@ -6,6 +6,15 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Fixed
+
+- `examples/installation.schema.json` matches what the controller accepts again. It lacked
+  `external`, `nativeMigration`, `console.nativeListeners`, `console.edgeSubnet`,
+  `hosts.*.sudoPasswordFile` and `bootstrap.magnusGateway`, so configurations that guided setup
+  itself writes failed the published schema. `interactive.test.py` now validates every
+  configuration guided setup writes against the schema, and `installation-schema.test.mjs`
+  checks hand-written shapes against both the schema and `hive_validate`.
+
 ### Security
 
 - `hive-redis` 8.2.10-3 installs OpenSSL 3.5.9-r2 (`libssl3`, `libcrypto3`), which fixes

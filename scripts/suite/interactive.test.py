@@ -394,3 +394,8 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     assert 'retention' not in remote, 'Declined daily pruning was configured'
     assert remote['hosts']['control'] == {'target': 'deploy@hive.example.com', 'directory': '/opt/remote-proof', 'architecture': architecture, 'sshConfig': '/opt/credentials/ssh-config'}
     print('Passed: interactive directory default and writability guidance, SSH configuration for an SSH target, and continuing a saved setup.')
+    # Every configuration guided setup wrote must satisfy the published schema.
+    written = sorted(str(path) for path in (base / 'inventory').glob('*.json'))
+    assert len(written) >= 8, written
+    subprocess.run(['node', str(root / 'scripts/suite/installation-schema.mjs'), *written], check=True)
+    print(f'Passed: {len(written)} guided-setup configurations match examples/installation.schema.json.')
