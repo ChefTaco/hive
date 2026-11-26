@@ -406,6 +406,35 @@ file.
   the logs and from every string of the JSON reports, including preflight errors and warnings. Redaction is pattern-based, and host names, paths, the console origin and log text
   are kept: read the files before you share the bundle. `errors.txt` lists every step that
   failed.
+## Uninstalling
+
+From the release after 3.14.3:
+
+```bash
+./hive.sh uninstall --config ~/.config/hive/ID/installation.json           # shows the plan, asks
+./hive.sh uninstall --config ~/.config/hive/ID/installation.json --purge   # also deletes the data
+```
+
+`uninstall` stops and removes the containers on every host (`docker compose down`), then the
+Magnus host agent the installer set up (`magnus-agent remove`), the daily prune line in your
+crontab, this machine's console certificate renewal service and timer when they renew this
+installation, and the `hive` command's record. Each host refuses while a transaction is open or
+another controller runs. Every installation directory stays with its data, configuration and
+backups, as does the installation file, and records `uninstalled.json`; `./hive.sh install` with
+the same file brings the installation back.
+
+`--purge` also deletes every host's installation directory, with all data and backups, and the
+installation file's directory on this machine. It asks you to type the installation name, and
+`--yes` never answers that question. Export any backup you want to keep first
+(`./hive.sh backups export ARCHIVE --to DESTINATION`). Deleting files the products own needs
+root: on this machine through sudo, on another host through its `sudoPasswordFile` or
+passwordless sudo.
+
+`./hive.sh remove PRODUCT` takes a product out of an installation: an online backup first, then
+its containers are stopped and removed, its components leave the installation file (the previous
+file is kept beside it), and the change is applied as an upgrade to the installed release. Its data
+stays. It supports `cindertrace-collector` so far; removing a product with console entries, an
+Oathweave client and ingress routes (such as Cindertrace) is not supported yet.
 
 ## Container logs
 

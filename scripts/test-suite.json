@@ -23,6 +23,7 @@
     {"run": ["bash", "scripts/suite/audit-collection.test.sh"]},
     {"run": ["bash", "scripts/suite/cindertrace.test.sh"]},
     {"run": ["bash", "scripts/suite/add-product.test.sh"]},
+    {"run": ["bash", "scripts/suite/uninstall.test.sh"]},
     {"run": ["bash", "scripts/suite/transaction.test.sh"]},
     {"run": ["bash", "scripts/suite/new-component.test.sh"]},
     {"run": ["bash", "scripts/suite/storage-migrations.test.sh"]},
