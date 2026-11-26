@@ -199,6 +199,6 @@ refused 'environment is missing' step audit-collection-collector "$(jq -c '.+{so
 # ---- The controller runs it on install and upgrade and ships the host step. ----
 grep -q 'install|upgrade) hive_audit_collection_provision' "$ROOT/scripts/suite/lifecycle.sh" || fail 'Install and upgrade do not configure audit collection'
 grep -q 'scripts/suite/audit-collection.sh scripts/suite/audit-collection-host.sh' "$ROOT/scripts/suite/controller.sh" || fail 'The steps are not part of the controller bundle'
-grep -q 'auditCollection:\$auditCollection' "$ROOT/scripts/suite/controller.sh" || fail 'The host request is not transported'
+grep -q 'auditCollection:\$auditCollection' "$ROOT/scripts/suite/host-request.jq" || fail 'The host request is not transported'
 grep -q 'source "$HIVE_ROOT/scripts/suite/audit-collection.sh"' "$ROOT/hive.sh" || fail 'hive.sh does not load the step'
 printf 'audit collection tests passed\n'

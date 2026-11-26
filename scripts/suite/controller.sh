@@ -43,7 +43,7 @@ hive_cleanup() {
 # Keep this a literal printf list: the launcher parses it without executing downloaded code.
 hive_runtime_files() {
   printf '%s\n' LICENSE hive.sh deployment/Caddyfile \
-    scripts/suite/controller.sh scripts/suite/release-launcher.sh scripts/suite/lifecycle.sh scripts/suite/host-runtime.sh \
+    scripts/suite/controller.sh scripts/suite/host-request.jq scripts/suite/release-launcher.sh scripts/suite/lifecycle.sh scripts/suite/host-runtime.sh \
     scripts/suite/guided-setup.sh scripts/suite/console-certificate-service.sh scripts/install-prerequisites.sh scripts/console-certificate.sh scripts/prepare-terminal.sh \
     scripts/suite/skills-integration.sh scripts/suite/skills-integration-host.sh scripts/suite/skills-preparation-host.sh \
     scripts/suite/adapters.sh scripts/suite/native-initialization-host.sh scripts/suite/adapters-host.sh scripts/suite/inference-registration.sh \
@@ -757,14 +757,50 @@ hive_host() {
   bootstrap_users=${HIVE_BOOTSTRAP_USERS:-'{}'}
   local bootstrap_images=${HIVE_BOOTSTRAP_IMAGES:-'{}'}
   target=$(jq -r --arg host "$host" '.hosts[$host].target' "$HIVE_CONFIG")
-  payload=$(jq -c --arg host "$host" --arg installation "$HIVE_ID" --arg version "$HIVE_VERSION" --arg digest "${HIVE_MANIFEST_DIGEST:-}" --arg plan "${HIVE_PLAN_DIGEST:-}" \
-    --arg action "${HIVE_HOST_ACTION:-}" --arg operation "${HIVE_OPERATION:-}" --arg archive "${HIVE_ARCHIVE:-}" --argjson allowMigrations "${HIVE_ALLOW_MIGRATIONS:-false}" \
-    --argjson serviceUsers "$bootstrap_users" --argjson images "$bootstrap_images" --argjson identityIds "${HIVE_BOOTSTRAP_IDENTITIES:-null}" --arg ingressTemplate "${HIVE_BOOTSTRAP_INGRESS:-}" --argjson magnusNodeKeysOnly "${HIVE_MAGNUS_NODE_KEYS_ONLY:-false}" --arg integrityScript "$(base64 -w0 "$HIVE_ROOT/scripts/suite/check-data.mjs")" --arg snapshotTool "${HIVE_SNAPSHOT_TOOL:-}" \
-    --arg skillsManifest "${HIVE_SKILLS_MANIFEST:-}" --arg skillsSignature "${HIVE_SKILLS_SIGNATURE:-}" --arg skillsTrust "${HIVE_SKILLS_TRUST:-}" --arg skillsTokenSHA "${HIVE_SKILLS_TOKEN_SHA:-}" \
-    --arg controller "${HIVE_CONTROLLER_DIGEST:-}" --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" --argjson registry "${HIVE_REGISTRY_INPUT:-null}" --argjson memoryCredential "${HIVE_MEMORY_CREDENTIAL_INPUT:-null}" --argjson auditCollection "${HIVE_AUDIT_COLLECTION_INPUT:-null}" --argjson magnusTrust "${HIVE_MAGNUS_TRUST_INPUT:-null}" --argjson cindertrace "${HIVE_CINDERTRACE_INPUT:-null}" --argjson magnusAgent "${HIVE_MAGNUS_AGENT_INPUT:-null}" --argjson consoleClients "${HIVE_CONSOLE_CLIENTS_INPUT:-null}" --argjson adminAccess "${HIVE_ADMIN_ACCESS_INPUT:-null}" --argjson retention "${HIVE_RETENTION_INPUT:-null}" --argjson addProduct "${HIVE_ADD_INPUT:-null}" --arg abortStep "${HIVE_ABORT_STEP:-}" \
-    --arg nativeBackupTool "${HIVE_NATIVE_BACKUP_TOOL:-}" --argjson nativeRecovery "${HIVE_NATIVE_RECOVERY_INPUT:-null}" --arg recoveryConfig "${HIVE_NATIVE_RECOVERY_CONFIGURATION_SHA:-}" --arg recoverySemantic "${HIVE_NATIVE_RECOVERY_MANIFEST_SEMANTIC_SHA:-}" \
-    --arg dataTool "${HIVE_NATIVE_DATA_TOOL:-}" --arg adminScript "${HIVE_NATIVE_ADMIN_SCRIPT:-}" --argjson reviewedLinks "${HIVE_NATIVE_LINKS:-null}" --arg tokenDigest "${HIVE_NATIVE_TOKEN_DIGEST:-}" --argjson tokenTtlSeconds "${HIVE_NATIVE_TOKEN_TTL:-null}" \
-    '{directory:.hosts[$host].directory,minimumFreeMiB:(.hosts[$host].minimumFreeMiB // 2048),origin,host:$host,installation:$installation,version:$version,digest:$digest,plan:$plan,controllerSourceSHA256:$controller,controllerArchiveSHA256:$controllerArchive,registry:$registry,memoryCredential:$memoryCredential,auditCollection:$auditCollection,magnusTrust:$magnusTrust,cindertrace:$cindertrace,magnusAgent:$magnusAgent,abortStep:$abortStep,action:$action,operation:$operation,archive:$archive,allowMigrations:$allowMigrations,placements:(.components|with_entries(select(.value.host==$host))),console:(if .console.host==$host then .console else null end),bootstrap:(.bootstrap // null),bootstrapImages:$images,bootstrapIdentityIds:$identityIds,bootstrapServiceUsers:$serviceUsers,magnusMemoryIdentity:(.components.magnus!=null and .components.hivemem!=null and .components.oathweave!=null and .components.magnus.host==.components.oathweave.host),ingressTemplate:$ingressTemplate,integrityScript:$integrityScript,snapshotTool:$snapshotTool,nativeBackupTool:$nativeBackupTool,nativeRecovery:($nativeRecovery.hosts[$host] // null),nativeRecoveryConfigurationSHA256:$recoveryConfig,nativeRecoveryManifestSemanticSHA256:$recoverySemantic,skillsDeployment:(.skillsDeployment // null),skillsRelease:{manifest:$skillsManifest,signature:$skillsSignature,trust:$skillsTrust},skillsTokenSHA256:$skillsTokenSHA,nativeMigration:(.nativeMigration // null),dataTool:$dataTool,adminScript:$adminScript,reviewedLinks:$reviewedLinks,tokenDigest:$tokenDigest,tokenTtlSeconds:$tokenTtlSeconds,agents:[.agents[]|select(.host==$host)],inference:[.inference[]|select(.host==$host)]} + (if .external then {external:.external} else {} end) + (if $consoleClients!=null then {consoleClients:$consoleClients} + (if env.HIVE_CONSOLE_CLIENTS_CHECK=="true" then {consoleClientsCheck:true} else {} end) else {} end) + (if $adminAccess!=null then {adminAccess:$adminAccess} else {} end) + (if $retention!=null then {retention:$retention} else {} end) + (if $addProduct!=null then {addProduct:$addProduct} else {} end) + (if $magnusNodeKeysOnly==true then {magnusNodeKeysOnly:true} else {} end)' "$HIVE_CONFIG") ||
+  payload=$(jq -c \
+    --arg host "$host" \
+    --arg installation "$HIVE_ID" \
+    --arg version "$HIVE_VERSION" \
+    --arg digest "${HIVE_MANIFEST_DIGEST:-}" \
+    --arg plan "${HIVE_PLAN_DIGEST:-}" \
+    --arg action "${HIVE_HOST_ACTION:-}" \
+    --arg operation "${HIVE_OPERATION:-}" \
+    --arg archive "${HIVE_ARCHIVE:-}" \
+    --argjson allowMigrations "${HIVE_ALLOW_MIGRATIONS:-false}" \
+    --argjson serviceUsers "$bootstrap_users" \
+    --argjson images "$bootstrap_images" \
+    --argjson identityIds "${HIVE_BOOTSTRAP_IDENTITIES:-null}" \
+    --arg ingressTemplate "${HIVE_BOOTSTRAP_INGRESS:-}" \
+    --argjson magnusNodeKeysOnly "${HIVE_MAGNUS_NODE_KEYS_ONLY:-false}" \
+    --arg integrityScript "$(base64 -w0 "$HIVE_ROOT/scripts/suite/check-data.mjs")" \
+    --arg snapshotTool "${HIVE_SNAPSHOT_TOOL:-}" \
+    --arg skillsManifest "${HIVE_SKILLS_MANIFEST:-}" \
+    --arg skillsSignature "${HIVE_SKILLS_SIGNATURE:-}" \
+    --arg skillsTrust "${HIVE_SKILLS_TRUST:-}" \
+    --arg skillsTokenSHA "${HIVE_SKILLS_TOKEN_SHA:-}" \
+    --arg controller "${HIVE_CONTROLLER_DIGEST:-}" \
+    --arg controllerArchive "${HIVE_CONTROLLER_ARCHIVE_DIGEST:-}" \
+    --argjson registry "${HIVE_REGISTRY_INPUT:-null}" \
+    --argjson memoryCredential "${HIVE_MEMORY_CREDENTIAL_INPUT:-null}" \
+    --argjson auditCollection "${HIVE_AUDIT_COLLECTION_INPUT:-null}" \
+    --argjson magnusTrust "${HIVE_MAGNUS_TRUST_INPUT:-null}" \
+    --argjson cindertrace "${HIVE_CINDERTRACE_INPUT:-null}" \
+    --argjson magnusAgent "${HIVE_MAGNUS_AGENT_INPUT:-null}" \
+    --argjson consoleClients "${HIVE_CONSOLE_CLIENTS_INPUT:-null}" \
+    --argjson adminAccess "${HIVE_ADMIN_ACCESS_INPUT:-null}" \
+    --argjson retention "${HIVE_RETENTION_INPUT:-null}" \
+    --argjson addProduct "${HIVE_ADD_INPUT:-null}" \
+    --arg abortStep "${HIVE_ABORT_STEP:-}" \
+    --arg nativeBackupTool "${HIVE_NATIVE_BACKUP_TOOL:-}" \
+    --argjson nativeRecovery "${HIVE_NATIVE_RECOVERY_INPUT:-null}" \
+    --arg recoveryConfig "${HIVE_NATIVE_RECOVERY_CONFIGURATION_SHA:-}" \
+    --arg recoverySemantic "${HIVE_NATIVE_RECOVERY_MANIFEST_SEMANTIC_SHA:-}" \
+    --arg dataTool "${HIVE_NATIVE_DATA_TOOL:-}" \
+    --arg adminScript "${HIVE_NATIVE_ADMIN_SCRIPT:-}" \
+    --argjson reviewedLinks "${HIVE_NATIVE_LINKS:-null}" \
+    --arg tokenDigest "${HIVE_NATIVE_TOKEN_DIGEST:-}" \
+    --argjson tokenTtlSeconds "${HIVE_NATIVE_TOKEN_TTL:-null}" \
+    --from-file "$HIVE_ROOT/scripts/suite/host-request.jq" "$HIVE_CONFIG") ||
     hive_die "The request for host $host could not be prepared"
   # A secret travels only in the payload, on standard input: it is read here from an owner-only
   # file, never placed in an argument.

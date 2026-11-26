@@ -34,6 +34,7 @@ printf 'ROOT_ACTION_OK\n'
 HOST
 printf 'export {};\n' > "$temporary/scripts/suite/check-data.mjs"
 export PATH="$temporary/bin:$PATH"
+cp "$ROOT/scripts/suite/host-request.jq" "$temporary/scripts/suite/host-request.jq"
 HIVE_ROOT=$temporary HIVE_CONFIG=$temporary/config.json HIVE_VERSION=0.1.0 HIVE_ID=example-suite
 HIVE_AGENT_HOST=control HIVE_AGENT_SUDO_FILE=$temporary/password
 jq -nc '{origin:"https://hive.example.com",hosts:{control:{target:"local",directory:"/opt/example"}},components:{},agents:[],inference:[]}' > "$HIVE_CONFIG"

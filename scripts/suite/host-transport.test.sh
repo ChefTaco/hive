@@ -38,6 +38,7 @@ printf 'obviously-fake-sudo-password\n' > "$temporary/password"
 printf 'obviously-fake-sudo-password' > "$temporary/password-no-newline"
 printf '{"token":"obviously-fake-token"}\n' > "$temporary/secret.json"
 printf 'export {};\n' > "$temporary/scripts/suite/check-data.mjs"
+cp "$ROOT/scripts/suite/host-request.jq" "$temporary/scripts/suite/host-request.jq"
 HIVE_ROOT=$temporary HIVE_CONFIG=$temporary/config.json HIVE_VERSION=0.1.0 HIVE_ID=example-suite
 HIVE_HOST_SECRET_FILE=$temporary/secret.json
 script=$(printf '# HOST_CODE_MUST_STAY_ON_STDIN\n#'; head -c 524288 /dev/zero | tr '\0' x; printf '\nIFS= read -r packet\njq -e '\''.secret.token=="obviously-fake-token" and .installation=="example-suite"'\'' <<< "$packet" >/dev/null\nprintf "LARGE_HOST_OK\\n"\n')
