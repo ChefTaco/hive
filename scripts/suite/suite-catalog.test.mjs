@@ -152,5 +152,7 @@ test('versions compare numerically, part by part', () => {
   assert.throws(() => assertDatastoreProfileCurrent('3.8.0', 'runtime-2026-11-pg1712'), /superseded/);
   assert.doesNotThrow(() => assertDatastoreProfileCurrent('3.14.0', 'runtime-2026-11-pg1712-xslt'));
   assert.throws(() => assertDatastoreProfileCurrent('3.14.1', 'runtime-2026-11-pg1712-xslt'), /superseded/);
-  assert.doesNotThrow(() => assertDatastoreProfileCurrent('9.9.9', 'runtime-2026-11-pg1712-zstd'));
+  assert.doesNotThrow(() => assertDatastoreProfileCurrent('3.14.3', 'runtime-2026-11-pg1712-zstd'));
+  assert.throws(() => assertDatastoreProfileCurrent('3.15.0', 'runtime-2026-11-pg1712-zstd'), /superseded/);
+  assert.doesNotThrow(() => assertDatastoreProfileCurrent('9.9.9', 'runtime-2026-11-pg1712-zstd-openssl'));
 });

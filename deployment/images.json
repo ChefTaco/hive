@@ -58,7 +58,7 @@
     },
     {
       "image": "hive-redis",
-      "version": "8.2.10-2",
+      "version": "8.2.10-3",
       "context": "deployment/datastores",
       "file": "deployment/datastores/redis.Dockerfile",
       "check": [

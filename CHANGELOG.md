@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Security
+
+- `hive-redis` 8.2.10-3 installs OpenSSL 3.5.9-r2 (`libssl3`, `libcrypto3`), which fixes
+  CVE-2026-124709 in 3.5.9-r0. The new datastore profile `runtime-2026-11-pg1712-zstd-openssl`
+  selects it with the PostgreSQL and Qdrant images of `runtime-2026-11-pg1712-zstd`, which remains
+  selectable up to 3.14.3. Redis and its data formats are unchanged.
+
 ## [3.14.3] - 2026-11-25
 
 ### Security
