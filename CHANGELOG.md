@@ -157,6 +157,12 @@ deleting old posts in channels that have a retention limit.
 
 ### Fixed
 
+- `uninstall --purge` deletes an installation directory that setup created with sudo. When every
+  file in it belonged to the operator, the purge ran without root, emptied the directory and then
+  failed to remove it from its root-owned parent; repeating the command then stopped at the empty
+  directory. The purge now uses root when the parent is not writable, and a repeated purge finishes
+  an emptied directory.
+
 - `console-clients add` marks the suite's own HiveXUI browser clients first-party when an existing
   one is not (a public `hivexui-*` client with this console's callback), so Oathweave asks no
   consent at sign-in; nothing else about them, and no other client, changes. Clients it creates

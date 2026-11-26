@@ -98,6 +98,28 @@ rm -rf -- "$temporary/uninstall-proof"; config="$temporary/config.json"
 grep -q -- 'down --remove-orphans --volumes' "$temporary/docker.calls" || fail 'The purge did not remove the volumes'
 [[ ! -e "$XDG_STATE_HOME/hive/uninstall-proof" ]] || fail 'The purge kept the state directory'
 
+# A purge on this machine asks for root when the operator cannot remove the directory itself
+# (setup created it with sudo in a root-owned parent), even when every file in it is the operator's.
+(
+  source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/uninstall.sh"
+  mkdir -p "$temporary/rootparent/inst"; printf 'x\n' > "$temporary/rootparent/inst/file"
+  ! hive_uninstall_needs_sudo "$temporary/rootparent/inst" || exit 1
+  chmod 555 "$temporary/rootparent"
+  hive_uninstall_needs_sudo "$temporary/rootparent/inst" || { chmod 755 "$temporary/rootparent"; exit 2; }
+  chmod 755 "$temporary/rootparent"
+  ! hive_uninstall_needs_sudo "$temporary/rootparent/missing" || exit 3
+) || fail "The purge root decision is wrong (status $?)"
+# A purge interrupted after the directory was emptied leaves it empty: repeating the purge
+# finishes (the containers count as gone, the directory and the installation file are removed).
+fixture
+rm -rf -- "$directory"; mkdir -p "$directory"
+printf 'uninstall-proof\n' | hive uninstall --purge --yes > "$temporary/result" 2>&1 || { cat "$temporary/result" >&2; fail 'A repeated purge of an emptied directory failed'; }
+[[ ! -e "$directory" && ! -e "$config" ]] || fail 'A repeated purge kept the emptied directory or the installation file'
+fixture
+rm -rf -- "$directory"; mkdir -p "$directory"
+hive uninstall --yes < /dev/null > "$temporary/result" 2>&1 || { cat "$temporary/result" >&2; fail 'uninstall of an emptied directory failed'; }
+[[ -d "$directory" ]] || fail 'uninstall without --purge removed an emptied directory'
+
 # The host refuses a directory of another installation, and an open transaction.
 fixture
 printf '{"installation":"other","host":"control","uuid":"x"}' > "$directory/installation.json"
