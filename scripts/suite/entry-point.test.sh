@@ -45,6 +45,14 @@ rm -rf -- "$XDG_STATE_HOME/hive/second-suite"
 chmod 0644 "$state"
 refuse 'readable by its owner only' "$temporary/bin/hive" status
 chmod 0600 "$state"
+# A modified controller is refused before any of its code runs: the digest is computed from the
+# literal runtime list without sourcing the checkout.
+cp "$checkout/scripts/suite/controller.sh" "$temporary/controller.original"
+printf 'touch %q\n' "$temporary/executed" >> "$checkout/scripts/suite/controller.sh"
+refuse 'changed since it ran example-suite (release 1.2.3)' "$temporary/bin/hive" status
+[[ ! -e "$temporary/executed" ]] || fail 'The entry point ran a modified controller before refusing it'
+cp "$temporary/controller.original" "$checkout/scripts/suite/controller.sh"
+"$temporary/bin/hive" --help >/dev/null 2>&1 || fail 'The restored controller was refused'
 printf '\n' >> "$checkout/scripts/suite/lifecycle.sh"
 refuse 'changed since it ran example-suite (release 1.2.3)' "$temporary/bin/hive" status
 mv "$checkout" "$temporary/moved"
