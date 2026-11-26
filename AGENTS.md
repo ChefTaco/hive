@@ -77,7 +77,7 @@ change.
 | `services/hive-registry` | Hive Registry: the mandatory install catalog and lookup API of one installation, written by `hive.sh`. Not the Skills registry |
 | `examples/` | Installation JSON example and schemas |
 | `docs/` | Architecture, release process, Registry API and runbooks; `docs/acceptance/` holds dated release evidence (JSON) |
-| `.github/workflows/` | `hive-ci.yml` (gates on Node 24 and 26), `recovery.yml` (backup and restore acceptance, see [docs/ci-recovery.md](docs/ci-recovery.md)), `suite-release.yml` (suite images and tagged releases), `gitleaks.yml` |
+| `.github/workflows/` | `hive-ci.yml` (gates on Node 24 and 26), `recovery.yml` (backup and restore acceptance, see [docs/ci-recovery.md](docs/ci-recovery.md)), `suite-release.yml` (suite images and tagged releases), `image-rescan.yml` (daily re-scan of the newest published release), `gitleaks.yml` |
 | `README.md`, `UPGRADING.md`, `CHANGELOG.md` | Install overview, per-release upgrade notes (newest first) and the change log |
 
 The products (Oathweave, Emberpath, HiveMem, HiveSkills, HiveXUI, Magnus and the others) live in

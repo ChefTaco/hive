@@ -92,9 +92,14 @@ release's bytes only from the controller source of that release's tag.
    that no pinned image, on either architecture, has a CRITICAL or HIGH finding, including
    unfixed findings, when `HIVE_IMAGE_SECURITY_MODE=all` is set. New tagged releases enforce
    this full policy automatically. Exceptions go in `deployment/trivy/IMAGE.trivyignore.yaml`, one advisory per entry
-   with its justification. Keep the unfiltered reports and document every accepted scoped exception.
+   with its justification and an `expired_at` date, after which the finding is reported again and
+   must be re-reviewed. Keep the unfiltered reports and document every accepted scoped exception.
+   After publication, the *Published image re-scan* workflow (`image-rescan.yml`) re-scans the
+   newest published release daily with a fresh Trivy database and opens or updates an issue when
+   a HIGH or CRITICAL finding appears.
 6. **Commit and tag.** Commit the manifest, the signature and any documentation, and let CI pass
-   on `main`. Then push the tag `vX.Y.Z`. The *Suite release* workflow checks the tagged tree again
+   on `main`. Then push the tag `vX.Y.Z` on that commit of `main`; the workflow refuses a tag whose
+   commit is not on `main`, and a release without notes under `## [X.Y.Z]` in `CHANGELOG.md`. The *Suite release* workflow checks the tagged tree again
    and checks every pinned digest against the published tag named in the inputs file. Then it publishes the GitHub
    release with the manifest, the signature and the publisher key attached.
 7. **Make new packages public.** A first push to GitHub Container Registry creates a private

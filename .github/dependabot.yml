@@ -27,6 +27,27 @@ updates:
           - minor
           - patch
 
+  # Digest-pinned Dockerfile bases: the ingress (golang, caddy), the Node.js runtime image and the
+  # Hive Registry builder. The datastore Dockerfiles take their bases from deployment/images.json
+  # build arguments, which change through a reviewed datastore profile. A changed base reaches
+  # users only in a new image version (deployment/images.json) and a signed release.
+  - package-ecosystem: docker
+    directories:
+      - /deployment
+      - /deployment/runtime
+      - /services/hive-registry
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      # The Node.js major follows the runtime (.nvmrc and hive-node-runtime); change it deliberately.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+    groups:
+      docker-bases:
+        patterns:
+          - "*"
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
