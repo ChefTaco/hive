@@ -253,8 +253,8 @@ receipts share the same restore point; see [backups](BACKUPS.md).
 The archive is written to `/opt/hive/backups/first-backup` and verified. From 2.0.2 a backup keeps
 the suite serving; `--stopped` stops every service while it runs instead, which is what 2.0.0 and
 2.0.1 always do. Copy archives off the host: `./hive.sh backups export first-backup --to
-DIRECTORY|USER@HOST:/PATH --encrypt AGE_RECIPIENT` copies every host's part (from the release
-after 3.14.3), and `"retention": {"backup": {"keep": 7}}` has the daily prune take a backup first;
+DIRECTORY|USER@HOST:/PATH --encrypt AGE_RECIPIENT` copies every host's part (from
+3.15.0), and `"retention": {"backup": {"keep": 7}}` has the daily prune take a backup first;
 see [off-host copies](BACKUPS.md#off-host-copies). See [backups](BACKUPS.md) for what is captured,
 restores and rehearsals.
 

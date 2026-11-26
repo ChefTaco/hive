@@ -416,7 +416,7 @@ file.
   failed.
 ## Uninstalling
 
-From the release after 3.14.3:
+From 3.15.0:
 
 ```bash
 ./hive.sh uninstall --config ~/.config/hive/ID/installation.json           # shows the plan, asks

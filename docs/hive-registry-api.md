@@ -325,7 +325,7 @@ reaches the browser. The service's own tests parse every public response with it
 
 | Version | Registry | Adds |
 | --- | --- | --- |
-| 5 | next release | The `audit.v1` capability, a product's own HiveAuditRecord v1 export |
+| 5 | 1.6.0 | The `audit.v1` capability, a product's own HiveAuditRecord v1 export |
 | 4 | 1.4.0 | The `inventory.v1` capability, announcing the [inventory](#inventory) |
 | 3 | 1.3.0 | The optional [setup checklist](#setup-checklist) on `GET /v1/installation` |
 | 2 | 1.2.0 | Product [capabilities](#capabilities) |
