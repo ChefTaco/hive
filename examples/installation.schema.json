@@ -376,6 +376,12 @@
               "minimum": 1,
               "maximum": 604800,
               "default": 86400
+            },
+            "email": {
+              "type": "string",
+              "maxLength": 254,
+              "pattern": "^[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$",
+              "description": "The operator's email address, for products that create their administrator with one (hive.sh add chattermost)."
             }
           }
         },

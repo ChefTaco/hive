@@ -327,8 +327,8 @@ the prefix kept, no cookies either way and unbuffered event streams; without Stu
 answers 404. Its state is the `ardentstudio-data` volume (`data/ardentstudio`), backed up with the
 rest of the installation ([BACKUPS.md](BACKUPS.md#ardent-project-studio)).
 
-Adding Studio to an existing installation is not automated yet (`hive.sh add` supports Cindertrace
-and its collector; see [Adding a product to an existing installation](#adding-a-product-to-an-existing-installation)):
+Adding Studio to an existing installation is not automated yet (`hive.sh add` supports Cindertrace,
+its collector and ChatterMost; see [Adding a product to an existing installation](#adding-a-product-to-an-existing-installation)):
 configure the same clients, links and environment by hand, then select the component.
 [Adding an external Magnus and Studio to an existing installation](#adding-an-external-magnus-and-studio-to-an-existing-installation)
 lists every entry; with Magnus as a component, add Studio's link to `MAGNUS_OATHWEAVE_IDENTITIES_JSON`
@@ -593,7 +593,8 @@ with the three Magnus permissions (step 11, which does that by itself without St
 
 `hive.sh add PRODUCT` adds a product, with the private datastores it owns, to an installation that
 is already running, configured as fresh setup would have configured it. It supports `cindertrace`
-(with `cindertrace-postgres` and `cindertrace-redis`), described here, and `cindertrace-collector`
+(with `cindertrace-postgres` and `cindertrace-redis`), described here, `chattermost` (with
+`chattermost-postgres`; [below](#adding-chattermost)) and `cindertrace-collector`
 ([Events from a separate logging host](#events-from-a-separate-logging-host)); for other products, follow
 [Adding an external Magnus and Studio](#adding-an-external-magnus-and-studio-to-an-existing-installation)
 by hand. It works on an installation set up fresh and on one moved with `migrate-native`:
@@ -636,6 +637,19 @@ newer one. It then:
 5. **Creates the console client** `hivexui-cindertrace` in Oathweave's store and adds its
    permissions to `SUITE_ADMIN`, as `console-clients add` does. Sign out of the console and in
    again to see Cindertrace.
+
+### Adding ChatterMost
+
+From the release after 3.14.3, `./hive.sh add chattermost` follows the same five steps for
+ChatterMost and its private PostgreSQL (`chattermost-postgres`): its secrets, internal certificate,
+`config/chattermost.env` (and the `runtime.env` and PostgreSQL password files fresh setup writes),
+the operator as ChatterMost's administrator (`ADMIN_USERNAME`, `ADMIN_EMAIL`, a generated
+password in the add journal's owner-only `secrets/chat-admin-password`) with an explicit
+Oathweave link (`OATHWEAVE_CHAT_IDENTITIES_JSON`), the `hivexui-chattermost` browser policy and
+console client (`chattermost:session`), `CHATTERMOST_ENDPOINT` and `CHATTERMOST_TLS_NAME` in the
+ingress environment, ChatterMost in `runtime.json`, then the upgrade that runs its signed schema
+migration. ChatterMost needs the operator's email: fresh setup's `bootstrap.adminEmail`, or on a
+migrated installation `nativeMigration.adminAccount.email`, which you add to the installation file.
 
 At the end it names the recovery account and the owner-only file that holds its password
 (`config/.additions/cindertrace/secrets/security-admin-password`); no secret is printed.

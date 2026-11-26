@@ -22,11 +22,12 @@ request=$(jq -ce '.addProduct|objects' <<< "$input") || { printf 'Hive add: miss
 product=$(jq -er .product <<< "$request")
 die() { printf 'Hive add: %s\n' "$*" >&2; exit 1; }
 [[ "$directory" =~ ^/[A-Za-z0-9_./-]+$ && "$directory" == "$(realpath -m -- "$directory")" && ! -L "$directory" ]] || die 'Installation path must be canonical without symlinks'
-# One product at a time: Cindertrace, whose configuration initialize-full-host.sh owns, or its
-# collector, whose settings hive.sh cindertrace-collector add --run writes.
+# One product at a time: Cindertrace or ChatterMost, whose configuration initialize-full-host.sh
+# owns, or the Cindertrace collector, whose settings hive.sh cindertrace-collector add --run writes.
 mapfile -t components < <(jq -r '.components[]' <<< "$request")
 case "$product" in
   cindertrace) [[ "${components[*]}" == "cindertrace cindertrace-postgres cindertrace-redis" ]] || die 'Unexpected component set';;
+  chattermost) [[ "${components[*]}" == "chattermost chattermost-postgres" ]] || die 'Unexpected component set';;
   cindertrace-collector) [[ "${components[*]}" == cindertrace-collector ]] || die 'Unexpected component set';;
   *) die "add does not support $product";;
 esac
@@ -126,16 +127,28 @@ done
 [[ -f "$runtime" && ! -L "$runtime" ]] || die 'The console runtime.json is missing'
 issuer=$(get "$oathweave_environment" IAM_BROWSER_ISSUER)
 [[ "$issuer" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._/-]*)?$ ]] || die 'Oathweave has no HTTPS IAM_BROWSER_ISSUER'
+# What differs per product: its account ID secret, its administrator password secret, its internal
+# port, and what its configuration needs of the operator account.
+case "$product" in
+  cindertrace) id_secret=security-id password_secret=security-admin-password port=4101 label=CINDERTRACE;;
+  chattermost) id_secret=chat-id password_secret=chat-admin-password port=8065 label=CHATTERMOST;;
+esac
+email=''
 if jq -e '.bootstrap!=null' <<< "$input" >/dev/null; then
   username=$(jq -er .bootstrap.adminUsername <<< "$input")
+  email=$(jq -r '.bootstrap.adminEmail // empty' <<< "$input")
   [[ -f "$config/.initializer/secrets/identity-id" ]] || die 'The fresh setup record of the operator account is missing'
   subject=$(cat "$config/.initializer/secrets/identity-id")
 elif jq -e '.nativeMigration.adminAccount!=null' <<< "$input" >/dev/null; then
   username=$(jq -er .nativeMigration.adminAccount.username <<< "$input")
   subject=$(jq -er .nativeMigration.adminAccount.subject <<< "$input")
+  email=$(jq -r '.nativeMigration.adminAccount.email // empty' <<< "$input")
   [[ "$issuer" == "$(jq -er .nativeMigration.browserIssuer <<< "$input")" ]] || die 'Oathweave browser issuer differs from nativeMigration.browserIssuer'
 else die 'The installation names no operator account: a fresh installation has bootstrap, a migrated one nativeMigration.adminAccount'; fi
 [[ "$subject" =~ ^[A-Za-z0-9._:@-]{1,128}$ && "$username" =~ ^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$ ]] || die 'Invalid operator account'
+# ChatterMost creates its administrator with the operator's email address.
+[[ "$product" != chattermost || ( ${#email} -le 254 && "$email" =~ ^[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ) ]] ||
+  die 'ChatterMost needs the operator email: bootstrap.adminEmail, or nativeMigration.adminAccount.email on a migrated installation'
 
 # The installation's internal authority: the one the ingress verifies products with.
 if [[ -f "$config/.initializer/keys/authority.pem" ]]; then ca_key="$config/.initializer/keys/authority.pem"; ca="$config/.initializer/certificates/authority.pem"
@@ -179,7 +192,7 @@ ensure_secret() {
   record_file "$path"
 }
 secret() { cat "$state/secrets/$1"; }
-ensure_secret security-id
+ensure_secret "$id_secret"
 while IFS= read -r name; do ensure_secret "$name"; done < <(hive_full_secret_names "$product")
 
 # The product's internal certificate, from the installation authority, as fresh setup issues it.
@@ -261,7 +274,7 @@ jq -e --arg id "$client_id" --argjson client "$client" '.[$id]==null or .[$id]==
   die "Oathweave already has another policy for $client_id"
 update "$oathweave_environment" "$(jq -nc --argjson policies "$policies" --arg id "$client_id" --argjson client "$client" '{IAM_BROWSER_CLIENT_POLICIES:($policies+{($id):{audience:$client.audience,permissions:$client.permissions}}|tojson)}')"
 # The internal endpoint, as fresh setup writes it for a product on the console host.
-wanted='{"CINDERTRACE_ENDPOINT":"https://cindertrace:4101","CINDERTRACE_TLS_NAME":"cindertrace"}'
+wanted=$(jq -nc --arg label "$label" --arg product "$product" --arg port "$port" '{($label+"_ENDPOINT"):("https://"+$product+":"+$port),($label+"_TLS_NAME"):$product}')
 while IFS=$'\t' read -r name value; do
   current=$(get "$ingress_environment" "$name")
   [[ -z "$current" || "$current" == "$value" ]] || die "The ingress already routes $product elsewhere ($name)"
@@ -278,6 +291,6 @@ if ! jq -e --arg product "$product" --arg id "$client_id" '.products[$product]==
   changed+=("${runtime#"$config"/}")
 fi
 drop_stale_formats
-jq --arg password "$state/secrets/security-admin-password" '.phase="complete" | .passwordFile=$password' "$journal" | atomic_receipt
-printf 'Cindertrace configuration prepared on %s; secrets stay in %s.\n' "$host" "$state/secrets" >&2
-jq -nc --arg username "$username" --arg password "$state/secrets/security-admin-password" '{phase:"complete",changed:$ARGS.positional,username:$username,passwordFile:$password}' --args "${changed[@]}"
+jq --arg password "$state/secrets/$password_secret" '.phase="complete" | .passwordFile=$password' "$journal" | atomic_receipt
+printf '%s configuration prepared on %s; secrets stay in %s.\n' "$product" "$host" "$state/secrets" >&2
+jq -nc --arg username "$username" --arg password "$state/secrets/$password_secret" '{phase:"complete",changed:$ARGS.positional,username:$username,passwordFile:$password}' --args "${changed[@]}"

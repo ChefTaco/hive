@@ -178,8 +178,9 @@ Usage: hive.sh [init|plan|install|status|doctor|logs|support-bundle|upgrade|post
 
 init prepares protected configuration for an explicitly fresh installation.
 add PRODUCT [--yes] adds a product to an existing installation, on the console host, as fresh
-setup configures it: cindertrace (with its private datastores: secrets, Oathweave link, ingress,
-console and console client) or cindertrace-collector (prepared by cindertrace-collector add --run).
+setup configures it: cindertrace or chattermost (with their private datastores: secrets, Oathweave
+link, ingress, console and console client) or cindertrace-collector (prepared by
+cindertrace-collector add --run).
 It backs up first, adds the product to the installation file and applies it as an upgrade to the
 installed release (rehearsal and schema migration included). Each step is journaled beside the
 installation file; repeat the command to continue an interrupted add.

@@ -25,9 +25,10 @@ mkdir -p "$temporary/bin" "$temporary/operator/hive"
 openssl genpkey -algorithm ED25519 -out "$temporary/publisher.key" >/dev/null 2>&1
 openssl pkey -in "$temporary/publisher.key" -pubout -out "$temporary/publisher.pub" >/dev/null 2>&1
 base='["hive-registry","oathweave","oathweave-redis","hivexui","ingress","emberpath","hivemem","hivemem-qdrant","hiveskills"]'
-jq -n --argjson base "$base" --arg user "$user" '{schema:1,version:"0.1.0",profiles:{core:$base,full:($base+["cindertrace","cindertrace-postgres","cindertrace-redis"])},
-  components:(($base+["cindertrace","cindertrace-postgres","cindertrace-redis","cindertrace-collector"])|map({key:.,value:{image:("example.com/"+.+"@sha256:"+("0"*64)),service:{user:$user,healthcheck:{test:["CMD","true"]}}}})|from_entries)} |
-  .components.hivexui.kind="static-ui" | .components.ingress.kind="ingress" | .components["cindertrace-postgres"].kind="datastore" | .components["cindertrace-redis"].kind="datastore" | .components["cindertrace-collector"].requiresLocal=["cindertrace"] |
+jq -n --argjson base "$base" --arg user "$user" '{schema:1,version:"0.1.0",profiles:{core:$base,full:($base+["cindertrace","cindertrace-postgres","cindertrace-redis","chattermost","chattermost-postgres"])},
+  components:(($base+["cindertrace","cindertrace-postgres","cindertrace-redis","cindertrace-collector","chattermost","chattermost-postgres"])|map({key:.,value:{image:("example.com/"+.+"@sha256:"+("0"*64)),service:{user:$user,healthcheck:{test:["CMD","true"]}}}})|from_entries)} |
+  .components.hivexui.kind="static-ui" | .components.ingress.kind="ingress" | .components["cindertrace-postgres"].kind="datastore" | .components["cindertrace-redis"].kind="datastore" | .components["chattermost-postgres"].kind="datastore" | .components["cindertrace-collector"].requiresLocal=["cindertrace"] |
+  .components.chattermost.initialization={image:("example.com/chattermost-migrator@sha256:"+("0"*64)),command:["migrate"],verificationCommand:["validate-current"]} |
   .components.cindertrace.initialization={image:("example.com/cindertrace@sha256:"+("0"*64)),command:["node","scripts/apply-migrations.mjs"],verificationCommand:["node","scripts/apply-migrations.mjs","--verify-current"]}' > "$temporary/release.json"
 source "$ROOT/scripts/suite/test-catalog.sh"; hive_test_catalog "$temporary/release.json"
 openssl pkeyutl -sign -inkey "$temporary/publisher.key" -rawin -in "$temporary/release.json" -out "$temporary/release.json.sig"
@@ -123,7 +124,7 @@ journal="$temporary/operator/hive/additions/cindertrace.json"
 # Unattended use needs --yes; an unknown product or a bad request is refused before anything runs.
 fixture fresh
 refused 'Unattended use needs --yes' hive add cindertrace
-refused 'add supports cindertrace' hive add chattermost --yes
+refused 'add supports chattermost, cindertrace' hive add magnus --yes
 refused 'Use: add PRODUCT' hive add --yes
 refused 'Use: add PRODUCT' hive add cindertrace magnus --yes
 [[ ! -e "$journal" && ! -e "$HIVE_TEST_LIFECYCLE" && ! -d "$(state)" ]] && cmp -s "$configuration" "$temporary/original.json" || fail 'A refused add changed something'
@@ -252,4 +253,34 @@ env_value "$install/config/cindertrace.env" CINDERTRACE_OATHWEAVE_IDENTITIES_JSO
 env_value "$install/config/oathweave-renamed.env" IAM_BROWSER_CLIENT_POLICIES | jq -e '.["hivexui-cindertrace"].audience=="cindertrace"' >/dev/null || fail 'The renamed Oathweave environment did not gain the policy'
 openssl verify -CAfile "$install/config/.migration/ca.pem" -verify_hostname cindertrace "$install/config/cindertrace/tls.crt" >/dev/null 2>&1 || fail 'The certificate is not from the migration authority'
 [[ ! -e "$install/config/.initializer" ]] || fail 'add created an initializer record on a migrated installation'
-printf 'Passed: add cindertrace backs up first, configures the product as fresh setup does with an explicit operator link and native sign-in, edits existing files in place, records the components and applies them as an upgrade, creates the console client, resumes after interruptions without repeating finished steps or rotating secrets, refuses unsafe states, and works on fresh and migrated installations.\n'
+# ChatterMost: its secrets, internal certificate, private PostgreSQL and environment as fresh setup
+# writes them, the operator as its administrator with an Oathweave link, the browser policy, the
+# ingress route and the runtime.json entry, then the same upgrade and console client.
+fixture fresh
+cm_state="$install/config/.additions/chattermost"; cm_journal="$temporary/operator/hive/additions/chattermost.json"
+hive add chattermost --yes > "$temporary/chat.log" 2>&1 || { cat "$temporary/chat.log" >&2; fail 'add chattermost failed'; }
+mapfile -t calls < "$HIVE_TEST_LIFECYCLE"
+[[ "${calls[0]}" == 'backup backup false pre-add-chattermost-'* && "${calls[1]}" == 'upgrade upgrade true none ["chattermost","chattermost-postgres",'* ]] || fail "ChatterMost was not backed up and applied: ${calls[*]}"
+jq -e --arg root "$install" '.components.chattermost=={host:"control",envFile:($root+"/config/chattermost.env"),configDirectory:($root+"/config/chattermost")} and .components["chattermost-postgres"]=={host:"control",configDirectory:($root+"/config/chattermost-postgres")}' "$configuration" >/dev/null || fail 'The installation file did not gain ChatterMost'
+chat_env="$install/config/chattermost.env"
+[[ $(env_value "$chat_env" DATABASE_URL) == "postgresql://chattermost_app:$(cat "$cm_state/secrets/chat-db")@chattermost-postgres:5432/chattermost?schema=public" ]] || fail 'The ChatterMost database setting is wrong'
+[[ $(env_value "$chat_env" ADMIN_USERNAME) == admin && $(env_value "$chat_env" ADMIN_EMAIL) == admin@example.com && $(env_value "$chat_env" ADMIN_PASSWORD) == "$(cat "$cm_state/secrets/chat-admin-password")" && $(env_value "$chat_env" SERVER_URL) == https://hive.example.com ]] || fail 'The ChatterMost administrator or origin is wrong'
+env_value "$chat_env" OATHWEAVE_CHAT_IDENTITIES_JSON | jq -e --rawfile id "$cm_state/secrets/chat-id" --rawfile subject "$install/config/.initializer/secrets/identity-id"   '.==[{issuer:"https://hive.example.com/api/oathweave",subject:($subject|rtrimstr("\n")),localUserId:($id|rtrimstr("\n"))}]' >/dev/null || fail 'The operator account is not linked to ChatterMost'
+cmp -s "$chat_env" "$install/config/chattermost/runtime.env" && [[ $(cat "$install/config/chattermost/postgres-password") == "$(cat "$cm_state/secrets/chat-db")" && $(cat "$install/config/chattermost-postgres/password") == "$(cat "$cm_state/secrets/chat-db")" ]] || fail 'The ChatterMost datastore files are wrong'
+openssl verify -CAfile "$install/config/ingress/backend-ca.pem" -verify_hostname chattermost "$install/config/chattermost/tls.crt" >/dev/null 2>&1 || fail 'The ChatterMost certificate is not trusted by the ingress authority'
+env_value "$install/config/oathweave.env" IAM_BROWSER_CLIENT_POLICIES | jq -e '.["hivexui-chattermost"]=={"audience":"chattermost","permissions":["chattermost:session"]} and .["hivexui-oathweave"]!=null' >/dev/null || fail 'The ChatterMost browser policy was not added'
+[[ $(env_value "$install/config/ingress.env" CHATTERMOST_ENDPOINT) == https://chattermost:8065 && $(env_value "$install/config/ingress.env" CHATTERMOST_TLS_NAME) == chattermost ]] || fail 'The ChatterMost ingress route is wrong'
+jq -e '.products.chattermost=="/api/chattermost" and .identity.clients.chattermost=="hivexui-chattermost"' "$install/config/runtime.json" >/dev/null || fail 'runtime.json does not list ChatterMost'
+jq -e '.[0].id=="hivexui-chattermost" and length==1' "$HIVE_TEST_CLIENTS" >/dev/null || fail 'The ChatterMost console client was not created'
+jq -e '.phase=="complete" and (.passwordFile|endswith("/secrets/chat-admin-password"))' "$cm_journal" >/dev/null || fail 'The ChatterMost journal is incomplete'
+! grep -q 'cindertrace-collector add' "$temporary/chat.log" || fail 'The ChatterMost summary names the Cindertrace collector'
+for secret in chat-db chat-cookie chat-token chat-admin-password chat-bot; do ! grep -q -- "$(cat "$cm_state/secrets/$secret")" "$temporary/chat.log" || fail "add printed $secret"; done
+refused 'ChatterMost is already installed' hive add chattermost --yes
+# A migrated installation without the operator's email cannot give ChatterMost its administrator.
+fixture migrated
+refused 'ChatterMost needs the operator email' hive add chattermost --yes
+jq '.nativeMigration.adminAccount.email="operator@example.com"' "$configuration" > "$configuration.next"; mv "$configuration.next" "$configuration"; chmod 600 "$configuration"
+hive add chattermost --yes > "$temporary/chat-migrated.log" 2>&1 || { cat "$temporary/chat-migrated.log" >&2; fail 'add chattermost failed on a migrated installation'; }
+[[ $(env_value "$install/config/chattermost.env" ADMIN_EMAIL) == operator@example.com && $(env_value "$install/config/chattermost.env" ADMIN_USERNAME) == operator ]] || fail 'The migrated operator is not the ChatterMost administrator'
+
+printf 'Passed: add cindertrace and add chattermost back up first, configures the product as fresh setup does with an explicit operator link and native sign-in, edits existing files in place, records the components and applies them as an upgrade, creates the console client, resumes after interruptions without repeating finished steps or rotating secrets, refuses unsafe states, and works on fresh and migrated installations.\n'
