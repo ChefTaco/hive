@@ -75,17 +75,32 @@ jobs:
       - name: Install controller tools
         timeout-minutes: 20
         run: sudo env GITHUB_ACTIONS=true bash scripts/ci-apt-install.sh jq openssl
+      # The release's application containers run as 1000:1000, and fresh setup runs as that service
+      # owner: an operator account with that ID, Docker access and, for the Magnus host's
+      # lifecycle steps, sudo, as on a prepared host.
+      - name: Operator account
+        run: |
+          set -euo pipefail
+          operator=$(getent passwd 1000 | cut -d: -f1 || true)
+          if [[ -z "$operator" ]]; then sudo groupadd -g 1000 hive-operator 2>/dev/null || true; sudo useradd -m -u 1000 -g 1000 -s /bin/bash hive-operator; operator=hive-operator; fi
+          sudo usermod -aG docker "$operator"
+          printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$operator" | sudo tee /etc/sudoers.d/hive-round-trip >/dev/null
+          sudo install -d -o 1000 -g 1000 -m 0750 /srv/hive-round-trip
+          sudo cp -a "$GITHUB_WORKSPACE" /srv/hive-round-trip/source
+          sudo chown -R 1000:1000 /srv/hive-round-trip/source
+          echo "OPERATOR=$operator" >> "$GITHUB_ENV"
       - name: Round trip
         env:
           FROM: ${{ needs.pair.outputs.from }}
           TO: ${{ needs.pair.outputs.to }}
           PROFILE: ${{ matrix.profile }}
-        run: bash scripts/suite/release-upgrade-roundtrip.sh --profile "$PROFILE" --from "$FROM" --to "$TO" --output "$RUNNER_TEMP/round-trip"
+        run: |
+          sudo -u "$OPERATOR" -H env PATH="$PATH" bash -c 'cd /srv/hive-round-trip/source && bash scripts/suite/release-upgrade-roundtrip.sh --profile "$1" --from "$2" --to "$3" --output /srv/hive-round-trip/run' _ "$PROFILE" "$FROM" "$TO"
       - name: Steps
         if: always()
         run: |
-          if [[ -f "$RUNNER_TEMP/round-trip/steps.log" ]]; then { echo '```'; cat "$RUNNER_TEMP/round-trip/steps.log"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"; fi
+          if sudo test -f /srv/hive-round-trip/run/steps.log; then { echo '```'; sudo cat /srv/hive-round-trip/run/steps.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"; fi
       - name: Command logs
         if: failure()
         run: |
-          for log in "$RUNNER_TEMP"/round-trip/*.log; do echo "::group::${log##*/}"; tail -n 200 "$log"; echo '::endgroup::'; done
+          for log in $(sudo find /srv/hive-round-trip/run -maxdepth 1 -name '*.log'); do echo "::group::${log##*/}"; sudo tail -n 200 "$log"; echo '::endgroup::'; done
