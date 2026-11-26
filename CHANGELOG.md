@@ -52,6 +52,14 @@ All notable changes to this project are documented in this file. The format is b
   when any fingerprint in it matched, then installed the whole file as the repository's
   `Signed-By` keyring, so an extra key in the file would have been trusted for packages installed
   as root. Existing keyrings are not changed; a refused download leaves nothing behind.
+- Publisher key rotation works. The release launcher refused every release whose
+  `trust/publisher.pub` differed from its own checkout's, so after a rotation neither a rollback
+  from a new checkout nor a newer release from an old checkout could launch. A rotated key now
+  ships with a statement in `trust/rotations/` signed by the key it retires. The launcher follows
+  these statements forward to a newer key, and trusts a retired key only through its own
+  checkout's history and only for releases before the retirement. `scripts/release/publisher-key-rotation.sh`
+  creates (offline) and checks the statements. No operator action is needed: the key has not
+  been rotated.
 
 ## [3.14.3] - 2026-11-25
 
