@@ -21,6 +21,11 @@ All notable changes to this project are documented in this file. The format is b
   CVE-2026-124709 in 3.5.9-r0. The new datastore profile `runtime-2026-11-pg1712-zstd-openssl`
   selects it with the PostgreSQL and Qdrant images of `runtime-2026-11-pg1712-zstd`, which remains
   selectable up to 3.14.3. Redis and its data formats are unchanged.
+- The Docker (`install-prerequisites.sh`) and NodeSource (Magnus host agent) apt signing keys must
+  now be exactly one primary key with the pinned fingerprint. The check accepted a downloaded file
+  when any fingerprint in it matched, then installed the whole file as the repository's
+  `Signed-By` keyring, so an extra key in the file would have been trusted for packages installed
+  as root. Existing keyrings are not changed; a refused download leaves nothing behind.
 
 ## [3.14.3] - 2026-11-25
 

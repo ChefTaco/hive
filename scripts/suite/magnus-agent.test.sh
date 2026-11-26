@@ -27,7 +27,7 @@ stub tailscale 'exit 1'
 stub dpkg 'echo amd64'
 stub apt-get 'if [[ "$*" == *nodejs* ]]; then echo v24.22.3 > "'"$temporary"'/node-version"; fi'
 stub curl 'while (($#)); do [[ "$1" == -o ]] && cp "'"$temporary"'/nodesource.asc" "$2"; shift; done'
-stub gpg 'printf "fpr:::::::::%s:\n" "$(cat "'"$temporary"'/fingerprint")"'
+stub gpg 'while read -r f; do printf "pub:-:4096:1:K:::::\nfpr:::::::::%s:\nsub:-:4096:1:S:::::\nfpr:::::::::%s:\n" "$f" "${SUB_FPR:-5555555555555555555555555555555555555555}"; done < "'"$temporary"'/fingerprint"'
 stub npm 'case "$1" in
   pack) spec=${@: -1}; v=${spec##*@}; name=magnus-agent; [[ "$spec" != @hivemagnus/ardent@* ]] || name=ardent
     cp "'"$temporary"'/fixtures/$name-$v.tgz" "$name-$v.tgz"; echo "$name-$v.tgz";;
@@ -108,6 +108,14 @@ printf 'KEY\n' > "$temporary/nodesource.asc"
 printf '0000000000000000000000000000000000000000\n' > "$temporary/fingerprint"
 if host magnus-agent-node '{}'; then fail 'Installed Node.js with a foreign key'; fi
 grep -q 'did not match fingerprint' "$temporary/err" || fail 'The key refusal is unclear'
+# The pinned key plus another key in the same file is refused: apt would trust both.
+printf '6F71F525282841EEDAF851B42F59B5F99B1BE0B4\n1111111111111111111111111111111111111111\n' > "$temporary/fingerprint"
+if host magnus-agent-node '{}'; then fail 'Installed Node.js from a keyring with an extra key'; fi
+grep -q 'exactly one key expected' "$temporary/err" || fail 'The extra-key refusal is unclear'
+# A foreign primary key whose subkey has the pinned fingerprint is refused too.
+printf '0000000000000000000000000000000000000000\n' > "$temporary/fingerprint"
+pinned=6F71F525282841EEDAF851B42F59B5F99B1BE0B4
+if SUB_FPR=$pinned host magnus-agent-node '{}'; then fail 'Accepted the pinned fingerprint as a subkey'; fi
 printf '6F71F525282841EEDAF851B42F59B5F99B1BE0B4\n' > "$temporary/fingerprint"
 # Another package manager holding apt's lists lock (unattended upgrades after a fresh boot) is
 # waited for, not reported as a failed Node.js installation. Every apt call goes through apt_get.

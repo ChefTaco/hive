@@ -237,8 +237,10 @@ if [[ "$add_repository" == true ]]; then
   key=$(mktemp)
   trap 'rm -f -- "$key"' EXIT
   curl -fsSL --proto '=https' --tlsv1.2 "https://download.docker.com/linux/$os_id/gpg" -o "$key"
-  fingerprints=$(gpg --show-keys --with-colons "$key" 2>/dev/null | awk -F: '$1=="fpr" {print $10}')
-  grep -qx "$DOCKER_KEY_FINGERPRINT" <<< "$fingerprints" || die "Docker's signing key did not match fingerprint $DOCKER_KEY_FINGERPRINT; the repository was not added"
+  # The file becomes the repository's Signed-By keyring: it must hold exactly one primary key,
+  # the pinned one, so no extra key in the download can sign packages installed as root.
+  fingerprints=$(gpg --show-keys --with-colons "$key" 2>/dev/null | awk -F: '$1=="pub" {primary=1; next} $1=="fpr" && primary {print $10; primary=0}')
+  [[ $fingerprints == "$DOCKER_KEY_FINGERPRINT" ]] || die "Docker's signing key did not match fingerprint $DOCKER_KEY_FINGERPRINT (exactly one key expected); the repository was not added"
   install -m 0644 "$key" "$APT_DIR/keyrings/docker.asc"
   printf 'Types: deb\nURIs: https://download.docker.com/linux/%s\nSuites: %s\nComponents: stable\nArchitectures: %s\nSigned-By: %s/keyrings/docker.asc\n' \
     "$os_id" "$os_codename" "$architecture" "$APT_DIR" > "$APT_DIR/sources.list.d/docker.sources"
