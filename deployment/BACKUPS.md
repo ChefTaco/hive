@@ -535,6 +535,54 @@ current controller, run `./hive.sh backups schedule disable` and remove `retenti
 the installation file, which they refuse; then roll back. A line left behind refuses every run,
 because the installation then runs another controller: remove it with `crontab -e`.
 
+### Daily backups
+
+From the release after 3.14.3, the daily prune can take an online backup first. Set it in the
+installation file:
+
+```json
+"retention": { "schedule": "03:40", "backup": { "keep": 7 } }
+```
+
+Each run then calls this controller's own `backup --archive scheduled-TIME-ID --yes` before it
+prunes, and logs both to the schedule's log. Backups named `scheduled-*` have their own count:
+retention keeps the newest `keep` (1 to 365, default 7) and anything a state file names, and
+removes older ones whatever their age; other backups without a rehearsal are kept, as before. A
+failed backup fails the run but still lets it prune, which never removes the newest scheduled
+backups. A scheduled backup is not rehearsed: rehearse it (`./hive.sh rehearse --archive ID`)
+before you rely on it for a restore. Controllers of 3.14.3 and earlier refuse `retention.backup`;
+remove it before running one, for example for a rollback.
+
+## Off-host copies
+
+An archive holds product secrets, keys and certificates, and a backup on the host it protects is
+lost with that host. From the release after 3.14.3:
+
+```bash
+./hive.sh backups export ARCHIVE --to /mnt/backup --encrypt age1...         # a local or mounted directory
+./hive.sh backups export ARCHIVE --to deploy@backup.example.com:/srv/hive  # over SSH
+./hive.sh backups import --from /mnt/backup/hive-backup-ID-ARCHIVE --identity ~/.config/hive/age.key
+```
+
+`export` checks each host's backup against its receipt and checksum, copies it from every host
+into a new owner-only directory `hive-backup-INSTALLATION-ARCHIVE` (one `HOST.tar`, or
+`HOST.tar.age` with `--encrypt`, per host) and writes `manifest.json` with each file's SHA-256.
+`--encrypt` takes an [age](https://age-encryption.org) recipient (`age1...`) or an SSH public key
+and needs `age` on the controller; without it the copy is not encrypted, and `export` says so.
+Over SSH the destination path is created with fixed commands and the files travel on standard
+input; nothing is overwritten. `backups list` shows what this machine exported.
+
+`import` takes an export directory on the controller (copy one made over SSH back first). It needs
+an export of this installation with exactly its hosts, checks every file against the manifest
+(decrypting with `--identity`) before it changes any host, and each host then checks every member
+(regular files and directories under the archive only), the receipt and the checksum under its
+controller lock before the backup appears in `backups/`. It never replaces an existing backup: when
+a host already holds the same verified archive, as after an import that stopped at a later host, it
+accepts that copy, so repeating the import completes every host.
+An imported backup has no rehearsal: run `./hive.sh rehearse --archive ARCHIVE` before
+`restore`. Retention treats it like any backup without a rehearsal and keeps it. Copies kept
+outside the installation, by `export` or otherwise, are never touched by retention.
+
 ## Disk
 
 The staged snapshot is the only full copy: the archive is compressed straight from it, and the

@@ -19,13 +19,14 @@ hive_retention_default_keep_days=14
 hive_retention_validate() {
   jq -e 'has("retention")' "$HIVE_CONFIG" >/dev/null || return 0
   jq -e '
-    .retention|type=="object" and (keys-["keep","keepDays","auto","schedule","multiHost"]|length==0) and
+    .retention|type=="object" and (keys-["keep","keepDays","auto","schedule","multiHost","backup"]|length==0) and
+    ((has("backup")|not) or (.backup|type=="object" and (keys-["keep"]|length==0) and ((.keep // 7)|type=="number" and floor==. and .>=1 and .<=365))) and
     ((.multiHost // false)|type=="boolean") and
     ((.keep // 5)|type=="number" and floor==. and .>=2 and .<=1000) and
     ((.keepDays // 14)|type=="number" and floor==. and .>=0 and .<=3650) and
     ((.auto // false)|type=="boolean") and
     ((has("schedule")|not) or (.schedule|type=="string" and test("^([01][0-9]|2[0-3]):[0-5][0-9]$")))
-  ' "$HIVE_CONFIG" >/dev/null || hive_die 'retention is {"keep":N,"keepDays":D,"auto":true|false,"schedule":"HH:MM"}: keep the newest N restorable backup and rehearsal pairs (2 to 1000, default 5) and everything newer than D days (0 to 3650, default 14); auto (default false) opts the installation into pruning after each successful upgrade; schedule (24-hour local time, for example "03:40") has install set up a daily prune; multiHost (default false) lets auto and schedule remove pairs on an installation with several hosts. See deployment/BACKUPS.md#retention'
+  ' "$HIVE_CONFIG" >/dev/null || hive_die 'retention is {"keep":N,"keepDays":D,"auto":true|false,"schedule":"HH:MM"}: keep the newest N restorable backup and rehearsal pairs (2 to 1000, default 5) and everything newer than D days (0 to 3650, default 14); auto (default false) opts the installation into pruning after each successful upgrade; schedule (24-hour local time, for example "03:40") has install set up a daily prune; multiHost (default false) lets auto and schedule remove pairs on an installation with several hosts; backup ({"keep":N}, 1 to 365, default 7) has the daily schedule take an online backup first and keep the newest N of them. See deployment/BACKUPS.md#retention'
 }
 
 # Automatic pair removal (retention.auto, the daily prune) on an installation with several hosts
@@ -231,8 +232,12 @@ hive_retention_print_removed() {
 # receipt names that controller.
 hive_retention_input() {
   jq -nc --argjson keep "$1" --argjson days "$2" --argjson full "${3:-1}" --arg controller "${HIVE_RETENTION_CONTROLLER:-}" --arg source "$( (hive_controller_digest) 2>/dev/null || true)" \
-    '{keep:$keep,keepDays:$days,keepFull:$full,controllerSourceSHA256:$source} + (if $controller!="" then {controller:$controller} else {} end)'
+    --argjson backupKeep "$(hive_retention_backup_keep)" \
+    '{keep:$keep,keepDays:$days,keepFull:$full,backupKeep:$backupKeep,controllerSourceSHA256:$source} + (if $controller!="" then {controller:$controller} else {} end)'
 }
+# The number of scheduled backups (backups/scheduled-*) retention keeps: retention.backup.keep,
+# 7 with retention.backup alone, and 0, keep them all, without retention.backup.
+hive_retention_backup_keep() { jq -r 'if .retention.backup then (.retention.backup.keep // 7) else 0 end' "$HIVE_CONFIG" 2>/dev/null || printf '0\n'; }
 
 # Releases the plan's restored copies on every host, each under its own lock. This never changes
 # what can be restored. Prints the hosts' results.
@@ -285,8 +290,11 @@ hive_retention_snapshot_configuration() {
 hive_backups_command() (
   local subcommand=${1:-list} host keep days full settings input plans total results removed copies copy_count copy_total status=0 options usage
   local configuration
-  usage='Usage: hive.sh backups list|prune [--keep N] [--keep-days D] [--keep-full N] [--apply] | backups schedule enable|disable|status [--at HH:MM]'
+  usage='Usage: hive.sh backups list|prune [--keep N] [--keep-days D] [--keep-full N] [--apply] | backups schedule enable|disable|status [--at HH:MM] | backups export ARCHIVE --to DESTINATION [--encrypt RECIPIENT] | backups import --from DIRECTORY [--identity FILE]'
   if [[ "$subcommand" == schedule ]]; then shift; hive_retention_schedule_command "$@"; return; fi
+  if [[ "$subcommand" == export ]]; then (($# <= 2)) || hive_die 'Use: backups export ARCHIVE --to DESTINATION'; hive_backups_export "${2:-}"; return; fi
+  if [[ "$subcommand" == import ]]; then (($# == 1)) || hive_die 'Use: backups import --from DIRECTORY'; hive_backups_import; return; fi
+  [[ -z "${HIVE_BACKUP_TO:-}${HIVE_BACKUP_ENCRYPT:-}${HIVE_BACKUP_FROM:-}${HIVE_BACKUP_IDENTITY:-}" ]] || hive_die '--to, --encrypt, --from and --identity apply only to backups export and import'
   [[ -z "${HIVE_RETENTION_AT:-}" ]] || hive_die '--at applies only to backups schedule enable'
   configuration=$(hive_retention_snapshot_configuration) || return 1
   trap 'rm -f -- "$configuration"' EXIT
@@ -317,6 +325,7 @@ hive_backups_command() (
     hive_retention_print "$plans" all
     printf 'The rules above remove %s entries, freeing %s: ./hive.sh backups prune shows them, and --apply removes them.\n' "$(jq '[.[].entries[]|select(.remove)]|length' <<< "$plans")" "$(hive_retention_size "$total")"
     if ((copy_count > 0)); then printf 'They also release %s restored copies, freeing %s; their backups stay restorable.\n' "$copy_count" "$(hive_retention_size "$copy_total")"; fi
+    if declare -F hive_backup_exports_print >/dev/null; then hive_backup_exports_print; fi
     return
   fi
   hive_retention_print "$plans" changes

@@ -213,6 +213,19 @@
           "type": "boolean",
           "default": false,
           "description": "On an installation with several hosts, let auto and schedule remove backup and rehearsal pairs (deployment/BACKUPS.md#pruning-on-several-hosts). backups prune --apply needs no opt-in. Requires the release after 3.14.3: older controllers refuse the key."
+        },
+        "backup": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Have the daily schedule take an online backup (backups/scheduled-*) before it prunes, and keep the newest keep of them (deployment/BACKUPS.md#daily-backups). Requires the release after 3.14.3: older controllers refuse the key.",
+          "properties": {
+            "keep": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 365,
+              "default": 7
+            }
+          }
         }
       }
     },

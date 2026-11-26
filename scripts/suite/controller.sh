@@ -62,7 +62,8 @@ hive_runtime_files() {
     scripts/suite/post-upgrade.sh scripts/suite/setup-checklist.sh \
     scripts/suite/retention.sh scripts/suite/retention-host.sh scripts/suite/retention-schedule.sh scripts/suite/rehearsal-copy-host.sh \
     scripts/suite/add-product.sh scripts/suite/add-product-host.sh \
-    scripts/suite/diagnostics.sh scripts/suite/diagnostics-host.sh
+    scripts/suite/diagnostics.sh scripts/suite/diagnostics-host.sh \
+    scripts/suite/backup-transfer.sh scripts/suite/backup-transfer-host.sh
 }
 hive_controller_digest() {
   local file
@@ -166,6 +167,10 @@ Usage: hive.sh [init|plan|install|status|doctor|logs|support-bundle|upgrade|post
   --since DURATION|TIME  logs and support-bundle: only log lines since 30m, 2h, 1d or an ISO date
   --tail N|all           logs and support-bundle: the last N lines of each log (default 200)
   --output FILE          support-bundle: where to write the bundle (default ./hive-support-ID-TIME.tar.gz)
+  --to DESTINATION       backups export: a directory, or USER@HOST:/PATH over SSH
+  --encrypt RECIPIENT    backups export: encrypt each host's file to an age recipient
+  --from DIRECTORY       backups import: an export directory on this machine
+  --identity FILE        backups import: the age identity of an encrypted export
   --help                 Show this help
 
 init prepares protected configuration for an explicitly fresh installation.
@@ -265,6 +270,11 @@ support-bundle [--since D] [--tail N|all] [--output FILE] writes an owner-only a
 report: status, doctor, each host's transaction and receipt phases, compose ps and log tails, with
 credentials, tokens and private keys redacted. Host names, paths and the origin are kept: review
 it before sharing. See deployment/README.md#diagnostics.
+backups export ARCHIVE --to DIRECTORY|USER@HOST:/PATH [--encrypt AGE_RECIPIENT] copies one verified
+backup of every host into a new owner-only directory with a SHA-256 manifest; backups import --from
+DIRECTORY [--identity FILE] puts it back on every host, which checks it first. With "retention":
+{"backup":{"keep":7}} the daily schedule takes an online backup (backups/scheduled-*) before it
+prunes, and keeps the newest 7. See deployment/BACKUPS.md#off-host-copies.
 setup [list] | setup done ID | setup skip ID shows and settles the setup checklist: the steps after an
 install or upgrade that still need a person, recorded in the Hive Registry (1.3.0 and later) and shown
 in HiveXUI. status lists the pending ones. See deployment/FULL.md#setup-checklist.
@@ -805,6 +815,7 @@ hive_host() {
     --argjson retention "${HIVE_RETENTION_INPUT:-null}" \
     --argjson addProduct "${HIVE_ADD_INPUT:-null}" \
     --argjson diagnostics "${HIVE_DIAGNOSTICS_INPUT:-null}" \
+    --argjson backupTransfer "${HIVE_BACKUP_TRANSFER_INPUT:-null}" \
     --arg abortStep "${HIVE_ABORT_STEP:-}" \
     --arg nativeBackupTool "${HIVE_NATIVE_BACKUP_TOOL:-}" \
     --argjson nativeRecovery "${HIVE_NATIVE_RECOVERY_INPUT:-null}" \
@@ -831,25 +842,27 @@ IFS= read -r hive_program
 hive_program=$(printf "%s" "$hive_program" | base64 -d)
 source <(printf "%s\n" "$hive_program")'
   encoded=$(printf '%s' "$script" | base64 -w0)
+  # HIVE_HOST_STDIN_FILE: bytes the host program reads after its JSON input, such as an archive.
+  hive_host_frame() { printf '%s\n%s\n' "$encoded" "$payload"; [[ -z "${HIVE_HOST_STDIN_FILE:-}" ]] || cat -- "$HIVE_HOST_STDIN_FILE"; }
   if [[ "$target" == local && "${HIVE_HOST_LOCAL_SUDO:-false}" == true ]]; then
     # Root on this host, as the sudo password prompt allows; the payload follows on stdin.
     if [[ -n "$sudo_file" ]]; then
-      { hive_sudo_password "$sudo_file"; printf '%s\n%s\n' "$encoded" "$payload"; } | sudo -k -S -p '' bash -c "$launcher"
+      { hive_sudo_password "$sudo_file"; hive_host_frame; } | sudo -k -S -p '' bash -c "$launcher"
     else
       sudo -v || hive_die 'This step needs root through sudo; use --sudo-password-file for unattended agent commands'
-      printf '%s\n%s\n' "$encoded" "$payload" | sudo -n bash -c "$launcher"
+      hive_host_frame | sudo -n bash -c "$launcher"
     fi
   elif [[ "$target" == local ]]; then
-    printf '%s\n%s\n' "$encoded" "$payload" | bash -c "$launcher"
+    hive_host_frame | bash -c "$launcher"
   else
     # The remote command is fixed; the program and JSON travel only on stdin.
     if [[ -n "$sudo_file" ]]; then
       # sudo reads exactly its password line from standard input; the payload follows it.
-      { hive_sudo_password "$sudo_file"; printf '%s\n%s\n' "$encoded" "$payload"; } | ssh "${ssh_options[@]}" -- "$target" "sudo -k -S -p '' bash -c '$launcher'"
+      { hive_sudo_password "$sudo_file"; hive_host_frame; } | ssh "${ssh_options[@]}" -- "$target" "sudo -k -S -p '' bash -c '$launcher'"
     elif [[ "${HIVE_HOST_REMOTE_SUDO:-false}" == true ]]; then
-      printf '%s\n%s\n' "$encoded" "$payload" | ssh "${ssh_options[@]}" -- "$target" "sudo -n bash -c '$launcher'"
+      hive_host_frame | ssh "${ssh_options[@]}" -- "$target" "sudo -n bash -c '$launcher'"
     else
-      printf '%s\n%s\n' "$encoded" "$payload" | ssh "${ssh_options[@]}" -- "$target" "bash -c '$launcher'"
+      hive_host_frame | ssh "${ssh_options[@]}" -- "$target" "bash -c '$launcher'"
     fi
   fi
 }
@@ -1054,6 +1067,7 @@ hive_main() {
   HIVE_RELEASE_SUMMARY='' HIVE_REGISTRY_FILE='' HIVE_REGISTRY_ORIGINAL_CONFIG='' HIVE_REGISTRY_TEMPORARY='' HIVE_OPERATION='' HIVE_CHECKLIST=''
   HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS='' HIVE_AGENT_ENROLLMENT='' HIVE_ADD_TEMPORARY='' HIVE_ADD_INPUT=''
   HIVE_JSON=false HIVE_LOGS_SINCE='' HIVE_LOGS_TAIL='' HIVE_BUNDLE_OUTPUT='' HIVE_DIAGNOSTICS_INPUT=''
+  HIVE_BACKUP_TO='' HIVE_BACKUP_ENCRYPT='' HIVE_BACKUP_FROM='' HIVE_BACKUP_IDENTITY='' HIVE_BACKUP_TRANSFER_INPUT=''
   local -a registry_arguments=() trust_arguments=()
   if (($#)) && [[ "$1" != --* ]]; then command=$1; shift; fi
   if [[ "$command" == entry-point ]]; then hive_entry_point_command "$@"; return; fi
@@ -1074,6 +1088,11 @@ hive_main() {
         [[ "$command" == backups ]] || hive_die '--at applies only to backups schedule enable'
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
         HIVE_RETENTION_AT=$2; shift 2;;
+      --to|--encrypt|--from|--identity)
+        [[ "$command" == backups ]] || hive_die "$1 applies only to backups export and import"
+        (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
+        case $1 in --to) HIVE_BACKUP_TO=$2;; --encrypt) HIVE_BACKUP_ENCRYPT=$2;; --from) HIVE_BACKUP_FROM=$2;; --identity) HIVE_BACKUP_IDENTITY=$2;; esac
+        shift 2;;
       --apply) [[ "$command" == backups ]] || hive_die '--apply applies only to backups prune'; HIVE_RETENTION_APPLY=true; shift;;
       --json) [[ "$command" == status || "$command" == doctor ]] || hive_die '--json applies only to status and doctor'; HIVE_JSON=true; shift;;
       --since|--tail)
