@@ -40,6 +40,13 @@ All notable changes to this project are documented in this file. The format is b
   RFC 9110 requires; a standards-compliant client no longer gets `invalid_credential`.
 - The ingress round trip waits for the console upstream before its first assertion, instead of
   failing intermittently with "Service unavailable" while the HiveXUI container starts.
+- A stable `hive` command. Every successful install, upgrade, rollback and adopt records the
+  controller that ran it in `~/.local/state/hive/ID/controller.json`, and
+  `hive.sh entry-point install` installs `~/.local/bin/hive`, which runs that controller (after
+  checking its source digest) with the arguments it was given. Operators no longer need to `cd`
+  into the release checkout for lifecycle commands. An installation records its controller from
+  its next upgrade with this release on. See
+  [the hive command](deployment/README.md#the-hive-command).
 
 ### Changed
 

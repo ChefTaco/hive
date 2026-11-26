@@ -43,7 +43,7 @@ hive_cleanup() {
 # Keep this a literal printf list: the launcher parses it without executing downloaded code.
 hive_runtime_files() {
   printf '%s\n' LICENSE hive.sh deployment/Caddyfile \
-    scripts/suite/controller.sh scripts/suite/host-request.jq scripts/suite/release-launcher.sh scripts/suite/lifecycle.sh scripts/suite/host-runtime.sh \
+    scripts/suite/controller.sh scripts/suite/host-request.jq scripts/suite/entry-point.sh scripts/suite/hive-entry.sh scripts/suite/release-launcher.sh scripts/suite/lifecycle.sh scripts/suite/host-runtime.sh \
     scripts/suite/guided-setup.sh scripts/suite/console-certificate-service.sh scripts/install-prerequisites.sh scripts/console-certificate.sh scripts/prepare-terminal.sh \
     scripts/suite/skills-integration.sh scripts/suite/skills-integration-host.sh scripts/suite/skills-preparation-host.sh \
     scripts/suite/adapters.sh scripts/suite/native-initialization-host.sh scripts/suite/adapters-host.sh scripts/suite/inference-registration.sh \
@@ -130,7 +130,7 @@ hive_setup_hosts_ready() {
 
 hive_usage() {
   cat <<'EOF'
-Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access]
+Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|entry-point]
   --config FILE          Installation JSON. Commands other than install, init and plan find
                          it themselves when there is exactly one under ~/.config/hive (or
                          $XDG_CONFIG_HOME/hive), or when HIVE_INSTALLATION names it
@@ -1005,6 +1005,7 @@ hive_main() {
   HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS='' HIVE_AGENT_ENROLLMENT='' HIVE_ADD_TEMPORARY='' HIVE_ADD_INPUT=''
   local -a registry_arguments=() trust_arguments=()
   if (($#)) && [[ "$1" != --* ]]; then command=$1; shift; fi
+  if [[ "$command" == entry-point ]]; then hive_entry_point_command "$@"; return; fi
   while (($#)); do
     case $1 in
       --help|-h) hive_usage; return;;

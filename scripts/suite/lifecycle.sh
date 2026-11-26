@@ -201,6 +201,7 @@ hive_lifecycle() {
       if [[ "$operation" == upgrade ]] && declare -F hive_retention_after_upgrade >/dev/null; then hive_retention_after_upgrade; fi
       # The daily prune follows the controller that now runs the installation.
       if declare -F hive_retention_schedule_after >/dev/null; then hive_retention_schedule_after "$operation"; fi
+      if declare -F hive_entry_point_record >/dev/null; then hive_entry_point_record "$operation"; fi
       ;;
     backup)
       HIVE_ARCHIVE=${HIVE_ARCHIVE:-"backup-$(date -u +%Y%m%d%H%M%S)-$(openssl rand -hex 4)"}
@@ -272,6 +273,7 @@ hive_lifecycle() {
       hive_registry_complete || hive_registry_failed "$operation"
       hive_all complete || hive_die 'Adoption receipt could not be finalized'
       if declare -F hive_retention_schedule_after >/dev/null; then hive_retention_schedule_after "$operation"; fi
+      if declare -F hive_entry_point_record >/dev/null; then hive_entry_point_record "$operation"; fi
       ;;
   esac
 }

@@ -282,6 +282,17 @@ HSTS names the console host only, without `includeSubDomains`; Oathweave already
 host. Requests to the static console (everything outside `/api`, `/v1`, `/memory` and the other
 product routes) may carry at most 16 KB of body and are otherwise answered with 413.
 
+## The hive command
+
+Lifecycle commands must run from the controller of the installed release. `./hive.sh
+entry-point install` puts a `hive` command in `~/.local/bin` (or the directory you name) that does
+this for you: every successful `install`, `upgrade`, `rollback` and `adopt` records the controller
+that ran it, owner-only, in `~/.local/state/hive/ID/controller.json`, and `hive ARGS...` runs that
+controller with the same arguments after checking that its source still has the recorded digest.
+The installation is the one `--config` names, `HIVE_INSTALLATION`, or the only one recorded.
+`./hive.sh entry-point status` lists the records. An upgrade with `hive upgrade --release X.Y.Z`
+still selects the new release's controller through the launcher, and records it when it succeeds.
+
 ## When a command stops: transactions and recovery
 
 `install`, `upgrade`, `rollback`, `backup`, `rehearse`, `restore` and `adopt` each open a
