@@ -10,7 +10,7 @@ All notable changes to this project are documented in this file. The format is b
 
 Product update with the controller changes below. Pins Oathweave 2.6.0, Emberpath 2.9.0,
 HiveMem 1.12.0, HiveSkills 1.11.1, HiveXUI 0.13.0, Cindertrace 0.10.0, ChatterMost 0.10.0,
-Emberfold 0.5.0, Ardent Project Studio 0.7.0, Embermend 0.6.1 and Magnus 3.4.0 (server, fleet
+Emberfold 0.5.0, Ardent Project Studio 0.7.0, Embermend 0.6.1 and Magnus 3.4.1 (server, fleet
 gateway and host agent; Ardent 3.5.1 for the agents), with the datastore profile
 `runtime-2026-11-pg1712-zstd-openssl` (`hive-redis` 8.2.10-3) and the Hive Registry 1.6.0 (image
 2.0.14). The ingress image is that of 3.14.3. Every upgrade to 3.15.0 needs `--allow-migrations` (Oathweave's and
@@ -49,7 +49,7 @@ deleting old posts in channels that have a retention limit.
   order. No database migration.
 - **Ardent Project Studio 0.7.0** (from 0.5.1): project membership and purge; migrations 11 and 12
   run on its first start.
-- **HiveXUI 0.13.0**, **Emberfold 0.5.0** and **Magnus 3.4.0**: see UPGRADING.
+- **HiveXUI 0.13.0**, **Emberfold 0.5.0** and **Magnus 3.4.1**: see UPGRADING.
 
 ### Security
 

@@ -60,8 +60,8 @@
       ]
     },
     "magnus": {
-      "image": "ghcr.io/cheftaco/magnus-server:3.3.6",
-      "version": "3.3.6",
+      "image": "ghcr.io/cheftaco/magnus-server:3.4.1",
+      "version": "3.4.1",
       "platforms": [
         "linux/amd64",
         "linux/arm64"
@@ -69,8 +69,8 @@
       "embermendProtocol": 1
     },
     "magnus-gateway": {
-      "image": "ghcr.io/cheftaco/magnus-fleet-gateway:3.3.6",
-      "version": "3.3.6",
+      "image": "ghcr.io/cheftaco/magnus-fleet-gateway:3.4.1",
+      "version": "3.4.1",
       "platforms": [
         "linux/amd64",
         "linux/arm64"
@@ -127,8 +127,8 @@
   },
   "magnusAgent": {
     "name": "@hivemagnus/magnus-agent",
-    "version": "3.3.6",
-    "integrity": "sha512-bqIRq7tPkNgNh0XSbg0IeUq1lfxYln8asNuiubooBUevMAJmEQEKdlwKsODnfPOsbpV/BsuMuhgYp0nQcVRL5g=="
+    "version": "3.4.1",
+    "integrity": "sha512-2Pk7yaI/JLknlgNhfR3rDVb0WhlFd+mMxaF+KF9eez4rt35jg4d9toHewMjdqn6I/0S6IVuWh+Uwpqwm8XJQWA=="
   },
   "datastoreProfile": "runtime-2026-11-pg1712-zstd-openssl",
   "storageRecovery": "embermend-postgres-runtime2-unversioned",

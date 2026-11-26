@@ -184,7 +184,7 @@ rollback keeps the renamed data, which older HiveMem versions read, and the re-l
 
 3.15.0 pins Oathweave 2.6.0, Emberpath 2.9.0, HiveMem 1.12.0, HiveSkills 1.11.1, HiveXUI 0.13.0,
 Cindertrace 0.10.0, ChatterMost 0.10.0, Emberfold 0.5.0, Ardent Project Studio 0.7.0,
-Embermend 0.6.1, Magnus 3.4.0 (server, fleet gateway and host agent, which stages Ardent 3.5.1),
+Embermend 0.6.1, Magnus 3.4.1 (server, fleet gateway and host agent, which stages Ardent 3.5.1),
 the Hive Registry 1.6.0 (image 2.0.14, which advertises Cindertrace's `audit.v1` export), and
 selects the datastore profile `runtime-2026-11-pg1712-zstd-openssl`. The ingress image and the
 storage recovery profile are those of 3.14.3. The controller changes; the
@@ -202,7 +202,7 @@ run `plan`.
 - HiveSkills 1.10.0 adds `managed-format-4` and `-5` (two additive tables); the suite declares
   `hiveskills-managed-format-5`, which its `migrate` reaches from `managed-format-3` in one run.
 - On a full installation, Cindertrace 0.10.0 (`source_poll_stats`), Embermend 0.5.0
-  (`list_paging`) and Magnus 3.4.0 (two fast migrations) each apply additive migrations through
+  (`list_paging`) and Magnus 3.4.1 (two fast migrations) each apply additive migrations through
   their signed initialization, verified on the restored copy first.
 - Ardent Project Studio 0.7.0 applies its one-way migrations 11 (`file_deletion`) and 12
   (`project_membership_purge`) itself when it first starts, which the rehearsal exercises on the
@@ -349,14 +349,14 @@ loopback; the suite configures none.
 - The sign-in form has no prefilled username.
 - Do not cache `/version.json` at a proxy in front of the console.
 
-**Magnus 3.4.0, its host agent and Ardent 3.5.1.**
+**Magnus 3.4.1, its host agent and Ardent 3.5.1.**
 
-- Upgrade the host agents before the server. A 3.4.0 server refuses file pushes, role applications
+- Upgrade the host agents before the server. A 3.4.1 server refuses file pushes, role applications
   and library skill deploys to an older agent with 409 `AGENT_FILE_WRITE_UNSUPPORTED`. On an
   installation whose host agent the suite installed, run `./hive.sh magnus-agent install --release
   3.15.0` before the upgrade, or `./hive.sh post-upgrade --yes` straight after it. Update other
   fleet agents from Magnus.
-- After the agents run 3.4.0, re-run `sudo magnus-agent install-service` on each node for the
+- After the agents run 3.4.1, re-run `sudo magnus-agent install-service` on each node for the
   tighter systemd unit.
 - Writes to system paths need the ADMIN role, `/dev` is refused, and paths must be absolute.
 - Agent command `args` are literal arguments.
@@ -370,7 +370,7 @@ loopback; the suite configures none.
   start: switch it to HTTPS first. A suite-managed Magnus trusts Oathweave through
   `OATHWEAVE_ISSUER` and is unaffected.
 - Ardent profiles keep their version until you update them in Magnus > Ardent, after the node
-  agents run 3.4.0: Ardent 3.4.0 and later accept the management token only with the `Bearer`
+  agents run 3.4.1: Ardent 3.4.0 and later accept the management token only with the `Bearer`
   scheme. Ardent 3.4.0 applies `execution.max_parallel_tasks` above 4; set 4 to keep the previous
   concurrency.
 
