@@ -24,6 +24,14 @@ holds its transaction for recovery, as described in
 delete transaction or runtime receipts to force another attempt. See also
 [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
 
+## Daily backups and off-host copies (next release)
+
+Nothing changes until you opt in. `"retention": {"backup": {"keep": 7}}` has the daily prune take
+an online backup first; `backups export` and `backups import` copy backups off the host and back.
+Controllers of 3.14.3 and earlier refuse `retention.backup`: remove it before running one, for
+example for a rollback. See [daily backups](deployment/BACKUPS.md#daily-backups) and
+[off-host copies](deployment/BACKUPS.md#off-host-copies).
+
 ## Backup pruning on several hosts (next release)
 
 The next release's controller removes old backup and rehearsal pairs on installations with

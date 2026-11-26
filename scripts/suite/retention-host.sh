@@ -36,7 +36,10 @@ identity=$(jq -er .uuid "$directory/installation.json")
 keep=$(jq -er '.retention.keep' <<< "$input")
 keep_days=$(jq -er '.retention.keepDays' <<< "$input")
 keep_full=$(jq -r '.retention.keepFull // 1' <<< "$input")
-[[ "$keep" =~ ^[0-9]+$ && "$keep" -ge 2 && "$keep_days" =~ ^[0-9]+$ && "$keep_full" =~ ^[0-9]+$ && "$keep_full" -ge 1 ]] || die 'Invalid retention settings'
+# The newest scheduled backups (backups/scheduled-*, which the daily schedule takes) to keep; 0
+# keeps every one, as every other backup without a rehearsal.
+backup_keep=$(jq -r '.retention.backupKeep // 0' <<< "$input")
+[[ "$keep" =~ ^[0-9]+$ && "$keep" -ge 2 && "$keep_days" =~ ^[0-9]+$ && "$keep_full" =~ ^[0-9]+$ && "$keep_full" -ge 1 && "$backup_keep" =~ ^[0-9]+$ ]] || die 'Invalid retention settings'
 declare -F hive_rehearsal_copy_plan >/dev/null || die 'Rehearsal copy definitions are missing'
 name_pattern='^[a-zA-Z0-9][a-zA-Z0-9.-]{0,95}$'
 
@@ -128,7 +131,7 @@ inventory() {
 # Why each entry stays, or none when the rules let it go.
 decide() {
   local now=$1
-  jq -sc --argjson keep "$keep" --argjson days "$keep_days" --argjson now "$now" --arg current "$current_plan" \
+  jq -sc --argjson keep "$keep" --argjson days "$keep_days" --argjson backupKeep "$backup_keep" --argjson now "$now" --arg current "$current_plan" \
     --rawfile references "$references" --rawfile plans "$plans" '
     ($references|split("\n")|map(select(length>0)|split("\t")|{file:.[0],value:(.[1:]|join("\t"))})) as $refs |
     ($plans|split("\n")|map(select(length>0)|split("\t")|{file:.[0],value:.[1]})) as $plans |
@@ -136,16 +139,21 @@ decide() {
       or ($e.backupSHA256!="" and .value==$e.backupSHA256) or ($e.rehearsalArchiveSHA256!="" and .value==$e.rehearsalArchiveSHA256)) | .file] | unique;
     def planned($e): if $e.candidatePlan=="" then [] else [$plans[] | select(.value==$e.candidatePlan) | .file] | unique end;
     (map(select(.kind=="restorable"))|sort_by(-.createdAt, .name)|map(.name)) as $restorable |
-    map(. as $e | ($restorable|index($e.name)) as $rank |
+    # Scheduled backups have their own count, when one is configured.
+    def scheduled: .kind=="backup-only" and (.name|startswith("scheduled-")) and $backupKeep>0;
+    (map(select(scheduled))|sort_by(-.createdAt, .name)|map(.name)) as $scheduled |
+    map(. as $e | ($restorable|index($e.name)) as $rank | ($scheduled|index($e.name)) as $daily |
+      .scheduled = ($e|scheduled) |
       .reasons = ([
-        (if .kind=="backup-only" then "not rehearsed: retention keeps backups that have no rehearsal" else empty end),
+        (if .kind=="backup-only" and (.scheduled|not) then "not rehearsed: retention keeps backups that have no rehearsal" else empty end),
+        (if $daily!=null and $daily<$backupKeep then "one of the newest \($backupKeep) scheduled backups" else empty end),
         (if .kind=="incomplete" then "rehearsal has no result: review it" else empty end),
         (if .kind=="unrecognised" then "not an archive this controller wrote: review it" else empty end),
         (if $rank==0 then "newest restorable pair" elif $rank!=null and $rank<$keep then "one of the newest \($keep) restorable pairs" else empty end),
         (if $current!="" and .candidatePlan==$current then "the upgrade archive of the installed release (receipt.json)" else empty end),
         (planned($e)[] | select((.=="receipt.json" or .=="transaction.json") and $e.candidatePlan==$current|not) | "its plan is named by \(.)"),
         (named($e)[] | "named by \(.)"),
-        (if .kind!="unrecognised" and ($now - .createdAt) < ($days*86400) then "newer than \($days) days" else empty end)
+        (if .kind!="unrecognised" and (.scheduled|not) and ($now - .createdAt) < ($days*86400) then "newer than \($days) days" else empty end)
       ]))'
 }
 
@@ -159,7 +167,7 @@ plan_entries() {
       entries=$(jq -c --arg name "$name" 'map(if .name==$name then .reasons+=["rehearsal containers still exist: the next upgrade releases them"] else . end)' <<< "$entries")
     fi
   done < <(jq -r '.[]|select((.reasons|length)==0 and (.kind|IN("restorable","failed","mismatched","orphan-rehearsal","orphan-history")))|.name' <<< "$entries")
-  entries=$(jq -c 'map(.remove=((.reasons|length)==0 and (.kind|IN("restorable","failed","mismatched","orphan-rehearsal","orphan-history"))))|sort_by(.createdAt,.name)' <<< "$entries")
+  entries=$(jq -c 'map(.remove=((.reasons|length)==0 and ((.kind|IN("restorable","failed","mismatched","orphan-rehearsal","orphan-history")) or (.scheduled // false))))|sort_by(.createdAt,.name)' <<< "$entries")
   # Restored copies: releasing one never changes what is restorable, so it does not depend on the
   # rules above. The controller releases copies only of entries that it does not remove.
   jq -c --argjson copies "$(hive_rehearsal_copy_plan "$keep_full" | jq -sc .)" '
