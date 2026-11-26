@@ -640,7 +640,7 @@ newer one. It then:
 
 ### Adding ChatterMost
 
-From the release after 3.14.3, `./hive.sh add chattermost` follows the same five steps for
+From 3.15.0, `./hive.sh add chattermost` follows the same five steps for
 ChatterMost and its private PostgreSQL (`chattermost-postgres`): its secrets, internal certificate,
 `config/chattermost.env` (and the `runtime.env` and PostgreSQL password files fresh setup writes),
 the operator as ChatterMost's administrator (`ADMIN_USERNAME`, `ADMIN_EMAIL`, a generated

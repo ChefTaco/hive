@@ -19,6 +19,16 @@ if [[ ! -e "$directory" ]]; then
   [[ "$action" != remove-component ]] || die "There is no installation directory $directory on this host"
   jq -nc --arg host "$host" '{host:$host,absent:true}'; exit 0
 fi
+# An empty directory is what an interrupted purge leaves when its last step, removing the
+# directory itself, failed: nothing is deployed there, and a repeated purge removes it.
+if [[ "$action" != remove-component && -d "$directory" && -z $(find "$directory" -mindepth 1 -print -quit) ]]; then
+  if [[ "$action" == uninstall-purge ]]; then
+    [[ $(jq -r '.uninstall.confirmed // ""' <<< "$input") == "$installation" ]] || die 'The purge was not confirmed with the installation name; nothing was deleted'
+    rmdir -- "$directory" || die "$directory could not be deleted; review it"
+    jq -nc --arg host "$host" '{host:$host,purged:true}'
+  else jq -nc --arg host "$host" '{host:$host,absent:true}'; fi
+  exit 0
+fi
 [[ -f "$directory/installation.json" && ! -L "$directory/installation.json" ]] || die "$directory holds no installation; nothing was changed"
 jq -e --arg id "$installation" --arg host "$host" '.installation==$id and .host==$host' "$directory/installation.json" >/dev/null || die "$directory belongs to another installation or host; nothing was changed"
 [[ ! -L "$directory/controller.lock" ]] || die 'Unsafe controller lock'

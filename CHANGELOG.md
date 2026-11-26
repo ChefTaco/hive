@@ -6,6 +6,95 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [3.15.0] - 2026-11-26
+
+Product update with the controller changes below. Pins Oathweave 2.6.0, Emberpath 2.9.0,
+HiveMem 1.12.0, HiveSkills 1.11.1, HiveXUI 0.13.0, Cindertrace 0.10.0, ChatterMost 0.10.0,
+Emberfold 0.5.0, Ardent Project Studio 0.7.0, Embermend 0.6.1 and Magnus 3.4.1 (server, fleet
+gateway and host agent; Ardent 3.5.1 for the agents), with the datastore profile
+`runtime-2026-11-pg1712-zstd-openssl` (`hive-redis` 8.2.10-3) and the Hive Registry 1.6.0 (image
+2.0.14). The ingress image is that of 3.14.3. Every upgrade to 3.15.0 needs `--allow-migrations` (Oathweave's and
+HiveSkills' data formats, and the Cindertrace and Embermend schema migrations on full
+installations), and no earlier release reads the migrated Oathweave store, so the way back is the
+pre-upgrade backup. Read `UPGRADING.md`, "Suite 3.15.0", first: ChatterMost 0.10.0 starts
+deleting old posts in channels that have a retention limit.
+
+### Products
+
+- **Oathweave 2.6.0** (from 2.3.3): five SQLite migrations, one of which drops the legacy
+  encrypted password column. The suite declares the new format `oathweave-managed-format-2`, so the
+  upgrade runs Oathweave's own `migrate` on the rehearsal copy and then on the stopped store.
+  Group roles reach tokens; confidential clients authenticate on refresh; refresh stops at the
+  session's hard expiry and a replayed refresh token revokes the session; TOTP codes are
+  single-use; `preferred_username` and `name` need the `profile` scope; deactivating a user or
+  signing out revokes their sessions and refresh tokens, published on a `session.revoked` event
+  feed.
+- **HiveSkills 1.11.1** (from 1.9.1): data format `hiveskills-managed-format-5` (two additive
+  tables), applied by its `migrate` in one step; trusted-proxy sign-in throttling, per-route body
+  limits and signed releases.
+- **Emberpath 2.9.0** (from 2.6.0): no data format change. Anthropic streaming and tools,
+  `POST /api/pull` needs `ollama:manage`, Oathweave sign-in answers `MFA_REQUIRED`, idle provider
+  timeouts, upstream header allowlist, circuit breakers, and HTTPS-only Oathweave token URLs off
+  loopback.
+- **HiveMem 1.12.0** (from 1.9.1): no data format change. `Idempotency-Key` on POST routes, the
+  `events.v1` feed, a search rate limit, clock tolerance for Oathweave tokens and `release` in
+  `/v1/health` reporting the package version.
+- **Cindertrace 0.10.0** (from 0.8.2): one additive migration (`source_poll_stats`), run by its
+  signed initialization; per-client sign-in throttling behind a trusted proxy, optional TOTP and
+  the `audit.v1` export.
+- **Embermend 0.6.1** (from 0.3.4): one additive migration (`list_paging`); work stops when its
+  operator's grant is removed or narrowed. The default grants mode is unchanged.
+- **ChatterMost 0.10.0** (from 0.7.2): channel retention limits are enforced (system admins only),
+  deleted attachments and old orphan uploads are removed, scrypt password hashing, newest-first post
+  order. No database migration.
+- **Ardent Project Studio 0.7.0** (from 0.5.1): project membership and purge; migrations 11 and 12
+  run on its first start.
+- **HiveXUI 0.13.0**, **Emberfold 0.5.0** and **Magnus 3.4.1**: see UPGRADING.
+
+### Security
+
+- **Cindertrace throttles sign-ins per client behind the ingress.** Cindertrace reads the client
+  address from `X-Forwarded-For` only from `CINDERTRACE_TRUSTED_PROXIES` (default `loopback`), so
+  behind the ingress every browser shared one sign-in and rate-limit bucket. When the ingress runs
+  on Cindertrace's host and Cindertrace has no published endpoint, the controller sets
+  `CINDERTRACE_TRUSTED_PROXIES=ingress`, which Cindertrace resolves to the ingress container alone.
+- **The release withdraws 3.2.1 and 3.12.8** (tagged, never published; the launcher refuses them)
+  and warns about 3.14.0 and 3.14.1 (their Magnus fails agent-definition installs).
+- The repository privacy checks (`scripts/check-private-data.sh` and `scripts/scan-secrets.sh`) now report a finding as `path:line: rule` and never print the matching text or the line around it, so a failing check cannot copy a private term or a credential into a public CI log. A path that itself contains a private term is shown as `(path redacted)`. Exit codes are unchanged, and `scripts/privacy-output.test.sh` (run in CI) plants fake values and checks they stay out of the output. Repository tooling only; nothing to do when upgrading.
+- The ingress sets `Strict-Transport-Security`, `X-Content-Type-Options: nosniff` and
+  `Referrer-Policy` on every console-origin response that has none of its own, so product APIs no
+  longer depend on each product for them, and limits request bodies to the static console to 16 KB
+  (413 beyond). The Caddyfile is a controller runtime file: installations get this with the next
+  release's upgrade. See [response security headers](deployment/README.md#response-security-headers).
+- Every third-party GitHub Action is pinned by commit SHA (with its version in a comment),
+  including the image-publishing and release jobs that hold `packages: write`, `id-token: write`
+  or `contents: write`. Dependabot's github-actions group keeps the pins current, and new
+  Dependabot `docker` updates cover the digest-pinned Dockerfile bases (ingress, Node.js runtime
+  and Hive Registry builder).
+- A daily *Published image re-scan* workflow scans every image the newest published release pins
+  with a fresh Trivy database and opens or updates an issue on HIGH/CRITICAL findings. The two
+  Qdrant Trivy exceptions now expire on 2027-03-01, so they are re-reviewed.
+- The release-publish job refuses a tag whose commit is not on `main` and a release whose
+  `CHANGELOG.md` section is empty, and leaves out the `chattermost-migrator` row for a release
+  without ChatterMost instead of printing `null`.
+- `hive-redis` 8.2.10-3 installs OpenSSL 3.5.9-r2 (`libssl3`, `libcrypto3`), which fixes
+  CVE-2026-124709 in 3.5.9-r0. The new datastore profile `runtime-2026-11-pg1712-zstd-openssl`
+  selects it with the PostgreSQL and Qdrant images of `runtime-2026-11-pg1712-zstd`, which remains
+  selectable up to 3.14.3. Redis and its data formats are unchanged.
+- The Docker (`install-prerequisites.sh`) and NodeSource (Magnus host agent) apt signing keys must
+  now be exactly one primary key with the pinned fingerprint. The check accepted a downloaded file
+  when any fingerprint in it matched, then installed the whole file as the repository's
+  `Signed-By` keyring, so an extra key in the file would have been trusted for packages installed
+  as root. Existing keyrings are not changed; a refused download leaves nothing behind.
+- Publisher key rotation works. The release launcher refused every release whose
+  `trust/publisher.pub` differed from its own checkout's, so after a rotation neither a rollback
+  from a new checkout nor a newer release from an old checkout could launch. A rotated key now
+  ships with a statement in `trust/rotations/` signed by the key it retires. The launcher follows
+  these statements forward to a newer key, and trusts a retired key only through its own
+  checkout's history and only for releases before the retirement. `scripts/release/publisher-key-rotation.sh`
+  creates (offline) and checks the statements. No operator action is needed: the key has not
+  been rotated.
+
 ### Added
 
 - Hive Registry 1.6.0 (image `hive-registry` 2.0.14) carries the Registry changes listed below to
@@ -67,6 +156,20 @@ All notable changes to this project are documented in this file. The format is b
   as UPGRADING describes. Older images ignore both.
 
 ### Fixed
+
+- The upgrade round trip (`release-upgrade-roundtrip.sh`) skips its rollback step when the older
+  release cannot read a storage format of the newer one, as its description said; it ran the
+  rollback anyway, which the host refuses, so every round trip into 3.15.0 would have failed.
+  `scripts/release/rollback-crossing.sh` decides.
+- A product's own storage migration runs with the private datastores it requires started, in the
+  rehearsal and on the live store, and stopped again afterwards. Oathweave 2.5.0 and later reach
+  their Redis from `migrate`, which failed with the datastores stopped, so the first upgrade with an
+  Oathweave format transition held at the rehearsal.
+- `uninstall --purge` deletes an installation directory that setup created with sudo. When every
+  file in it belonged to the operator, the purge ran without root, emptied the directory and then
+  failed to remove it from its root-owned parent; repeating the command then stopped at the empty
+  directory. The purge now uses root when the parent is not writable, and a repeated purge finishes
+  an emptied directory.
 
 - `console-clients add` marks the suite's own HiveXUI browser clients first-party when an existing
   one is not (a public `hivexui-*` client with this console's callback), so Oathweave asks no
@@ -153,43 +256,6 @@ All notable changes to this project are documented in this file. The format is b
   instead of component versions, and say that no release enables suite audit collection yet.
 - RELEASING step 1 points at the newest profile in `DATASTORE_PROFILES` instead of naming one that
   is no longer allowed.
-
-### Security
-
-- The repository privacy checks (`scripts/check-private-data.sh` and `scripts/scan-secrets.sh`) now report a finding as `path:line: rule` and never print the matching text or the line around it, so a failing check cannot copy a private term or a credential into a public CI log. A path that itself contains a private term is shown as `(path redacted)`. Exit codes are unchanged, and `scripts/privacy-output.test.sh` (run in CI) plants fake values and checks they stay out of the output. Repository tooling only; nothing to do when upgrading.
-- The ingress sets `Strict-Transport-Security`, `X-Content-Type-Options: nosniff` and
-  `Referrer-Policy` on every console-origin response that has none of its own, so product APIs no
-  longer depend on each product for them, and limits request bodies to the static console to 16 KB
-  (413 beyond). The Caddyfile is a controller runtime file: installations get this with the next
-  release's upgrade. See [response security headers](deployment/README.md#response-security-headers).
-- Every third-party GitHub Action is pinned by commit SHA (with its version in a comment),
-  including the image-publishing and release jobs that hold `packages: write`, `id-token: write`
-  or `contents: write`. Dependabot's github-actions group keeps the pins current, and new
-  Dependabot `docker` updates cover the digest-pinned Dockerfile bases (ingress, Node.js runtime
-  and Hive Registry builder).
-- A daily *Published image re-scan* workflow scans every image the newest published release pins
-  with a fresh Trivy database and opens or updates an issue on HIGH/CRITICAL findings. The two
-  Qdrant Trivy exceptions now expire on 2027-03-01, so they are re-reviewed.
-- The release-publish job refuses a tag whose commit is not on `main` and a release whose
-  `CHANGELOG.md` section is empty, and leaves out the `chattermost-migrator` row for a release
-  without ChatterMost instead of printing `null`.
-- `hive-redis` 8.2.10-3 installs OpenSSL 3.5.9-r2 (`libssl3`, `libcrypto3`), which fixes
-  CVE-2026-124709 in 3.5.9-r0. The new datastore profile `runtime-2026-11-pg1712-zstd-openssl`
-  selects it with the PostgreSQL and Qdrant images of `runtime-2026-11-pg1712-zstd`, which remains
-  selectable up to 3.14.3. Redis and its data formats are unchanged.
-- The Docker (`install-prerequisites.sh`) and NodeSource (Magnus host agent) apt signing keys must
-  now be exactly one primary key with the pinned fingerprint. The check accepted a downloaded file
-  when any fingerprint in it matched, then installed the whole file as the repository's
-  `Signed-By` keyring, so an extra key in the file would have been trusted for packages installed
-  as root. Existing keyrings are not changed; a refused download leaves nothing behind.
-- Publisher key rotation works. The release launcher refused every release whose
-  `trust/publisher.pub` differed from its own checkout's, so after a rotation neither a rollback
-  from a new checkout nor a newer release from an old checkout could launch. A rotated key now
-  ships with a statement in `trust/rotations/` signed by the key it retires. The launcher follows
-  these statements forward to a newer key, and trusts a retired key only through its own
-  checkout's history and only for releases before the retirement. `scripts/release/publisher-key-rotation.sh`
-  creates (offline) and checks the statements. No operator action is needed: the key has not
-  been rotated.
 
 ## [3.14.3] - 2026-11-25
 

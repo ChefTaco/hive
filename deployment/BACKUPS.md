@@ -361,7 +361,7 @@ releases copies on each host under that host's lock.
 
 `prune` is a dry run unless `--apply` is given. It prints each entry it would remove, each restored
 copy it would release, and the space that frees, and changes nothing. `--apply` removes the
-eligible entries, releases the copies and prints each one; before the release after 3.14.3, only on a
+eligible entries, releases the copies and prints each one; before 3.15.0, only on a
 single-host installation (see [several hosts](#pruning-on-several-hosts)).
 Automatic pruning is off by default; from 3.9.4 an installation can
 [prune every day](#daily-pruning).
@@ -411,7 +411,7 @@ entry any host keeps is shown as kept on every host.
 
 A plan reads each host under its lock in turn, so another command can protect an archive on one
 host after that host was read. Controllers of suite 3.14.3 and earlier therefore removed no pair
-on an installation with several hosts. From the release after 3.14.3, `prune --apply` removes
+on an installation with several hosts. From 3.15.0, `prune --apply` removes
 pairs there in three steps, each one on every host under that host's lock and with no transaction
 open:
 
@@ -474,7 +474,7 @@ digests to reconcile them.
 ### Daily pruning
 
 From suite 3.9.4, a single-host installation can run `backups prune --apply` every day from cron,
-and from the release after 3.14.3 an installation with several hosts that sets
+and from 3.15.0 an installation with several hosts that sets
 `"retention": {"multiHost": true}` ([several hosts](#pruning-on-several-hosts)):
 
 ```bash
@@ -537,7 +537,7 @@ because the installation then runs another controller: remove it with `crontab -
 
 ### Daily backups
 
-From the release after 3.14.3, the daily prune can take an online backup first. Set it in the
+From 3.15.0, the daily prune can take an online backup first. Set it in the
 installation file:
 
 ```json
@@ -556,7 +556,7 @@ remove it before running one, for example for a rollback.
 ## Off-host copies
 
 An archive holds product secrets, keys and certificates, and a backup on the host it protects is
-lost with that host. From the release after 3.14.3:
+lost with that host. From 3.15.0:
 
 ```bash
 ./hive.sh backups export ARCHIVE --to /mnt/backup --encrypt age1...         # a local or mounted directory

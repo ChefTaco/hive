@@ -4,6 +4,15 @@
 # given --purge and the operator types the installation name, which --yes never replaces.
 # See deployment/README.md#uninstalling.
 
+# Root is needed to delete DIRECTORY on this machine when a file in it belongs to another account
+# (a product's service user), or when its parent is not writable: setup creates /opt/ID with sudo,
+# so the operator owns everything inside it but cannot remove the directory itself.
+hive_uninstall_needs_sudo() { # DIRECTORY
+  local directory=$1
+  [[ $(id -u) != 0 && -e "$directory" ]] || return 1
+  [[ -n $(find "$directory" ! -user "$(id -u)" -print -quit 2>/dev/null) || ! -w "$(dirname -- "$directory")" ]]
+}
+
 hive_uninstall_action() { # HOST ACTION [REQUEST] [SUDO]
   local sudo=${4:-false} remote_sudo=false
   # Deleting an installation needs root for files the products own; on this machine only when
@@ -12,7 +21,7 @@ hive_uninstall_action() { # HOST ACTION [REQUEST] [SUDO]
     if jq -e --arg host "$1" '.hosts[$host].target=="local"' "$HIVE_CONFIG" >/dev/null; then
       local directory
       directory=$(jq -r --arg host "$1" '.hosts[$host].directory' "$HIVE_CONFIG")
-      if [[ $(id -u) == 0 || ! -e "$directory" || -z $(find "$directory" ! -user "$(id -u)" -print -quit 2>/dev/null) ]]; then sudo=false; fi
+      hive_uninstall_needs_sudo "$directory" || sudo=false
     else sudo=false; remote_sudo=true; fi
   fi
   HIVE_HOST_LOCAL_SUDO=$sudo HIVE_HOST_REMOTE_SUDO=$remote_sudo HIVE_HOST_ACTION=$2 HIVE_UNINSTALL_INPUT=${3:-null} \

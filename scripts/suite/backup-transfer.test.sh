@@ -51,7 +51,7 @@ jq -nc --arg base "$temporary" '{installation:"example-suite",release:"0.1.0",or
   export_dir=$temporary/out/hive-backup-example-suite-manual-one
   [[ $(stat -c %a "$export_dir") == 700 && $(stat -c %a "$export_dir/a.tar") == 600 && $(stat -c %a "$export_dir/manifest.json") == 600 ]] || exit 2
   jq -e --arg sha "$(sha256sum "$export_dir/b.tar" | cut -d ' ' -f1)" '.kind=="hive-backup-export" and .archive=="manual-one" and .encrypted==false and .hosts.b.sha256==$sha and .hosts.a.file=="a.tar"' "$export_dir/manifest.json" >/dev/null || exit 3
-  tar -tf "$export_dir/a.tar" | grep -qx 'manual-one/state.tar.gz' || exit 4
+  grep -qx 'manual-one/state.tar.gz' <(tar -tf "$export_dir/a.tar") || exit 4
   grep -q 'not encrypted and holds product secrets' "$temporary/export.err" || exit 5
   jq -e '.archive=="manual-one" and .encrypted==false' "$XDG_STATE_HOME/hive/example-suite/exports.jsonl" >/dev/null || exit 6
   if (HIVE_BACKUP_TO=$temporary/out hive_backups_export manual-one) > /dev/null 2>&1; then exit 7; fi
