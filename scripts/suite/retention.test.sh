@@ -176,17 +176,13 @@ export HIVE_ROOT=$ROOT
   jq -e '.[0].entries[0].remove==false and .[0].entries[0].reasons==["kept on host b"] and .[0].entries[1].remove==true and .[1].entries[1].remove==true' <<< "$merged" >/dev/null
 ) || fail 'A name kept on one host was removed on another'
 
-# A plan is only a snapshot. Another controller can protect a restore point after
-# all hosts were planned, on either the first or the last host in apply order.
-# Until selection and deletion share coordinated locks, refuse multi-host writes.
-multi_host_change() (
-  source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/retention.sh"
-  local changed=$1 change=$2 host base name days input plans status=0 lock_pid=''
-  local multi="$temporary/multi-$changed-$change"
-  trap 'if [[ -n "$lock_pid" ]]; then touch "$multi/release"; wait "$lock_pid" || true; fi' EXIT
-  mkdir -p "$multi"
-  HIVE_CONFIG=$multi/config.json HIVE_ROOT=$ROOT HIVE_VERSION=0.1.0 HIVE_ID=example-suite
-  jq -nc --arg base "$multi" '{origin:"https://hive.example.com",hosts:{a:{target:"local",directory:($base+"/a")},b:{target:"local",directory:($base+"/b")}},components:{},agents:[],inference:[]}' > "$HIVE_CONFIG"
+# A plan is only a snapshot. Another controller can protect a restore point after all hosts
+# were planned, on either the first or the last host in apply order. Pair removal on several
+# hosts sets aside under each host's lock first and removes only what every host set aside.
+multi_fixture() { # DIRECTORY
+  local multi=$1 host base name days
+  rm -rf -- "$multi"; mkdir -p "$multi"
+  jq -nc --arg base "$multi" '{origin:"https://hive.example.com",hosts:{a:{target:"local",directory:($base+"/a")},b:{target:"local",directory:($base+"/b")}},components:{},agents:[],inference:[]}' > "$multi/config.json"
   for host in a b; do
     base="$multi/$host"; mkdir -p "$base"
     jq -nc --arg host "$host" '{installation:"example-suite",host:$host,uuid:"fixture-uuid"}' > "$base/installation.json"
@@ -201,18 +197,29 @@ multi_host_change() (
       touch -d "$(ago "$days")" "$base/backups/$name/receipt.json"
     done
   done
+}
+# Every pair is in place on both hosts, and nothing is left set aside.
+multi_intact() { # DIRECTORY
+  local host
+  for host in a b; do
+    [[ -f "$1/$host/backups/old/state.tar.gz" && -f "$1/$host/rehearsals/old/result.json" ]] || { printf 'old is missing on host %s\n' "$host" >&2; return 1; }
+    ! compgen -G "$1/$host/backups/.held-*" >/dev/null && ! compgen -G "$1/$host/rehearsals/.held-*" >/dev/null && ! compgen -G "$1/$host/retention/hold-*.json" >/dev/null ||
+      { printf 'Something is left set aside on host %s\n' "$host" >&2; return 1; }
+  done
+}
+multi_host_change() (
+  source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/retention.sh"
+  local changed=$1 change=$2 input plans lock_pid=''
+  local multi="$temporary/multi-$changed-$change"
+  trap 'if [[ -n "$lock_pid" ]]; then touch "$multi/release"; wait "$lock_pid" || true; fi' EXIT
+  multi_fixture "$multi"
+  HIVE_CONFIG=$multi/config.json HIVE_ROOT=$ROOT HIVE_VERSION=0.1.0 HIVE_ID=example-suite
   input=$(hive_retention_input 2 0)
   plans=$(hive_retention_plans "$input") || exit 1
   jq -e 'length==2 and all(.[]; [.entries[]|select(.remove)|.name]==["old"])' <<< "$plans" >/dev/null || exit 1
-  if [[ "$changed:$change" == a:lock ]]; then
-    for command in list prune; do
-      hive_backups_command "$command" > "$multi/preview-$command" || exit 1
-      grep -q 'Multi-host preview:.*Destructive pruning is disabled' "$multi/preview-$command" || exit 1
-    done
-  fi
   hive_retention_action() {
     printf '%s %s\n' "$1" "$2" >> "$multi/actions"
-    HIVE_HOST_ACTION=$2 HIVE_RETENTION_INPUT=$3 hive_host "$1" "$(cat "$ROOT/scripts/suite/ownership-host.sh" "$ROOT/scripts/suite/retention-host.sh")"
+    HIVE_HOST_ACTION=$2 HIVE_RETENTION_INPUT=$3 hive_host "$1" "$(cat "$ROOT/scripts/suite/ownership-host.sh" "$ROOT/scripts/suite/rehearsal-copy-host.sh" "$ROOT/scripts/suite/retention-host.sh")"
   }
   # These changes happen in an independent process after the merged selection.
   case "$change" in
@@ -224,29 +231,110 @@ multi_host_change() (
     transaction) (printf '{"phase":"recovery-required"}\n' > "$multi/$changed/transaction.json");;
     reference) (printf '{"archive":"old"}\n' > "$multi/$changed/reconciliation.fixture.json");;
   esac
-  hive_retention_apply "$input" "$plans" prune > "$multi/result" 2> "$multi/error" || status=$?
-  [[ "$status" != 0 ]] && grep -q 'Multi-host backup pruning is disabled' "$multi/error" || exit 1
-  [[ ! -e "$multi/actions" ]] || { printf 'Multi-host apply contacted a host\n' >&2; exit 1; }
-  if HIVE_RETENTION_APPLY=true hive_backups_command prune > "$multi/command" 2>&1; then exit 1; fi
-  grep -q 'Multi-host backup pruning is disabled' "$multi/command" || exit 1
-  jq '.retention={auto:true}' "$HIVE_CONFIG" > "$multi/next.json"; mv "$multi/next.json" "$HIVE_CONFIG"
-  hive_retention_after_upgrade > "$multi/upgrade" 2>&1 || exit 1
-  grep -q 'Multi-host backup pruning is disabled' "$multi/upgrade" || exit 1
-  # A multi-host prune --apply reads each host and may release restored copies; it never asks a
-  # host to remove a pair.
-  ! grep -q 'retention-apply' "$multi/actions" 2>/dev/null || { printf 'Multi-host manual or automatic pruning asked a host to remove a pair\n' >&2; exit 1; }
-  for host in a b; do
-    if [[ ! -f "$multi/$host/backups/old/state.tar.gz" || ! -f "$multi/$host/rehearsals/old/result.json" ]]; then
-      printf 'Unsafe retention: %s on host %s after %s changed on host %s\n' old "$host" "$change" "$changed" >&2
-      exit 1
-    fi
-  done
-  return 0
+  hive_retention_apply "$input" "$plans" prune > "$multi/result" 2> "$multi/error" || true
+  grep -q "$changed retention-hold" "$multi/actions" || { printf 'The changed host was never asked\n' >&2; cat "$multi/actions" "$multi/error" >&2; exit 1; }
+  if [[ -n "$lock_pid" ]]; then touch "$multi/release"; wait "$lock_pid" || true; lock_pid=''; fi
+  [[ "$change" != transaction ]] || printf '{"phase":"complete"}\n' > "$multi/$changed/transaction.json"
+  # A host the change left unable to put back does so at the next prune.
+  if ! multi_intact "$multi" 2>/dev/null; then
+    HIVE_RETENTION_KEEP=1000 HIVE_RETENTION_KEEP_DAYS=0 HIVE_RETENTION_APPLY=true hive_backups_command prune > "$multi/again" 2>&1 || true
+  fi
+  multi_intact "$multi" || { cat "$multi/actions" "$multi/error" >&2; exit 1; }
+  [[ $(jq '[.[].removed[]?]|length' "$multi/result" 2>/dev/null || printf 0) == 0 ]] || exit 1
 )
 for changed in a b; do
   for change in lock transaction reference; do
     multi_host_change "$changed" "$change" || fail "Cross-host retention was not held after $change on $changed"
   done
+done
+
+# Without a change, the pair goes on both hosts, by prune --apply and by retention.auto, and each
+# host records it. An interrupted prune leaves its pairs set aside; list names them and the next
+# prune --apply puts them back before it decides again.
+(
+  source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/retention.sh"
+  multi="$temporary/multi-coordinated"
+  multi_fixture "$multi"
+  HIVE_CONFIG=$multi/config.json HIVE_ROOT=$ROOT HIVE_VERSION=0.1.0 HIVE_ID=example-suite
+  hive_retention_action() {
+    printf '%s %s\n' "$1" "$2" >> "$multi/actions"
+    HIVE_HOST_ACTION=$2 HIVE_RETENTION_INPUT=$3 hive_host "$1" "$(cat "$ROOT/scripts/suite/ownership-host.sh" "$ROOT/scripts/suite/rehearsal-copy-host.sh" "$ROOT/scripts/suite/retention-host.sh")"
+  }
+  HIVE_RETENTION_KEEP=2 HIVE_RETENTION_KEEP_DAYS=0 HIVE_RETENTION_APPLY=true hive_backups_command prune > "$multi/apply" 2>&1 || { cat "$multi/apply" >&2; exit 1; }
+  grep -q 'removed old on a' "$multi/apply" && grep -q 'removed old on b' "$multi/apply" || { cat "$multi/apply" >&2; exit 1; }
+  ! grep -q 'retention-apply' "$multi/actions" || exit 2
+  for host in a b; do
+    [[ ! -e "$multi/$host/backups/old" && ! -e "$multi/$host/rehearsals/old" && -d "$multi/$host/backups/middle" && -d "$multi/$host/backups/newest" ]] || exit 3
+    jq -e '.removed[0].name=="old"' "$multi/$host"/retention/prune-*.json >/dev/null || exit 4
+    ! compgen -G "$multi/$host/backups/.held-*" >/dev/null && ! compgen -G "$multi/$host/retention/hold-*.json" >/dev/null || exit 5
+  done
+  # retention.auto after an upgrade: on several hosts only with retention.multiHost as well.
+  multi_fixture "$multi"
+  jq '.retention={keep:2,keepDays:0,auto:true}' "$HIVE_CONFIG" > "$multi/next.json"; mv "$multi/next.json" "$HIVE_CONFIG"
+  : > "$multi/actions"
+  hive_retention_after_upgrade > "$multi/upgrade" 2>&1 || exit 6
+  grep -q 'multiHost' "$multi/upgrade" && [[ ! -s "$multi/actions" ]] || { cat "$multi/upgrade" >&2; exit 6; }
+  multi_intact "$multi" || exit 6
+  jq '.retention.multiHost=true' "$HIVE_CONFIG" > "$multi/next.json"; mv "$multi/next.json" "$HIVE_CONFIG"
+  hive_retention_after_upgrade > "$multi/upgrade" 2>&1 || exit 6
+  [[ ! -e "$multi/a/backups/old" && ! -e "$multi/b/backups/old" ]] || { cat "$multi/upgrade" >&2; exit 7; }
+  jq 'del(.retention)' "$HIVE_CONFIG" > "$multi/next.json"; mv "$multi/next.json" "$HIVE_CONFIG"
+  # An interruption after host a set old aside.
+  multi_fixture "$multi"
+  input=$(hive_retention_input 2 0)
+  hold_id=$(printf 'f%.0s' {1..16})
+  hive_retention_action a retention-hold "$(jq -c --arg id "$hold_id" '.hold=["old"]|.token=$id|.trigger="prune"' <<< "$input")" > "$multi/hold" || exit 8
+  jq -e '.held==["old"]' "$multi/hold" >/dev/null || exit 9
+  [[ -d "$multi/a/backups/.held-$hold_id-old" && ! -e "$multi/a/backups/old" ]] || exit 10
+  HIVE_RETENTION_KEEP=2 HIVE_RETENTION_KEEP_DAYS=0 hive_backups_command list > "$multi/list" 2>&1 || exit 11
+  grep -q 'an interrupted prune set aside old on a' "$multi/list" || { cat "$multi/list" >&2; exit 12; }
+  [[ -d "$multi/a/backups/.held-$hold_id-old" ]] || exit 13
+  # An overlapping prune: a host with an unfinished hold sets nothing else aside.
+  other_id=$(printf 'e%.0s' {1..16})
+  if hive_retention_action a retention-hold "$(jq -c --arg id "$other_id" '.hold=["middle"]|.token=$id|.trigger="prune"' <<< "$input")" > "$multi/overlap" 2>&1; then exit 14; fi
+  grep -q 'An unfinished prune holds archives on this host' "$multi/overlap" && [[ -d "$multi/a/backups/middle" ]] || { cat "$multi/overlap" >&2; exit 14; }
+  # Undecided: the next prune --apply puts it back before it decides again.
+  HIVE_RETENTION_KEEP=1000 HIVE_RETENTION_KEEP_DAYS=0 HIVE_RETENTION_APPLY=true hive_backups_command prune > "$multi/resume" 2>&1 || { cat "$multi/resume" >&2; exit 15; }
+  grep -q 'putting back what an interrupted prune set aside (old)' "$multi/resume" || { cat "$multi/resume" >&2; exit 15; }
+  multi_intact "$multi" || exit 16
+) || fail 'Coordinated multi-host pruning did not remove, record or resume as expected'
+
+# A host outage after the decision: the prune never ends half-way. Once every host set its pairs
+# aside and one recorded the decision, the next prune --apply finishes it forwards on every host;
+# a host outage before any decision puts everything back.
+multi_outage() ( # FAILING_ACTION
+  source "$ROOT/scripts/suite/controller.sh"; source "$ROOT/scripts/suite/retention.sh"
+  multi="$temporary/multi-outage-$1"
+  multi_fixture "$multi"
+  HIVE_CONFIG=$multi/config.json HIVE_ROOT=$ROOT HIVE_VERSION=0.1.0 HIVE_ID=example-suite
+  hive_retention_action() {
+    printf '%s %s\n' "$1" "$2" >> "$multi/actions"
+    if [[ "$1:$2" == "b:$FAILING" && ! -e "$multi/failed-once" ]]; then touch "$multi/failed-once"; printf 'ssh: connect to host b: Connection timed out\n' >&2; return 255; fi
+    HIVE_HOST_ACTION=$2 HIVE_RETENTION_INPUT=$3 hive_host "$1" "$(cat "$ROOT/scripts/suite/ownership-host.sh" "$ROOT/scripts/suite/rehearsal-copy-host.sh" "$ROOT/scripts/suite/retention-host.sh")"
+  }
+  FAILING=$1
+  if HIVE_RETENTION_KEEP=2 HIVE_RETENTION_KEEP_DAYS=0 HIVE_RETENTION_APPLY=true hive_backups_command prune > "$multi/first" 2>&1; then cat "$multi/first" >&2; exit 1; fi
+  case "$1" in
+    retention-hold)
+      grep -q 'nothing is removed on any host' "$multi/first" || { cat "$multi/first" >&2; exit 2; }
+      multi_intact "$multi" || exit 3;;
+    retention-decide)
+      # a recorded the decision, b did not: nothing is removed yet.
+      compgen -G "$multi/a/backups/.held-*-old" >/dev/null && compgen -G "$multi/b/backups/.held-*-old" >/dev/null || exit 4
+      jq -e '.decided==true' "$multi"/a/retention/hold-*.json >/dev/null && jq -e '.decided==false' "$multi"/b/retention/hold-*.json >/dev/null || exit 5;;
+    retention-commit)
+      [[ ! -e "$multi/a/backups/old" ]] && ! compgen -G "$multi/a/backups/.held-*" >/dev/null || exit 6
+      compgen -G "$multi/b/backups/.held-*-old" >/dev/null && jq -e '.decided==true' "$multi"/b/retention/hold-*.json >/dev/null || exit 7;;
+  esac
+  HIVE_RETENTION_KEEP=2 HIVE_RETENTION_KEEP_DAYS=0 HIVE_RETENTION_APPLY=true hive_backups_command prune > "$multi/second" 2>&1 || { cat "$multi/second" >&2; exit 8; }
+  for host in a b; do
+    [[ ! -e "$multi/$host/backups/old" && ! -e "$multi/$host/rehearsals/old" && -d "$multi/$host/backups/middle" ]] || { cat "$multi/second" >&2; exit 9; }
+    ! compgen -G "$multi/$host/backups/.held-*" >/dev/null && ! compgen -G "$multi/$host/retention/hold-*.json" >/dev/null || exit 10
+  done
+  [[ "$1" == retention-hold ]] || grep -q 'finishing an interrupted prune: removing old' "$multi/second" || { cat "$multi/second" >&2; exit 11; }
+)
+for action in retention-hold retention-decide retention-commit; do
+  multi_outage "$action" || fail "A host outage during $action left a half-removed restore point or did not finish"
 done
 
 # Editing the operator's file while the first host action runs must not redirect
@@ -337,7 +425,7 @@ after_upgrade "$temporary/configured-auto.json" || { cat "$temporary/after.log" 
 grep -q 'Removed 5 entries' "$temporary/after.log" || { cat "$temporary/after.log" >&2; fail 'Retention after the upgrade did not use the installation settings'; }
 [[ ! -e "$directory/backups/pre-failed" && ! -e "$directory/rehearsals/pre-30" && -d "$directory/backups/pre-29" ]] || fail 'Retention after the upgrade removed the wrong entries'
 jq -e '.trigger=="upgrade" and .keep==3 and .keepDays==30' "$directory"/retention/prune-*.json >/dev/null || fail 'The upgrade audit record is wrong'
-printf 'Passed: retention preserves protected archives, removes single-host pairs only with explicit apply or automatic opt-in, records each prune, and refuses every multi-host write before contacting a host despite late protection changes.\n'
+printf 'Passed: retention preserves protected archives, removes single-host pairs only with explicit apply or automatic opt-in, records each prune, and removes multi-host pairs only after every host set them aside under its lock, despite late protection changes.\n'
 
 # ---- Restored copies: a passed rehearsal keeps its evidence and gives up its copy; only the newest
 # --keep-full keep theirs. The pair stays, and stays restorable. ----
@@ -425,18 +513,18 @@ multi_copies() (
     HIVE_HOST_ACTION=$2 HIVE_RETENTION_INPUT=$3 hive_host "$1" "$(cat "$ROOT/scripts/suite/ownership-host.sh" "$ROOT/scripts/suite/rehearsal-copy-host.sh" "$ROOT/scripts/suite/retention-host.sh")"
   }
   HIVE_RETENTION_KEEP=2 HIVE_RETENTION_KEEP_DAYS=0 hive_backups_command prune > "$copies_dir/preview" 2>&1 || exit 1
-  grep -q 'Multi-host preview: 2 entries match' "$copies_dir/preview" && grep -q '4 restored copies, .* can be released' "$copies_dir/preview" || { cat "$copies_dir/preview" >&2; exit 1; }
-  if HIVE_RETENTION_KEEP=2 HIVE_RETENTION_KEEP_DAYS=0 HIVE_RETENTION_APPLY=true hive_backups_command prune > "$copies_dir/apply" 2>&1; then cat "$copies_dir/apply" >&2; exit 1; fi
-  grep -q 'Multi-host backup pruning is disabled' "$copies_dir/apply" && grep -q '^Released 4 restored copies' "$copies_dir/apply" || { cat "$copies_dir/apply" >&2; exit 1; }
-  grep -q 'retention-release' "$copies_dir/actions" && ! grep -q 'retention-apply' "$copies_dir/actions" || { printf 'A multi-host prune asked a host to remove a pair\n' >&2; exit 1; }
+  grep -q 'Dry run: 2 entries would be removed' "$copies_dir/preview" && grep -q 'Dry run: 2 restored copies would be released' "$copies_dir/preview" || { cat "$copies_dir/preview" >&2; exit 1; }
+  HIVE_RETENTION_KEEP=2 HIVE_RETENTION_KEEP_DAYS=0 HIVE_RETENTION_APPLY=true hive_backups_command prune > "$copies_dir/apply" 2>&1 || { cat "$copies_dir/apply" >&2; exit 1; }
+  grep -q '^Removed 2 entries' "$copies_dir/apply" && grep -q '^Released 2 restored copies' "$copies_dir/apply" || { cat "$copies_dir/apply" >&2; exit 1; }
+  grep -q 'retention-release' "$copies_dir/actions" && grep -q 'retention-commit' "$copies_dir/actions" && ! grep -q 'retention-apply' "$copies_dir/actions" || { printf 'A multi-host prune did not remove in steps\n' >&2; exit 1; }
   for host in a b; do
-    for name in old middle; do [[ -f "$copies_dir/$host/rehearsals/$name/copy-released.json" && ! -e "$copies_dir/$host/rehearsals/$name/data" ]] || { printf '%s on %s kept its copy\n' "$name" "$host" >&2; exit 1; }; done
+    [[ -f "$copies_dir/$host/rehearsals/middle/copy-released.json" && ! -e "$copies_dir/$host/rehearsals/middle/data" ]] || { printf 'middle on %s kept its copy\n' "$host" >&2; exit 1; }
     [[ -f "$copies_dir/$host/rehearsals/newest/data/store/file" ]] || exit 1
-    [[ -f "$copies_dir/$host/backups/old/state.tar.gz" && -f "$copies_dir/$host/rehearsals/old/result.json" ]] || { printf 'A multi-host pair was removed\n' >&2; exit 1; }
+    [[ ! -e "$copies_dir/$host/backups/old" && ! -e "$copies_dir/$host/rehearsals/old" ]] || { printf 'The old pair stayed on %s\n' "$host" >&2; exit 1; }
   done
 )
-multi_copies || fail 'A multi-host prune did not release copies only'
-printf 'Passed: restored copies are listed with what they free, released only with --apply or the schedule, keep the newest --keep-full, are recorded, and are released on multi-host installations while pair removal stays refused.\n'
+multi_copies || fail 'A multi-host prune did not remove the old pair and release the other copies'
+printf 'Passed: restored copies are listed with what they free, released only with --apply or the schedule, keep the newest --keep-full, are recorded, and are released on multi-host installations beside coordinated pair removal.\n'
 
 # The daily prune (backups schedule) has its own fixture: fake crontab and ssh.
 bash "$ROOT/scripts/suite/retention-schedule.test.sh"

@@ -385,7 +385,7 @@ agents.
 The upgrade prints its plan, takes a verified pre-change backup and rehearses data changes on a
 copy. From 3.9.3, `./hive.sh backups list` shows the kept backup and rehearsal pairs and why, and
 `./hive.sh backups prune` previews what the [retention rules](BACKUPS.md#retention) would remove;
-automatic pruning after an upgrade is off unless a single-host installation enables it. From
+automatic pruning after an upgrade is off unless the installation enables it. From
 3.9.4, `./hive.sh backups schedule enable` prunes them every day instead; see
 [daily pruning](BACKUPS.md#daily-pruning). From 3.9.5, only the newest passed rehearsal keeps its
 full restored copy; the others keep their evidence and their backups stay restorable (see

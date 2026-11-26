@@ -6,6 +6,15 @@
 # records what it removed under retention/. retention-release releases the restored copies of
 # passed rehearsals (rehearsal-copy-host.sh) for the names the controller passes, keeping the
 # newest keepFull; it never removes a backup or a rehearsal's evidence.
+# On an installation with several hosts, pairs are removed in phases instead of retention-apply,
+# each under this host's lock. retention-hold sets aside the names that this host still finds
+# removable (renamed to .held-TOKEN-NAME beside them, where no command finds them) and records
+# them in retention/hold-TOKEN.json. retention-decide records there the names the controller
+# commits, once every host has set its names aside. retention-commit then removes the committed
+# names and puts every other one back; without a recorded decision it only puts back. A decided
+# hold is never put back and an undecided one never removed, so every host of one prune ends the
+# same way. The report lists unfinished holds; the controller finishes them before a new prune,
+# and retention-hold refuses while one exists.
 set -Eeuo pipefail
 umask 077
 read -r input
@@ -160,10 +169,59 @@ plan_entries() {
       .copyNote=([$mine[]|select(.release|not)|.reason|select(.!="")]|unique|join("; ")))' <<< "$entries"
 }
 
+# The set-aside path of NAME in PARENT (backups, rehearsals, rehearsal-history) under TOKEN.
+token_pattern='^[a-f0-9]{16}$'
+held_path() { printf '%s/%s/.held-%s-%s\n' "$directory" "$1" "$2" "$3"; }
+hold_record() { printf '%s/retention/hold-%s.json\n' "$directory" "$1"; }
+# Every unfinished hold on this host: [{token,names,decided,committed}].
+holds() {
+  local record
+  for record in "$directory"/retention/hold-*.json; do
+    [[ -f "$record" && ! -L "$record" ]] || continue
+    jq -c '{token,names:(.names // []),decided:(.decided // false),committed:(.committed // [])}' "$record" 2>/dev/null ||
+      jq -nc --arg file "${record##*/}" '{token:$file,names:[],decided:false,committed:[],unreadable:true}'
+  done | jq -sc .
+}
+# Puts back what the hold TOKEN set aside, except the names in COMMITTED (already removed), and
+# removes its record. A name whose original path exists again is left set aside and reported.
+put_back() { # TOKEN [COMMITTED]
+  local token=$1 committed=${2:-[]} record name parent held original kept=0
+  record=$(hold_record "$token")
+  [[ -f "$record" && ! -L "$record" ]] || return 0
+  while IFS= read -r name; do
+    [[ "$name" =~ $name_pattern ]] || continue
+    jq -e --arg name "$name" 'index($name)!=null' <<< "$committed" >/dev/null && continue
+    # The backup first: a rehearsal back before its backup would claim a pair that is not there.
+    for parent in backups rehearsal-history rehearsals; do
+      held=$(held_path "$parent" "$token" "$name"); original="$directory/$parent/$name"
+      [[ -e "$held" && ! -L "$held" ]] || continue
+      if [[ -e "$original" || -L "$original" ]]; then
+        printf 'Hive host: %s exists again; the set-aside %s is kept for review\n' "$original" "$held" >&2; kept=1; continue
+      fi
+      mv -T -- "$held" "$original"
+    done
+  done < <(jq -r '.names[]?' "$record")
+  ((kept == 0)) || return 1
+  rm -f -- "$record"
+}
+
 report() {
   jq -c --arg host "$host" --arg directory "$directory" --argjson keep "$keep" --argjson days "$keep_days" --arg release "$(jq -r '.version // ""' "$directory/receipt.json" 2>/dev/null || true)" \
     --argjson free "$(df -Pk -- "$directory" | awk 'NR==2 {print $4}')" \
-    --argjson keepFull "$keep_full" '{schema:1,host:$host,directory:$directory,release:$release,keep:$keep,keepDays:$days,keepFull:$keepFull,freeKiB:$free,entries:.}'
+    --argjson keepFull "$keep_full" --argjson holds "$(holds)" '{schema:1,host:$host,directory:$directory,release:$release,keep:$keep,keepDays:$days,keepFull:$keepFull,freeKiB:$free,holds:$holds,held:([$holds[].names[]]|unique),entries:.}'
+}
+
+# Writes the prune record of REMOVED (a JSON array) under retention/.
+prune_record() { # REMOVED
+  local removed=$1 record
+  [[ $(jq length <<< "$removed") != 0 ]] || return 0
+  [[ ! -L "$directory/retention" ]] || die 'Unsafe retention record directory'
+  install -d -m 700 "$directory/retention"
+  record="$directory/retention/prune-$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 4).json"
+  jq -n --argjson removed "$removed" --arg at "$(date -u +%FT%TZ)" --arg host "$host" --arg installation "$installation" --arg release "$(jq -r '.version // ""' "$directory/receipt.json" 2>/dev/null || true)" \
+    --arg trigger "$(jq -r '.retention.trigger // "prune"' <<< "$input")" --argjson keep "$keep" --argjson days "$keep_days" \
+    '{schema:1,at:$at,trigger:$trigger,installation:$installation,host:$host,release:$release,keep:$keep,keepDays:$days,removed:$removed,freedBytes:([$removed[].bytes]|add // 0),offHostCopies:"not touched"}' > "$record.tmp"
+  chmod 600 "$record.tmp"; mv -T -- "$record.tmp" "$record"
 }
 
 case "$action" in
@@ -188,15 +246,83 @@ case "$action" in
       ((status == 0)) || { printf 'Hive host: %s could not be removed completely; review it\n' "$name" >&2; break; }
       removed=$(jq -c --argjson entry "$entry" '.+[$entry|{name,kind,rehearsal,backupSHA256,createdAt:(.createdAt|todate),bytes:((.backupKiB+.rehearsalKiB+.historyKiB)*1024)}]' <<< "$removed")
     done < <(jq -r --argjson requested "$requested" '.[]|select(.remove and (.name as $name|$requested|index($name)!=null))|.name' <<< "$entries")
-    if [[ $(jq length <<< "$removed") != 0 ]]; then
-      [[ ! -L "$directory/retention" ]] || die 'Unsafe retention record directory'
-      install -d -m 700 "$directory/retention"
-      at=$(date -u +%Y%m%dT%H%M%SZ)
-      record="$directory/retention/prune-$at-$(openssl rand -hex 4).json"
-      jq -n --argjson removed "$removed" --arg at "$(date -u +%FT%TZ)" --arg host "$host" --arg installation "$installation" --arg release "$(jq -r '.version // ""' "$directory/receipt.json" 2>/dev/null || true)" \
-        --arg trigger "$(jq -r '.retention.trigger // "prune"' <<< "$input")" --argjson keep "$keep" --argjson days "$keep_days" \
-        '{schema:1,at:$at,trigger:$trigger,installation:$installation,host:$host,release:$release,keep:$keep,keepDays:$days,removed:$removed,freedBytes:([$removed[].bytes]|add // 0),offHostCopies:"not touched"}' > "$record.tmp"
-      chmod 600 "$record.tmp"; mv -T -- "$record.tmp" "$record"
+    prune_record "$removed"
+    jq -c --argjson removed "$removed" '.removed=$removed' <<< "$(plan_entries | report)"
+    exit "$status";;
+  retention-hold)
+    token=$(jq -r '.retention.token // ""' <<< "$input")
+    [[ "$token" =~ $token_pattern ]] || die 'Invalid retention hold'
+    requested=$(jq -c '.retention.hold // []' <<< "$input")
+    jq -e 'type=="array" and all(.[]; type=="string")' <<< "$requested" >/dev/null || die 'Invalid retention request'
+    # One prune at a time: an unfinished one is finished by the controller first, never here.
+    [[ $(holds | jq length) == 0 ]] || die "An unfinished prune holds archives on this host ($(holds | jq -r '[.[].token]|join(", ")')); ./hive.sh backups prune --apply finishes it first. Nothing was set aside"
+    entries=$(plan_entries)
+    # The controller's merged plan, reduced to what this host still finds removable now.
+    selected=$(jq -c --argjson requested "$requested" '[.[]|select(.remove and (.name as $name|$requested|index($name)!=null))]' <<< "$entries")
+    [[ ! -L "$directory/retention" ]] || die 'Unsafe retention record directory'
+    install -d -m 700 "$directory/retention"
+    record=$(hold_record "$token")
+    # The record comes first, so an interruption leaves nothing set aside that put_back cannot find.
+    jq -n --arg token "$token" --arg at "$(date -u +%FT%TZ)" --argjson entries "$selected" \
+      '{schema:1,token:$token,at:$at,names:[$entries[].name],decided:false,entries:$entries}' > "$record.tmp"
+    chmod 600 "$record.tmp"; sync -- "$record.tmp" 2>/dev/null || true; mv -T -- "$record.tmp" "$record"
+    status=0
+    while IFS= read -r name; do
+      [[ "$name" =~ $name_pattern ]] || continue
+      # The rehearsal first, as retention-apply removes it first.
+      for parent in rehearsals rehearsal-history backups; do
+        path="$directory/$parent/$name"
+        [[ ! -L "$path" ]] || { status=1; break; }
+        [[ -e "$path" ]] || continue
+        mv -T -- "$path" "$(held_path "$parent" "$token" "$name")" || { status=1; break; }
+      done
+      ((status == 0)) || { printf 'Hive host: %s could not be set aside; review it\n' "$name" >&2; break; }
+    done < <(jq -r '.[].name' <<< "$selected")
+    if ((status != 0)); then put_back "$token" || true; die 'Nothing was set aside on this host'; fi
+    jq -nc --arg host "$host" --argjson requested "$requested" --argjson selected "$selected" \
+      '{host:$host,held:[$selected[].name],refused:[$requested[]|select(. as $name|[$selected[].name]|index($name)|not)]}'
+    ;;
+  retention-decide)
+    # The decision of the whole prune, recorded before any host removes anything. Repeating it
+    # with the same names is harmless; another decision for the same hold is refused.
+    token=$(jq -r '.retention.token // ""' <<< "$input")
+    [[ "$token" =~ $token_pattern ]] || die 'Invalid retention hold'
+    committed=$(jq -c '.retention.commit // []' <<< "$input")
+    jq -e 'type=="array" and all(.[]; type=="string")' <<< "$committed" >/dev/null || die 'Invalid retention request'
+    record=$(hold_record "$token")
+    [[ -f "$record" && ! -L "$record" ]] || die "No hold $token on this host"
+    if jq -e '.decided==true' "$record" >/dev/null; then
+      jq -e --argjson committed "$committed" '(.committed|sort)==($committed|sort)' "$record" >/dev/null || die "Hold $token is already decided differently"
+    else
+      jq --argjson committed "$committed" --arg at "$(date -u +%FT%TZ)" '.decided=true | .decidedAt=$at | .committed=$committed' "$record" > "$record.tmp"
+      chmod 600 "$record.tmp"; sync -- "$record.tmp" 2>/dev/null || true; mv -T -- "$record.tmp" "$record"
+    fi
+    jq -nc --arg host "$host" --arg token "$token" '{host:$host,token:$token,decided:true}'
+    ;;
+  retention-commit)
+    token=$(jq -r '.retention.token // ""' <<< "$input")
+    [[ "$token" =~ $token_pattern ]] || die 'Invalid retention hold'
+    record=$(hold_record "$token")
+    removed='[]' status=0 committed='[]'
+    if [[ -f "$record" && ! -L "$record" ]]; then
+      # Only a recorded decision removes; without one, everything goes back.
+      if jq -e '.decided==true' "$record" >/dev/null; then committed=$(jq -c '.committed // []' "$record"); fi
+      while IFS= read -r name; do
+        [[ "$name" =~ $name_pattern ]] || continue
+        for parent in rehearsals rehearsal-history backups; do
+          path=$(held_path "$parent" "$token" "$name")
+          [[ ! -L "$path" ]] || { status=1; break; }
+          [[ -e "$path" ]] || continue
+          rm -rf --one-file-system -- "$path" || { status=1; break; }
+        done
+        ((status == 0)) || { printf 'Hive host: the set-aside %s could not be removed completely; repeat backups prune --apply to finish\n' "$name" >&2; break; }
+        removed=$(jq -c --argjson entry "$(jq -c --arg name "$name" '.entries[]|select(.name==$name)' "$record")" '.+[$entry|{name,kind,rehearsal,backupSHA256,createdAt:(.createdAt|todate),bytes:((.backupKiB+.rehearsalKiB+.historyKiB)*1024)}]' <<< "$removed")
+      done < <(jq -r --argjson committed "$committed" '.names[]|select(. as $name|$committed|index($name)!=null)' "$record")
+      # A decided hold stays until every committed name is gone, so a repeat finishes it.
+      if ((status == 0)); then
+        prune_record "$removed"
+        put_back "$token" "$committed" || status=1
+      fi
     fi
     jq -c --argjson removed "$removed" '.removed=$removed' <<< "$(plan_entries | report)"
     exit "$status";;

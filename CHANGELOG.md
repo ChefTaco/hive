@@ -15,6 +15,16 @@ All notable changes to this project are documented in this file. The format is b
   archive with the status and doctor reports, each host's transaction and receipt phases,
   `compose ps` and log tails, with credentials, tokens and private keys redacted. See
   [diagnostics](deployment/README.md#diagnostics). Plain `status` and `doctor` are unchanged.
+- Backup pruning on installations with several hosts. `backups prune --apply` now removes old
+  backup and rehearsal pairs there in three steps, each under every host's lock: every host sets
+  aside the pairs it still finds removable, every host records the decision, then every host
+  removes them. A pair goes only when every host holding it set it aside; otherwise everything
+  is put back. An interrupted prune is finished (after a recorded decision) or put back by the
+  next one, so a restore point is never left half-removed, and a host with an unfinished prune
+  refuses another. `retention.auto` and the daily prune do this only with the new
+  `"retention": {"multiHost": true}`; automatic pruning stays off on existing multi-host
+  installations. See [pruning on several hosts](deployment/BACKUPS.md#pruning-on-several-hosts)
+  and UPGRADING.
 - HiveSkills 1.10.0 and later and Emberpath trust the ingress's `X-Forwarded-For` when they run on
   its host without a published port (`HIVE_SKILLS_TRUSTED_PROXIES`, `EMBERPATH_TRUSTED_PROXIES`:
   the pinned suite network or Docker's private ranges), so their sign-in throttles see the client,
