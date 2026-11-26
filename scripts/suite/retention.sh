@@ -5,9 +5,10 @@
 # default 1) need that copy; the rehearse step and `backups prune --apply` release the others'
 # copies and keep their evidence (rehearsal-copy-host.sh), which changes nothing about what can
 # be restored. `backups list` shows every pair with what the retention rules decide;
-# `backups prune` removes, only with --apply, the backup and rehearsal pairs the rules let go on a
-# single-host installation. Automatic pair pruning is opt-in. On a multi-host installation only
-# copies are released: pair removal is held until selection and deletion have coordinated locks.
+# `backups prune` removes, only with --apply, the backup and rehearsal pairs the rules let go:
+# directly under the host's lock on a single host, and in two phases, each under every host's
+# lock, on an installation with several hosts (hive_retention_apply_hosts). Automatic pair
+# pruning is opt-in.
 # See deployment/BACKUPS.md#retention.
 
 hive_retention_default_keep=5
@@ -23,7 +24,7 @@ hive_retention_validate() {
     ((.keepDays // 14)|type=="number" and floor==. and .>=0 and .<=3650) and
     ((.auto // false)|type=="boolean") and
     ((has("schedule")|not) or (.schedule|type=="string" and test("^([01][0-9]|2[0-3]):[0-5][0-9]$")))
-  ' "$HIVE_CONFIG" >/dev/null || hive_die 'retention is {"keep":N,"keepDays":D,"auto":true|false,"schedule":"HH:MM"}: keep the newest N restorable backup and rehearsal pairs (2 to 1000, default 5) and everything newer than D days (0 to 3650, default 14); auto (default false) opts a single-host installation into pruning after each successful upgrade; schedule (24-hour local time, for example "03:40") has install set up a daily prune on a single-host installation. See deployment/BACKUPS.md#retention'
+  ' "$HIVE_CONFIG" >/dev/null || hive_die 'retention is {"keep":N,"keepDays":D,"auto":true|false,"schedule":"HH:MM"}: keep the newest N restorable backup and rehearsal pairs (2 to 1000, default 5) and everything newer than D days (0 to 3650, default 14); auto (default false) opts the installation into pruning after each successful upgrade; schedule (24-hour local time, for example "03:40") has install set up a daily prune. See deployment/BACKUPS.md#retention'
 }
 
 # The settings this run uses: the command line, then the installation file, then the defaults.
@@ -93,33 +94,25 @@ hive_retention_print() {
 }
 
 hive_retention_total() { jq -r '[.[].entries[]|select(.remove)|(.backupKiB+.rehearsalKiB+.historyKiB)]|add // 0' <<< "$1"; }
-# The copies this run releases: of every entry it keeps; on a multi-host installation, where no
-# pair is removed, of every entry.
-hive_retention_copies() { jq -c --argjson multi "$2" '[.[].entries[]|select((.releaseCopy // false) and ($multi or (.remove|not)))]' <<< "$1"; }
+# The copies this run releases: of every entry it keeps.
+hive_retention_copies() { jq -c '[.[].entries[]|select((.releaseCopy // false) and (.remove|not))]' <<< "$1"; }
 
-# A merged plan releases each host's lock before the next one is read. It cannot
-# authorize distributed deletion: protection may change on any host meanwhile.
-# Refuse before contacting a host, even if this run would remove entries on only one.
-hive_retention_writable() {
-  [[ $(jq '.hosts|length' "$HIVE_CONFIG") == 1 ]] || {
-    printf 'Hive: Multi-host backup pruning is disabled until selection and deletion use coordinated locks; list and dry runs remain available. Nothing was removed.\n' >&2
-    return 1
-  }
-}
-
-# Removes the plan's entries on the single host; prints its removal report.
+# Removes the plan's entries; prints the hosts' removal reports. One host removes them directly
+# under its lock. With several hosts, a merged plan releases each host's lock before the next one
+# is read, so protection may change on any host meanwhile: hive_retention_apply_hosts removes in
+# two phases instead.
 hive_retention_apply() (
   local input=$1 plans=$2 trigger=$3 host request result results='[]' status=0
   local configuration
   configuration=$(hive_retention_snapshot_configuration) || { printf '[]\n'; return 1; }
   trap 'rm -f -- "$configuration"' EXIT
   local HIVE_CONFIG=$configuration
-  hive_retention_writable || { printf '[]\n'; return 1; }
   if ! jq -e --slurpfile config "$HIVE_CONFIG" 'length==($config[0].hosts|length) and all(.[]; . as $plan | $config[0].hosts[$plan.host]!=null and $config[0].hosts[$plan.host].directory==$plan.directory)' <<< "$plans" >/dev/null; then
     printf 'Hive: backup retention host placement differs from its plan; nothing was removed.\n' >&2
     printf '[]\n'
     return 1
   fi
+  if [[ $(jq '.hosts|length' "$HIVE_CONFIG") != 1 ]]; then hive_retention_apply_hosts "$input" "$plans" "$trigger"; return; fi
   while IFS= read -r host; do
     request=$(jq -c --argjson plans "$plans" --arg host "$host" --arg trigger "$trigger" '.remove=[$plans[]|select(.host==$host)|.entries[]|select(.remove)|.name] | .trigger=$trigger' <<< "$input")
     if [[ $(jq '.remove|length' <<< "$request") == 0 ]]; then continue; fi
@@ -129,6 +122,53 @@ hive_retention_apply() (
   printf '%s\n' "$results"
   return "$status"
 )
+# Pair removal on several hosts, in host order. Phase one: each host, under its lock, sets aside
+# the requested names that it still finds removable itself, so that no other command finds them,
+# and reports them. A name is committed only when every host whose plan holds it set it aside.
+# Phase two: each host removes the committed names and puts every other one back. A host that
+# refuses or fails in phase one commits nothing anywhere; a hold that an interruption leaves is
+# put back by the next prune on that host. Prints the hosts' reports; runs inside
+# hive_retention_apply, on its configuration snapshot.
+hive_retention_apply_hosts() {
+  local input=$1 plans=$2 trigger=$3 token host request result held='{}' failed=false committed results='[]' status=0
+  token=$(openssl rand -hex 8)
+  while IFS= read -r host; do
+    request=$(jq -c --argjson plans "$plans" --arg host "$host" --arg token "$token" --arg trigger "$trigger" \
+      '.hold=[$plans[]|select(.host==$host)|.entries[]|select(.remove)|.name] | .token=$token | .trigger=$trigger' <<< "$input")
+    [[ $(jq '.hold|length' <<< "$request") != 0 ]] || continue
+    if result=$(hive_retention_action "$host" retention-hold "$request") && jq -e '.held|type=="array"' <<< "$result" >/dev/null 2>&1; then
+      held=$(jq -c --arg host "$host" --argjson result "$result" '.[$host]=$result.held' <<< "$held")
+      if [[ $(jq '.refused|length' <<< "$result") != 0 ]]; then
+        printf 'Hive: host %s now keeps %s; they stay on every host.\n' "$host" "$(jq -r '.refused|join(", ")' <<< "$result")" >&2
+      fi
+    else
+      # A host that may have set aside part of its request puts it back in phase two.
+      held=$(jq -c --arg host "$host" '.[$host]=(.[$host] // [])' <<< "$held")
+      failed=true
+      printf 'Hive: host %s could not set its backups aside (see above); nothing is removed on any host.\n' "$host" >&2
+      break
+    fi
+  done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
+  committed='[]'
+  if [[ "$failed" != true ]]; then
+    committed=$(jq -c --argjson held "$held" '
+      [.[] | .host as $host | .entries[] | select(.remove) | {name, host:$host}] | group_by(.name) |
+      map(select(all(.[]; . as $e | ($held[$e.host] // []) | index($e.name) != null)) | .[0].name)' <<< "$plans")
+  fi
+  while IFS= read -r host; do
+    request=$(jq -c --arg token "$token" --arg trigger "$trigger" --argjson committed "$committed" --argjson held "$held" --arg host "$host" \
+      '.token=$token | .trigger=$trigger | .commit=[$committed[]|select(. as $name|$held[$host]|index($name)!=null)]' <<< "$input")
+    if result=$(hive_retention_action "$host" retention-commit "$request"); then :; else
+      status=1
+      printf 'Hive: host %s did not finish the prune (see above); what it set aside is put back by its next prune.\n' "$host" >&2
+    fi
+    [[ -z "$result" ]] || results=$(jq -c --argjson result "$result" '.+[$result]' <<< "$results")
+  done < <(jq -r 'keys[]' <<< "$held")
+  printf '%s\n' "$results"
+  [[ "$failed" != true ]] || status=1
+  return "$status"
+}
+
 hive_retention_print_removed() {
   local host name kind created bytes
   while IFS=$'\t' read -r host name kind created bytes; do
@@ -144,10 +184,9 @@ hive_retention_input() {
 }
 
 # Releases the plan's restored copies on every host, each under its own lock. This never changes
-# what can be restored, so unlike pair removal it also runs on a multi-host installation. Prints
-# the hosts' results.
+# what can be restored. Prints the hosts' results.
 hive_retention_release_copies() (
-  local input=$1 plans=$2 trigger=$3 multi=$4 host request result results='[]' status=0
+  local input=$1 plans=$2 trigger=$3 host request result results='[]' status=0
   local configuration
   configuration=$(hive_retention_snapshot_configuration) || { printf '[]\n'; return 1; }
   trap 'rm -f -- "$configuration"' EXIT
@@ -158,8 +197,8 @@ hive_retention_release_copies() (
     return 1
   fi
   while IFS= read -r host; do
-    request=$(jq -c --argjson plans "$plans" --arg host "$host" --arg trigger "$trigger" --argjson multi "$multi" \
-      '.release=[$plans[]|select(.host==$host)|.entries[]|select((.releaseCopy // false) and ($multi or (.remove|not)))|.name] | .trigger=$trigger' <<< "$input")
+    request=$(jq -c --argjson plans "$plans" --arg host "$host" --arg trigger "$trigger" \
+      '.release=[$plans[]|select(.host==$host)|.entries[]|select((.releaseCopy // false) and (.remove|not))|.name] | .trigger=$trigger' <<< "$input")
     if [[ $(jq '.release|length' <<< "$request") == 0 ]]; then continue; fi
     if result=$(hive_retention_action "$host" retention-release "$request"); then :; else status=1; fi
     [[ -z "$result" ]] || results=$(jq -c --argjson result "$result" '.+[$result]' <<< "$results")
@@ -193,7 +232,7 @@ hive_retention_snapshot_configuration() {
 
 # backups list | backups prune [--keep N] [--keep-days D] [--keep-full N] [--apply] | backups schedule ...
 hive_backups_command() (
-  local subcommand=${1:-list} keep days full settings input plans total results removed copies copy_count copy_total multi=false status=0 options usage
+  local subcommand=${1:-list} host keep days full settings input plans total results removed copies copy_count copy_total status=0 options usage
   local configuration
   usage='Usage: hive.sh backups list|prune [--keep N] [--keep-days D] [--keep-full N] [--apply] | backups schedule enable|disable|status [--at HH:MM]'
   if [[ "$subcommand" == schedule ]]; then shift; hive_retention_schedule_command "$@"; return; fi
@@ -207,25 +246,24 @@ hive_backups_command() (
   settings=$(hive_retention_settings "${HIVE_RETENTION_KEEP:-}" "${HIVE_RETENTION_KEEP_DAYS:-}"); read -r keep days <<< "$settings"
   full=$(hive_retention_keep_full "${HIVE_RETENTION_KEEP_FULL:-}")
   input=$(hive_retention_input "$keep" "$days" "$full")
-  [[ $(jq '.hosts|length' "$HIVE_CONFIG") == 1 ]] || multi=true
-  if [[ "$multi" == true && "${HIVE_RETENTION_APPLY:-false}" == true ]]; then
-    printf 'Hive: Multi-host backup pruning is disabled until selection and deletion use coordinated locks; on this installation --apply releases only restored copies, which keeps every backup restorable. No backup or rehearsal pair is removed.\n' >&2
-  fi
   plans=$(hive_retention_plans "$input") || hive_die 'Backup retention could not read every host; nothing was removed. See above'
+  if [[ $(jq '[.[].held[]?]|length' <<< "$plans") != 0 ]]; then
+    printf 'Hive: an interrupted prune set aside %s on %s.\n' \
+      "$(jq -r '[.[].held[]?]|unique|join(", ")' <<< "$plans")" "$(jq -r '[.[]|select((.held // [])|length>0)|.host]|join(", ")' <<< "$plans")" >&2
+    if [[ "$subcommand" == prune && "${HIVE_RETENTION_APPLY:-false}" == true ]]; then
+      while IFS= read -r host; do
+        hive_retention_action "$host" retention-restore "$input" >/dev/null || hive_die "The archives set aside on $host could not be put back; nothing was removed. See above"
+      done < <(jq -r '.[]|select((.held // [])|length>0)|.host' <<< "$plans")
+      printf 'Hive: they are back in place; retention decides on them again.\n' >&2
+      plans=$(hive_retention_plans "$input") || hive_die 'Backup retention could not read every host; nothing was removed. See above'
+    else
+      printf 'Hive: backups prune --apply puts them back before it decides again.\n' >&2
+    fi
+  fi
   total=$(hive_retention_total "$plans")
-  copies=$(hive_retention_copies "$plans" "$multi")
+  copies=$(hive_retention_copies "$plans")
   copy_count=$(jq length <<< "$copies"); copy_total=$(jq '[.[].releaseCopyKiB]|add // 0' <<< "$copies")
   options=$( [[ -z "${HIVE_RETENTION_KEEP:-}" ]] || printf ' --keep %s' "$keep"; [[ -z "${HIVE_RETENTION_KEEP_DAYS:-}" ]] || printf ' --keep-days %s' "$days"; [[ -z "${HIVE_RETENTION_KEEP_FULL:-}" ]] || printf ' --keep-full %s' "$full")
-  if [[ "$multi" == true && "${HIVE_RETENTION_APPLY:-false}" != true ]]; then
-    if [[ "$subcommand" == list ]]; then hive_retention_print "$plans" all
-    else hive_retention_print "$plans" changes; fi
-    printf 'Multi-host preview: %s entries match the pruning rules, totaling %s. Destructive pruning is disabled until selection and deletion use coordinated locks. Nothing was removed.\n' \
-      "$(jq '[.[].entries[]|select(.remove)]|length' <<< "$plans")" "$(hive_retention_size "$total")"
-    if ((copy_count > 0)); then
-      printf '%s restored copies, %s, can be released on their hosts; releasing a copy keeps its backup restorable: ./hive.sh backups prune%s --apply releases only copies on a multi-host installation.\n' "$copy_count" "$(hive_retention_size "$copy_total")" "$options"
-    fi
-    return 0
-  fi
   if [[ "$subcommand" == list ]]; then
     hive_retention_print "$plans" all
     printf 'The rules above remove %s entries, freeing %s: ./hive.sh backups prune shows them, and --apply removes them.\n' "$(jq '[.[].entries[]|select(.remove)]|length' <<< "$plans")" "$(hive_retention_size "$total")"
@@ -233,7 +271,7 @@ hive_backups_command() (
     return
   fi
   hive_retention_print "$plans" changes
-  [[ "$multi" == true ]] || printf 'Kept: %s entries (./hive.sh backups list shows why).\n' "$(jq '[.[].entries[]|select(.remove|not)]|length' <<< "$plans")"
+  printf 'Kept: %s entries (./hive.sh backups list shows why).\n' "$(jq '[.[].entries[]|select(.remove|not)]|length' <<< "$plans")"
   if [[ "${HIVE_RETENTION_APPLY:-false}" != true ]]; then
     if [[ $(jq '[.[].entries[]|select(.remove)]|length' <<< "$plans") == 0 && "$copy_count" == 0 ]]; then
       printf 'Dry run: nothing would be removed.\n'
@@ -250,7 +288,7 @@ hive_backups_command() (
     return
   fi
   if [[ $(jq '[.[].entries[]|select(.remove)]|length' <<< "$plans") == 0 && "$copy_count" == 0 ]]; then printf 'Nothing to remove.\n'; return; fi
-  if [[ "$multi" != true && $(jq '[.[].entries[]|select(.remove)]|length' <<< "$plans") != 0 ]]; then
+  if [[ $(jq '[.[].entries[]|select(.remove)]|length' <<< "$plans") != 0 ]]; then
     if results=$(hive_retention_apply "$input" "$plans" "${HIVE_RETENTION_TRIGGER:-prune}"); then :; else
       hive_retention_print_removed "$results"
       hive_die 'Backup retention stopped on a host; see above. What it removed is recorded in that host'"'"'s retention/ directory'
@@ -261,22 +299,17 @@ hive_backups_command() (
       "$removed" "$(hive_retention_size "$(jq '[.[].removed[].bytes]|add // 0|./1024|floor' <<< "$results")")"
   fi
   if ((copy_count > 0)); then
-    if results=$(hive_retention_release_copies "$input" "$plans" "${HIVE_RETENTION_TRIGGER:-prune}" "$multi"); then :; else status=1; fi
+    if results=$(hive_retention_release_copies "$input" "$plans" "${HIVE_RETENTION_TRIGGER:-prune}"); then :; else status=1; fi
     [[ -n "$results" ]] || results='[]'
     hive_retention_print_released "$results"
     printf 'Released %s restored copies, freeing %s. Their backups stay restorable; ./hive.sh rehearse --archive ID rebuilds a full copy. Each host recorded them under retention/.\n' \
       "$(jq '[.[].released[]]|length' <<< "$results")" "$(hive_retention_size "$(jq '[.[].released[].releasedKiB]|add // 0' <<< "$results")")"
     ((status == 0)) || printf 'Hive: a restored copy could not be released; it is kept unchanged (see above).\n' >&2
   fi
-  # Copy release is the only change on a multi-host installation; pair removal stays refused.
-  if [[ "$multi" == true && $(jq '[.[].entries[]|select(.remove)]|length' <<< "$plans") != 0 ]]; then
-    printf 'Hive: %s entries match the pruning rules but were not removed: multi-host pair removal is disabled.\n' "$(jq '[.[].entries[]|select(.remove)]|length' <<< "$plans")" >&2
-    status=1
-  fi
   return "$status"
 )
 
-# After a successful upgrade: prune only with explicit single-host opt-in. The
+# After a successful upgrade: prune only with explicit opt-in (retention.auto). The
 # upgrade has already completed, so a retention problem is reported, never fatal.
 hive_retention_after_upgrade() (
   local settings keep days input plans results removed
@@ -288,7 +321,6 @@ hive_retention_after_upgrade() (
     printf 'Hive: backup retention after upgrades is off by default (retention.auto); ./hive.sh backups prune previews old backups and rehearsals\n' >&2
     return 0
   fi
-  hive_retention_writable || return 0
   if ! settings=$( (hive_retention_settings '' '') 2>&1); then printf 'Hive: backup retention skipped: %s\n' "$settings" >&2; return 0; fi
   read -r keep days <<< "$settings"
   input=$(hive_retention_input "$keep" "$days")

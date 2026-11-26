@@ -24,6 +24,21 @@ holds its transaction for recovery, as described in
 delete transaction or runtime receipts to force another attempt. See also
 [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
 
+## Backup pruning on several hosts (next release)
+
+The next release's controller removes old backup and rehearsal pairs on installations with
+several hosts too; earlier controllers only listed them there and released restored copies. It
+removes in two phases, under each host's lock: every host first sets aside what it still finds
+removable, and a pair goes only when every host holding it did; see
+[pruning on several hosts](deployment/BACKUPS.md#pruning-on-several-hosts).
+
+- An installation file with `"retention": {"auto": true}` on several hosts now prunes after each
+  successful upgrade, from the first upgrade with this controller. Remove `auto` (or set it to
+  `false`) first if you relied on it doing nothing there.
+- `backups schedule enable` now works on several hosts, and needs every host to run the same
+  controller; `install` sets it up from `retention.schedule` there too.
+- Preview with `./hive.sh backups prune` before the first `--apply`.
+
 ## Client addresses and OIDC discovery (next release)
 
 The next release's controller passes the ingress's client address to more products and gives
