@@ -178,6 +178,7 @@ hive_retention_schedule_write() { # TIME LOG
 
 hive_retention_schedule_enable() {
   local time=${HIVE_RETENTION_AT:-} installed digest log entry rules
+  hive_retention_automatic 'every day' || return 1
   if [[ -z "$time" ]]; then time=$(jq -r --arg default "$hive_retention_default_schedule" '.retention.schedule // $default' "$HIVE_CONFIG"); fi
   [[ "$time" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || hive_die '--at is a 24-hour local time such as 03:40'
   rules=$(hive_retention_schedule_rules) || return 1
@@ -221,6 +222,9 @@ hive_retention_schedule_status() {
   printf 'Installation %s (%s)\n' "$(jq -r .installation "$HIVE_CONFIG")" "$config"
   rules=$(hive_retention_schedule_rules) || return 1
   printf 'Rules: %s\n' "$rules"
+  if ! hive_retention_automatic 'every day' 2>/dev/null; then
+    printf 'Daily pruning on several hosts needs "retention": {"multiHost": true} in the installation file; scheduled runs refuse without it.\n'
+  fi
   current=$(mktemp)
   if ! hive_retention_crontab_read "$current"; then rm -f -- "$current"; return 1; fi
   entries=$(hive_retention_crontab_entries "$current" "$config"); rm -f -- "$current"
@@ -273,7 +277,8 @@ hive_retention_schedule_run() (
   config=$(hive_retention_schedule_config) || hive_die 'The installation file cannot be resolved'
   digest=$(hive_controller_digest)
   printf '%s scheduled prune start: installation %s, %s, controller %s (%s)\n' "$(date -u +%FT%TZ)" "$(jq -r .installation "$HIVE_CONFIG")" "$config" "$(realpath -e -- "$HIVE_ROOT/hive.sh")" "${digest:0:12}"
-  if HIVE_RETENTION_APPLY=true HIVE_RETENTION_KEEP='' HIVE_RETENTION_KEEP_DAYS='' HIVE_RETENTION_KEEP_FULL='' HIVE_RETENTION_CONTROLLER=$digest HIVE_RETENTION_TRIGGER=schedule \
+  if ! hive_retention_automatic 'every day'; then status=1
+  elif HIVE_RETENTION_APPLY=true HIVE_RETENTION_KEEP='' HIVE_RETENTION_KEEP_DAYS='' HIVE_RETENTION_KEEP_FULL='' HIVE_RETENTION_CONTROLLER=$digest HIVE_RETENTION_TRIGGER=schedule \
       hive_backups_command prune; then status=0; else status=$?; fi
   if ((status == 0)); then
     printf '%s scheduled prune end: succeeded\n' "$(date -u +%FT%TZ)"

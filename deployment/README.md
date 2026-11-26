@@ -329,7 +329,7 @@ restorable. Failed and incomplete rehearsals keep everything. See
 attempt under `rehearsal-history/` and restores a fresh copy; incomplete or unverified attempts
 require review.
 `hive.sh backups prune` removes old backup and rehearsal pairs together and releases older restored
-copies, as a dry run unless `--apply` is given; with several hosts it removes pairs in two phases under each host's lock; a successful upgrade runs it only when the
+copies, as a dry run unless `--apply` is given; with several hosts it sets pairs aside, records the decision and removes them on every host under its lock; a successful upgrade runs it only when the
 installation opts in, and `hive.sh backups schedule enable` runs it every day; see
 [retention](BACKUPS.md#retention).
 

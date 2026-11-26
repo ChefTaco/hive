@@ -236,15 +236,17 @@ backups prune [--keep N] [--keep-days D] [--keep-full N] [--apply] is a dry run 
 the backup and rehearsal pairs it would remove, together, and the space that frees. It keeps the
 newest N restorable pairs, everything newer than D days, the installed release's upgrade archive,
 anything a transaction, receipt or recovery record names, and backups never rehearsed. --apply
-removes them; with several hosts, in two phases: each host first sets aside, under its lock, what
-it still finds removable, and a pair is removed only when every host holding it did. It also lists the restored copies it would
+removes them; with several hosts, in steps under each host's lock: every host sets aside what it
+still finds removable, records the decision, then removes, and a pair goes only when every host
+holding it set it aside; the next --apply finishes an interrupted prune. It also lists the restored copies it would
 release ("release copy"): a passed rehearsal is a full restored copy of the installation, and only
 the newest --keep-full (default 1) keep theirs. The others keep their evidence (result, isolated
 Compose definition, container logs), and their backups stay restorable; ./hive.sh rehearse
 --archive ID rebuilds a full copy for inspection. Each rehearse step, including the one in every
 upgrade and rollback, releases the earlier copies first.
-Automatic pruning after a successful upgrade is off by default: an installation turns it on with installation.json "retention" ({"keep":5,"keepDays":14,"auto":true}). Retention
-protects only archives that state files name: keep any archive you plan to restore later outside
+Automatic pruning after a successful upgrade is off by default: an installation turns it on with
+installation.json "retention" ({"keep":5,"keepDays":14,"auto":true}), and with several hosts
+also "multiHost":true, which the daily prune there needs too. Retention protects only archives that state files name: keep any archive you plan to restore later outside
 the installation directory before --apply. See deployment/BACKUPS.md#retention.
 backups schedule enable [--at HH:MM] | disable | status runs backups prune --apply every day,
 with the installation file's settings, from one marked line in the crontab
