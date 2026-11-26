@@ -16,10 +16,13 @@ test('declares the events feed path per product, relative to its browser prefix'
   assert.equal(suiteCatalog.cindertrace.capabilities['events.v1'].path, '/hive/events');
   assert.equal(suiteCatalog.hiveskills.capabilities['events.v1'].path, '/v1/hive/events');
   assert.equal(suiteCatalog.embermend.capabilities['events.v1'].path, '/api/v1/hive/events');
+  assert.equal(suiteCatalog.hivemem.capabilities['events.v1'].path, '/hive/events');
   // The first released version serving each feed.
-  const since = { magnus: '2.8.0', cindertrace: '0.5.0', hiveskills: '1.6.0', embermend: '0.2.0' };
+  const since = { magnus: '2.8.0', cindertrace: '0.5.0', hiveskills: '1.6.0', embermend: '0.2.0', hivemem: '1.11.0' };
   for (const [name, version] of Object.entries(since)) assert.equal(suiteCatalog[name].capabilities['events.v1'].since, version, name);
   assert.equal(suiteCatalog['hive-registry'].capabilities['inventory.v1'].since, '1.4.0');
+  // Cindertrace serves its own audit as HiveAuditRecord v1 from 0.10.0.
+  assert.deepEqual(suiteCatalog.cindertrace.capabilities['audit.v1'], { path: '/audit/export', since: '0.10.0' });
   for (const [name, entry] of Object.entries(suiteCatalog)) if (entry.capabilities) assert.ok(entry.connection.browserPrefix, name);
 });
 
@@ -38,6 +41,15 @@ test('emits a capability only from its since version, and only its path', () => 
     assert.equal(manifest.components.emberpath.version, '9.9.9');
   });
   assert.equal(suiteCatalog.magnus.capabilities['events.v1'].since, '2.8.0', 'the source catalog is not changed');
+});
+
+test('older pins do not advertise the HiveMem feed or the Cindertrace audit export', () => {
+  assert.equal(catalogFor('hivemem', '1.10.0').capabilities, undefined);
+  assert.equal(catalogFor('hivemem', '1.9.1').capabilities, undefined);
+  assert.deepEqual(catalogFor('hivemem', '1.11.0').capabilities, { 'events.v1': { path: '/hive/events' } });
+  assert.deepEqual(catalogFor('hivemem', '1.11.0').serviceCapabilities, [{ name: 'memory.v1', since: '1.9.1' }]);
+  assert.deepEqual(catalogFor('cindertrace', '0.9.0').capabilities, { 'events.v1': { path: '/hive/events' } });
+  assert.deepEqual(catalogFor('cindertrace', '0.10.0').capabilities, { 'events.v1': { path: '/hive/events' }, 'audit.v1': { path: '/audit/export' } });
 });
 
 test('refuses malformed capability declarations', () => {
@@ -107,7 +119,8 @@ function ingressMapping(prefix) {
 }
 // Where each product serves each capability natively.
 const nativeRoutes = {
-  'events.v1': { magnus: '/api/v1/hive/events', cindertrace: '/api/v1/hive/events', hiveskills: '/v1/hive/events', embermend: '/api/v1/hive/events' },
+  'events.v1': { magnus: '/api/v1/hive/events', cindertrace: '/api/v1/hive/events', hiveskills: '/v1/hive/events', embermend: '/api/v1/hive/events', hivemem: '/v1/hive/events' },
+  'audit.v1': { cindertrace: '/api/v1/audit/export' },
   'inventory.v1': { 'hive-registry': '/v1/inventory' },
 };
 

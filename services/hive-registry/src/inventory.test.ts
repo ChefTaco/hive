@@ -271,5 +271,9 @@ describe('Hive Registry inventory', async () => {
     it('announces inventory.v1 in the public browser contract', () => {
       assert.deepEqual(registryCapabilitiesSchema.parse({ 'inventory.v1': { path: '/v1/inventory' } }), { 'inventory.v1': { path: '/v1/inventory' } });
     });
+    it('announces audit.v1 in the public browser contract', () => {
+      assert.deepEqual(registryCapabilitiesSchema.parse({ 'audit.v1': { path: '/audit/export' }, 'events.v1': { path: '/hive/events' } }), { 'audit.v1': { path: '/audit/export' }, 'events.v1': { path: '/hive/events' } });
+      assert.throws(() => registryCapabilitiesSchema.parse({ 'audit.v1': { path: 'audit/export' } }));
+    });
   });
 });

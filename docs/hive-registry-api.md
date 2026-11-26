@@ -90,6 +90,7 @@ the installed product version serves to the browser. A product that offers none 
   | Cindertrace | `/api/cindertrace` | `/hive/events` | `/api/cindertrace/hive/events` | prefix replaced by `/api/v1` | `/api/v1/hive/events` |
   | HiveSkills | `/api/hiveskills` | `/v1/hive/events` | `/api/hiveskills/v1/hive/events` | prefix stripped | `/v1/hive/events` |
   | Embermend | `/api/embermend` | `/api/v1/hive/events` | `/api/embermend/api/v1/hive/events` | prefix stripped | `/api/v1/hive/events` |
+  | HiveMem (from 1.11.0) | `/api/hivemem` | `/hive/events` | `/api/hivemem/hive/events` | prefix replaced by `/v1` | `/v1/hive/events` |
 
 - A capability needs a `browserPrefix`.
 - Names match `[a-z0-9.-]{1,64}`, with at most 32 per product. Each value holds only `path`.
@@ -98,6 +99,10 @@ the installed product version serves to the browser. A product that offers none 
   `GET browserPrefix + path?after=CURSOR&limit=N`, with its normal user authentication.
 - `inventory.v1` (the Hive Registry only, from 1.4.0): the registry serves its
   [inventory](#inventory) at `GET browserPrefix + path`, here `/api/registry/v1/inventory`.
+- `audit.v1` (browser contract 5; Cindertrace from 0.10.0): the product serves its own audit as
+  HiveAuditRecord v1 pages, `GET browserPrefix + path?after=CURSOR&limit=N`, with its normal user
+  authentication. Cindertrace's path is `/audit/export`: `/api/cindertrace/audit/export` in the
+  browser, `/api/v1/audit/export` natively.
 
 The suite catalog (`scripts/suite/suite-catalog.json`) declares a capability per product with the
 first product version that serves it, as `{"path": "...", "since": "X.Y.Z"}`; `"since": null`
@@ -320,6 +325,7 @@ reaches the browser. The service's own tests parse every public response with it
 
 | Version | Registry | Adds |
 | --- | --- | --- |
+| 5 | next release | The `audit.v1` capability, a product's own HiveAuditRecord v1 export |
 | 4 | 1.4.0 | The `inventory.v1` capability, announcing the [inventory](#inventory) |
 | 3 | 1.3.0 | The optional [setup checklist](#setup-checklist) on `GET /v1/installation` |
 | 2 | 1.2.0 | Product [capabilities](#capabilities) |

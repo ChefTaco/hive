@@ -25,6 +25,10 @@ All notable changes to this project are documented in this file. The format is b
   `"retention": {"multiHost": true}`; automatic pruning stays off on existing multi-host
   installations. See [pruning on several hosts](deployment/BACKUPS.md#pruning-on-several-hosts)
   and UPGRADING.
+- Hive Registry catalog capabilities for newer product pins: HiveMem 1.11.0 and later advertise
+  its HiveEvent v1 feed (`events.v1`, `/api/hivemem/hive/events`), and Cindertrace 0.10.0 and
+  later its own audit export as HiveAuditRecord v1 (`audit.v1`, `/api/cindertrace/audit/export`).
+  `audit.v1` is new in the Registry's browser contract. Older pins advertise neither.
 - HiveSkills 1.10.0 and later and Emberpath trust the ingress's `X-Forwarded-For` when they run on
   its host without a published port (`HIVE_SKILLS_TRUSTED_PROXIES`, `EMBERPATH_TRUSTED_PROXIES`:
   the pinned suite network or Docker's private ranges), so their sign-in throttles see the client,
