@@ -57,6 +57,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- `console-clients add` marks the suite's own HiveXUI browser clients first-party when an existing
+  one is not (a public `hivexui-*` client with this console's callback), so Oathweave asks no
+  consent at sign-in; nothing else about them, and no other client, changes. Clients it creates
+  are first-party, as before. See UPGRADING.
 - Container resource limits. Every container now runs with `pids_limit: 4096` by default, and
   the installation file's new `containerLimits` sets `memory`, `cpus` and `pids` for every
   container (`"*"`) or per component, over the signed manifest. The manifest contract accepts

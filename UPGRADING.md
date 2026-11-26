@@ -50,6 +50,16 @@ or put back by the next one and never leaves a restore point half-removed; see
   3.14.3 or earlier (for example for a rollback), which refuses unknown retention keys.
 - Preview with `./hive.sh backups prune` before the first `--apply`.
 
+## First-party console clients (next release)
+
+Oathweave asks no consent for a first-party client. Fresh setup has always created the HiveXUI
+browser clients as first-party, but an installation whose clients were created otherwise (by
+hand, or by an older migration) shows a consent prompt at sign-in. After upgrading, run
+`./hive.sh console-clients add` (or `post-upgrade`, which runs it): it marks the suite's own
+`hivexui-*` clients first-party when they are public clients with this console's callback, and
+changes nothing else about them, and nothing about any other client. It names them and asks
+first; `--yes` applies unattended.
+
 ## Client addresses and OIDC discovery (next release)
 
 The next release's controller passes the ingress's client address to more products and gives
