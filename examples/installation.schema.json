@@ -131,6 +131,28 @@
         "trustBundleFile": {
           "$ref": "#/$defs/path",
           "description": "PEM trust bundle available at this protected local reference on every configured host."
+        },
+        "magnusGateway": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sshUsername",
+            "sshPrivateKeyFile"
+          ],
+          "description": "Fleet gateway SSH identity, with a selected magnus-gateway component.",
+          "properties": {
+            "sshUsername": {
+              "type": "string",
+              "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
+            },
+            "sshPrivateKeyFile": {
+              "$ref": "#/$defs/path"
+            },
+            "grantTerminalToInitialOperator": {
+              "type": "boolean",
+              "default": false
+            }
+          }
         }
       }
     },
@@ -188,6 +210,173 @@
           "description": "Daily prune time, 24-hour local time of the controller machine (deployment/BACKUPS.md#daily-pruning). install adds the crontab line on a single-host installation; afterwards hive.sh backups schedule enable|disable manage it. Requires suite 3.9.4 or later: older controllers refuse the key."
         }
       }
+    },
+    "external": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "magnus"
+      ],
+      "description": "Products this installation uses but does not run (deployment/FULL.md#external-magnus).",
+      "properties": {
+        "magnus": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "type": "string",
+              "maxLength": 262,
+              "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$",
+              "description": "HTTPS URL with a fully qualified DNS host name and a publicly trusted certificate; no path. It takes the place of the magnus components."
+            }
+          }
+        }
+      }
+    },
+    "nativeMigration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "expectedHost",
+        "machineIdSHA256",
+        "source",
+        "browserIssuer"
+      ],
+      "description": "Moving a native installation into the suite (deployment/MIGRATE_NATIVE.md). Requires profile custom, console.nativeListeners and console.networkSubnet, and no bootstrap.",
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "expectedHost": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,62}$"
+        },
+        "machineIdSHA256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "root": {
+              "type": "string",
+              "pattern": "^/([A-Za-z0-9_./-]+)?$"
+            },
+            "serviceManager": {
+              "enum": [
+                "systemd",
+                "command"
+              ],
+              "default": "systemd"
+            },
+            "controlCommand": {
+              "type": "string"
+            },
+            "qdrantContainer": {
+              "type": "string"
+            },
+            "qdrantUrl": {
+              "type": "string"
+            },
+            "redisUrl": {
+              "type": "string"
+            },
+            "dataNetwork": {
+              "type": "string"
+            },
+            "archive": {
+              "type": "string"
+            }
+          }
+        },
+        "browserIssuer": {
+          "type": "string",
+          "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._/-]*)?$"
+        },
+        "verifyAddress": {
+          "type": "string"
+        },
+        "verifyExtraTrustFile": {
+          "$ref": "#/$defs/path"
+        },
+        "reviewedLinksFile": {
+          "$ref": "#/$defs/path"
+        },
+        "imageRegistry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "server",
+            "username",
+            "passwordFile"
+          ],
+          "properties": {
+            "server": {
+              "type": "string"
+            },
+            "username": {
+              "type": "string"
+            },
+            "passwordFile": {
+              "$ref": "#/$defs/path"
+            }
+          }
+        },
+        "dataAliases": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/path"
+          }
+        },
+        "adminAccount": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "subject",
+            "username",
+            "tokenFile"
+          ],
+          "properties": {
+            "subject": {
+              "type": "string",
+              "minLength": 1
+            },
+            "username": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tokenFile": {
+              "$ref": "#/$defs/path"
+            },
+            "tokenTtlSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 604800,
+              "default": 86400
+            }
+          }
+        },
+        "rehearsal": {
+          "type": "boolean"
+        },
+        "networkSubnets": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "dryRunSubnets": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -231,6 +420,10 @@
         "sshConfig": {
           "$ref": "#/$defs/path",
           "description": "Optional operator-owned mode-0600 OpenSSH configuration. Host keys remain strictly verified."
+        },
+        "sudoPasswordFile": {
+          "$ref": "#/$defs/path",
+          "description": "Owner-only file on the controller holding this host's sudo password (deployment/MIGRATE_NATIVE.md). It never reaches a command line."
         }
       }
     },
@@ -288,6 +481,33 @@
             "type": "string"
           },
           "description": "IP addresses or CIDR ranges of reverse proxies in front of the console. Only their X-Forwarded-For is believed, read from the right. Omit when browsers connect to the console directly."
+        },
+        "nativeListeners": {
+          "type": "array",
+          "description": "Extra ports published on the console bind address. A fresh installation may publish one: {\"port\":N,\"component\":\"magnus\"}, the Magnus agent API (deployment/FULL.md#magnus-host-agents). A migrated installation (nativeMigration) keeps its native product listeners.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "port",
+              "component"
+            ],
+            "properties": {
+              "port": {
+                "type": "integer",
+                "minimum": 1024,
+                "maximum": 65535
+              },
+              "component": {
+                "$ref": "#/$defs/id"
+              }
+            }
+          }
+        },
+        "edgeSubnet": {
+          "type": "string",
+          "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$",
+          "description": "IPv4 CIDR of the separate edge network used by a nativeMigration rehearsal, whose suite network is internal."
         }
       }
     },
