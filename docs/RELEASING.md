@@ -108,6 +108,27 @@ release's bytes only from the controller source of that release's tag.
 7. **Make new packages public.** A first push to GitHub Container Registry creates a private
    package. Set every new package to public before announcing the release.
 
+## Withdrawing a release
+
+A signed release that must not be used, such as one tagged but never published or one with a
+defect that later releases fix, is withdrawn by the next release. Its inputs list it:
+
+```json
+"withdrawn": [
+  { "version": "3.12.8", "action": "refuse", "reason": "Tagged but never published", "replacement": "3.12.9" }
+]
+```
+
+`build-suite-manifest.mjs` copies the list into the signed manifest, sorted, after checking that
+each version is an earlier signed release in `releases/`, the action is `refuse` or `warn`, the
+reason is one line of at most 300 characters and a replacement is later. The list is cumulative:
+the build fails when it drops an entry of the newest earlier manifest. The launcher reads the
+newest manifest in its own checkout whose signature verifies, and before `plan`, `install`,
+`init` or `upgrade` with `--release` (exact or `latest`) refuses a `refuse` release and warns
+about a `warn` one. `HIVE_ALLOW_WITHDRAWN_RELEASE=X.Y.Z` runs exactly that refused release, for a
+recovery that needs it. A withdrawal reaches a launcher with the release that carries it: an older
+checkout, or a custom `--manifest`, does not know it.
+
 ## The publisher key
 
 The key is an Ed25519 key in PEM form, created with `openssl genpkey -algorithm ED25519`. Its public

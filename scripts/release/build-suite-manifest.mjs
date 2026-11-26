@@ -16,7 +16,7 @@
 // Signing is a separate, offline step (see docs/RELEASING.md).
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { addFullComponents, coreRelease, CORE_PRODUCTS, DATASTORE_IMAGES, DATASTORE_VERSIONS, FULL_PRODUCTS, OPTIONAL_PRODUCTS, datastoreProfileReferences, datastoreProfileComponent, assertDatastoreProfileCurrent, applyDatastoreProfile, applyStorageRecovery, applyProductFormats, applyProductInitializations } from '../suite/release-contracts.mjs';
@@ -108,6 +108,30 @@ applyStorageRecovery(manifest, inputs.storageRecovery);
 applyProductFormats(manifest, products);
 applyProductInitializations(manifest, products);
 manifest.controllerSHA256 = controllerSHA256;
+// Releases this publisher withdrew. Launchers refuse ("refuse") or warn about ("warn") them before
+// plan, install or upgrade. The list is cumulative: every entry of the newest earlier manifest stays.
+if (inputs.withdrawn !== undefined) {
+  const semver = /^[0-9]+\.[0-9]+\.[0-9]+$/;
+  const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; };
+  assert(Array.isArray(inputs.withdrawn) && inputs.withdrawn.length > 0, 'withdrawn lists at least one release');
+  for (const entry of inputs.withdrawn) {
+    assert.deepEqual(Object.keys(entry).filter((key) => !['version', 'action', 'reason', 'replacement'].includes(key)), [], 'withdrawn entries have version, action, reason and replacement only');
+    assert.match(entry.version, semver, 'A withdrawn release is an exact X.Y.Z');
+    assert(newer(entry.version, version) < 0, `withdrawn ${entry.version} is not older than ${version}`);
+    assert(existsSync(join(root, 'releases', entry.version + '.json')), `withdrawn ${entry.version} is not a signed release in releases/`);
+    assert(['refuse', 'warn'].includes(entry.action), 'A withdrawn action is refuse or warn');
+    assert(typeof entry.reason === 'string' && entry.reason.length > 0 && entry.reason.length <= 300 && !/[\t\n\r]/.test(entry.reason), 'A withdrawn reason is one line of at most 300 characters');
+    if (entry.replacement !== undefined) assert(semver.test(entry.replacement) && newer(entry.replacement, entry.version) > 0, 'A replacement is a later exact release');
+  }
+  assert.equal(new Set(inputs.withdrawn.map((entry) => entry.version)).size, inputs.withdrawn.length, 'A release is withdrawn once');
+  manifest.withdrawn = [...inputs.withdrawn].sort((a, b) => newer(a.version, b.version)).map(({ version: v, action, reason, replacement }) => ({ version: v, action, reason, ...(replacement ? { replacement } : {}) }));
+}
+const earlier = (existsSync(join(root, 'releases')) ? readdirSync(join(root, 'releases')) : []).filter((name) => /^[0-9]+\.[0-9]+\.[0-9]+\.json$/.test(name)).map((name) => name.slice(0, -5))
+  .filter((name) => { const x = name.split('.').map(Number), y = version.split('.').map(Number); return (x[0] - y[0] || x[1] - y[1] || x[2] - y[2]) < 0; })
+  .sort((a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; }).pop();
+for (const entry of (earlier ? JSON.parse(readFileSync(join(root, 'releases', earlier + '.json'), 'utf8')).withdrawn ?? [] : [])) {
+  assert((manifest.withdrawn ?? []).some((kept) => kept.version === entry.version), `${earlier} withdrew ${entry.version}; keep it in withdrawn`);
+}
 // Each component records the version of what it runs; applySuiteCatalog falls back to the suite version.
 for (const [name, product] of Object.entries(products)) if (product.version && manifest.components[name]) manifest.components[name].version = product.version;
 if (products.embermend?.version) manifest.components['embermend-worker'].version = products.embermend.version;

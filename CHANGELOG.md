@@ -47,6 +47,11 @@ All notable changes to this project are documented in this file. The format is b
   one field per line, instead of a 2 KB single-line jq program, and its arguments are listed one
   per line, so the security-relevant payload can be reviewed. The payload is byte-for-byte the
   same. `host-request.jq` is a new controller runtime file.
+- Withdrawn releases. A release's inputs may list earlier releases as `withdrawn` (`refuse` or
+  `warn`, with a reason and an optional replacement); the signed manifest carries the cumulative
+  list, and the launcher refuses or warns before `plan`, `install`, `init` or `upgrade` of a
+  listed release with `--release`. `HIVE_ALLOW_WITHDRAWN_RELEASE=X.Y.Z` overrides a refusal for a
+  recovery. No release is withdrawn yet; see docs/RELEASING.md, "Withdrawing a release".
 
 ### Fixed
 
