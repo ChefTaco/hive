@@ -23,9 +23,11 @@ case $1 in
     component=$5
     cat > "$STORAGE_FIXTURE/consumed-$component"
     printf '%s\n' "$component" >> "$STORAGE_FIXTURE/migrated"
+    printf 'run %s\n' "$component" >> "$STORAGE_FIXTURE/calls"
     [[ "$component" != "${FAIL_STORAGE_COMPONENT:-}" ]];;
   ps) [[ "${RUNNING_STORAGE:-false}" != true || "$*" != 'ps --status running -q' ]] || printf 'running-fixture\n';;
-  config|up|stop|logs|down) exit 0;;
+  up|stop) printf '%s\n' "$*" >> "$STORAGE_FIXTURE/calls";;
+  config|logs|down) exit 0;;
   *) exit 1;;
 esac
 DOCKER
@@ -44,7 +46,7 @@ host() {
     bash <(printf '%s\n' "${HOST_SCRIPT:-$script}") > "$temporary/host.log" 2>&1
 }
 reset() {
-  rm -rf -- "$directory"; rm -f "$temporary/migrated" "$temporary/consumed-"*
+  rm -rf -- "$directory"; rm -f "$temporary/migrated" "$temporary/calls" "$temporary/consumed-"*
   mkdir -p "$directory/data" "$directory/config" "$directory/releases"
   printf '{"installation":"example-suite","host":"control","uuid":"fixture"}' > "$directory/installation.json"
   printf '{"version":"0.1.0","digest":"%064d","plan":"%064d"}' 1 1 > "$directory/receipt.json"
@@ -52,7 +54,8 @@ reset() {
     {name:"example-suite-control",services:(["alpha","bravo","charlie"]|map(. as $name|{key:$name,value:{image:("example.com/"+$name+"@sha256:"+("0"*64)),user:$user,volumes:[{type:"bind",source:($base+"/data/"+$name),target:"/data"}]}})|from_entries)}
   ' > "$directory/compose.json"
   cp "$directory/compose.json" "$directory/candidate.$plan.json"
-  jq -n '{schema:1,version:"0.2.0",components:(["alpha","bravo","charlie"]|map({key:.,value:{kind:"datastore",storageFormat:"store-v2",migration:{from:"store-v1",command:["migrate-fixture"]}}})|from_entries)}' > "$directory/manifest.$plan.json"
+  # charlie's migration needs its private store running, as Oathweave's needs its Redis.
+  jq -n '{schema:1,version:"0.2.0",components:((["alpha","bravo","charlie"]|map({key:.,value:{kind:"datastore",storageFormat:"store-v2",migration:{from:"store-v1",command:["migrate-fixture"]}}})|from_entries) + {store:{kind:"datastore",storageFormat:"plain-v1"}} | .charlie.requiresLocal=["store"])}' > "$directory/manifest.$plan.json"
   printf '{"alpha":"store-v1","bravo":"store-v1","charlie":"store-v1"}' > "$directory/data-formats.json"
   for component in alpha bravo charlie; do mkdir "$directory/data/$component"; printf 'retained\n' > "$directory/data/$component/state.txt"; done
   for file in signature."$plan" trust."$plan".pub controller."$plan".tar.gz; do : > "$directory/$file"; done
@@ -64,6 +67,9 @@ for action in rehearse migrate; do
   if [[ "$action" == rehearse ]]; then host backup || { cat "$temporary/host.log" >&2; fail 'Backup failed'; }; fi
   host "$action" || { cat "$temporary/host.log" >&2; fail "$action failed"; }
   [[ $(cat "$temporary/migrated") == $'alpha\nbravo\ncharlie' ]] || fail "$action skipped later storage migrations"
+  grep -A2 -x 'up -d --wait --wait-timeout 180 store' "$temporary/calls" | tr '\n' ' ' | grep -q '^up -d --wait --wait-timeout 180 store run charlie stop --timeout 45 store' ||
+    { cat "$temporary/calls" >&2; fail "$action did not run charlie's migration with its store started and stopped around it"; }
+  ! grep -B1 -x 'run alpha' "$temporary/calls" | grep -q '^up ' || fail "$action started a store for a migration that needs none"
   for component in alpha bravo charlie; do [[ ! -s "$temporary/consumed-$component" ]] || fail "$action leaked enumeration input"; done
   if [[ "$action" == rehearse ]]; then
     jq -e '.result=="passed"' "$directory/rehearsals/archive/result.json" >/dev/null || fail 'Rehearsal did not pass'

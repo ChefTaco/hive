@@ -157,6 +157,10 @@ deleting old posts in channels that have a retention limit.
 
 ### Fixed
 
+- A product's own storage migration runs with the private datastores it requires started, in the
+  rehearsal and on the live store, and stopped again afterwards. Oathweave 2.5.0 and later reach
+  their Redis from `migrate`, which failed with the datastores stopped, so the first upgrade with an
+  Oathweave format transition held at the rehearsal.
 - `uninstall --purge` deletes an installation directory that setup created with sudo. When every
   file in it belonged to the operator, the purge ran without root, emptied the directory and then
   failed to remove it from its root-owned parent; repeating the command then stopped at the empty

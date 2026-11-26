@@ -86,6 +86,19 @@ upgrade_version_allowed() {
   fi
   [[ $(printf '%s\n%s\n' "$from" "$to" | sort -V | tail -1) == "$to" ]]
 }
+# A product's own storage migration may need the private datastores its manifest entry requires
+# (Oathweave's migrate reaches its Redis): start them, run the migration without its other
+# dependencies, then stop them again, as before the migration.
+product_migration() { # COMPOSE MANIFEST COMPONENT ARGUMENTS...
+  local file=$1 manifest=$2 component=$3 status=0
+  local -a stores
+  shift 3
+  mapfile -t stores < <(jq -r --arg name "$component" '.components as $c | ($c[$name].requiresLocal // [])[] | select($c[.].kind=="datastore")' "$manifest")
+  if ((${#stores[@]})); then docker compose -f "$file" up -d --wait --wait-timeout 180 "${stores[@]}" < /dev/null || return 1; fi
+  docker compose -f "$file" run --no-deps --rm -T "$component" "$@" < /dev/null || status=$?
+  if ((${#stores[@]})); then docker compose -f "$file" stop --timeout 45 "${stores[@]}" < /dev/null || status=1; fi
+  return "$status"
+}
 recorded_format() { jq -r --arg name "$2" '.[$name] // "unversioned"' "$1/data-formats.json" 2>/dev/null || printf 'unversioned\n'; }
 [[ "$directory" =~ ^/[A-Za-z0-9_./-]+$ && "$directory" != *'/../'* && "$directory" != */.. && ${#directory} -gt 4 ]] || die 'Invalid installation path'
 [[ "$installation" =~ ^[a-z][a-z0-9-]{0,47}$ && "$host" =~ ^[a-z][a-z0-9-]{0,47}$ && "$plan" =~ ^[a-f0-9]{64}$ ]] || die 'Invalid installation identity'
@@ -460,7 +473,7 @@ case "$action" in
         [[ $(jq -r .allowMigrations <<< "$input") == true ]] || die 'Migration execution requires --allow-migrations'
         record migration-started
         mapfile -t arguments < <(jq -r --arg name "$component" '.components[$name].migration.command[]' "$manifest")
-        docker compose -f "$directory/candidate.$plan.json" run --no-deps --rm -T "$component" "${arguments[@]}" < /dev/null
+        product_migration "$directory/candidate.$plan.json" "$manifest" "$component" "${arguments[@]}"
         jq -n --arg name "$component" --arg format "$format" --slurpfile previous "$directory/data-formats.json" '$previous[0]+{($name):$format}' | atomic_json "$directory/data-formats.json"
         record migrated
       fi
@@ -641,7 +654,7 @@ case "$action" in
         if component_is_new "$component" "$from" "$rehearsal"; then continue; fi
         if [[ "$from" != "$target" && $(jq -r .operation <<< "$input") != rollback ]]; then
           mapfile -t arguments < <(jq -r --arg name "$component" '.components[$name].migration.command[]' "$directory/manifest.$plan.json")
-          if ((${#arguments[@]}==0)) || ! docker compose -f "$rehearsal/isolated.json" run --no-deps --rm -T "$component" "${arguments[@]}" < /dev/null; then result=failed; break; fi
+          if ((${#arguments[@]}==0)) || ! product_migration "$rehearsal/isolated.json" "$directory/manifest.$plan.json" "$component" "${arguments[@]}"; then result=failed; break; fi
         fi
       done < <(jq -r '.services|keys[]' "$rehearsal/isolated.json")
     fi
