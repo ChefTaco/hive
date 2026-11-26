@@ -281,86 +281,31 @@ upgrade unattended, run `./hive.sh admin-access setup --release latest` when rea
 checklist keeps the product-access step pending until it is completed. See
 [administrator product access](#administrator-product-access).
 
-Upgrading from 3.10.0 to 3.11.0 needs no migration flag. HiveMem moves to 1.8.0 and ChatterMost
-and its migrator move to 0.7.0; other product pins and storage formats stay unchanged. See
-[Suite 3.11.0](../UPGRADING.md#suite-3110-guided-administrator-product-access).
+Whether an upgrade needs `--allow-migrations`, by release (older ones below the table; an upgrade
+across several releases needs the flag when any release it crosses does):
 
-Upgrading from 3.11.0 to 3.11.1 also needs no migration flag. Only Cindertrace moves, to 0.7.2;
-the controller and every other pin stay those of 3.11.0. See
-[Suite 3.11.1](../UPGRADING.md#suite-3111-cindertrace-072).
-
-Upgrading from 3.11.1 to 3.11.2 also needs no migration flag. Oathweave moves to 2.3.1, HiveMem
-to 1.8.1, Emberpath to 2.5.2, Magnus and its host agent to 3.1.2 and Ardent Project Studio to
-0.4.3; no storage format changes. The controller changes, so run 3.11.2 from its own release
-checkout. See [Suite 3.11.2](../UPGRADING.md#suite-3112-product-maintenance-releases).
-
-Upgrading from 3.11.2 to 3.12.0 needs `--allow-migrations` on an installation whose HiveMem has
-data owned by `hive-router` (one migrated from the native Hive Router), which moves to `emberpath`;
-other installations need no flag. Cindertrace moves to 0.8.0, HiveXUI to 0.10.0, HiveMem to 1.9.0,
-Emberpath to 2.5.3 and Magnus and its host agent to 3.1.3. The controller changes, so run 3.12.0
-from its own release checkout. See
-[Suite 3.12.0](../UPGRADING.md#suite-3120-cindertrace-080-and-the-emberpath-memory-principal).
-
-Upgrading from 3.12.0 to 3.12.1 needs no migration flag. Every product pin stays that of 3.12.0;
-only the controller changes, so run 3.12.1 from its own release checkout. An upgrade from 3.11.2
-straight to 3.12.1 needs the same `--allow-migrations` as 3.12.0. See
-[Suite 3.12.1](../UPGRADING.md#suite-3121-memory-identity-relink-fixes).
-
-Upgrading from 3.12.1 to 3.12.2 needs no migration flag. Cindertrace moves to 0.8.1, which has no
-schema migration; every other pin stays that of 3.12.1. The controller changes, so run 3.12.2 from
-its own release checkout. An upgrade from 3.11.2 straight to 3.12.2 needs the same
-`--allow-migrations` as 3.12.0. See
-[Suite 3.12.2](../UPGRADING.md#suite-3122-cindertrace-081).
-
-Upgrading from 3.12.2 to 3.12.3 needs no migration flag. HiveMem moves to 1.9.1, HiveXUI to 0.10.1
-and the Hive Registry to 1.3.2, none with a schema migration; every other pin stays that of 3.12.2.
-Every container now gets a bounded Docker log, so the first upgrade to 3.12.3 recreates every
-container, datastores included; data is kept, but `docker logs` loses the history of each replaced
-container. The controller changes, so run 3.12.3 from its own release checkout. An upgrade from
-3.11.2 straight to 3.12.3 needs the same `--allow-migrations` as 3.12.0. See
-[Suite 3.12.3](../UPGRADING.md#suite-3123-bounded-container-logs-and-security-updates).
-
-Upgrading from 3.12.7 to 3.12.9 uses the normal signed upgrade and needs no migration flag. The
-controller is that of 3.12.7; the launcher still runs 3.12.9 from its own release checkout. 3.12.8
-was tagged but never published. See
-[Suite 3.12.9](../UPGRADING.md#suite-3129-effect-3221-in-the-prisma-based-products).
-
-Upgrading from 3.12.9 to 3.13.0 needs no migration flag either, but the controller changes, so run
-3.13.0 from its own release checkout. It adds HiveXUI's Installed software view: before the upgrade,
-add the `hivexui-registry` browser client policy to Oathweave, and after it run
-`./hive.sh console-clients add`. See
-[Suite 3.13.0](../UPGRADING.md#suite-3130-hive-registry-141-and-the-installed-software-view).
-
-Upgrading from 3.13.0 to 3.13.1 needs no flag. It pins the same products, and its controller fixes a
-rehearsal before the upgrade and the abort of a failed check on installations migrated from native
-services. See [Suite 3.13.1](../UPGRADING.md#suite-3131-controller-fixes).
-
-Upgrading from 3.13.0 or 3.13.1 to 3.13.2 needs no flag either. It pins the same products, and its
-`post-upgrade` records the browser-clients checklist item as done when Oathweave already has every
-client. See [Suite 3.13.2](../UPGRADING.md#suite-3132-console-clients-checklist).
-
-Upgrading to 3.13.3 needs no flag either. It pins Magnus 3.2.1 (server, fleet gateway and host
-agent) and is otherwise 3.13.2. See [Suite 3.13.3](../UPGRADING.md#suite-3133-magnus-321).
-Upgrading to 3.13.4 from 3.13.0 or later needs no flag: it is 3.13.3 with the Hive Registry
-1.4.2. See [Suite 3.13.4](../UPGRADING.md#suite-3134-hive-registry-142).
-Upgrading to 3.13.5 from 3.13.0 or later needs no flag either. It pins the products of 3.13.4, and
-`magnus-agent install` on the Magnus host records the agent checklist item. See
-[Suite 3.13.5](../UPGRADING.md#suite-3135-agent-checklist-item).
-Upgrading to 3.14.0 needs `--allow-migrations` for Emberpath 2.6.0's data format,
-`emberpath-managed-format-3`. Ardent Project Studio 0.5.1 also runs one-way migrations on its first
-start, so keep the pre-change backup. See
-[Suite 3.14.0](../UPGRADING.md#suite-3140-ardent-execution-recovery-lineage-and-artifact-transfer-v2).
-Upgrading from 3.14.0 to 3.14.1 needs no flag. It pins Magnus 3.3.3, HiveSkills 1.9.1 and
-Cindertrace 0.8.2 and PostgreSQL images with Zstandard 1.6.0, and the controller changes; upgrade
-the Magnus host agent first. See
-[Suite 3.14.1](../UPGRADING.md#suite-3141-agent-model-route-magnus-333-and-zstandard-160).
-Upgrading to 3.14.2 from 3.14.0 or 3.14.1 needs `--allow-migrations` on an installation with a
-suite-managed Magnus (the full profile), for one fast, additive Magnus migration; other
-installations need no flag. See
-[Suite 3.14.2](../UPGRADING.md#suite-3142-magnus-335-agent-definitions-and-ardent-321).
-Upgrading from 3.14.2 to 3.14.3 needs no flag; from 3.14.0 or 3.14.1 it needs the same
-`--allow-migrations` as 3.14.2. It pins Magnus 3.3.6. See
-[Suite 3.14.3](../UPGRADING.md#suite-3143-magnus-336-xml-dependency-fixes).
+<!-- upgrade-matrix:start (generated from deployment/upgrade-matrix.json by scripts/release/upgrade-matrix.mjs --write) -->
+| To | From | `--allow-migrations` | Notes |
+| --- | --- | --- | --- |
+| [3.11.0](../UPGRADING.md#suite-3110-guided-administrator-product-access) | 3.10.0 | No | HiveMem moves to 1.8.0, ChatterMost and its migrator to 0.7.0; other pins and storage formats stay unchanged. |
+| [3.11.1](../UPGRADING.md#suite-3111-cindertrace-072) | 3.11.0 | No | Only Cindertrace moves, to 0.7.2; the controller and every other pin stay those of 3.11.0. |
+| [3.11.2](../UPGRADING.md#suite-3112-product-maintenance-releases) | 3.11.1 | No | Oathweave 2.3.1, HiveMem 1.8.1, Emberpath 2.5.2, Magnus and its host agent 3.1.2, Ardent Project Studio 0.4.3; no storage format changes. New controller: run it from its own release checkout. |
+| [3.12.0](../UPGRADING.md#suite-3120-cindertrace-080-and-the-emberpath-memory-principal) | 3.11.2 | Only when HiveMem has data owned by `hive-router` (an installation migrated from the native Hive Router), which moves to `emberpath` | Cindertrace 0.8.0, HiveXUI 0.10.0, HiveMem 1.9.0, Emberpath 2.5.3, Magnus and its host agent 3.1.3. New controller. |
+| [3.12.1](../UPGRADING.md#suite-3121-memory-identity-relink-fixes) | 3.12.0 | No | Every product pin stays that of 3.12.0; new controller. From 3.11.2 straight, the flag of 3.12.0 applies. |
+| [3.12.2](../UPGRADING.md#suite-3122-cindertrace-081) | 3.12.1 | No | Cindertrace 0.8.1, with no schema migration; new controller. From 3.11.2 straight, the flag of 3.12.0 applies. |
+| [3.12.3](../UPGRADING.md#suite-3123-bounded-container-logs-and-security-updates) | 3.12.2 | No | HiveMem 1.9.1, HiveXUI 0.10.1, Hive Registry 1.3.2, none with a schema migration. Every container gets a bounded Docker log, so the first upgrade to 3.12.3 recreates every container, datastores included; data is kept, but `docker logs` loses the history of each replaced container. New controller. From 3.11.2 straight, the flag of 3.12.0 applies. |
+| [3.12.9](../UPGRADING.md#suite-3129-effect-3221-in-the-prisma-based-products) | 3.12.7 | No | The controller is that of 3.12.7; the launcher still runs 3.12.9 from its own release checkout. 3.12.8 was tagged but never published. |
+| [3.13.0](../UPGRADING.md#suite-3130-hive-registry-141-and-the-installed-software-view) | 3.12.9 | No | New controller. HiveXUI's Installed software view: before the upgrade add the `hivexui-registry` browser client policy to Oathweave, and after it run `./hive.sh console-clients add`. |
+| [3.13.1](../UPGRADING.md#suite-3131-controller-fixes) | 3.13.0 | No | The same products; controller fixes for the rehearsal before an upgrade and for installations migrated from native services. |
+| [3.13.2](../UPGRADING.md#suite-3132-console-clients-checklist) | 3.13.0 or 3.13.1 | No | The same products; `post-upgrade` records the browser-clients checklist item when Oathweave already has every client. |
+| [3.13.3](../UPGRADING.md#suite-3133-magnus-321) | an earlier 3.13 release | No | Magnus 3.2.1 (server, fleet gateway and host agent); otherwise 3.13.2. |
+| [3.13.4](../UPGRADING.md#suite-3134-hive-registry-142) | 3.13.0 or later | No | 3.13.3 with the Hive Registry 1.4.2. |
+| [3.13.5](../UPGRADING.md#suite-3135-agent-checklist-item) | 3.13.0 or later | No | The products of 3.13.4; `magnus-agent install` on the Magnus host records the agent checklist item. |
+| [3.14.0](../UPGRADING.md#suite-3140-ardent-execution-recovery-lineage-and-artifact-transfer-v2) | any earlier release | Yes | Emberpath 2.6.0's data format, `emberpath-managed-format-3`. Ardent Project Studio 0.5.1 also runs one-way migrations on its first start: keep the pre-change backup. |
+| [3.14.1](../UPGRADING.md#suite-3141-agent-model-route-magnus-333-and-zstandard-160) | 3.14.0 | No | Magnus 3.3.3, HiveSkills 1.9.1, Cindertrace 0.8.2 and PostgreSQL images with Zstandard 1.6.0; new controller. Upgrade the Magnus host agent first. |
+| [3.14.2](../UPGRADING.md#suite-3142-magnus-335-agent-definitions-and-ardent-321) | 3.14.0 or 3.14.1 | Only when the installation has a suite-managed Magnus (the full profile): one fast, additive Magnus migration | Magnus 3.3.5, agent definitions and Ardent 3.2.1. |
+| [3.14.3](../UPGRADING.md#suite-3143-magnus-336-xml-dependency-fixes) | 3.14.2 | No | Magnus 3.3.6. From 3.14.0 or 3.14.1, the flag of 3.14.2 applies. |
+<!-- upgrade-matrix:end -->
 
 Use an exact version instead of `latest` to review and apply a specific release. Existing
 PostgreSQL stores need explicit migration approval when moving from 2.x to 3.6.0, and so do

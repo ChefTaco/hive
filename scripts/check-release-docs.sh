@@ -4,7 +4,9 @@
 # - CHANGELOG.md has a non-empty "## [X.Y.Z]" section, which the release workflow publishes as the
 #   release notes;
 # - UPGRADING.md has a "## Suite X.Y.Z" section with the upgrade steps;
-# - README.md publishes the fingerprint of trust/publisher.pub (SECURITY.md).
+# - README.md publishes the fingerprint of trust/publisher.pub (SECURITY.md);
+# - deployment/upgrade-matrix.json has a row for it, and the table generated from it in
+#   deployment/QUICKSTART.md section 8 is current (scripts/release/upgrade-matrix.mjs).
 # A release commit that adds releases/X.Y.Z.json updates all three.
 set -euo pipefail
 ROOT=${HIVE_DOCS_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
@@ -33,5 +35,6 @@ if ! grep -qx "$fingerprint" "$ROOT/README.md"; then
   printf 'README.md: the Security section must give the publisher key fingerprint %s on its own line.\n' "$fingerprint" >&2
   status=1
 fi
+HIVE_DOCS_ROOT=$ROOT node "$(dirname -- "${BASH_SOURCE[0]}")/release/upgrade-matrix.mjs" --check || status=1
 ((status == 0)) || exit 1
-printf 'Install examples, CHANGELOG and UPGRADING name the newest release, %s.\n' "$newest"
+printf 'Install examples, CHANGELOG, UPGRADING and the upgrade matrix name the newest release, %s.\n' "$newest"

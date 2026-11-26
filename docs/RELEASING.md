@@ -101,7 +101,11 @@ release's bytes only from the controller source of that release's tag.
    newest published release daily with a fresh Trivy database and opens or updates an issue when
    a HIGH or CRITICAL finding appears.
 6. **Commit and tag.** Commit the manifest, the signature and any documentation, and let CI pass
-   on `main`. Then push the tag `vX.Y.Z` on that commit of `main`; the workflow refuses a tag whose
+   on `main`. The documentation includes a row for the release in `deployment/upgrade-matrix.json`
+   (whether it needs `--allow-migrations`, from which releases, and its UPGRADING anchor), then
+   `node scripts/release/upgrade-matrix.mjs --write` to regenerate the table in
+   `deployment/QUICKSTART.md`; `npm run check:release-docs` fails without the row or with a stale
+   table. Then push the tag `vX.Y.Z` on that commit of `main`; the workflow refuses a tag whose
    commit is not on `main`, and a release without notes under `## [X.Y.Z]` in `CHANGELOG.md`. The *Suite release* workflow checks the tagged tree again
    and checks every pinned digest against the published tag named in the inputs file. Then it publishes the GitHub
    release with the manifest, the signature and the publisher key attached.

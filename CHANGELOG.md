@@ -132,6 +132,10 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Documentation
 
+- QUICKSTART section 8 shows which upgrades need `--allow-migrations` as one table generated from
+  `deployment/upgrade-matrix.json` (`scripts/release/upgrade-matrix.mjs`), instead of a paragraph
+  per release. `check:release-docs` fails when the table is stale or the newest release has no
+  row; a release commit adds its row.
 - README, UPGRADING and QUICKSTART now agree on when `--allow-migrations` is needed, including
   every installation moving to 3.14.0 or later and a suite-managed Magnus moving to 3.14.2 or
   later; QUICKSTART §8 covers 3.14.1 to 3.14.3. UPGRADING's generic sections name suite versions
