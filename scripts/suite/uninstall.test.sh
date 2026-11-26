@@ -82,6 +82,19 @@ grep -q 'The installation name was not typed; nothing was changed' "$temporary/r
 grep -q 'DELETE' <(printf 'x\n' | hive uninstall --purge --yes 2>&1) || fail 'The purge plan does not say what it deletes'
 printf 'uninstall-proof\n' | hive uninstall --purge --yes > "$temporary/result" 2>&1 || { cat "$temporary/result" >&2; fail 'A confirmed purge failed'; }
 [[ ! -e "$directory" && ! -e "$config" ]] || fail 'The purge kept the installation directory or file'
+[[ -d "$temporary" ]] || fail 'The purge deleted the directory of the installation file'
+# An installation file in a directory named after the installation, beside a file Hive did not
+# write: only Hive's own files go, the sibling and the directory stay.
+fixture
+mkdir -p "$temporary/uninstall-proof/additions"
+mv -- "$config" "$temporary/uninstall-proof/installation.json"; config="$temporary/uninstall-proof/installation.json"
+sed -i "s#--config [^ ]*#--config $config#" "$temporary/systemd/hive-console-certificate.service"
+printf '{}\n' > "$temporary/uninstall-proof/additions/cindertrace.json"
+printf 'operator notes\n' > "$temporary/uninstall-proof/notes.txt"
+printf 'uninstall-proof\n' | hive uninstall --purge --yes > "$temporary/result" 2>&1 || { cat "$temporary/result" >&2; fail 'A purge beside a foreign file failed'; }
+[[ -f "$temporary/uninstall-proof/notes.txt" && ! -e "$config" && ! -e "$temporary/uninstall-proof/additions" ]] || fail 'The purge deleted a sibling file, or kept its own files'
+grep -q 'holds other files and was kept' "$temporary/result" || fail 'The kept directory was not explained'
+rm -rf -- "$temporary/uninstall-proof"; config="$temporary/config.json"
 grep -q -- 'down --remove-orphans --volumes' "$temporary/docker.calls" || fail 'The purge did not remove the volumes'
 [[ ! -e "$XDG_STATE_HOME/hive/uninstall-proof" ]] || fail 'The purge kept the state directory'
 

@@ -63,7 +63,7 @@ hive_runtime_files() {
     scripts/suite/retention.sh scripts/suite/retention-host.sh scripts/suite/retention-schedule.sh scripts/suite/rehearsal-copy-host.sh \
     scripts/suite/add-product.sh scripts/suite/add-product-host.sh \
     scripts/suite/diagnostics.sh scripts/suite/diagnostics-host.sh \
-    scripts/suite/backup-transfer.sh scripts/suite/backup-transfer-host.sh
+    scripts/suite/backup-transfer.sh scripts/suite/backup-transfer-host.sh \
     scripts/suite/uninstall.sh scripts/suite/uninstall-host.sh
 }
 hive_controller_digest() {
@@ -133,8 +133,7 @@ hive_setup_hosts_ready() {
 
 hive_usage() {
   cat <<'EOF'
-Usage: hive.sh [init|plan|install|status|doctor|logs|support-bundle|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|entry-point]
-Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|remove|uninstall|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|entry-point]
+Usage: hive.sh [init|plan|install|status|doctor|logs|support-bundle|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|remove|uninstall|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|entry-point]
   --config FILE          Installation JSON. Commands other than install, init and plan find
                          it themselves when there is exactly one under ~/.config/hive (or
                          $XDG_CONFIG_HOME/hive), or when HIVE_INSTALLATION names it
@@ -1172,16 +1171,14 @@ hive_main() {
       *)
         [[ "$1" != --* ]] || hive_die 'Unknown option'
         case "$command" in
-          registry|migrate-native|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|setup|backups|add|logs) registry_arguments+=("$1");;
-          registry|migrate-native|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|setup|backups|add|remove) registry_arguments+=("$1");;
+          registry|migrate-native|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|setup|backups|add|logs|remove) registry_arguments+=("$1");;
           magnus-trust) trust_arguments=("$1" "${trust_arguments[@]}");;
           *) hive_die 'Unknown option';;
         esac
         shift;;
     esac
   done
-  case "$command" in init|plan|install|status|doctor|logs|support-bundle|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access) ;; *) hive_die 'Unknown command';; esac
-  case "$command" in init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|remove|uninstall|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access) ;; *) hive_die 'Unknown command';; esac
+  case "$command" in init|plan|install|status|doctor|logs|support-bundle|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|remove|uninstall|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access) ;; *) hive_die 'Unknown command';; esac
   [[ "$HIVE_PREPARE_RECONCILIATION" != true || -z "$HIVE_RECONCILIATION" ]] || hive_die 'Choose --prepare-reconciliation or --reconciliation, not both'
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
     case "$command" in plan|install|upgrade) ;; *) hive_die '--relax-auth-limits applies only to plan, install and upgrade';; esac

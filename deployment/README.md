@@ -423,8 +423,9 @@ another controller runs. Every installation directory stays with its data, confi
 backups, as does the installation file, and records `uninstalled.json`; `./hive.sh install` with
 the same file brings the installation back.
 
-`--purge` also deletes every host's installation directory, with all data and backups, and the
-installation file's directory on this machine. It asks you to type the installation name, and
+`--purge` also deletes every host's installation directory, with all data and backups, and on
+this machine the installation file and what Hive wrote beside it (the `additions/` journals and
+the copies `remove` keeps); that directory goes only when nothing else is left in it. It asks you to type the installation name, and
 `--yes` never answers that question. Export any backup you want to keep first
 (`./hive.sh backups export ARCHIVE --to DESTINATION`). Deleting files the products own needs
 root: on this machine through sudo, on another host through its `sudoPasswordFile` or

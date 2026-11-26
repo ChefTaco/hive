@@ -58,7 +58,7 @@ hive_uninstall() {
     for host in "${hosts[@]}"; do
       printf '  %s. DELETE %s on %s: all data, configuration and backups (sudo)\n' "$((step++))" "$(jq -r --arg host "$host" '.hosts[$host].directory' "$HIVE_CONFIG")" "$host"
     done
-    printf '  %s. DELETE %s, the installation file and its journals on this machine\n' "$((step++))" "$config_directory"
+    printf '  %s. DELETE the installation file %s and the journals Hive wrote beside it; %s goes only if nothing else is in it\n' "$((step++))" "$HIVE_OPERATOR_CONFIG" "$config_directory"
     printf 'Nothing deleted can be restored. Copy any backup you want to keep first: ./hive.sh backups export ARCHIVE --to DESTINATION\n'
   else
     printf 'Data, configuration and backups are kept; ./hive.sh install --config %s brings the installation back, and uninstall --purge deletes them.\n' "$HIVE_OPERATOR_CONFIG"
@@ -100,14 +100,15 @@ hive_uninstall() {
         hive_die "$(jq -r --arg host "$host" '.hosts[$host].directory' "$HIVE_CONFIG") on $host could not be deleted; see above. Repeat the command to continue"
       printf 'Deleted the installation directory on %s.\n' "$host"
     done
-    # Only the installation's own directory, as guided setup creates it.
-    if [[ -d "$config_directory" && "$(basename -- "$config_directory")" == "$HIVE_ID" && -f "$config_directory/installation.json" ]]; then
-      rm -rf -- "$config_directory"
-      printf 'Deleted %s.\n' "$config_directory"
-    else
-      rm -f -- "$HIVE_OPERATOR_CONFIG"
-      printf 'Deleted %s; %s is not an installation directory guided setup created and was kept.\n' "$HIVE_OPERATOR_CONFIG" "$config_directory"
+    # Only what Hive itself wrote beside the installation file: the file, the add journals, and
+    # the copies remove keeps. The directory goes only when nothing else is left in it.
+    rm -f -- "$HIVE_OPERATOR_CONFIG" "$HIVE_OPERATOR_CONFIG".before-remove-*
+    if [[ -d "$config_directory/additions" && ! -L "$config_directory/additions" ]]; then
+      find "$config_directory/additions" -maxdepth 1 -type f \( -name '*.json' -o -name '*.json.complete-*' \) -delete
+      rmdir -- "$config_directory/additions" 2>/dev/null || printf 'Hive: kept %s, which holds files Hive did not write.\n' "$config_directory/additions" >&2
     fi
+    if rmdir -- "$config_directory" 2>/dev/null; then printf 'Deleted %s.\n' "$config_directory"
+    else printf 'Deleted %s; %s holds other files and was kept.\n' "$HIVE_OPERATOR_CONFIG" "$config_directory"; fi
     rm -rf -- "$(dirname -- "$(hive_entry_point_state "$HIVE_ID")")"
   fi
   printf 'Installation %s is uninstalled%s.\n' "$HIVE_ID" "$([[ "$purge" == true ]] && printf ' and its data deleted' || printf '; its data is kept')"
