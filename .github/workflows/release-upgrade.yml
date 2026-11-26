@@ -84,7 +84,11 @@ jobs:
           operator=$(getent passwd 1000 | cut -d: -f1 || true)
           if [[ -z "$operator" ]]; then sudo groupadd -g 1000 hive-operator 2>/dev/null || true; sudo useradd -m -u 1000 -g 1000 -s /bin/bash hive-operator; operator=hive-operator; fi
           sudo usermod -aG docker "$operator"
-          printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$operator" | sudo tee /etc/sudoers.d/hive-round-trip >/dev/null
+          # sudo -v checks every rule for the account; !authenticate covers rules of its groups too.
+          printf 'Defaults:%s !authenticate\n%s ALL=(ALL) NOPASSWD:ALL\n' "$operator" "$operator" | sudo tee /etc/sudoers.d/hive-round-trip >/dev/null
+          sudo chmod 0440 /etc/sudoers.d/hive-round-trip
+          sudo -u "$operator" sudo -n -v
+          echo "Operator account: $operator ($(id "$operator"))"
           sudo install -d -o 1000 -g 1000 -m 0750 /srv/hive-round-trip
           sudo cp -a "$GITHUB_WORKSPACE" /srv/hive-round-trip/source
           sudo chown -R 1000:1000 /srv/hive-round-trip/source
