@@ -24,6 +24,34 @@ holds its transaction for recovery, as described in
 delete transaction or runtime receipts to force another attempt. See also
 [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
 
+## Client addresses and OIDC discovery (next release)
+
+The next release's controller passes the ingress's client address to more products and gives
+Oathweave its discovery base:
+
+- **HiveSkills 1.10.0 and later** get `HIVE_SKILLS_TRUSTED_PROXIES` and **Emberpath** gets
+  `EMBERPATH_TRUSTED_PROXIES` in their container environment when they run on the ingress's host
+  without a published port: the pinned `console.networkSubnet`, or Docker's private ranges. Their
+  sign-in throttles, and the `X-Forwarded-For` Emberpath sends to Oathweave and HiveMem, then see
+  the real client instead of the ingress. A value in the product's environment file is replaced by
+  this one. An older HiveSkills, which accepts only single addresses, gets nothing; an older
+  Emberpath ignores it. The upgrade recreates both containers.
+- **Oathweave's `IAM_PUBLIC_URL`.** Oathweave releases that serve native OIDC discovery need
+  `IAM_PUBLIC_URL`, its own HTTPS endpoint (without `/api/v1`); without it discovery answers 503,
+  while JWKS, userinfo and sign-in keep working. Fresh installations get it in
+  `config/oathweave.env`. On an existing installation, add it before the `plan` of the upgrade that
+  pins such an Oathweave, so the pre-change backup and the plan include it: `https://oathweave:4200`
+  when Oathweave has no published endpoint, otherwise
+  `bootstrap.productEndpoints.oathweave.origin` from the installation file:
+
+  ```bash
+  printf 'IAM_PUBLIC_URL=%s\n' "$(jq -r '.bootstrap.productEndpoints.oathweave.origin // "https://oathweave:4200"' ~/.config/hive/ID/installation.json)" >> /opt/hive/config/oathweave.env
+  ```
+
+  It must be HTTPS, or Oathweave refuses to start. Older Oathweave images ignore it.
+- **Embermend's worker** drains for up to `EMBERMEND_WORKER_DRAIN_SECONDS` (default 8) when
+  stopped. Every suite container has a 45-second stop grace period, so the drain completes.
+
 ## The setup checklist
 
 From the Hive Registry 1.3.0, an upgrade records the steps that follow it, such as the Magnus host

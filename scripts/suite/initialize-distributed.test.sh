@@ -33,6 +33,7 @@ run_init > "$temporary/initialization.log"
 [[ ! -e "$temporary/identity/config/.initializer/secrets/router-key" && ! -e "$temporary/console/config/.initializer/secrets/oath-cookie" ]] || fail 'Product secrets crossed their owning host'
 rg -q '^IAM_ENROLLMENT_INSTALLATION_ID=example-suite$' "$temporary/identity/config/oathweave.env" || fail 'Enrollment coordinator lacks installation ownership'
 rg -q 'https://127.0.0.1:65422/api' "$temporary/identity/config/oathweave.env" || fail 'Enrollment coordinator uses local Compose DNS across hosts'
+rg -q '^IAM_PUBLIC_URL=https://[^/]+$' "$temporary/identity/config/oathweave.env" && ! rg -q '^IAM_PUBLIC_URL=https://oathweave:' "$temporary/identity/config/oathweave.env" || fail 'Distributed Oathweave discovery does not use its published endpoint'
 subject=$(cat "$temporary/identity/config/.initializer/secrets/identity-id")
 [[ $(jq -r .adminId "$temporary/identity/config/oathweave/suite-bootstrap.json") == "$subject" ]] || fail 'Identity account changed'
 for name in identity model memory; do cmp -s "$temporary/identity/config/.initializer/secrets/$name-id" "$temporary/console/config/.initializer/secrets/$name-id" || fail 'Account coordination IDs differ'; done

@@ -269,6 +269,9 @@ is never passed on.
   the private ranges Docker assigns (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
   `fc00::/7`), which only the installation's own containers can use to reach it. A ChatterMost
   with a published endpoint gets no trusted proxies and uses the connecting address.
+- HiveSkills 1.10.0 and later (`HIVE_SKILLS_TRUSTED_PROXIES`) and Emberpath
+  (`EMBERPATH_TRUSTED_PROXIES`) get the same list under the same conditions. An older HiveSkills,
+  which accepts only single addresses, gets none.
 
 ### Response security headers
 

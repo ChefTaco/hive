@@ -63,6 +63,7 @@ jq -e '.mode=="suite" and (.products|length)==4 and (.identity|keys)==["apiPrefi
 # By default nothing in front of the console is trusted, and Oathweave trusts no forwarder.
 ! grep -q '^HIVE_INGRESS_TRUSTED_PROXIES=' "$temporary/install/config/ingress.env" || fail 'A default ingress trusts a forwarding proxy'
 ! grep -q '^TRUSTED_PROXY_IPS=' "$temporary/install/config/oathweave.env" || fail 'Oathweave trusts a forwarder without a pinned ingress network'
+grep -qx 'IAM_PUBLIC_URL=https://oathweave:4200' "$temporary/install/config/oathweave.env" || fail 'Oathweave discovery has no public HTTPS base on its own endpoint'
 # Public browser artifacts contain none of the generated credentials.
 while IFS= read -r file; do
   if rg -F -q -- "$(cat "$file")" "$temporary/install/config/runtime.json" "$temporary/install/config/ingress.env"; then fail 'Infrastructure credential reached a browser/ingress artifact'; fi

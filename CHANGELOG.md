@@ -8,6 +8,15 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- HiveSkills 1.10.0 and later and Emberpath trust the ingress's `X-Forwarded-For` when they run on
+  its host without a published port (`HIVE_SKILLS_TRUSTED_PROXIES`, `EMBERPATH_TRUSTED_PROXIES`:
+  the pinned suite network or Docker's private ranges), so their sign-in throttles see the client,
+  as ChatterMost and Oathweave already do. Fresh installations write `IAM_PUBLIC_URL` (Oathweave's
+  own HTTPS endpoint) to `oathweave.env` for native OIDC discovery; existing installations add it
+  as UPGRADING describes. Older images ignore both.
+
+### Fixed
+
 - Container resource limits. Every container now runs with `pids_limit: 4096` by default, and
   the installation file's new `containerLimits` sets `memory`, `cpus` and `pids` for every
   container (`"*"`) or per component, over the signed manifest. The manifest contract accepts
@@ -15,6 +24,22 @@ All notable changes to this project are documented in this file. The format is b
   set by default. See [container resource limits](deployment/README.md#container-resource-limits).
   Upgrade note: the first upgrade with this controller recreates every container to add the
   process limit; data is kept.
+- Guided setup checks each answer where it is asked: the installation name, directory, SSH
+  target, architecture, console origin, profile, bind address, port, configuration mode,
+  operator username and email. A typo is explained and the question is asked again, instead of
+  being found by the final validation after about 20 questions and discarding every answer. End
+  of input (Ctrl-D or a closed terminal) at any question now stops with a message naming that
+  question, instead of exiting silently.
+- `examples/installation.schema.json` matches what the controller accepts again. It lacked
+  `external`, `nativeMigration`, `console.nativeListeners`, `console.edgeSubnet`,
+  `hosts.*.sudoPasswordFile` and `bootstrap.magnusGateway`, so configurations that guided setup
+  itself writes failed the published schema. `interactive.test.py` now validates every
+  configuration guided setup writes against the schema, and `installation-schema.test.mjs`
+  checks hand-written shapes against both the schema and `hive_validate`.
+- Hive Registry accepts the `Authorization` scheme in any letter case (`bearer ...`), as
+  RFC 9110 requires; a standards-compliant client no longer gets `invalid_credential`.
+- The ingress round trip waits for the console upstream before its first assertion, instead of
+  failing intermittently with "Service unavailable" while the HiveXUI container starts.
 
 ### Changed
 
@@ -52,25 +77,6 @@ All notable changes to this project are documented in this file. The format is b
   list, and the launcher refuses or warns before `plan`, `install`, `init` or `upgrade` of a
   listed release with `--release`. `HIVE_ALLOW_WITHDRAWN_RELEASE=X.Y.Z` overrides a refusal for a
   recovery. No release is withdrawn yet; see docs/RELEASING.md, "Withdrawing a release".
-
-### Fixed
-
-- Guided setup checks each answer where it is asked: the installation name, directory, SSH
-  target, architecture, console origin, profile, bind address, port, configuration mode,
-  operator username and email. A typo is explained and the question is asked again, instead of
-  being found by the final validation after about 20 questions and discarding every answer. End
-  of input (Ctrl-D or a closed terminal) at any question now stops with a message naming that
-  question, instead of exiting silently.
-- `examples/installation.schema.json` matches what the controller accepts again. It lacked
-  `external`, `nativeMigration`, `console.nativeListeners`, `console.edgeSubnet`,
-  `hosts.*.sudoPasswordFile` and `bootstrap.magnusGateway`, so configurations that guided setup
-  itself writes failed the published schema. `interactive.test.py` now validates every
-  configuration guided setup writes against the schema, and `installation-schema.test.mjs`
-  checks hand-written shapes against both the schema and `hive_validate`.
-- Hive Registry accepts the `Authorization` scheme in any letter case (`bearer ...`), as
-  RFC 9110 requires; a standards-compliant client no longer gets `invalid_credential`.
-- The ingress round trip waits for the console upstream before its first assertion, instead of
-  failing intermittently with "Service unavailable" while the HiveXUI container starts.
 
 ### Documentation
 
