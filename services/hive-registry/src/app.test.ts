@@ -86,6 +86,15 @@ describe('Hive Registry API', () => {
       const response = await fetch(`${base}/v1/products`, { headers: { Authorization: `Basic ${readToken}` } });
       assert.equal(response.status, 401);
     });
+    it('accepts the Bearer scheme in any letter case', async () => {
+      for (const scheme of ['bearer', 'BEARER', 'beARer']) {
+        const response = await fetch(`${base}/v1/history`, { headers: { Authorization: `${scheme} ${readToken}` } });
+        assert.equal(response.status, 200, scheme);
+      }
+      for (const header of [`Bearer${readToken}`, `Bearer ${readToken} extra`, `Bearer ${readToken},x`]) {
+        assert.equal((await fetch(`${base}/v1/history`, { headers: { Authorization: header } })).status, 401, header);
+      }
+    });
     it('requires a credential for history and accepts the read credential', async () => {
       assert.equal((await call('GET', '/v1/history')).status, 401);
       assert.equal((await call('GET', '/v1/history', { token: readToken })).status, 200);
