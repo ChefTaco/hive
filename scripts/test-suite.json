@@ -3,6 +3,7 @@
   "suite": [
     {"run": ["bash", "scripts/release/scan-suite-images.test.sh"]},
     {"run": ["bash", "scripts/suite/release-launcher.test.sh"]},
+    {"run": ["bash", "scripts/suite/entry-point.test.sh"]},
     {"run": ["bash", "scripts/release/build-suite-manifest.test.sh"]},
     {"run": ["bash", "scripts/suite/controller.test.sh"]},
     {"run": ["node", "--test", "scripts/suite/installation-schema.test.mjs", "scripts/suite/suite-catalog.test.mjs", "scripts/suite/registry-image-fixture.test.mjs", "scripts/suite/embermend.test.mjs", "scripts/suite/skills-integration.test.mjs", "scripts/suite/existing-products-archive.test.mjs", "scripts/suite/native-consumer-contract.test.mjs", "scripts/suite/native-user-service.test.mjs"]},

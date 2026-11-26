@@ -59,7 +59,10 @@ the exact version, and runs its tagged controller. To choose a version, use `./h
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`; keep them for later commands and certificate
 renewal timers. It leaves the original checkout and current working directory unchanged. After
 setup, change to the printed release checkout for the lifecycle commands below; return to the
-original launcher checkout when selecting a new release with `--release latest`.
+original launcher checkout when selecting a new release with `--release latest`. Or run
+`./hive.sh entry-point install` once: the `hive` command it installs runs the controller that last
+installed or upgraded the installation, from any directory (see
+[the hive command](deployment/README.md#the-hive-command)).
 
 For example, release 3.14.3 verifies `releases/3.14.3.json` against `releases/3.14.3.json.sig` with the publisher key
 in `trust/publisher.pub` before installing product resources, and refuses a manifest pinned to a different
