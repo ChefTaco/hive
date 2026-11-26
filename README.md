@@ -128,6 +128,18 @@ releases, the Registry and the ingress fit together.
 On first install, the controller generates each product's secrets once into protected files and
 never prints them. Please report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
 
+Releases are signed with one Ed25519 publisher key. Its fingerprint, the SHA-256 of the DER public
+key, is:
+
+```text
+c0d0665a70969f37c8f1cffbdcf8e54df13626f8dbd4b5759a7c44843d86d1b2
+```
+
+Compare it with `openssl pkey -pubin -in trust/publisher.pub -outform DER | sha256sum` before
+trusting a checkout, and with the fingerprint in the release notes. A rotated key ships with a
+statement signed by the key it replaces; see
+[rotating the key](docs/RELEASING.md#rotating-the-key).
+
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
@@ -142,10 +154,14 @@ upgrade takes a verified backup and rehearses data changes on a copy before acti
 HiveXUI browser clients.
 
 - **Migration approval.** `--allow-migrations` is needed when the rehearsal finds pending product
-  data changes: from 2.x to 3.x with existing PostgreSQL stores, and when an installation with
+  data changes: from 2.x to 3.x with existing PostgreSQL stores, when an installation with
   Emberpath or HiveSkills comes from before 3.4.0, one with Embermend from before 3.6.0, or one
-  that runs Magnus from before 3.8.0. Code-only rollback across the 3.0.0 PostgreSQL collation
-  change is refused; recovery uses the original-state backup and write reconciliation.
+  that runs Magnus from before 3.8.0, for every installation moving from before 3.14.0 to 3.14.0
+  or later (Emberpath 2.6.0's data format), and for an installation with a suite-managed Magnus
+  (the full profile) moving from before 3.14.2 to 3.14.2 or later (Magnus migration
+  `20261124190000_ardent_agent_operation_definition_kind`). [UPGRADING](UPGRADING.md) lists each
+  case. Code-only rollback across the 3.0.0 PostgreSQL collation change is refused; recovery uses
+  the original-state backup and write reconciliation.
 - **Magnus node keys.** Releases from 3.9.0 pin Magnus 3, which accepts node keys only. An
   installation that runs Magnus reaches them from 3.8.1, after every Magnus node has its key.
 - **Backups and rehearsals.** Each upgrade keeps a backup and a restore rehearsal. `./hive.sh

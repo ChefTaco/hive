@@ -33,11 +33,14 @@ release's bytes only from the controller source of that release's tag.
 
 1. **Release the products.** Each product repository publishes its own multi-architecture image
    from its own version tag. Record the exact tags in `releases/X.Y.Z.inputs.json`. The input file
-   lists the platforms each image must provide. Releases that adopt the patched datastore
-   runtime set `"datastoreProfile": "runtime-2026-11-pg1712-xslt"`. This selects the reviewed Redis,
-   Qdrant and PostgreSQL tags in `release-contracts.mjs`; older inputs retain their
-   historical pins. PostgreSQL receives a new storage format and the explicit offline
-   collation migration, so adoption requires the normal backup and rehearsal workflow.
+   lists the platforms each image must provide. Set `"datastoreProfile"` to the newest profile in
+   `DATASTORE_PROFILES` (`scripts/suite/release-contracts.mjs`). It selects the reviewed Redis,
+   Qdrant and PostgreSQL tags; older inputs retain their historical pins, and
+   `DATASTORE_PROFILE_LAST_RELEASE` refuses a superseded profile in any release after the last one
+   allowed to select it. A profile that changes a storage format (as the PostgreSQL collation
+   migration of `runtime-2026-11-pg1712-xslt` did) requires the normal backup and rehearsal
+   workflow and an UPGRADING note; the [datastore profile history](#datastore-profile-history)
+   records why each profile exists.
    `DATASTORE_PROFILE_LAST_RELEASE` names the last suite release that may select each superseded
    profile; a later release that names one is refused, so a new datastore profile is adopted by the
    next release.
@@ -149,6 +152,16 @@ statement: older and newer launchers depend on it.
 If the current key is compromised, do not rotate with it: a statement signed by a compromised key
 proves nothing. Publish a security advisory, and have operators replace `trust/publisher.pub` in
 their checkout after verifying the new fingerprint out of band.
+
+## Residual risks
+
+A vulnerability that stays in a pinned image because no fixed upstream release exists, and that
+the image scanners cannot see (a library linked statically into a binary), is recorded in
+`deployment/residual-risks.json` with the exact upstream pin it was reviewed for and the condition
+that resolves it. `scripts/release/check-residual-risks.sh` (run by `npm test`) fails as soon as
+that pin changes in `deployment/images.json`, so the next upstream release is checked on purpose:
+remove the entry when the new pin resolves the risk, or confirm it and update `reviewedPin` and
+`reviewed`. Today it tracks Qdrant 1.18.3's bundled Zstandard 1.5.x (CVE-2026-124851).
 
 ## Datastore profile history
 

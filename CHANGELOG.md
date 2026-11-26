@@ -24,6 +24,25 @@ All notable changes to this project are documented in this file. The format is b
 - Hive Registry builds on Node.js 26.13.1, the major of its `hive-node-runtime` 26.13.1 runtime
   image, and accepts `@hivemagnus/hive-common` 0.6.x (`^0.6.1`; the `^0.5.1` range excluded every
   0.6 release). Both reach installations with the next Hive Registry image version.
+- `npm run check:release-docs` also requires, for the newest release in `releases/`, non-empty
+  notes under `## [X.Y.Z]` in `CHANGELOG.md` (the release workflow publishes them), a
+  `## Suite X.Y.Z` section in `UPGRADING.md`, and the publisher key fingerprint in the README.
+  A release commit adds all three.
+- The README publishes the publisher key fingerprint, so it can be compared with a source other
+  than the release notes, which the release workflow computes from the same tagged tree.
+- `deployment/residual-risks.json` records known vulnerabilities that the image scanners cannot
+  see, each bound to the upstream pin it was reviewed for; `scripts/release/check-residual-risks.sh`
+  fails when that pin changes. It tracks Qdrant 1.18.3's bundled Zstandard 1.5.x
+  (CVE-2026-124851).
+
+### Documentation
+
+- README, UPGRADING and QUICKSTART now agree on when `--allow-migrations` is needed, including
+  every installation moving to 3.14.0 or later and a suite-managed Magnus moving to 3.14.2 or
+  later; QUICKSTART §8 covers 3.14.1 to 3.14.3. UPGRADING's generic sections name suite versions
+  instead of component versions, and say that no release enables suite audit collection yet.
+- RELEASING step 1 points at the newest profile in `DATASTORE_PROFILES` instead of naming one that
+  is no longer allowed.
 
 ### Security
 

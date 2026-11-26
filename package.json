@@ -23,7 +23,7 @@
     "build": "npm run build:registry",
     "build:registry": "npm --prefix services/hive-registry run build",
     "test": "npm run test:ci && npm run test:install-scripts && npm run check:release-docs && npm run test:registry && npm run test:suite",
-    "test:ci": "node --test scripts/ci-recovery-scope.test.mjs scripts/suite/recovery-timing.test.mjs scripts/suite/recovery-client.test.mjs && bash scripts/ci-apt-setup.test.sh && bash scripts/suite/sudo-host.test.sh",
+    "test:ci": "node --test scripts/ci-recovery-scope.test.mjs scripts/suite/recovery-timing.test.mjs scripts/suite/recovery-client.test.mjs && bash scripts/check-release-docs.test.sh && bash scripts/release/check-residual-risks.test.sh && bash scripts/ci-apt-setup.test.sh && bash scripts/suite/sudo-host.test.sh",
     "test:install-scripts": "node --test scripts/migrate-legacy-ardent.test.mjs && bash scripts/install-prerequisites.test.sh && bash scripts/console-certificate.test.sh && bash scripts/suite/console-certificate-service.test.sh && python3 scripts/suite/guided-setup.test.py && node --test scripts/suite/ardent-enrollment.test.mjs scripts/suite/ardent-setup.test.mjs && bash scripts/suite/ardent-setup.test.sh && bash scripts/suite/ardent-enrollment-controller.test.sh && node --test scripts/suite/node-enrollment.test.mjs scripts/suite/terminal-authority.test.mjs && bash scripts/suite/node-enrollment-controller.test.sh && bash scripts/suite/local-sudo.test.sh && bash scripts/suite/host-transport.test.sh && bash scripts/suite/rehearsal-resources.test.sh",
     "test:registry": "npm --prefix services/hive-registry test",
     "check:release-docs": "bash scripts/check-release-docs.sh",
