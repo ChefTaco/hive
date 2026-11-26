@@ -147,5 +147,9 @@ touches.
 - Changing any file in `hive_runtime_files` (including `hive.sh` and the `--help` text in
   `scripts/suite/controller.sh`) changes the controller digest; the published manifests stay
   verifiable only from their own tags.
-- The recovery CI job uses the small corpus only for pull requests that change nothing but
-  `README.md` or `CONTRIBUTING.md`; any other change runs the full corpus and takes longer.
+- The recovery CI job uses the small corpus only for pull requests that change nothing but prose
+  (root Markdown, `docs/**/*.md`, `deployment/*.md`); any other change runs the full corpus and
+  takes longer.
+- `npm run test:suite` runs the commands listed in `scripts/test-suite.json` in parallel
+  (`HIVE_TEST_JOBS`, default 4) and lists every failure at the end. Add a new controller test
+  there; `node scripts/run-tests.mjs suite NAME` runs the matching entries only.

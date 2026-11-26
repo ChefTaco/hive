@@ -17,8 +17,9 @@ Cleanup is measured separately. A controller failure still fails the job.
 - Main pushes, manual runs and release tags use seed scale **1**: about 520 MiB, eighty Qdrant
   collections and about thirty thousand vectors, large active/idle SQLite databases, Redis,
   PostgreSQL and files. The five-second pause budget stays in force.
-- Only pull requests that change nothing but the root README and contribution prose use seed
-  scale **0.02**. They execute the same ownership, consistency,
+- Only pull requests that change nothing but prose (the root Markdown files README, CONTRIBUTING,
+  UPGRADING, CHANGELOG, SECURITY and CODE_OF_CONDUCT, Markdown under `docs/`, and the deployment
+  guides `deployment/*.md`; see `scripts/ci-recovery-scope.mjs`) use seed scale **0.02**. They execute the same ownership, consistency,
   failure/retry, rehearsal and **both restore** cases, with less generated data. They do not replace
   the installation-sized pause/performance proof.
 - Installer/controller, datastore, schema, shared contracts, dependency/lock, workflow, release,
