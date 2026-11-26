@@ -165,7 +165,16 @@ assert.equal(zstd['datastore:postgres17'].version, patch['datastore:postgres17']
 assert.equal(zstd['datastore:postgres18'].version, patch['datastore:postgres18'].version);
 assert.deepEqual(zstd['datastore:redis'], patch['datastore:redis']);
 assert.deepEqual(zstd['datastore:qdrant'], patch['datastore:qdrant']);
-current('9.9.9', 'runtime-2026-11-pg1712-zstd');
+current('3.14.3', 'runtime-2026-11-pg1712-zstd');
+assert.throws(() => current('3.15.0', 'runtime-2026-11-pg1712-zstd'), /superseded/);
+// The OpenSSL patch of the Redis image: a new immutable Redis tag only.
+const openssl = references('runtime-2026-11-pg1712-zstd-openssl');
+assert.equal(openssl['datastore:redis'].image, 'ghcr.io/cheftaco/hive-redis:8.2.10-3');
+assert.equal(openssl['datastore:redis'].version, zstd['datastore:redis'].version);
+assert.deepEqual(openssl['datastore:qdrant'], zstd['datastore:qdrant']);
+assert.deepEqual(openssl['datastore:postgres17'], zstd['datastore:postgres17']);
+assert.deepEqual(openssl['datastore:postgres18'], zstd['datastore:postgres18']);
+current('9.9.9', 'runtime-2026-11-pg1712-zstd-openssl');
 NODE
 jq '.datastoreProfile="runtime-2026-11-xslt"' "$temporary/inputs.json" > "$temporary/xslt-inputs.json"
 jq '.datastoreProfile="runtime-2026-11-pg1712"' "$temporary/inputs.json" > "$temporary/minor-inputs.json"

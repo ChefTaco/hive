@@ -161,3 +161,9 @@ collation receipt, so an upgrade from `runtime-2026-11-pg1712-xslt` has no stora
 image workflow starts data written by 17.12-2 and 18.7-2 on the candidate. Redis and Qdrant keep
 their images: Qdrant 1.18.3 bundles Zstandard 1.5.x inside its binary, and no Qdrant release ships
 1.6.0 yet. `runtime-2026-11-pg1712-xslt` remains selectable up to suite 3.14.0.
+
+Suite 3.15.0 and later select `runtime-2026-11-pg1712-zstd-openssl`: `hive-redis` 8.2.10-3, the same
+Redis 8.2.10 with OpenSSL 3.5.9-r2 (`libssl3` and `libcrypto3`), which fixes CVE-2026-124709 in
+3.5.9-r0. Redis, its AOF and RDB formats and the PostgreSQL and Qdrant images are those of
+`runtime-2026-11-pg1712-zstd`, so an upgrade from it changes only the Redis image, with no storage
+transition. `runtime-2026-11-pg1712-zstd` remains selectable up to suite 3.14.3.
