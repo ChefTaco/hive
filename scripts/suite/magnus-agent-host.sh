@@ -131,8 +131,10 @@ install_node() {
   command -v gpg >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 || { apt_get update -qq; apt_get install -y --no-install-recommends gpg curl ca-certificates >/dev/null; }
   key=$(mktemp)
   curl -fsSL --proto '=https' --tlsv1.2 https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o "$key"
-  gpg --show-keys --with-colons "$key" 2>/dev/null | awk -F: '$1=="fpr" {print $10}' | grep -qx "$NODESOURCE_FINGERPRINT" ||
-    { rm -f -- "$key"; die "NodeSource's signing key did not match fingerprint $NODESOURCE_FINGERPRINT; nothing was added"; }
+  # The file becomes the repository's Signed-By keyring: it must hold exactly one primary key,
+  # the pinned one, so no extra key in the download can sign packages installed as root.
+  [[ $(gpg --show-keys --with-colons "$key" 2>/dev/null | awk -F: '$1=="pub" {primary=1; next} $1=="fpr" && primary {print $10; primary=0}') == "$NODESOURCE_FINGERPRINT" ]] ||
+    { rm -f -- "$key"; die "NodeSource's signing key did not match fingerprint $NODESOURCE_FINGERPRINT (exactly one key expected); nothing was added"; }
   install -d -m 0755 /etc/apt/keyrings
   install -m 0644 "$key" /etc/apt/keyrings/nodesource.asc; rm -f -- "$key"
   arch=$(dpkg --print-architecture)

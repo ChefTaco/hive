@@ -79,7 +79,7 @@ while (( \$# )); do [[ "\$1" == -o ]] && { printf 'FAKE KEY\n' > "\$2"; shift; }
 EOF
   cat > "$box/bin/gpg" <<EOF
 #!/usr/bin/env bash
-printf 'pub:-:4096:1:8D81803C0EBFCD88:::::\nfpr:::::::::%s:\n' "\$(cat "$box/fpr")"
+while read -r f; do printf 'pub:-:4096:1:8D81803C0EBFCD88:::::\nfpr:::::::::%s:\nsub:-:4096:1:7EA0A9C3F273FCD8:::::\nfpr:::::::::%s:\n' "\$f" "\${SUB_FPR:-D3306A018370199E527AE7997EA0A9C3F273FCD8}"; done < "$box/fpr"
 EOF
   cat > "$box/bin/runuser" <<EOF
 #!/usr/bin/env bash
@@ -144,6 +144,15 @@ KEY_FPR=0000000000000000000000000000000000000000 machine debian 12 bookworm
 run --yes && fail 'a wrong signing key was accepted'
 expect 'did not match fingerprint'
 [[ ! -e "$box/apt/sources.list.d/docker.sources" ]] || fail 'repository written despite a wrong key'
+# A keyring holding the pinned key and another key is refused: apt would trust both.
+KEY_FPR=$FPR$'\n'1111111111111111111111111111111111111111 machine debian 12 bookworm
+run --yes && fail 'a keyring with an extra key was accepted'
+expect 'exactly one key expected'
+[[ ! -e "$box/apt/sources.list.d/docker.sources" ]] || fail 'repository written from a keyring with an extra key'
+# The pinned fingerprint on a foreign key's subkey is refused too.
+KEY_FPR=0000000000000000000000000000000000000000 machine debian 12 bookworm
+SUB_FPR=$FPR run --yes && fail 'the pinned fingerprint was accepted as a subkey'
+[[ ! -e "$box/apt/sources.list.d/docker.sources" ]] || fail 'repository written from a foreign primary key'
 machine debian 12 bookworm
 run --yes --no-docker-group || { cat "$box/out" >&2; fail 'Debian apply failed'; }
 grep -qx 'URIs: https://download.docker.com/linux/debian' "$box/apt/sources.list.d/docker.sources" || fail 'Debian repository'
