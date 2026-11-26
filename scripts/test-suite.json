@@ -14,6 +14,7 @@
     {"run": ["bash", "scripts/suite/console.test.sh"]},
     {"run": ["bash", "scripts/suite/preflight.test.sh"]},
     {"run": ["bash", "scripts/suite/status.test.sh"]},
+    {"run": ["bash", "scripts/suite/diagnostics.test.sh"]},
     {"run": ["bash", "scripts/suite/registry.test.sh"]},
     {"run": ["bash", "scripts/suite/memory-credential.test.sh"]},
     {"run": ["bash", "scripts/suite/memory-identity.test.sh"]},

@@ -61,7 +61,8 @@ hive_runtime_files() {
     scripts/suite/admin-access.sh scripts/suite/admin-access-host.sh scripts/suite/admin-access-files-host.sh scripts/suite/admin-access-data.mjs scripts/suite/admin-access-identity.mjs scripts/suite/admin-access-native.mjs \
     scripts/suite/post-upgrade.sh scripts/suite/setup-checklist.sh \
     scripts/suite/retention.sh scripts/suite/retention-host.sh scripts/suite/retention-schedule.sh scripts/suite/rehearsal-copy-host.sh \
-    scripts/suite/add-product.sh scripts/suite/add-product-host.sh
+    scripts/suite/add-product.sh scripts/suite/add-product-host.sh \
+    scripts/suite/diagnostics.sh scripts/suite/diagnostics-host.sh
 }
 hive_controller_digest() {
   local file
@@ -130,7 +131,7 @@ hive_setup_hosts_ready() {
 
 hive_usage() {
   cat <<'EOF'
-Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|entry-point]
+Usage: hive.sh [init|plan|install|status|doctor|logs|support-bundle|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|entry-point]
   --config FILE          Installation JSON. Commands other than install, init and plan find
                          it themselves when there is exactly one under ~/.config/hive (or
                          $XDG_CONFIG_HOME/hive), or when HIVE_INSTALLATION names it
@@ -161,6 +162,10 @@ Usage: hive.sh [init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollb
   --at HH:MM             backups schedule enable: the daily prune's local time (default
                          retention.schedule, else 03:40)
   --file FILE            Entry for registry add/update; entries never contain credentials
+  --json                 status and doctor: print one JSON document for monitoring
+  --since DURATION|TIME  logs and support-bundle: only log lines since 30m, 2h, 1d or an ISO date
+  --tail N|all           logs and support-bundle: the last N lines of each log (default 200)
+  --output FILE          support-bundle: where to write the bundle (default ./hive-support-ID-TIME.tar.gz)
   --help                 Show this help
 
 init prepares protected configuration for an explicitly fresh installation.
@@ -251,6 +256,14 @@ upgrade, rollback and adopt point the line at the controller they ran; install c
 installation.json sets "retention": {"schedule":"HH:MM"}. Before rolling back to a controller older
 than 3.9.4, run backups schedule disable and remove retention.schedule from the file.
 See deployment/BACKUPS.md#daily-pruning.
+status prints one JSON report per host and lists pending setup items; status --json prints one
+document with every host and the pending items. doctor checks every host and the Hive Registry;
+doctor --json reports the same checks as one JSON document ("ok" false, exit status 1, on a failure).
+logs COMPONENT [--since D] [--tail N|all] prints one component's container log from its host.
+support-bundle [--since D] [--tail N|all] [--output FILE] writes an owner-only archive for an issue
+report: status, doctor, each host's transaction and receipt phases, compose ps and log tails, with
+credentials, tokens and private keys redacted. Host names, paths and the origin are kept: review
+it before sharing. See deployment/README.md#diagnostics.
 setup [list] | setup done ID | setup skip ID shows and settles the setup checklist: the steps after an
 install or upgrade that still need a person, recorded in the Hive Registry (1.3.0 and later) and shown
 in HiveXUI. status lists the pending ones. See deployment/FULL.md#setup-checklist.
@@ -790,6 +803,7 @@ hive_host() {
     --argjson adminAccess "${HIVE_ADMIN_ACCESS_INPUT:-null}" \
     --argjson retention "${HIVE_RETENTION_INPUT:-null}" \
     --argjson addProduct "${HIVE_ADD_INPUT:-null}" \
+    --argjson diagnostics "${HIVE_DIAGNOSTICS_INPUT:-null}" \
     --arg abortStep "${HIVE_ABORT_STEP:-}" \
     --arg nativeBackupTool "${HIVE_NATIVE_BACKUP_TOOL:-}" \
     --argjson nativeRecovery "${HIVE_NATIVE_RECOVERY_INPUT:-null}" \
@@ -993,6 +1007,41 @@ hive_discover_config() {
   printf 'Hive: using %s (pass --config to choose another)\n' "$HIVE_CONFIG" >&2
 }
 
+# hive.sh status: one JSON report per host, read on the host after it proves it holds this
+# installation. REGISTRY_REPORT (hive_registry_report) is added to the registry host's report.
+hive_status_hosts() { # REGISTRY_REPORT
+  local host registry_report=$1 registry_host
+  registry_host=$(hive_registry_host)
+  while IFS= read -r host; do
+    { hive_host "$host" 'set -euo pipefail; read -r input; directory=$(jq -r .directory <<< "$input");
+      test -f "$directory/installation.json";
+      test "$(jq -r .installation "$directory/installation.json")" = "$(jq -r .installation <<< "$input")";
+      test "$(jq -r .host "$directory/installation.json")" = "$(jq -r .host <<< "$input")";
+      containers=$(docker compose -f "$directory/compose.json" ps --format json | jq -s flatten);
+      agents=$(while IFS= read -r id; do
+        receipt="$directory/agents/$id/receipt.json";
+        service=$(jq -r --arg id "$id" ".agents[]|select(.id==\$id)|.service" <<< "$input");
+        service_state=manual;
+        if [[ "$service" == user ]]; then
+          service_state=unavailable;
+          unit="hive-$(jq -r .installation <<< "$input")-$id.service";
+          if command -v systemctl >/dev/null 2>&1; then
+            posture=$(systemctl --user show "$unit" --property=LoadState --property=ActiveState 2>/dev/null) || posture="";
+            if [[ "$posture" == *"LoadState=loaded"* ]]; then
+              case "$posture" in *"ActiveState=active"*) service_state=active;; *"ActiveState=inactive"*|*"ActiveState=deactivating"*) service_state=inactive;; *"ActiveState=failed"*) service_state=failed;; esac;
+            fi;
+          fi;
+        fi;
+        if [[ -f "$receipt" && ! -L "$receipt" ]]; then jq --arg id "$id" --arg serviceState "$service_state" "{id:\$id,runtime,version,installed:(.installed // false),preflightPassed:(.preflightPassed // false),accepted:(.accepted // false),operatorAuthorized:(.operatorAuthorized // false),acceptedAt,serviceState:\$serviceState}" "$receipt";
+        else jq -n --arg id "$id" --arg serviceState "$service_state" "{id:\$id,installed:false,accepted:false,serviceState:\$serviceState}"; fi;
+      done < <(jq -r ".agents[].id" <<< "$input") | jq -s .);
+      authLimits="{\"relaxed\":false,\"products\":[]}";
+      if [[ -f "$directory/compose.json" ]]; then authLimits=$(jq -c "[.services|to_entries[]|select(.value.environment.RELAX_AUTH_LIMITS==\"true\")|.key]|sort|{relaxed:(length>0),products:.}" "$directory/compose.json"); fi;
+      jq -n --arg host "$(jq -r .host <<< "$input")" --argjson containers "$containers" --argjson agents "$agents" --argjson authLimits "$authLimits" "{schema:1,host:\$host,authLimits:\$authLimits,containers:\$containers,nativeAgents:\$agents}"'; } |
+      if [[ "$host" == "$registry_host" ]]; then jq --argjson registry "$registry_report" '.registry=$registry'; else cat; fi
+  done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
+}
+
 hive_main() {
   local command=install confirmed=false interactive=true hold_on_failure=false
   HIVE_ADMIN_ACCESS_SUDO_FILE=''
@@ -1003,6 +1052,7 @@ hive_main() {
   HIVE_CONTROLLER_DIGEST='' HIVE_CONTROLLER_ARCHIVE_DIGEST=''
   HIVE_RELEASE_SUMMARY='' HIVE_REGISTRY_FILE='' HIVE_REGISTRY_ORIGINAL_CONFIG='' HIVE_REGISTRY_TEMPORARY='' HIVE_OPERATION='' HIVE_CHECKLIST=''
   HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS='' HIVE_AGENT_ENROLLMENT='' HIVE_ADD_TEMPORARY='' HIVE_ADD_INPUT=''
+  HIVE_JSON=false HIVE_LOGS_SINCE='' HIVE_LOGS_TAIL='' HIVE_BUNDLE_OUTPUT='' HIVE_DIAGNOSTICS_INPUT=''
   local -a registry_arguments=() trust_arguments=()
   if (($#)) && [[ "$1" != --* ]]; then command=$1; shift; fi
   if [[ "$command" == entry-point ]]; then hive_entry_point_command "$@"; return; fi
@@ -1024,6 +1074,16 @@ hive_main() {
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
         HIVE_RETENTION_AT=$2; shift 2;;
       --apply) [[ "$command" == backups ]] || hive_die '--apply applies only to backups prune'; HIVE_RETENTION_APPLY=true; shift;;
+      --json) [[ "$command" == status || "$command" == doctor ]] || hive_die '--json applies only to status and doctor'; HIVE_JSON=true; shift;;
+      --since|--tail)
+        [[ "$command" == logs || "$command" == support-bundle ]] || hive_die "$1 applies only to logs and support-bundle"
+        (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
+        if [[ "$1" == --since ]]; then HIVE_LOGS_SINCE=$2; else HIVE_LOGS_TAIL=$2; fi
+        shift 2;;
+      --output)
+        [[ "$command" == support-bundle ]] || hive_die '--output applies only to support-bundle'
+        (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
+        HIVE_BUNDLE_OUTPUT=$2; shift 2;;
       --stopped) [[ "$command" == backup ]] || hive_die '--stopped applies only to backup'; HIVE_BACKUP_STOPPED=true; shift;;
       --prepare-reconciliation) [[ "$command" == restore ]] || hive_die '--prepare-reconciliation applies only to restore'; HIVE_PREPARE_RECONCILIATION=true; shift;;
       --native-recovery)
@@ -1077,14 +1137,14 @@ hive_main() {
       *)
         [[ "$1" != --* ]] || hive_die 'Unknown option'
         case "$command" in
-          registry|migrate-native|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|setup|backups|add) registry_arguments+=("$1");;
+          registry|migrate-native|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access|setup|backups|add|logs) registry_arguments+=("$1");;
           magnus-trust) trust_arguments=("$1" "${trust_arguments[@]}");;
           *) hive_die 'Unknown option';;
         esac
         shift;;
     esac
   done
-  case "$command" in init|plan|install|status|doctor|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access) ;; *) hive_die 'Unknown command';; esac
+  case "$command" in init|plan|install|status|doctor|logs|support-bundle|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access) ;; *) hive_die 'Unknown command';; esac
   [[ "$HIVE_PREPARE_RECONCILIATION" != true || -z "$HIVE_RECONCILIATION" ]] || hive_die 'Choose --prepare-reconciliation or --reconciliation, not both'
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
     case "$command" in plan|install|upgrade) ;; *) hive_die '--relax-auth-limits applies only to plan, install and upgrade';; esac
@@ -1119,42 +1179,18 @@ hive_main() {
       fi
       hive_plan; return;;
     status)
-      local host registry_report registry_host
+      if [[ "$HIVE_JSON" == true ]]; then hive_status_json; return; fi
+      local registry_report
       registry_report=$(hive_registry_report)
-      registry_host=$(hive_registry_host)
-      while IFS= read -r host; do
-        { hive_host "$host" 'set -euo pipefail; read -r input; directory=$(jq -r .directory <<< "$input");
-          test -f "$directory/installation.json";
-          test "$(jq -r .installation "$directory/installation.json")" = "$(jq -r .installation <<< "$input")";
-          test "$(jq -r .host "$directory/installation.json")" = "$(jq -r .host <<< "$input")";
-          containers=$(docker compose -f "$directory/compose.json" ps --format json | jq -s flatten);
-          agents=$(while IFS= read -r id; do
-            receipt="$directory/agents/$id/receipt.json";
-            service=$(jq -r --arg id "$id" ".agents[]|select(.id==\$id)|.service" <<< "$input");
-            service_state=manual;
-            if [[ "$service" == user ]]; then
-              service_state=unavailable;
-              unit="hive-$(jq -r .installation <<< "$input")-$id.service";
-              if command -v systemctl >/dev/null 2>&1; then
-                posture=$(systemctl --user show "$unit" --property=LoadState --property=ActiveState 2>/dev/null) || posture="";
-                if [[ "$posture" == *"LoadState=loaded"* ]]; then
-                  case "$posture" in *"ActiveState=active"*) service_state=active;; *"ActiveState=inactive"*|*"ActiveState=deactivating"*) service_state=inactive;; *"ActiveState=failed"*) service_state=failed;; esac;
-                fi;
-              fi;
-            fi;
-            if [[ -f "$receipt" && ! -L "$receipt" ]]; then jq --arg id "$id" --arg serviceState "$service_state" "{id:\$id,runtime,version,installed:(.installed // false),preflightPassed:(.preflightPassed // false),accepted:(.accepted // false),operatorAuthorized:(.operatorAuthorized // false),acceptedAt,serviceState:\$serviceState}" "$receipt";
-            else jq -n --arg id "$id" --arg serviceState "$service_state" "{id:\$id,installed:false,accepted:false,serviceState:\$serviceState}"; fi;
-          done < <(jq -r ".agents[].id" <<< "$input") | jq -s .);
-          authLimits="{\"relaxed\":false,\"products\":[]}";
-          if [[ -f "$directory/compose.json" ]]; then authLimits=$(jq -c "[.services|to_entries[]|select(.value.environment.RELAX_AUTH_LIMITS==\"true\")|.key]|sort|{relaxed:(length>0),products:.}" "$directory/compose.json"); fi;
-          jq -n --arg host "$(jq -r .host <<< "$input")" --argjson containers "$containers" --argjson agents "$agents" --argjson authLimits "$authLimits" "{schema:1,host:\$host,authLimits:\$authLimits,containers:\$containers,nativeAgents:\$agents}"'; } |
-          if [[ "$host" == "$registry_host" ]]; then jq --argjson registry "$registry_report" '.registry=$registry'; else cat; fi
-      done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
+      hive_status_hosts "$registry_report"
       # The JSON above stays machine-readable; the pending setup items are for the operator.
       hive_checklist_print_pending "$(jq -c '.setup.items // []' <<< "$registry_report")" >&2
       return;;
     doctor)
+      if [[ "$HIVE_JSON" == true ]]; then hive_doctor_json; return; fi
       hive_registry_preflight; hive_registry_doctor; hive_agent_dependencies_doctor; return;;
+    logs) hive_logs "${registry_arguments[@]}"; return;;
+    support-bundle) hive_support_bundle; return;;
     registry) hive_registry_command "${registry_arguments[@]}"; return;;
     magnus-trust) hive_magnus_trust "${trust_arguments[@]}"; return;;
     migrate-native) hive_native_migrate "${registry_arguments[0]:-}" "$confirmed" "$hold_on_failure"; return;;

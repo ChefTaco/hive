@@ -8,6 +8,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Diagnostics for monitoring and issue reports. `status --json` and `doctor --json` print one
+  JSON document each; `doctor --json` reports every check, with `ok` false and exit status 1
+  when one failed, instead of stopping at the first. `logs COMPONENT [--since D] [--tail N|all]`
+  prints one component's container log from its host. `support-bundle` writes an owner-only
+  archive with the status and doctor reports, each host's transaction and receipt phases,
+  `compose ps` and log tails, with credentials, tokens and private keys redacted. See
+  [diagnostics](deployment/README.md#diagnostics). Plain `status` and `doctor` are unchanged.
 - HiveSkills 1.10.0 and later and Emberpath trust the ingress's `X-Forwarded-For` when they run on
   its host without a published port (`HIVE_SKILLS_TRUSTED_PROXIES`, `EMBERPATH_TRUSTED_PROXIES`:
   the pinned suite network or Docker's private ranges), so their sign-in throttles see the client,

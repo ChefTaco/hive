@@ -379,6 +379,34 @@ includes the whole SQLite family. Rehearsals mount `/data` read-only and serve a
 copy that refuses writes. A rollback to a release from before the registry stops it and
 keeps its data for the next upgrade.
 
+## Diagnostics
+
+Like plain `status` and `doctor`, these commands change no container, configuration or installation
+file.
+
+- `./hive.sh status --json` prints one JSON document for monitoring: `hosts` (the per-host
+  reports that plain `status` prints one by one) and `setup.pending`, the setup checklist items
+  still open, which plain `status` lists on standard error.
+- `./hive.sh doctor --json` runs the checks of `doctor` and prints them as one document: each
+  host's preflight (`passed` or `failed` with its `error`), the Hive Registry state and drift,
+  the agent dependencies Magnus reports and any warnings. Unlike `doctor`, a failed check does
+  not stop the others. `ok` is `false`, and the exit status 1, when any check failed; a Magnus
+  that does not answer is a warning, as in `doctor`.
+- `./hive.sh logs COMPONENT [--since D] [--tail N|all]` prints one component's container log
+  from the host that runs it, with timestamps. `--since` takes `30s`, `15m`, `2h`, `7d` or an
+  ISO 8601 date or time. The default is the last 200 lines, or every line since `--since`.
+- `./hive.sh support-bundle [--since D] [--tail N|all] [--output FILE]` writes an owner-only
+  `hive-support-ID-TIME.tar.gz` (in the current directory unless `--output` names a new
+  `.tar.gz` file) for an issue report: the controller's release and digest, a summary of the
+  installation file (products, logical hosts and versions; no SSH targets or file paths), the
+  `status --json` and `doctor --json` reports, each host's transaction and receipt phases, data
+  formats, Docker version, free space and `compose ps`, and the last 200 lines (or `--tail`) of
+  every container log. Credentials, bearer tokens, JSON Web Tokens, passwords in URLs, private
+  keys and the values of settings named like passwords, secrets, tokens or keys are redacted from
+  the logs and from every string of the JSON reports, including preflight errors and warnings. Redaction is pattern-based, and host names, paths, the console origin and log text
+  are kept: read the files before you share the bundle. `errors.txt` lists every step that
+  failed.
+
 ## Container logs
 
 Every service the controller renders rotates its Docker log: the products, their datastores,
