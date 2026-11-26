@@ -67,6 +67,24 @@ for change in '.magnusAgent.version="1.0.1"' '.magnusAgent.name="magnus-agent"' 
   jq "$change" "$temporary/agent-inputs.json" > "$temporary/bad-inputs.json"
   if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo "An invalid agent pin passed: $change" >&2; exit 1; fi
 done
+# Withdrawn releases are carried, sorted, by the signed manifest; invalid lists are refused.
+mkdir -p "$root/releases"
+for version in 3.2.1 3.12.8 3.12.9; do printf '{"version":"%s"}\n' "$version" > "$root/releases/$version.json"; done
+git -C "$root" add releases && git -C "$root" -c user.name='Synthetic Test' -c user.email=test@example.com commit -qm 'Synthetic releases'
+jq '.withdrawn=[{version:"3.12.8",action:"refuse",reason:"Signed but never published",replacement:"3.12.9"},{version:"3.2.1",action:"warn",reason:"Failed its release scan"}]' "$temporary/inputs.json" > "$temporary/withdrawn-inputs.json"
+node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/withdrawn-inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/withdrawn.json" >/dev/null
+jq -e '.withdrawn==[{version:"3.2.1",action:"warn",reason:"Failed its release scan"},{version:"3.12.8",action:"refuse",reason:"Signed but never published",replacement:"3.12.9"}]' "$temporary/withdrawn.json" >/dev/null || { echo 'The withdrawn releases were not carried' >&2; exit 1; }
+diff <(jq -S 'del(.withdrawn)' "$temporary/withdrawn.json") <(jq -S . "$temporary/original.json") >&2 || { echo 'withdrawn changed more than the list' >&2; exit 1; }
+for change in '.withdrawn=[]' '.withdrawn=[{version:"9.9.9",action:"refuse",reason:"x"}]' '.withdrawn=[{version:"1.9.9",action:"refuse",reason:"x"}]' '.withdrawn=[{version:"3.12.8",action:"delete",reason:"x"}]' '.withdrawn=[{version:"3.12.8",action:"refuse",reason:""}]' '.withdrawn=[{version:"3.12.8",action:"refuse",reason:"x",extra:1}]' '.withdrawn=[{version:"3.12.8",action:"refuse",reason:"x",replacement:"3.12.7"}]' '.withdrawn=[{version:"3.12.8",action:"refuse",reason:"x"},{version:"3.12.8",action:"warn",reason:"y"}]'; do
+  jq "$change" "$temporary/inputs.json" > "$temporary/bad-inputs.json"
+  if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo "An invalid withdrawn list passed: $change" >&2; exit 1; fi
+done
+# The list is cumulative: a later release must keep every entry of the newest earlier manifest.
+printf '{"version":"9.9.8","withdrawn":[{"version":"3.12.8","action":"refuse","reason":"x"}]}\n' > "$root/releases/9.9.8.json"
+git -C "$root" add releases && git -C "$root" -c user.name='Synthetic Test' -c user.email=test@example.com commit -qm 'Synthetic withdrawal'
+if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'A withdrawal was dropped' >&2; exit 1; fi
+node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/withdrawn-inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/withdrawn.json" >/dev/null
+git -C "$root" rm -q releases/9.9.8.json && git -C "$root" -c user.name='Synthetic Test' -c user.email=test@example.com commit -qm 'Drop synthetic withdrawal'
 # Ardent Project Studio is offered when the inputs name its image, and no profile selects it.
 jq '.products.ardentstudio={image:"ghcr.io/example/ardent-studio:0.1.0",version:"0.1.0",platforms:["linux/amd64","linux/arm64"]}' "$temporary/inputs.json" > "$temporary/studio-inputs.json"
 jq --arg digest "$(digest 7)" '.ardentstudio=("ghcr.io/example/ardent-studio@"+$digest)' "$temporary/pinned.json" > "$temporary/studio-pinned.json"

@@ -140,6 +140,36 @@ hive_release_checkout() (
   printf '%s\n' "$checkout"
 )
 
+# Withdrawn releases: the newest signed manifest in this checkout lists the releases its publisher
+# withdrew (build-suite-manifest.mjs, from the inputs' "withdrawn"). Prints "action TAB reason TAB
+# replacement" for VERSION when it is listed. Manifests whose signature does not verify are ignored.
+hive_release_withdrawn() {
+  local version=$1 name newest=''
+  [[ -d "$HIVE_ROOT/releases" ]] || return 0
+  while IFS= read -r name; do
+    [[ -f "$HIVE_ROOT/releases/$name.json.sig" && ! -L "$HIVE_ROOT/releases/$name.json" ]] || continue
+    openssl pkeyutl -verify -pubin -inkey "$HIVE_ROOT/trust/publisher.pub" -rawin -in "$HIVE_ROOT/releases/$name.json" \
+      -sigfile "$HIVE_ROOT/releases/$name.json.sig" >/dev/null 2>&1 || continue
+    newest=$HIVE_ROOT/releases/$name.json
+    break
+  done < <(find "$HIVE_ROOT/releases" -maxdepth 1 -type f -name '[0-9]*.[0-9]*.[0-9]*.json' ! -name '*.inputs.json' -printf '%f\n' | sed 's/\.json$//' | sort -rV)
+  [[ -n "$newest" ]] || return 0
+  jq -r --arg version "$version" '(.withdrawn // [])[] | select(.version==$version) | [.action, .reason, (.replacement // "")] | @tsv' "$newest"
+}
+
+# A refused release stops before it can plan, install or upgrade; HIVE_ALLOW_WITHDRAWN_RELEASE set
+# to exactly that version runs it anyway, for a recovery that needs it. A warned one only warns.
+hive_release_check_withdrawn() {
+  local version=$1 entry action reason replacement
+  entry=$(hive_release_withdrawn "$version") || hive_die 'Could not read the withdrawn releases'
+  [[ -n "$entry" ]] || return 0
+  IFS=$'\t' read -r action reason replacement <<< "$entry"
+  if [[ "$action" == refuse && "${HIVE_ALLOW_WITHDRAWN_RELEASE:-}" != "$version" ]]; then
+    hive_die "Release $version was withdrawn: $reason.${replacement:+ Use $replacement instead.} To run it anyway, for a recovery that needs exactly this release, set HIVE_ALLOW_WITHDRAWN_RELEASE=$version."
+  fi
+  printf 'Hive: warning: release %s was withdrawn: %s.%s\n' "$version" "$reason" "${replacement:+ Use $replacement instead.}" >&2
+}
+
 hive_release_launch() {
   local command=install requested='' explicit_manifest=false release_index=-1 index=0 option version tag checkout digest
   local -a arguments=("$@")
@@ -185,6 +215,7 @@ hive_release_launch() {
   fi
   [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || hive_die 'Use --release latest or an exact version such as 2.0.5'
   hive_need jq; hive_need sha256sum
+  if [[ "$command" != admin-access ]]; then hive_need openssl; hive_release_check_withdrawn "$version"; fi
   arguments[release_index]=$version
   # Exact versions can run from a matching local checkout. Channel launches always
   # retain a verified tag so installed timers can keep using the selected controller.

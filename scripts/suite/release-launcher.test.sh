@@ -219,6 +219,22 @@ remote_release 2.0.12 "$temporary/key"
 reject bash "$TEST_ROOT/hive.sh" --release 2.0.12
 grep -q 'retired before 2.0.6' "$temporary/error" || fail 'A retired key signed a later release'
 cp "$temporary/key1.pub" "$TEST_ROOT/trust/publisher.pub"; rm -rf -- "$TEST_ROOT/trust/rotations"
+# Withdrawn releases, from the newest signed manifest of the launcher checkout.
+jq -n '{schema:1,version:"2.0.99",withdrawn:[{version:"2.0.5",action:"refuse",reason:"Synthetic defect",replacement:"2.0.6"},{version:"2.0.4",action:"warn",reason:"Synthetic warning"}]}' > "$TEST_ROOT/releases/2.0.99.json"
+jq -n '{schema:1,version:"2.0.100",withdrawn:[{version:"2.0.6",action:"refuse",reason:"Unsigned"}]}' > "$TEST_ROOT/releases/2.0.100.json"
+printf 'not a signature' > "$TEST_ROOT/releases/2.0.100.json.sig"
+openssl pkeyutl -sign -inkey "$temporary/key" -rawin -in "$TEST_ROOT/releases/2.0.99.json" -out "$TEST_ROOT/releases/2.0.99.json.sig"
+reject bash "$TEST_ROOT/hive.sh" plan --release 2.0.5
+grep -q 'Release 2.0.5 was withdrawn: Synthetic defect. Use 2.0.6 instead.' "$temporary/error" || fail 'A withdrawn release was not refused with its reason'
+printf '%s\n' '{"draft":false,"prerelease":false,"tag_name":"v2.0.5"}' > "$TEST_API"
+reject bash "$TEST_ROOT/hive.sh" install --release latest
+HIVE_ALLOW_WITHDRAWN_RELEASE=2.0.5 bash "$TEST_ROOT/hive.sh" plan --release 2.0.5 2> "$temporary/error" || fail 'The explicit override did not run a withdrawn release'
+grep -q 'warning: release 2.0.5 was withdrawn' "$temporary/error" || fail 'The override did not warn'
+bash "$TEST_ROOT/hive.sh" upgrade --release 2.0.4 2> "$temporary/error" || fail 'A warned release was refused'
+grep -q 'warning: release 2.0.4 was withdrawn: Synthetic warning.' "$temporary/error" || fail 'A warned release did not warn'
+bash "$TEST_ROOT/hive.sh" plan --release 2.0.6 2> "$temporary/error" || fail 'An unsigned withdrawal was trusted'
+bash "$TEST_ROOT/hive.sh" admin-access setup alice --release 2.0.5 --yes 2>/dev/null || fail 'Withdrawal stopped guided access to an installed release'
+rm -f -- "$TEST_ROOT/releases/2.0.99.json" "$TEST_ROOT/releases/2.0.99.json.sig" "$TEST_ROOT/releases/2.0.100.json" "$TEST_ROOT/releases/2.0.100.json.sig"
 # The repository's own rotation history is a valid chain ending at trust/publisher.pub.
 bash "$ROOT/scripts/release/publisher-key-rotation.sh" check >/dev/null || fail 'The repository publisher key rotation history is invalid'
-printf 'Passed: latest and explicit versions, exact forwarding, offline reuse, stdin, exit status, signed checkouts, publisher key rotation and fail-closed resolution.\n'
+printf 'Passed: latest and explicit versions, exact forwarding, offline reuse, stdin, exit status, signed checkouts, publisher key rotation, withdrawn releases and fail-closed resolution.\n'
