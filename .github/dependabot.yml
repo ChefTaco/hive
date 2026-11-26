@@ -22,6 +22,10 @@ updates:
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
     groups:
+      # Suite packages first: every @hivemagnus/* update lands in one grouped pull request.
+      hivemagnus:
+        patterns:
+          - "@hivemagnus/*"
       npm-minor-and-patch:
         update-types:
           - minor

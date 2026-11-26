@@ -50,6 +50,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Changed
 
+- Dependabot now opens one grouped weekly pull request (group `hivemagnus`) for `@hivemagnus/*` package updates, so suite package bumps arrive together. Repository configuration only; nothing to do when upgrading. The existing Hive Registry npm updates keep their minor-and-patch group for everything else.
 - Hive Registry accepts `@hivemagnus/hive-common` 0.7.x (`^0.7.0`). The Registry uses only its
   Oathweave token verifier; 0.7.0's 15-second `createCaFetch` deadline applies to its key-set
   fetches, which are short. It reaches installations with the next Hive Registry image version.
