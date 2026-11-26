@@ -107,10 +107,20 @@ hive_retention_schedule_rules() {
 }
 
 # The release and controller the installation's receipt names. Read under the host lock.
+# The release and controller every host's receipt names, from the first host. Hosts that name
+# different controllers have no one controller to schedule.
 hive_retention_schedule_installed() {
-  local host
-  host=$(jq -r '.hosts|keys[0]' "$HIVE_CONFIG")
-  hive_retention_action "$host" retention-controller "$(hive_retention_input "$hive_retention_default_keep" "$hive_retention_default_keep_days")"
+  local host first='' record
+  while IFS= read -r host; do
+    record=$(hive_retention_action "$host" retention-controller "$(hive_retention_input "$hive_retention_default_keep" "$hive_retention_default_keep_days")") || return 1
+    if [[ -z "$first" ]]; then first=$record
+    elif [[ $(jq -r .controllerSourceSHA256 <<< "$record") != "$(jq -r .controllerSourceSHA256 <<< "$first")" ]]; then
+      printf 'Hive: host %s runs another controller (%s) than host %s (%s); upgrade or roll back every host to one release first\n' \
+        "$host" "$(jq -r '.controllerSourceSHA256[0:12]' <<< "$record")" "$(jq -r '.hosts|keys[0]' "$HIVE_CONFIG")" "$(jq -r '.controllerSourceSHA256[0:12]' <<< "$first")" >&2
+      return 1
+    fi
+  done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
+  printf '%s\n' "$first"
 }
 
 # The full-node review may leave this one installer-owned schedule outside Magnus.
@@ -168,7 +178,6 @@ hive_retention_schedule_write() { # TIME LOG
 
 hive_retention_schedule_enable() {
   local time=${HIVE_RETENTION_AT:-} installed digest log entry rules
-  hive_retention_writable || return 1
   if [[ -z "$time" ]]; then time=$(jq -r --arg default "$hive_retention_default_schedule" '.retention.schedule // $default' "$HIVE_CONFIG"); fi
   [[ "$time" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || hive_die '--at is a 24-hour local time such as 03:40'
   rules=$(hive_retention_schedule_rules) || return 1
@@ -212,9 +221,6 @@ hive_retention_schedule_status() {
   printf 'Installation %s (%s)\n' "$(jq -r .installation "$HIVE_CONFIG")" "$config"
   rules=$(hive_retention_schedule_rules) || return 1
   printf 'Rules: %s\n' "$rules"
-  if ! hive_retention_writable 2>/dev/null; then
-    printf 'Daily pruning is not available: Multi-host backup pruning is disabled until selection and deletion use coordinated locks.\n'
-  fi
   current=$(mktemp)
   if ! hive_retention_crontab_read "$current"; then rm -f -- "$current"; return 1; fi
   entries=$(hive_retention_crontab_entries "$current" "$config"); rm -f -- "$current"
@@ -267,10 +273,7 @@ hive_retention_schedule_run() (
   config=$(hive_retention_schedule_config) || hive_die 'The installation file cannot be resolved'
   digest=$(hive_controller_digest)
   printf '%s scheduled prune start: installation %s, %s, controller %s (%s)\n' "$(date -u +%FT%TZ)" "$(jq -r .installation "$HIVE_CONFIG")" "$config" "$(realpath -e -- "$HIVE_ROOT/hive.sh")" "${digest:0:12}"
-  # A schedule is single-host only (enable refuses otherwise); a line left from before is refused
-  # before any host is contacted. backups prune --apply releases copies there by hand.
-  if ! hive_retention_writable; then status=1
-  elif HIVE_RETENTION_APPLY=true HIVE_RETENTION_KEEP='' HIVE_RETENTION_KEEP_DAYS='' HIVE_RETENTION_KEEP_FULL='' HIVE_RETENTION_CONTROLLER=$digest HIVE_RETENTION_TRIGGER=schedule \
+  if HIVE_RETENTION_APPLY=true HIVE_RETENTION_KEEP='' HIVE_RETENTION_KEEP_DAYS='' HIVE_RETENTION_KEEP_FULL='' HIVE_RETENTION_CONTROLLER=$digest HIVE_RETENTION_TRIGGER=schedule \
       hive_backups_command prune; then status=0; else status=$?; fi
   if ((status == 0)); then
     printf '%s scheduled prune end: succeeded\n' "$(date -u +%FT%TZ)"
@@ -326,10 +329,6 @@ hive_retention_schedule_after() (
   fi
   printf -v time '%02d:%02d' "$((10#${BASH_REMATCH[2]}))" "$((10#${BASH_REMATCH[1]}))"
   log=${BASH_REMATCH[6]}
-  if ! hive_retention_writable 2>/dev/null; then
-    printf 'Hive: daily pruning stays scheduled for %s, but every run refuses: Multi-host backup pruning is disabled until selection and deletion use coordinated locks. Remove it with: %s backups schedule disable --config %s\n' "$config" "$controller" "$config" >&2
-    exit 0
-  fi
   entry=$(hive_retention_schedule_entry "$time" "$controller" "$config" "$log" "$(hive_retention_schedule_search_path)")
   [[ "$line" != "$entry" ]] || exit 0
   if entry=$(hive_retention_schedule_write "$time" "$log"); then

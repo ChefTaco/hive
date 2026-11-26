@@ -8,6 +8,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- Backup pruning on installations with several hosts. `backups prune --apply`, the daily prune
+  and `retention.auto` now remove old backup and rehearsal pairs there in two phases: each host
+  sets aside, under its lock, the pairs it still finds removable, and a pair is removed only when
+  every host holding it did; otherwise everything is put back. An interrupted prune is put back
+  by the next one. `backups schedule enable` checks that every host runs the same controller.
+  See [pruning on several hosts](deployment/BACKUPS.md#pruning-on-several-hosts). Upgrade note:
+  `retention.auto` on several hosts now prunes; see UPGRADING.
 - HiveSkills 1.10.0 and later and Emberpath trust the ingress's `X-Forwarded-For` when they run on
   its host without a published port (`HIVE_SKILLS_TRUSTED_PROXIES`, `EMBERPATH_TRUSTED_PROXIES`:
   the pinned suite network or Docker's private ranges), so their sign-in throttles see the client,

@@ -169,7 +169,7 @@ HiveXUI browser clients.
   installation that runs Magnus reaches them from 3.8.1, after every Magnus node has its key.
 - **Backups and rehearsals.** Each upgrade keeps a backup and a restore rehearsal. `./hive.sh
   backups list|prune` reviews and removes old pairs, `./hive.sh backups schedule enable` prunes
-  them daily on a single-host installation, and only the newest passed rehearsal keeps its full
+  them daily, and only the newest passed rehearsal keeps its full
   restored copy (see [retention](deployment/BACKUPS.md#retention)). Backups include the Ardent
   profiles of the installer's Magnus host agent
   (see [native profiles](deployment/BACKUPS.md#magnus-managed-native-profiles)).
