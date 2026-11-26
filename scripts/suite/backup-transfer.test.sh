@@ -79,9 +79,24 @@ jq -nc --arg base "$temporary" '{installation:"example-suite",release:"0.1.0",or
   [[ $(stat -c %a "$temporary/a/backups/manual-one") == 700 ]] || exit 18
   jq -e '.imported=="manual-one"' "$temporary/a"/retention/import-*.json >/dev/null || exit 19
   grep -q 'rehearse --archive manual-one' "$temporary/import" || exit 20
-  # An existing backup is never replaced.
-  if (HIVE_BACKUP_FROM=$export_dir hive_backups_import) > /dev/null 2> "$temporary/exists"; then exit 21; fi
-  grep -q 'already exists on this host' "$temporary/exists" || exit 22
+  # Repeating it is harmless: every host already holds the same verified archive.
+  HIVE_BACKUP_FROM=$export_dir hive_backups_import > /dev/null 2>&1 || exit 21
+  # Another backup of the same name is never replaced.
+  printf 'tampered\n' >> "$temporary/b/backups/manual-one/state.tar.gz"
+  if (HIVE_BACKUP_FROM=$export_dir hive_backups_import) > /dev/null 2> "$temporary/exists"; then exit 22; fi
+  grep -q 'already exists on this host and is not the imported one' "$temporary/exists" || exit 22
+  # A later host that fails (here locked by another controller) leaves the restore point
+  # incomplete; the same import repeated completes every host.
+  rm -rf -- "$temporary/a/backups/manual-one" "$temporary/b/backups/manual-one"
+  (exec 8>"$temporary/b/controller.lock"; flock -x 8; touch "$temporary/locked"; while [[ ! -f "$temporary/unlock" ]]; do sleep 0.05; done) &
+  locker=$!
+  for _ in {1..100}; do [[ ! -f "$temporary/locked" ]] || break; sleep 0.05; done
+  if (HIVE_BACKUP_FROM=$export_dir hive_backups_import) > /dev/null 2> "$temporary/partial"; then touch "$temporary/unlock"; exit 23; fi
+  touch "$temporary/unlock"; wait "$locker" || true
+  grep -q 'imported on 1 host(s) before host b refused it' "$temporary/partial" && [[ -d "$temporary/a/backups/manual-one" && ! -e "$temporary/b/backups/manual-one" ]] || { cat "$temporary/partial" >&2; exit 23; }
+  HIVE_BACKUP_FROM=$export_dir hive_backups_import > "$temporary/retry" 2>&1 || { cat "$temporary/retry" >&2; exit 23; }
+  cmp -s "$temporary/original-a/state.tar.gz" "$temporary/a/backups/manual-one/state.tar.gz" && [[ -f "$temporary/b/backups/manual-one/state.tar.gz" ]] || exit 23
+  grep -q 'Imported backup manual-one on 2 host(s)' "$temporary/retry" || exit 23
   # A changed file is refused before any host is contacted.
   cp -a "$export_dir" "$temporary/changed"; printf 'x' >> "$temporary/changed/b.tar"
   rm -rf -- "$temporary/a/backups/manual-one" "$temporary/b/backups/manual-one"

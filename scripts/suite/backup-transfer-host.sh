@@ -43,7 +43,7 @@ case "$action" in
     flock -n 9 || die 'Another controller holds this host; import the backup once it finishes'
     [[ ! -L "$directory/backups" ]] || die 'Unsafe backups directory'
     install -d -m 700 "$directory/backups"
-    [[ ! -e "$backup" && ! -L "$backup" ]] || die "Backup $archive already exists on this host; nothing was imported"
+    [[ ! -L "$backup" ]] || die "Unsafe backup $archive on this host"
     staging=$(mktemp -d "$directory/backups/.importing-XXXXXXXX")
     trap 'rm -rf -- "$staging"' EXIT
     cat > "$staging/stream.tar"
@@ -56,6 +56,14 @@ case "$action" in
     mkdir "$staging/content"
     tar -C "$staging/content" --no-same-owner --no-same-permissions -xf "$staging/stream.tar"
     verified "$staging/content/$archive" || die "The imported backup $archive is not a verified backup of installation $installation on host $host; nothing was imported"
+    # A repeated import after another host failed: the copy here is accepted when it verifies and
+    # is the same archive; any other backup of that name is never replaced.
+    if [[ -e "$backup" ]]; then
+      verified "$backup" && [[ $(jq -r .sha256 "$backup/receipt.json") == "$(jq -r .sha256 "$staging/content/$archive/receipt.json")" ]] ||
+        die "Backup $archive already exists on this host and is not the imported one; nothing was imported"
+      jq -nc --arg host "$host" --arg archive "$archive" --arg sha "$(jq -r .sha256 "$backup/receipt.json")" '{host:$host,archive:$archive,imported:true,alreadyPresent:true,sha256:$sha}'
+      exit 0
+    fi
     chmod -R go-rwx -- "$staging/content/$archive"
     mv -T -- "$staging/content/$archive" "$backup"
     [[ ! -L "$directory/retention" ]] || die 'Unsafe retention record directory'

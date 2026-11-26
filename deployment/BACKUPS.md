@@ -576,7 +576,9 @@ input; nothing is overwritten. `backups list` shows what this machine exported.
 an export of this installation with exactly its hosts, checks every file against the manifest
 (decrypting with `--identity`) before it changes any host, and each host then checks every member
 (regular files and directories under the archive only), the receipt and the checksum under its
-controller lock before the backup appears in `backups/`. It never replaces an existing backup.
+controller lock before the backup appears in `backups/`. It never replaces an existing backup: when
+a host already holds the same verified archive, as after an import that stopped at a later host, it
+accepts that copy, so repeating the import completes every host.
 An imported backup has no rehearsal: run `./hive.sh rehearse --archive ARCHIVE` before
 `restore`. Retention treats it like any backup without a rehearsal and keeps it. Copies kept
 outside the installation, by `export` or otherwise, are never touched by retention.

@@ -111,7 +111,7 @@ hive_backups_import() (
   done < <(jq -r '.hosts|keys[]' "$HIVE_CONFIG")
   while IFS= read -r host; do
     if ! hive_backup_transfer_action "$host" backup-import "$archive" "$work/$host.tar" > /dev/null; then
-      ((imported == 0)) || printf 'Hive: backup %s was imported on %s host(s) before host %s refused it; it is restorable only once every host has it.\n' "$archive" "$imported" "$host" >&2
+      ((imported == 0)) || printf 'Hive: backup %s was imported on %s host(s) before host %s refused it; it is restorable only once every host has it. Repeat the same import: hosts that already hold this archive accept their verified copy and the rest are imported.\n' "$archive" "$imported" "$host" >&2
       hive_die "Host $host did not import backup $archive; see above"
     fi
     imported=$((imported + 1))
