@@ -357,6 +357,9 @@ if has_component oathweave; then
   common_environment; line HOST 0.0.0.0; line PORT 4200; line DATABASE_URL file:/data/iam/iam.db
   line REDIS_URL "redis://:$(secret redis-password)@oathweave-redis:6379"
   line JWT_ISSUER "$native_issuer"; line IAM_BROWSER_ISSUER "$issuer"; line IAM_BROWSER_CLIENT_POLICIES "$policies"
+  # Native OIDC discovery advertises this base: Oathweave's own HTTPS endpoint, which serves /api/v1
+  # (the ingress serves it under /api/oathweave instead). Older Oathweave images ignore it.
+  line IAM_PUBLIC_URL "$(product_endpoint oathweave https://oathweave:4200)"
   line COOKIE_SECRET "$(secret oath-cookie)"; line IAM_AGENT_SECRET "$(secret oath-agent)"
   line SEED_ADMIN_USERNAME "$username"; line SEED_ADMIN_EMAIL "$email"; line SEED_ADMIN_PASSWORD "$(secret admin-password)"
   line SEED_HIVE_CLIENT_SECRET "$(secret native-hive-client)"; line SEED_HIVE_ROUTER_CLIENT_SECRET "$(secret native-router-client)"

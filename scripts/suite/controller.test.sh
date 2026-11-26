@@ -139,6 +139,27 @@ jq -e '.services.chattermost.environment|.TRUSTED_PROXIES=="10.0.0.0/8,172.16.0.
 jq '.console.networkSubnet="10.200.0.0/24"' "$temporary/suite.json" > "$temporary/suite-subnet.json"
 HIVE_CONFIG=$temporary/suite-subnet.json hive_render control | jq -e '.services.chattermost.environment.TRUSTED_PROXIES=="10.200.0.0/24"' >/dev/null ||
   fail 'ChatterMost does not trust exactly the pinned suite network'
+# HiveSkills 1.10.0 and later trust the ingress on their host the same way; an older image, which
+# accepts only single addresses, gets nothing.
+jq -e '.services.hiveskills.environment|has("HIVE_SKILLS_TRUSTED_PROXIES")|not' "$temporary/suite-default.compose.json" >/dev/null || fail 'An older HiveSkills got CIDR proxy trust'
+for version in 1.10.0 1.12.3 2.0.0; do
+  jq --arg version "$version" '.components.hiveskills.version=$version' "$temporary/suite-release.json" > "$temporary/skills-release.json"
+  openssl pkeyutl -sign -inkey "$temporary/private" -rawin -in "$temporary/skills-release.json" -out "$temporary/skills-release.sig"
+  ( HIVE_MANIFEST=$temporary/skills-release.json HIVE_SIGNATURE=$temporary/skills-release.sig; hive_manifest; hive_render control ) > "$temporary/skills.compose.json" || fail "HiveSkills $version did not render"
+  jq -e '.services.hiveskills.environment.HIVE_SKILLS_TRUSTED_PROXIES=="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7" and
+    ([.services|to_entries[]|select(.key!="hiveskills" and ((.value.environment // {})|has("HIVE_SKILLS_TRUSTED_PROXIES")))]|length==0)' "$temporary/skills.compose.json" >/dev/null || fail "HiveSkills $version does not trust the ingress on its host"
+done
+( HIVE_CONFIG=$temporary/suite-subnet.json HIVE_MANIFEST=$temporary/skills-release.json HIVE_SIGNATURE=$temporary/skills-release.sig; hive_manifest; hive_render control ) |
+  jq -e '.services.hiveskills.environment.HIVE_SKILLS_TRUSTED_PROXIES=="10.200.0.0/24"' >/dev/null || fail 'HiveSkills does not trust exactly the pinned suite network'
+jq '.bootstrap.productEndpoints.hiveskills={origin:"https://skills.example.com:4030",bindAddress:"192.0.2.10"}' "$temporary/suite.json" > "$temporary/suite-published-skills.json"
+( HIVE_CONFIG=$temporary/suite-published-skills.json HIVE_MANIFEST=$temporary/skills-release.json HIVE_SIGNATURE=$temporary/skills-release.sig; hive_manifest; hive_render control ) |
+  jq -e '.services.hiveskills.environment|has("HIVE_SKILLS_TRUSTED_PROXIES")|not' >/dev/null || fail 'A published HiveSkills port trusts forwarded addresses'
+# Emberpath trusts the ingress on its host the same way, at any version (older images ignore it).
+jq -e '.services.emberpath.environment.EMBERPATH_TRUSTED_PROXIES=="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7" and
+  ([.services|to_entries[]|select(.key!="emberpath" and ((.value.environment // {})|has("EMBERPATH_TRUSTED_PROXIES")))]|length==0)' "$temporary/suite-default.compose.json" >/dev/null || fail 'Emberpath does not trust the ingress on its host'
+HIVE_CONFIG=$temporary/suite-subnet.json hive_render control | jq -e '.services.emberpath.environment.EMBERPATH_TRUSTED_PROXIES=="10.200.0.0/24"' >/dev/null || fail 'Emberpath does not trust exactly the pinned suite network'
+jq '.bootstrap.productEndpoints.emberpath={origin:"https://models.example.com:9443",bindAddress:"192.0.2.10",certificateFile:"/opt/hive/config/models.crt",privateKeyFile:"/opt/hive/config/models.key",inferenceOrigin:"https://inference.example.com:9444"}' "$temporary/suite.json" > "$temporary/suite-published-models.json"
+HIVE_CONFIG=$temporary/suite-published-models.json hive_render control | jq -e '.services.emberpath.environment|has("EMBERPATH_TRUSTED_PROXIES")|not' >/dev/null || fail 'A published Emberpath port trusts forwarded addresses'
 # Oathweave gets Docker's private ranges only without a pinned network, whose list setup and
 # migrate-native write to oathweave.env and the container environment must not replace.
 jq -e '.services.oathweave.environment.TRUSTED_PROXY_IPS=="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7" and
