@@ -43,6 +43,11 @@ All notable changes to this project are documented in this file. The format is b
   typed (`--yes` never does). `remove cindertrace-collector` backs up, stops the collector, takes
   it out of the installation file and applies that as an upgrade; its data stays. See
   [uninstalling](deployment/README.md#uninstalling).
+- `hive.sh add chattermost` adds ChatterMost and its private PostgreSQL to a running installation,
+  configured as fresh setup does, with the same backup, journal, upgrade and console-client steps as
+  `add cindertrace`. A migrated installation names the operator's email in the new optional
+  `nativeMigration.adminAccount.email`. See
+  [adding ChatterMost](deployment/FULL.md#adding-chattermost).
 - HiveSkills 1.10.0 and later and Emberpath trust the ingress's `X-Forwarded-For` when they run on
   its host without a published port (`HIVE_SKILLS_TRUSTED_PROXIES`, `EMBERPATH_TRUSTED_PROXIES`:
   the pinned suite network or Docker's private ranges), so their sign-in throttles see the client,

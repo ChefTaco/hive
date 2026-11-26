@@ -22,6 +22,9 @@ hive_add_catalog() {
   printf '%s\n' '{"cindertrace":{"name":"Cindertrace","components":["cindertrace","cindertrace-postgres","cindertrace-redis"],"requires":[],"initialization":true,
     "browserClient":{"id":"hivexui-cindertrace","audience":"cindertrace","permissions":["cindertrace:view","cindertrace:investigate","cindertrace:admin"]},
     "prepares":"Cindertrace secrets, internal certificate, private PostgreSQL and Redis configuration and environment, with native browser sign-in for the operator and an Oathweave link from the operator account to a new Cindertrace account; the hivexui-cindertrace browser policy in Oathweave, the Cindertrace routes in the ingress and Cindertrace in the console runtime.json"},
+  "chattermost":{"name":"ChatterMost","components":["chattermost","chattermost-postgres"],"requires":[],"initialization":true,
+    "browserClient":{"id":"hivexui-chattermost","audience":"chattermost","permissions":["chattermost:session"]},
+    "prepares":"ChatterMost secrets, internal certificate, private PostgreSQL configuration and environment, with its administrator for the operator and an Oathweave link from the operator account to a new ChatterMost account; the hivexui-chattermost browser policy in Oathweave, the ChatterMost route in the ingress and ChatterMost in the console runtime.json"},
   "cindertrace-collector":{"name":"Cindertrace collector","components":["cindertrace-collector"],"requires":["cindertrace"],"initialization":false,"browserClient":null,
     "prepares":"checks the collector settings that cindertrace-collector add ID --sources ... --run wrote"}}' | jq -c .
 }
@@ -184,5 +187,6 @@ hive_add_product() {
   printf '  Console:   sign out of %s/ and in again to see %s\n' "$(jq -r .origin "$HIVE_CONFIG")" "$name"
   printf '  Recovery:  %s'"'"'s own sign-in, for when Oathweave is unavailable: account %s, password in %s on %s (owner-only; never printed)\n' "$name" "$(jq -r '.operator // "?"' "$journal")" "$(jq -r '.passwordFile // "?"' "$journal")" "$host"
   printf '  Backup:    %s was taken before any change\n' "$(jq -r '.backup // "?"' "$journal")"
+  [[ "$product" == cindertrace ]] || return 0
   printf '  Events:    ./hive.sh cindertrace-collector add ID --sources SOURCE[,SOURCE] --config %s (deployment/FULL.md#sending-security-events-to-cindertrace)\n' "$HIVE_OPERATOR_CONFIG"
 }

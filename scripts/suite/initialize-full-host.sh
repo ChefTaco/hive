@@ -7,6 +7,7 @@
 hive_full_secret_names() {
   case $1 in
     cindertrace) printf '%s\n' security-db security-redis security-admin-password security-session security-console security-audit security-receipt security-backup security-rate;;
+    chattermost) printf '%s\n' chat-db chat-cookie chat-token chat-admin-password chat-bot;;
     *) return 1;;
   esac
 }

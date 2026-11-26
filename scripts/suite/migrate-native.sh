@@ -15,7 +15,7 @@ hive_native_validate() {
     (if ($n.source.serviceManager // "systemd")=="command" or ($n.source.root // "/")!="/" then $n.rehearsal==true else true end) and
     ($n.browserIssuer|type=="string" and test("^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._/-]*)?$")) and
     (($n.reviewedLinksFile // "/dev/null")|path) and
-    (if $n.adminAccount then ($n.adminAccount|type=="object" and (keys-["subject","username","tokenFile","tokenTtlSeconds"]|length==0) and (.subject|type=="string" and length>0) and (.username|type=="string" and length>0) and (.tokenFile|path) and ((.tokenTtlSeconds // 86400)|type=="number" and .>=1 and .<=604800)) else true end) and
+    (if $n.adminAccount then ($n.adminAccount|type=="object" and (keys-["subject","username","email","tokenFile","tokenTtlSeconds"]|length==0) and (.subject|type=="string" and length>0) and (.username|type=="string" and length>0) and ((has("email")|not) or (.email|type=="string" and length<=254 and test("^[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"))) and (.tokenFile|path) and ((.tokenTtlSeconds // 86400)|type=="number" and .>=1 and .<=604800)) else true end) and
     (if $n.imageRegistry then ($n.imageRegistry|type=="object" and (keys-["server","username","passwordFile"]|length==0) and (.server|type=="string") and (.username|type=="string") and (.passwordFile|path)) else true end) and
     (.console.nativeListeners|type=="array" and all(.[];(keys-["port","component"]|length==0) and (.port|type=="number" and floor==. and .>=1024 and .<=65535) and (.component|id))) and
     ((.console.networkSubnet // "")|type=="string" and test("^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$")) and
