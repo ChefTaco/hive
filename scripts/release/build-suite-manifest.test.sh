@@ -246,6 +246,23 @@ for versions in '2.1.0 1.4.0 emberpath-v1 hiveskills-v1' '2.2.0 1.4.0 emberpath-
   ' "$temporary/format.json" >/dev/null || { echo "The product data format contract is wrong for $versions" >&2; exit 1; }
   diff <(jq 'del(.components.emberpath, .components.hiveskills)' "$temporary/format.json") <(jq 'del(.components.emberpath, .components.hiveskills)' "$temporary/original.json") >/dev/null || { echo 'A product data format changed another component' >&2; exit 1; }
 done
+# HiveSkills 1.10.0 moves from managed-format-3 to -5, and Oathweave 2.5.0 from oathweave-v1 to
+# managed-format-2, each with its own migrate; earlier pins keep their formats.
+for versions in '1.9.1 2.4.0 hiveskills-managed-format-3 oathweave-v1' '1.10.0 2.4.0 hiveskills-managed-format-5 oathweave-v1' '1.11.1 2.5.0 hiveskills-managed-format-5 oathweave-managed-format-2' '1.11.1 2.6.0 hiveskills-managed-format-5 oathweave-managed-format-2'; do
+  read -r skills identity skills_format identity_format <<< "$versions"
+  skills_from=hiveskills-v1; [[ "$skills_format" != hiveskills-managed-format-5 ]] || skills_from=hiveskills-managed-format-3
+  jq --arg skills "$skills" --arg identity "$identity" '.products.emberpath.version="2.6.0" | .products.hiveskills.version=$skills | .products.oathweave.version=$identity' "$temporary/inputs.json" > "$temporary/format-inputs.json"
+  node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/format-inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/format.json" >/dev/null
+  jq -e --arg skills "$skills_format" --arg skills_from "$skills_from" --arg identity "$identity_format" '
+    .components.hiveskills as $h | .components.oathweave as $o |
+    $h.storageFormat==$skills and $h.readableFormats==[$skills] and $h.migration=={from:$skills_from,command:["migrate","--backup-dir","/data/migration-backups"]} and
+    $o.storageFormat==$identity and
+    (if $identity=="oathweave-v1" then ($o|has("migration") or has("readableFormats")|not)
+     else $o.readableFormats==[$identity] and $o.migration=={from:"oathweave-v1",command:["migrate","--backup-dir","/data/migration-backups"]} end)
+  ' "$temporary/format.json" >/dev/null || { echo "The HiveSkills or Oathweave data format contract is wrong for $versions" >&2; exit 1; }
+done
+jq 'del(.products.oathweave.version)' "$temporary/inputs.json" > "$temporary/bad-inputs.json"
+if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'An Oathweave pin without an exact version skipped its data format review' >&2; exit 1; fi
 jq 'del(.products.emberpath.version)' "$temporary/inputs.json" > "$temporary/bad-inputs.json"
 if node "$root/scripts/release/build-suite-manifest.mjs" --version 9.9.9 --inputs "$temporary/bad-inputs.json" --pinned "$temporary/pinned.json" --output "$temporary/bad.json" >/dev/null 2>&1; then echo 'A product without an exact version skipped its data format review' >&2; exit 1; fi
 # HiveMem 1.9.0 moves Emberpath's former memory principal, hive-router, to emberpath as its signed

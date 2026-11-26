@@ -157,7 +157,16 @@ const PRODUCT_FORMATS = Object.freeze({
     { since: '2.2.0', storageFormat: 'emberpath-managed-format-2', from: 'emberpath-v1' },
     { since: '2.6.0', storageFormat: 'emberpath-managed-format-3', from: 'emberpath-managed-format-2' },
   ]),
-  hiveskills: Object.freeze([{ since: '1.5.0', storageFormat: 'hiveskills-managed-format-3', from: 'hiveskills-v1' }]),
+  // HiveSkills 1.10.0 adds managed-format-4 and -5 (two additive tables); its migrate applies both
+  // in one run, so the suite names only the newest.
+  hiveskills: Object.freeze([
+    { since: '1.5.0', storageFormat: 'hiveskills-managed-format-3', from: 'hiveskills-v1' },
+    { since: '1.10.0', storageFormat: 'hiveskills-managed-format-5', from: 'hiveskills-managed-format-3' },
+  ]),
+  // Oathweave 2.5.0 and 2.6.0 add five SQLite migrations, one of which drops a column, and refuse to
+  // start with any of them pending while HIVE_AUTO_MIGRATE is false; no earlier Oathweave reads the
+  // migrated database. Its migrate takes the same backup directory argument.
+  oathweave: Object.freeze([{ since: '2.5.0', storageFormat: 'oathweave-managed-format-2', from: 'oathweave-v1' }]),
 });
 const PRODUCT_MIGRATION = Object.freeze(['migrate', '--backup-dir', '/data/migration-backups']);
 const atLeast = (version, since) => compareVersions(version, since) >= 0;

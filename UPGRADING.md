@@ -14,9 +14,11 @@ below, and so does moving an installation with Emberpath or HiveSkills from a re
 later, an installation that runs Magnus from a release before 3.8.0 to 3.8.0 or later, and every
 installation moving from a release before 3.14.0 to 3.14.0 or later (Emberpath 2.6.0's data
 format; see [Suite 3.14.0](#suite-3140-ardent-execution-recovery-lineage-and-artifact-transfer-v2)),
-and an installation with a suite-managed Magnus (the full profile) moving from a release before
+an installation with a suite-managed Magnus (the full profile) moving from a release before
 3.14.2 to 3.14.2 or later (one Magnus migration; see
-[Suite 3.14.2](#suite-3142-magnus-335-agent-definitions-and-ardent-321)). An
+[Suite 3.14.2](#suite-3142-magnus-335-agent-definitions-and-ardent-321)), and every installation
+moving from a release before 3.15.0 to 3.15.0 or later (Oathweave 2.6.0's and HiveSkills 1.11.1's
+data formats; see [Suite 3.15.0](#suite-3150-product-security-round)). An
 installation that runs Magnus moves to 3.9.0 or later (Magnus 3) from 3.8.1 only, after its nodes
 have their keys; see [Suite 3.9.0](#suite-390-magnus-301-node-keys-only). A failed or uncertain step
 holds its transaction for recovery, as described in
@@ -24,7 +26,7 @@ holds its transaction for recovery, as described in
 delete transaction or runtime receipts to force another attempt. See also
 [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
 
-## Daily backups and off-host copies (next release)
+## Daily backups and off-host copies (from 3.15.0)
 
 Nothing changes until you opt in. `"retention": {"backup": {"keep": 7}}` has the daily prune take
 an online backup first; `backups export` and `backups import` copy backups off the host and back.
@@ -32,9 +34,9 @@ Controllers of 3.14.3 and earlier refuse `retention.backup`: remove it before ru
 example for a rollback. See [daily backups](deployment/BACKUPS.md#daily-backups) and
 [off-host copies](deployment/BACKUPS.md#off-host-copies).
 
-## Backup pruning on several hosts (next release)
+## Backup pruning on several hosts (from 3.15.0)
 
-The next release's controller removes old backup and rehearsal pairs on installations with
+The 3.15.0 controller removes old backup and rehearsal pairs on installations with
 several hosts too; earlier controllers only listed them there and released restored copies.
 `backups prune --apply` sets the pairs aside on every host, records the decision on every host,
 and only then removes them, each step under that host's lock, so an interrupted prune is finished
@@ -50,7 +52,7 @@ or put back by the next one and never leaves a restore point half-removed; see
   3.14.3 or earlier (for example for a rollback), which refuses unknown retention keys.
 - Preview with `./hive.sh backups prune` before the first `--apply`.
 
-## First-party console clients (next release)
+## First-party console clients (from 3.15.0)
 
 Oathweave asks no consent for a first-party client. Fresh setup has always created the HiveXUI
 browser clients as first-party, but an installation whose clients were created otherwise (by
@@ -60,9 +62,9 @@ hand, or by an older migration) shows a consent prompt at sign-in. After upgradi
 changes nothing else about them, and nothing about any other client. It names them and asks
 first; `--yes` applies unattended.
 
-## Client addresses and OIDC discovery (next release)
+## Client addresses and OIDC discovery (from 3.15.0)
 
-The next release's controller passes the ingress's client address to more products and gives
+The 3.15.0 controller passes the ingress's client address to more products and gives
 Oathweave its discovery base:
 
 - **HiveSkills 1.10.0 and later** get `HIVE_SKILLS_TRUSTED_PROXIES` and **Emberpath** gets
@@ -180,28 +182,51 @@ rollback keeps the renamed data, which older HiveMem versions read, and the re-l
 
 ## Suite 3.15.0: product security round
 
-3.15.0 pins HiveMem 1.10.0, Emberpath 2.7.0, Oathweave 2.4.0, HiveXUI 0.12.1, Cindertrace 0.9.0,
-Embermend 0.4.0, ChatterMost 0.8.0 and Magnus 3.4.0 (server, fleet gateway and host agent, which
-stages Ardent 3.3.0), and selects the datastore profile `runtime-2026-11-pg1712-zstd-openssl`.
-HiveSkills, Emberfold, Ardent Project Studio, the Hive Registry, the ingress and the storage recovery
-profile are those of 3.14.3. No product changes its data format and no product migration is
-pending, so an upgrade from 3.14.x needs no `--allow-migrations`. The controller changes. Read
-these notes before you run `plan`:
+3.15.0 pins Oathweave 2.6.0, Emberpath 2.9.0, HiveMem 1.12.0, HiveSkills 1.11.1, HiveXUI 0.13.0,
+Cindertrace 0.10.0, ChatterMost 0.10.0, Emberfold 0.5.0, Ardent Project Studio 0.7.0,
+Embermend 0.6.1 and Magnus 3.4.0 (server, fleet gateway and host agent, which stages Ardent 3.5.1),
+and selects the datastore profile `runtime-2026-11-pg1712-zstd-openssl`. The Hive Registry, the
+ingress image and the storage recovery profile are those of 3.14.3. The controller changes; the
+generic sections above marked "from 3.15.0" describe its new features. Read all of this before you
+run `plan`.
 
-- **Redis image.** The new datastore profile replaces `hive-redis` 8.2.10-2 with 8.2.10-3, the same
-  Redis 8.2.10 with OpenSSL 3.5.9-r2 (CVE-2026-124709). PostgreSQL and Qdrant keep their images.
-  Redis and its AOF and RDB formats are unchanged, so there is no storage transition and no
-  `--allow-migrations`: the upgrade takes its usual verified pre-change backup and rehearsal and
-  recreates the Redis containers (Oathweave, Magnus and Cindertrace each have one) on the new image.
+**Every upgrade to 3.15.0 needs `--allow-migrations`**, and its way back is the pre-upgrade backup:
 
-- **ChatterMost 0.8.0 deletes old posts in channels with a retention limit.** Earlier releases
-  saved the channel Policy form's **Retention days** but never applied it. On its first start 0.8.0
-  moves every saved value onto its channel and enforces it, together with any `retention_days` set
-  through the channel patch or import APIs. The first purge runs about a minute after startup, then
-  hourly, and permanently deletes every older post in that channel with its edit history, reactions
-  and files, plus older uploads that no kept post references. A rollback does not bring them back;
-  only the pre-upgrade backup does. Before upgrading, list the affected channels on the ChatterMost
-  host (substitute your installation directory and name for `/opt/hive` and `ID`):
+- Oathweave 2.5.0 and 2.6.0 add five SQLite migrations, one of which drops the legacy
+  `encryptedPassword` column, and refuse to start while any is pending. The suite declares the new
+  format `oathweave-managed-format-2`: the upgrade runs `oathweave migrate --backup-dir
+  /data/migration-backups` on the rehearsal copy, then once on the stopped live store. No earlier
+  Oathweave reads the migrated database, so a code-only `rollback` from 3.15.0 is refused;
+  `./hive.sh restore` of the verified pre-upgrade backup is the way back.
+- HiveSkills 1.10.0 adds `managed-format-4` and `-5` (two additive tables); the suite declares
+  `hiveskills-managed-format-5`, which its `migrate` reaches from `managed-format-3` in one run.
+- On a full installation, Cindertrace 0.10.0 (`source_poll_stats`), Embermend 0.5.0
+  (`list_paging`) and Magnus 3.4.0 (two fast migrations) each apply additive migrations through
+  their signed initialization, verified on the restored copy first.
+- Ardent Project Studio 0.7.0 applies its one-way migrations 11 (`file_deletion`) and 12
+  (`project_membership_purge`) itself when it first starts, which the rehearsal exercises on the
+  copy. Studio 0.5.x and 0.6.x then refuse the database.
+- The Redis image changes (`hive-redis` 8.2.10-3, OpenSSL 3.5.9-r2 for CVE-2026-124709). Redis
+  8.2.10 and its AOF and RDB formats are unchanged, so this is no storage transition; the Redis
+  containers are recreated. PostgreSQL and Qdrant keep their images.
+
+**ChatterMost moves from 0.7.2 to 0.10.0 in one step.** ChatterMost's own Compose release manager
+only upgrades through its stepping stones (0.7.2 to 0.8.0 to 0.9.0 to 0.10.0). The suite upgrades
+directly, because what those stones protect is already covered. ChatterMost's Prisma migrations and
+stored layout are unchanged from 0.7.2 to 0.10.0, and the migrator still verifies the exact
+migration lineage. Its one-time startup step, moving Policy-form retention values onto channels,
+runs at 0.10.0's first start as it does in 0.8.0. The rule that a rollback must land on a release
+that can verify scrypt passwords (0.9.0 or later) holds because 3.15.0 cannot be rolled back
+code-only (Oathweave above): its way back restores the pre-upgrade backup, whose password hashes
+0.7.2 verifies. Before upgrading:
+
+- **Channels with a retention limit lose older posts and files about a minute after ChatterMost
+  starts**, then hourly, permanently, with their edit history, reactions and attachments. Earlier
+  releases saved the channel Policy form's **Retention days** but never applied it; 0.10.0 moves
+  every saved value onto its channel and enforces it, together with limits set through the channel
+  patch or import APIs. A thread is purged when its newest post is older than the limit. List the
+  affected channels on the ChatterMost host (substitute your installation directory for
+  `/opt/hive`):
 
   ```bash
   sudo docker compose -f /opt/hive/compose.json exec -T chattermost-postgres psql -X -U chattermost_app -d chattermost -c \
@@ -209,50 +234,144 @@ these notes before you run `plan`:
   ```
 
   No rows means nothing will be purged. To keep a listed channel in full, clear its limit while
-  still on 3.14.x: for `form_limit`, empty **Retention days** in the channel's Policy panel and
-  save; for `api_limit`, send `PUT /api/v4/channels/CHANNEL_ID/patch` with
-  `{"retention_days": null}` as a system admin. Each purge is audited as
-  `channel.retention_purged`. Channels without a limit keep everything.
-- **Oathweave 2.4.0 changes who holds which permissions.** Roles assigned to a group now reach the
-  tokens of the group's members at their next sign-in or refresh: review group role assignments
-  before upgrading. A confidential client must send its secret on the `refresh_token` grant, a
-  refresh token stops working at its session's hard expiry (`JWT_REFRESH_TTL` after sign-in), and
-  replaying an already rotated refresh token revokes the whole session (audit
-  `token.refresh_reuse`). A TOTP code is accepted once. `POST /oauth/token`,
-  `/tokens/introspect` and `/tokens/revoke` are limited to 300 requests a minute per address, and
-  repeated failed client authentications are refused with 429. HTTP Basic client credentials are
-  form-URL-decoded, so a client whose secret contains `%` or `+` must encode it or send it in the
-  body. HiveXUI's public PKCE clients are unaffected.
-- **Emberpath 2.7.0.** `POST /api/pull` (Ollama model downloads) needs a client key with the
-  `ollama:manage` (or `*`) scope; agent keys get 403 there. `/api/auth/login` and
-  `/api/auth/reauthenticate` answer an MFA-enabled Oathweave account with `401 MFA_REQUIRED` and
-  accept `mfaCode`. A provider's `timeoutMs` is now an idle timeout per wait and its `concurrency`
-  limits running streams: review both on providers that serve long streams.
-- **Cindertrace 0.9.0 behind the ingress.** The controller sets `CINDERTRACE_TRUSTED_PROXIES=ingress`
-  when the ingress runs on Cindertrace's host and Cindertrace has no published endpoint (see
-  [client addresses](deployment/README.md#client-addresses-and-reverse-proxies)), so sign-in throttling
-  and rate limits apply per browser again. A Cindertrace with a published endpoint keeps the
-  default, `loopback`. Approvals now fail with 503 `DISPATCH_DISABLED` while
-  `SECURITY_DISPATCH_ENABLED` is not `true`, and undecided previews and approval requests expire
-  after ten minutes.
-- **HiveMem 1.10.0.** `/v1/health` reports `release` as `1.10.0`; update monitoring that compared it
-  with `1.2.2`. Idempotency records are kept in the server process for 24 hours. SDK 1.3.0 clients
-  that talk to an older HiveMem must pass `idempotencyKeys: false`.
-- **Embermend 0.4.0.** Work whose stored operator grant no longer matches
-  `EMBERMEND_IDENTITY_GRANTS` fails with an `ACTOR_*` code and its scheduled occurrences are
-  blocked; review the `job.authority-revoked`, `job.authority-narrowed` and `schedule.blocked` audit
-  entries after upgrading.
-- **Magnus 3.4.0.** A Magnus whose `IAM_CORE_URL` uses HTTP to a host other than loopback refuses to
-  start: switch an external Magnus to HTTPS before upgrading it (a suite-managed Magnus trusts
-  Oathweave through `OATHWEAVE_ISSUER` and is unaffected). Non-streaming AI chat pauses tools that
-  need approval, and `execCommand`, `writeFile`, `runSkill`, `createSkillDraft` and
-  `generateRunbook` always need approval unless the policy denies them. The host agent refuses
-  request bodies over `MAGNUS_AGENT_BODY_LIMIT_BYTES` (16 MiB) with 413, and installs Hermes from
-  one pinned commit. After upgrading the suite, run `./hive.sh post-upgrade --yes` to move the
-  Hive-managed host agents to 3.4.0; update other fleet agents from Magnus. Ardent profiles keep
-  their version until you update them in Magnus > Ardent; Ardent 3.3.0 needs no schema change.
-- **HiveXUI 0.12.1.** Sign-out also ends the ChatterMost session, and the sign-in form no longer
-  prefills `admin`. No operator action.
+  still on 3.14.x: for `form_limit`, empty **Retention days** in its Policy panel and save; for
+  `api_limit`, send `PUT /api/v4/channels/CHANNEL_ID/patch` with `{"retention_days": null}` as a
+  system admin. From 0.9.0 only system admins can set limits (audited as
+  `channel.retention_changed`); each purge is audited as `channel.retention_purged`.
+- **The first sweep also removes attachment files of posts deleted earlier, and uploads older than
+  a week that no post references.** Set `ORPHAN_UPLOAD_GRACE_HOURS=0` in `config/chattermost.env`
+  before the `plan` to keep the uploads.
+- New and changed passwords are hashed with scrypt (`PASSWORD_HASHING=scrypt`, the 0.10.0 default);
+  bcrypt hashes are replaced at each account's next sign-in. Oathweave sign-in is unaffected.
+- Post `order` lists are newest first; deleting a thread's root deletes its replies; the import
+  helper no longer accepts `--token`; the container health check calls `/health/ready`, so a
+  database outage marks ChatterMost unhealthy.
+
+**Oathweave 2.4.0 to 2.6.0.**
+
+- Group role assignments now reach tokens: a member of a group gains its roles and permissions at the
+  next sign-in or refresh. Review group role assignments before upgrading.
+- Confidential clients must send their secret on the `refresh_token` grant. Refresh tokens stop at
+  their session's hard expiry (`JWT_REFRESH_TTL`), and replaying a rotated refresh token revokes the
+  session (`token.refresh_reuse`). TOTP codes are accepted once. HTTP Basic client credentials are
+  form-URL-decoded. The token, introspection and revocation endpoints are throttled per address.
+  HiveXUI's public PKCE clients are unaffected.
+- Account lockout follows the stored password policy (5 attempts, 15 minutes by default) instead of
+  `RATE_LIMIT_*`. Introspection and revocation are limited to the issuing client unless it holds
+  `iam:tokens:introspect` or `iam:tokens:revoke`, and `allowedIps` also applies at the token
+  endpoint. Writes with the `hive-router` token need `x-hive-operator`.
+- id tokens and UserInfo carry `preferred_username` and `name` only with the `profile` scope and
+  `email` only with `email`; id tokens always carry `sid` and `auth_time`. Relying-party tokens are
+  audience-bound.
+- Deactivating or deleting a user revokes their sessions and refresh tokens, and a browser sign-out
+  revokes the session's refresh tokens. Revocations are published at `GET
+  /api/oathweave/hive/events` (`session.revoked`, `user.sessions_revoked`; needs
+  `iam:tokens:introspect` or `iam:sessions:revoke`). No 3.15.0 product follows the feed yet.
+- Add `IAM_PUBLIC_URL` before the `plan`, as
+  [OIDC discovery](#client-addresses-and-oidc-discovery-from-3150) describes; without it native
+  discovery answers 503.
+
+**Emberpath 2.7.0 to 2.9.0** (no data format change).
+
+- `POST /api/pull` needs a client key with the `ollama:manage` (or `*`) scope.
+- `/api/auth/login` and `/api/auth/reauthenticate` answer an MFA-enabled Oathweave administrator
+  with `401 MFA_REQUIRED` and accept `mfaCode`.
+- A provider's `timeoutMs` is an idle timeout per wait, and its `concurrency` limits running
+  streams; review both for long streams.
+- Upstream response headers are allowlisted (`x-request-id` and `x-ratelimit-*` arrive as
+  `x-emberpath-upstream-*`), and a 403 no longer includes `route_decision`. IAM-proxy writes need
+  `iam:*` permissions instead of `router:admin:write`. Circuit breakers use a 60-second window.
+- Oathweave token URLs must be HTTPS off loopback; the suite's are.
+- The controller sets `EMBERPATH_TRUSTED_PROXIES`, as described above.
+
+**HiveMem 1.10.0 to 1.12.0** (no data format change).
+
+- `/v1/health` reports `release` as the package version (`1.12.0`), no longer `1.2.2`.
+- POST routes accept `Idempotency-Key`. Its records are kept in the process for 24 hours.
+- Administering the implicit `default` workspace needs the admin role.
+- Search is limited to 600 requests a minute (429), and errors use `error:{code,message,requestId}`.
+- Oathweave tokens get 5 seconds of clock tolerance, and a sign-out can take up to 3 seconds to
+  reach HiveMem.
+- 1.11.0 writes a version 2 pending-write journal that 1.10.x and older refuse; the backup is the
+  way back.
+
+**HiveSkills 1.10.0 to 1.11.1.**
+
+- Request bodies are limited to 64 KiB per route; a release upload may be up to 70 MiB.
+- Errors carry `error.message`, and health `release` is the package version.
+- Failed sign-ins are throttled per client, 10 in 5 minutes. The controller sets
+  `HIVE_SKILLS_TRUSTED_PROXIES`.
+- Pinning publisher keys makes the Hermes bridge refuse unsigned releases. Redeploy the bridge
+  (`scripts/deploy-hermes-agent.sh`) after upgrading.
+
+**Cindertrace 0.9.0 to 0.10.0.**
+
+- The controller sets `CINDERTRACE_TRUSTED_PROXIES=ingress` when the ingress runs on Cindertrace's
+  host and Cindertrace has no published endpoint, so sign-in throttling and the API rate limits
+  apply per browser again (see
+  [client addresses](deployment/README.md#client-addresses-and-reverse-proxies)). With a published
+  endpoint it keeps the default, `loopback`.
+- Approvals fail with 503 `DISPATCH_DISABLED` while `SECURITY_DISPATCH_ENABLED` is not `true`, and
+  undecided previews and approval requests expire after ten minutes.
+- Startup stops on invalid settings, and on a `DASHBOARD_*` setting that disagrees with its
+  `CINDERTRACE_*` name. The old HS256 console tokens are refused, and `SECURITY_CONSOLE_TOKEN_SECRET`
+  is no longer read.
+- Viewers can read the overview, sources and policies. Optional TOTP and extra local accounts need
+  HiveXUI 0.13.0.
+
+**Embermend 0.4.0 to 0.6.1.**
+
+- Work whose stored operator grant no longer matches `EMBERMEND_IDENTITY_GRANTS` fails with an
+  `ACTOR_*` code, and its scheduled occurrences are blocked. Review the `job.authority-*` and
+  `schedule.blocked` audit entries.
+- An identity-provider outage answers 503 `IDENTITY_PROVIDER_UNAVAILABLE`.
+- The API health check reads `/health/ready`, which checks PostgreSQL.
+- List endpoints page with cursors.
+- The default authority source stays the grants list. Oathweave role authority is opt-in.
+
+**Ardent Project Studio 0.7.0.**
+
+- Projects stay open to everyone linked until an owner limits their members.
+- `GET /people` is limited to administrators and project owners.
+- Uploads whose bytes do not match their type get 422 `CONTENT_MISMATCH`.
+- An hourly sweep removes stored bytes nothing references.
+- `ardent-studio backup DIR` is new. HiveXUI 0.13.0 has the Members and Purge views.
+
+**Emberfold 0.5.0** has no data. A credentialed HTTP provider must use HTTPS unless it is on
+loopback; the suite configures none.
+
+**HiveXUI 0.13.0.**
+
+- Requests time out after 30 seconds for reads and 120 seconds for writes.
+- A 401 checks the Oathweave session, and signing out signs out every tab and ends the ChatterMost
+  session.
+- The sign-in form has no prefilled username.
+- Do not cache `/version.json` at a proxy in front of the console.
+
+**Magnus 3.4.0, its host agent and Ardent 3.5.1.**
+
+- Upgrade the host agents before the server. A 3.4.0 server refuses file pushes, role applications
+  and library skill deploys to an older agent with 409 `AGENT_FILE_WRITE_UNSUPPORTED`. On an
+  installation whose host agent the suite installed, run `./hive.sh magnus-agent install --release
+  3.15.0` before the upgrade, or `./hive.sh post-upgrade --yes` straight after it. Update other
+  fleet agents from Magnus.
+- After the agents run 3.4.0, re-run `sudo magnus-agent install-service` on each node for the
+  tighter systemd unit.
+- Writes to system paths need the ADMIN role, `/dev` is refused, and paths must be absolute.
+- Agent command `args` are literal arguments.
+- Agents answer 413 for request bodies over `MAGNUS_AGENT_BODY_LIMIT_BYTES` (16 MiB).
+- Hermes installs run one pinned, hash-checked installer as the Hermes home's owner. Set
+  `HERMES_USER` on a node whose Hermes lives in another account's home.
+- AI tools that need approval pause on every chat path, including non-streaming chat, and
+  scheduled AI operations stop at such a tool.
+- `MAGNUS_BACKUP_KEEP` now deletes older dumps.
+- An external Magnus whose `IAM_CORE_URL` is plain HTTP to a host other than loopback refuses to
+  start: switch it to HTTPS first. A suite-managed Magnus trusts Oathweave through
+  `OATHWEAVE_ISSUER` and is unaffected.
+- Ardent profiles keep their version until you update them in Magnus > Ardent, after the node
+  agents run 3.4.0: Ardent 3.4.0 and later accept the management token only with the `Bearer`
+  scheme. Ardent 3.4.0 applies `execution.max_parallel_tasks` above 4; set 4 to keep the previous
+  concurrency.
 
 ## Suite 3.14.3: Magnus 3.3.6 XML dependency fixes
 
