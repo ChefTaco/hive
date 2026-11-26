@@ -394,6 +394,37 @@ with tempfile.TemporaryDirectory(prefix='hive-interactive-') as temporary:
     assert 'retention' not in remote, 'Declined daily pruning was configured'
     assert remote['hosts']['control'] == {'target': 'deploy@hive.example.com', 'directory': '/opt/remote-proof', 'architecture': architecture, 'sshConfig': '/opt/credentials/ssh-config'}
     print('Passed: interactive directory default and writability guidance, SSH configuration for an SSH target, and continuing a saved setup.')
+
+    # A typo is refused where it is asked, with the rule, and the question is asked again; the
+    # earlier answers are kept. End of input stops with a message instead of exiting silently.
+    typos = {'Installation name': 'Bad Name', 'Console HTTPS origin': 'http://localhost:65427/path',
+             'HTTPS bind address': '300.1.1.1', 'HTTPS listener port': '70000', 'Configuration mode': 'fast',
+             'Initial operator username': '1admin', 'Initial operator email': 'alice-at-example'}
+    typo_output = base / 'inventory' / 'typos.json'
+    typo_questions = []
+    for label, answer in custom_questions:
+        if label == 'Write protected installation configuration to': answer = str(typo_output)
+        if label in typos: typo_questions.append((label, typos[label]))
+        typo_questions.append((label, answer))
+    review.write_text(json.dumps({'command': arguments, 'questions': typo_questions,
+                                 'transcriptFile': str(base / 'typo-transcript.log'), 'timeoutSeconds': 30}))
+    subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], check=True, stdout=subprocess.DEVNULL)
+    transcript = re.sub(r'\x1b\[[0-9;]*m', '', (base / 'typo-transcript.log').read_text())
+    for message in ['An installation name starts with a lowercase letter', 'The console origin is https://HOST',
+                    'The bind address is an IPv4 address', 'The HTTPS listener port is a number from 1 to 65535',
+                    'The configuration mode is fresh, distributed or prepared', 'The username starts with a letter',
+                    'Enter an email address such as alice@example.com']:
+        assert message in transcript, message
+    typo_config = json.loads(typo_output.read_text())
+    assert typo_config['bootstrap']['adminEmail'] == 'alice@example.com' and typo_config['console']['httpsPort'] == 65427
+    eof_questions = [(label, answer) for label, answer in custom_questions[:custom_questions.index(('Initial operator email', 'alice@example.com'))]]
+    eof_questions.append(('Initial operator email', '\x04'))
+    review.write_text(json.dumps({'command': arguments, 'questions': eof_questions,
+                                 'transcriptFile': str(base / 'eof-transcript.log'), 'timeoutSeconds': 30}))
+    ended = subprocess.run(['python3', str(root / 'scripts/suite/interactive-driver.py'), str(review)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    assert ended.returncode != 0, 'End of input was taken as an answer'
+    assert 'Input ended at "Initial operator email for identity recovery"; stopping.' in (base / 'eof-transcript.log').read_text()
+    print('Passed: guided setup refuses each invalid answer where it is asked and asks again, and stops with a message at end of input.')
     # Every configuration guided setup wrote must satisfy the published schema.
     written = sorted(str(path) for path in (base / 'inventory').glob('*.json'))
     assert len(written) >= 8, written
