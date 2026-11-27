@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # hive.sh post-upgrade: the steps that follow an upgrade, in one command. It checks the Magnus
 # host agent on the Magnus host against the release's pinned agent and upgrades it through the
-# existing magnus-agent paths. It adds HiveXUI browser clients that are missing from Oathweave,
-# using console-clients add. It asks Magnus whether any Ardent installation is behind the Ardent
+# existing magnus-agent paths. It adds the browser sign-in settings and HiveXUI browser clients
+# that are missing, using console-clients add. It asks Magnus whether any Ardent installation is behind the Ardent
 # its node agent stages, read only. Then it lists what is left for the operator. Every change goes
 # through the confirmations of the command it uses; nothing is changed without them. Each step it
 # finds done is marked done in the setup checklist the registry recorded, at once and idempotently.
@@ -100,13 +100,13 @@ hive_post_upgrade_ardent() {
   printf '  In HiveXUI, open Magnus > Ardent > Installations. Stop running profiles, choose Update package, then start them again. Rerun post-upgrade to confirm, or record it with ./hive.sh setup done ardent-packages-updated.\n'
 }
 
-# Browser clients for products added since the Oathweave store was created. The command
-# creates only the missing ones and reports "none" when nothing was missing.
+# Browser sign-in, whatever set the installation up: Oathweave's browser issuer, discovery URLs
+# and client policies, Emberpath without its password relay, and the browser clients for products
+# added since the Oathweave store was created. The command adds only what is missing and reports
+# "nothing to add" otherwise.
 hive_post_upgrade_clients() {
   jq -e '.components.oathweave!=null and .console!=null' "$HIVE_CONFIG" >/dev/null || return 0
-  # With the terminal grant, console-clients leaves hivexui-magnus to fresh setup.
-  [[ $(hive_console_clients_wanted | jq -c --argjson terminal "$(jq '.bootstrap.magnusGateway.grantTerminalToInitialOperator==true' "$HIVE_CONFIG")" 'map(select(($terminal|not) or .id!="hivexui-magnus"))') != '[]' ]] || return 0
-  printf -- '- HiveXUI browser clients in Oathweave:\n'
+  printf -- '- Browser sign-in settings and HiveXUI browser clients in Oathweave:\n'
   if hive_post_upgrade_run console-clients add; then hive_post_upgrade_done oathweave-console-clients
   else printf '  Not applied; see above. Rerun: ./hive.sh console-clients add --config %s\n' "${HIVE_REGISTRY_ORIGINAL_CONFIG:-$HIVE_CONFIG}"; fi
 }

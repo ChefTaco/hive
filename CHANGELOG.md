@@ -6,6 +6,27 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- Browser sign-in on every installation. `console-clients add`, which `post-upgrade` runs, now
+  first adds the browser sign-in settings that fresh setup writes and an installation moved with
+  `migrate-native`, extended with `add` or edited by hand may lack: Oathweave's
+  `IAM_BROWSER_ISSUER`, `IAM_BROWSER_AUTHORIZATION_URL` and `IAM_BROWSER_API_BASE_URL`, the
+  reviewed policy of every HiveXUI browser client of the installed products in
+  `IAM_BROWSER_CLIENT_POLICIES`, and `EMBERPATH_PASSWORD_RELAY=false` for Emberpath. It edits the
+  environment file each service's Compose definition reads (not necessarily
+  `config/oathweave.env`), adds only missing keys and keeps every key the operator set, copies each
+  changed file to `config/.browser-signin/`, moves the active plan's pin with the change and
+  recreates only Oathweave and Emberpath when their environment changed. It now also covers the
+  core clients (`hivexui-oathweave`, `-emberpath`, `-hivemem`, `-hiveskills`, `-chattermost`),
+  created only while their running policy is the reviewed one. The new
+  `console-clients check` only reads and exits non-zero while something is missing. See
+  [Suite 3.15.1](UPGRADING.md#suite-3151-browser-sign-in-on-every-installation-no-password-relay)
+  and [browser sign-in settings](deployment/FULL.md#browser-sign-in-settings).
+- Fresh setup writes Oathweave's browser discovery URLs (`IAM_BROWSER_AUTHORIZATION_URL`,
+  `IAM_BROWSER_API_BASE_URL`), and fresh setup and `migrate-native` write
+  `EMBERPATH_PASSWORD_RELAY=false`: people sign in and re-authenticate on Oathweave's own page.
+
 ## [3.15.0] - 2026-11-26
 
 Product update with the controller changes below. Pins Oathweave 2.6.0, Emberpath 2.9.0,

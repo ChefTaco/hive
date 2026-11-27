@@ -53,6 +53,7 @@
 + (if .external then {external:.external} else {} end)
 + (if $consoleClients!=null then {consoleClients:$consoleClients} + (if env.HIVE_CONSOLE_CLIENTS_CHECK=="true" then {consoleClientsCheck:true} else {} end) else {} end)
 + (if $consoleClients!=null and env.HIVE_CONSOLE_CLIENTS_OWNED!=null then {consoleClientsFirstParty:(env.HIVE_CONSOLE_CLIENTS_OWNED|fromjson)} else {} end)
++ (if $browserSignin!=null then {browserSignin:$browserSignin} else {} end)
 + (if $adminAccess!=null then {adminAccess:$adminAccess} else {} end)
 + (if $retention!=null then {retention:$retention} else {} end)
 + (if $addProduct!=null then {addProduct:$addProduct} else {} end)

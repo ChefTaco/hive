@@ -65,6 +65,12 @@ jq -e '.clients|length==8' "$temporary/install/config/oathweave/suite-bootstrap.
 # The Hive Registry inventory view's client, with its one permission, in the policies too.
 jq -e '[.clients[]|select(.id=="hivexui-registry")|.audience=="hive-registry" and .permissions==["registry:inventory"] and .firstParty==true]==[true]' "$temporary/install/config/oathweave/suite-bootstrap.json" >/dev/null || fail 'The registry browser client is not the reviewed grant'
 rg -q '"hivexui-registry":\{"audience":"hive-registry","permissions":\["registry:inventory"\]\}' "$temporary/install/config/oathweave.env" || fail 'Oathweave has no policy for the registry browser client'
+# Browser sign-in is complete from the start: console-clients add (and post-upgrade) reviews the
+# same policies, discovery URLs and Emberpath relay setting, and finds nothing to add.
+reviewed=$(HIVE_CONFIG="$temporary/config.json" bash -c 'source "$0/scripts/suite/console-clients.sh"; hive_console_clients_reviewed' "$ROOT" | jq -c 'map({key:.id,value:{audience,permissions}})|from_entries')
+sed -n 's/^IAM_BROWSER_CLIENT_POLICIES=//p' "$temporary/install/config/oathweave.env" | jq -e --argjson reviewed "$reviewed" '.==$reviewed' >/dev/null || fail 'Fresh browser policies differ from the ones console-clients reviews'
+grep -qx 'IAM_BROWSER_AUTHORIZATION_URL=https://localhost:65426/auth/authorize' "$temporary/install/config/oathweave.env" && grep -qx 'IAM_BROWSER_API_BASE_URL=https://localhost:65426/api/oathweave' "$temporary/install/config/oathweave.env" || fail 'Fresh Oathweave has no browser discovery'
+grep -qx 'EMBERPATH_PASSWORD_RELAY=false' "$temporary/install/config/emberpath.env" || fail 'Fresh Emberpath keeps its password relay'
 # The terminal is off in a fresh install. Oathweave gives its initial administrator every
 # permission a client lists, so listing magnus:terminal would grant it to the operator.
 jq -e '(.clients[]|select(.id=="hivexui-magnus")|.audience=="magnus" and .permissions==["magnus:view","magnus:operate","magnus:admin"])' "$temporary/install/config/oathweave/suite-bootstrap.json" >/dev/null || fail 'Magnus browser client is not the reviewed resource grant'

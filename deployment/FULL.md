@@ -138,17 +138,53 @@ beside the image each host reports it runs. It signs in to the registry with the
   userinfo URLs) and `config/hive-registry/authority.pem` (a copy of the ingress's
   `backend-ca.pem`), replacing either when it differs. They hold no secret, and the registry's
   environment file is not touched.
-- **An existing installation** gets the client in two steps, as for the
-  [external Magnus clients](#adding-an-external-magnus-and-studio-to-an-existing-installation).
-  Before the upgrade, merge
-  `"hivexui-registry":{"audience":"hive-registry","permissions":["registry:inventory"]}` into the
-  JSON of `IAM_BROWSER_CLIENT_POLICIES` in `config/oathweave.env`, keeping every existing key,
-  so the upgrade starts Oathweave with it. After the upgrade, run
-  `./hive.sh console-clients add`, which creates the public client and adds `registry:inventory`
-  to `SUITE_ADMIN`, then sign out of the console and in again. Without the policy,
-  `console-clients add` skips the registry client and names it; the other clients are unaffected.
+- **An existing installation** gets the client from `./hive.sh console-clients add` (and
+  `post-upgrade`, which runs it): it adds the `hivexui-registry` policy to Oathweave's environment
+  when it is missing, recreates Oathweave, creates the public client and adds `registry:inventory`
+  to `SUITE_ADMIN`; see [browser sign-in settings](#browser-sign-in-settings). Then sign out of the
+  console and in again.
 - `hive.sh status`, `doctor` and every completed lifecycle command record what they observe, so
   the view shows the state as of the last of them (`observedAt`).
+
+## Browser sign-in settings
+
+Everyone signs in to the console, and re-authenticates before a sensitive action, on Oathweave's own
+sign-in page (authorization code with PKCE); no product handles a password. That needs these
+settings, which fresh setup writes and `./hive.sh console-clients add` adds to any existing
+installation (fresh, moved with `migrate-native`, extended with `add`, or edited by hand):
+
+| Where | Setting | Value when missing |
+| --- | --- | --- |
+| Oathweave | `IAM_BROWSER_ISSUER` | `identity.issuer` from the console's `runtime.json`, else `nativeMigration.browserIssuer`, else `ORIGIN/api/oathweave` |
+| Oathweave | `IAM_BROWSER_AUTHORIZATION_URL`, `IAM_BROWSER_API_BASE_URL` | `ORIGIN/auth/authorize` and `ORIGIN/api/oathweave` (browser discovery), only when the issuer is on the console origin |
+| Oathweave | `IAM_BROWSER_CLIENT_POLICIES` | the reviewed policy of every HiveXUI browser client of the installed products (`hivexui-oathweave`, `-emberpath`, `-hivemem`, `-hiveskills`, `-chattermost`, `-magnus`, `-embermend`, `-cindertrace`, `-ardentstudio`, `-registry`), merged into the existing JSON |
+| Emberpath | `EMBERPATH_PASSWORD_RELAY` | `false`: Emberpath never forwards a password to Oathweave |
+| Oathweave's store | the public clients and their permissions in `SUITE_ADMIN` | as fresh setup creates them |
+
+- **Which file.** The command edits the environment file the active Compose definition gives the
+  service (`compose.json`), which must be the one the installation file names
+  (`components.oathweave.envFile`); an installation whose Oathweave reads another file than
+  `config/oathweave.env` is handled the same. When the two disagree it stops and changes nothing.
+- **Only what is missing.** Every key you set is kept, also when it differs from the value above;
+  the command names it (`Kept on HOST: ...`). A `hivexui-*` policy you changed stays, and its client
+  is then left as it is in the store and named. `EMBERPATH_PASSWORD_RELAY=true` stays too, and is
+  named, until you remove it.
+- **Read first.** `./hive.sh console-clients check` only reads, prints what is missing or needs
+  attention (for example a `runtime.json` issuer that differs from Oathweave's, or a product whose
+  `OATHWEAVE_ISSUER` differs) and exits non-zero until nothing is missing. `add` asks for
+  confirmation only when something changes; `--yes` applies unattended.
+- **Applying.** It copies each file it changes to `config/.browser-signin/STAMP/` (owner-only, with
+  `changes.json`), writes the new keys with the file's owner and mode, moves the initializer's record
+  and the active plan's pinned deployment inputs to the new bytes when nothing else changed since
+  they were taken, and recreates only Oathweave and Emberpath when their environment changed,
+  waiting for them to report healthy. Then it creates the missing browser clients. On a root-owned
+  installation it needs `hosts.HOST.sudoPasswordFile`, as other configuration changes do.
+- **Undo.** Copy the files from `config/.browser-signin/STAMP/` back over the ones named in its
+  `changes.json` (`SERVICE.env` to that service's `file`; `receipt.json` and
+  `deployment-inputs.PLAN.json`, when listed under `pinned`, to the installation directory), keeping
+  their owner and mode, and recreate those services
+  (`docker compose -f compose.json up -d --no-deps --force-recreate oathweave emberpath`). The
+  clients it created stay; they are harmless without their policy.
 
 ## Magnus web terminal
 

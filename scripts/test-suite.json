@@ -28,6 +28,7 @@
     {"run": ["bash", "scripts/suite/new-component.test.sh"]},
     {"run": ["bash", "scripts/suite/storage-migrations.test.sh"]},
     {"run": ["bash", "scripts/suite/console-clients.test.sh"]},
+    {"run": ["bash", "scripts/suite/browser-signin.test.sh"]},
     {"run": ["bash", "scripts/suite/post-upgrade.test.sh"]},
     {"run": ["bash", "scripts/suite/ardent-installations.test.sh"]},
     {"run": ["bash", "scripts/suite/magnus-upgrade-check.test.sh"]},
