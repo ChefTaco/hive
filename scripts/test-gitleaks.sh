@@ -20,7 +20,7 @@ expect_status() {
   actual=0
   "$@" >"$temporary/output" 2>&1 || actual=$?
   if [[ "$actual" != "$expected" ]]; then
-    echo "Expected exit $expected, received $actual: $*" >&2
+    echo "Expected exit $expected, received $actual (line ${BASH_LINENO[0]}): $*" >&2
     cat "$temporary/output" >&2
     exit 1
   fi
@@ -106,6 +106,33 @@ allowlisted_files=(scripts/suite/ingress-roundtrip.mjs)
 # in an allowlisted file must still be reported. Tokens are random and generated here.
 scoped="$temporary/scoped"
 random_token() { head -c 96 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-36; }
+# A random token that LINE (a printf format) makes a finding outside any allowlisted path.
+# Gitleaks' generic rule drops some random strings (stopwords, word-like tokens), about one in
+# a hundred, so a token is drawn until the rule reports it. The allowlisted file must then report
+# the same token: the allowlist, not the rule's filters, is what is tested.
+detected_token() { # LINE
+  local token probe=elsewhere/probe.txt status
+  # Without a clean index, any finding would be credited to the probe.
+  status=0
+  bash scripts/gitleaks.sh --staged >"$temporary/output" 2>&1 || status=$?
+  [[ "$status" == 0 ]] || { echo "The staged tree is not clean before choosing a fixture (exit $status)." >&2; return 1; }
+  for _ in $(seq 1 20); do
+    token="$(random_token)"
+    printf "$1\n" "$token" > "$probe"
+    git add "$probe"
+    status=0
+    bash scripts/gitleaks.sh --staged >"$temporary/output" 2>&1 || status=$?
+    git rm -q --cached "$probe"
+    rm -f "$probe"
+    case "$status" in
+      1) printf '%s\n' "$token"; return 0 ;;
+      0) ;;
+      *) echo "Gitleaks failed while choosing a fixture (exit $status)." >&2; cat "$temporary/output" >&2; return 1 ;;
+    esac
+  done
+  echo "Gitleaks reported none of 20 random tokens for: $1" >&2
+  return 1
+}
 for allowlisted in "${allowlisted_files[@]}"; do
   rm -rf "$scoped"
   mkdir -p "$scoped/scripts" "$scoped/$(dirname "$allowlisted")" "$scoped/elsewhere"
@@ -125,10 +152,12 @@ for allowlisted in "${allowlisted_files[@]}"; do
   expect_status 1 bash scripts/gitleaks.sh --staged
   git rm -rq --cached elsewhere
   rm -rf elsewhere
+  mkdir -p elsewhere
   # A credential for another rule, then for the same rule, is reported in that file.
   for line in 'note: ghp_%s' 'api_key = "%s"'; do
-    foreign="$(random_token)"
     cp "$root/$allowlisted" "$allowlisted"
+    git add "$allowlisted"
+    foreign="$(detected_token "$line")"
     printf "\n$line\n" "$foreign" >> "$allowlisted"
     git add "$allowlisted"
     expect_status 1 bash scripts/gitleaks.sh --staged
