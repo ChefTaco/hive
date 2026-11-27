@@ -279,6 +279,29 @@ remove the added settings themselves, use the undo in
 those files since `post-upgrade`. The browser clients that were created stay in Oathweave's store;
 they are harmless without their policies.
 
+**From 3.14.x, and going back.** An upgrade from 3.14.x crosses 3.15.0's data formats: run it
+with `--allow-migrations`, read "Suite 3.15.0" below first, and keep the `pre-upgrade-*` backup it
+takes, because no code-only rollback reaches 3.14.x. The way back is a restore of that backup, from
+the 3.15.1 release checkout. Restore refuses configuration that changed since the backup ("Secrets/
+configuration changed since backup"), and the upgrade and `post-upgrade` both change it (the
+browser sign-in settings and `config/.browser-signin/`, and HiveMem's
+`config/.memory-identity-renames.json`). So put the archive's configuration back while the
+services are held, between the two restore commands of [backups](deployment/BACKUPS.md#preparing-a-restore-approval):
+
+```bash
+./hive.sh restore --config ~/.config/hive/ID/installation.json --archive pre-upgrade-STAMP --prepare-reconciliation --yes
+# Services are held. Keep the current configuration beside it and put back the archive's:
+sudo mv /opt/hive/config /opt/hive/config.before-restore
+sudo tar -xzf /opt/hive/backups/pre-upgrade-STAMP/state.tar.gz -C /opt/hive --same-owner --same-permissions config
+# Save the printed template as approval.json, review it, set subsequentWritesReconciled to true:
+./hive.sh restore --config ~/.config/hive/ID/installation.json --archive pre-upgrade-STAMP --reconciliation approval.json --yes
+```
+
+The installation then runs 3.14.x again with the data and configuration of the backup; check it
+with `./hive.sh doctor` from the 3.14.x release checkout. To upgrade again, first set a new
+`configurationRevision` in `installation.json`: the earlier upgrade's plan pinned the configuration
+`post-upgrade` wrote, so repeating it stops with "Deployment input artifacts changed for this plan".
+
 ## Suite 3.15.0: product security round
 
 3.15.0 pins Oathweave 2.6.0, Emberpath 2.9.0, HiveMem 1.12.0, HiveSkills 1.11.1, HiveXUI 0.13.0,
