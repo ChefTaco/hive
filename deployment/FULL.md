@@ -181,10 +181,13 @@ installation (fresh, moved with `migrate-native`, extended with `add`, or edited
   installation it needs `hosts.HOST.sudoPasswordFile`, as other configuration changes do.
 - **Undo.** Copy the files from `config/.browser-signin/STAMP/` back over the ones named in its
   `changes.json` (`SERVICE.env` to that service's `file`; `receipt.json` and
-  `deployment-inputs.PLAN.json`, when listed under `pinned`, to the installation directory), keeping
-  their owner and mode, and recreate those services
-  (`docker compose -f compose.json up -d --no-deps --force-recreate oathweave emberpath`). The
-  clients it created stay; they are harmless without their policy.
+  `deployment-inputs.PLAN.json`, when listed under `pinned`, to the installation directory;
+  `initializer-receipt.json`, when `changes.json` names `initializer`, to that path),
+  keeping their owner and mode, and recreate those services
+  (`docker compose -f compose.json up -d --no-deps --force-recreate oathweave emberpath`). Copy
+  them back only while nothing else changed those files since (for example `admin-access setup` or
+  an upgrade); otherwise remove the added keys by hand. The clients it created stay; they are
+  harmless without their policy.
 
 ## Magnus web terminal
 

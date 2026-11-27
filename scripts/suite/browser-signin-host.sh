@@ -165,6 +165,13 @@ backup="$config/.browser-signin/$(date -u +%Y%m%dT%H%M%SZ)"
 [[ ! -e "$backup" ]] || die 'A backup of this second already exists; repeat the command'
 install -d -m 700 -- "$backup"
 initializer="$config/.initializer/receipt.json"
+# Fresh setup records the bytes of every file it wrote; a changed file is recorded again below, so
+# the previous record is kept with the files for an undo (certificate renewal refuses a file whose
+# bytes differ from the record).
+recorded=false
+if [[ -f "$initializer" && ! -L "$initializer" ]] && jq -e --argjson changes "$changes" 'any($changes[].file as $path | .files[$path]!=null; .)' "$initializer" >/dev/null; then
+  cp -p -- "$initializer" "$backup/initializer-receipt.json"; recorded=true
+fi
 replace_json() { # FILE (JSON on standard input)
   local temporary; temporary=$(mktemp "$(dirname -- "$1")/.browser-signin.XXXXXX")
   cat > "$temporary"; chown --reference="$1" -- "$temporary"; chmod --reference="$1" -- "$temporary"; sync -f "$temporary"; mv -T -- "$temporary" "$1"
@@ -182,8 +189,8 @@ while IFS= read -r change; do
     jq --arg path "$file" --arg sha "$(sha256sum -- "$file" | cut -d ' ' -f1)" '.files[$path]=$sha' "$initializer" | replace_json "$initializer"
   fi
 done < <(jq -c '.[]' <<< "$changes")
-jq -n --arg host "$host" --argjson changes "$changes" --argjson repin "$repin" --arg pin "$pin" --arg receipt "$receipt" \
-  '{schema:1,host:$host,changes:($changes|map({service,file,keys,policies}))}+(if $repin then {pinned:[$pin,$receipt]} else {} end)' > "$backup/changes.json"
+jq -n --arg host "$host" --argjson changes "$changes" --argjson repin "$repin" --arg pin "$pin" --arg receipt "$receipt" --argjson recorded "$recorded" --arg initializer "$initializer" \
+  '{schema:1,host:$host,changes:($changes|map({service,file,keys,policies}))}+(if $repin then {pinned:[$pin,$receipt]} else {} end)+(if $recorded then {initializer:$initializer} else {} end)' > "$backup/changes.json"
 if [[ "$repin" == true ]]; then
   cp -p -- "$pin" "$backup/${pin##*/}"; cp -p -- "$receipt" "$backup/receipt.json"
   after=$(deployment_inputs_digest "$definition") || die 'The deployment inputs cannot be read after the change'
