@@ -17,4 +17,6 @@ if crossing "$temporary/from.json" 2>/dev/null; then fail 'A missing manifest wa
 [[ $(crossing "$ROOT/releases/3.14.3.json" "$ROOT/releases/3.15.0.json" | sort | tr '\n' ' ') == 'hiveskills oathweave ' ]] || fail '3.15.0 should cross the Oathweave and HiveSkills formats'
 # 3.15.0 -> 3.15.1 changes no data format, so a binary rollback is allowed.
 [[ -z $(crossing "$ROOT/releases/3.15.0.json" "$ROOT/releases/3.15.1.json") ]] || fail '3.15.1 should roll back to 3.15.0'
+# 3.15.1 -> 3.15.2: Magnus 3.5.0's one migration is not a storage format change and 3.4.1 runs on it.
+[[ -z $(crossing "$ROOT/releases/3.15.1.json" "$ROOT/releases/3.15.2.json") ]] || fail '3.15.2 should roll back to 3.15.1'
 printf 'Passed: rollback crossings of synthetic and signed releases.\n'

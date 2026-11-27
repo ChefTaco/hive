@@ -18,7 +18,9 @@ an installation with a suite-managed Magnus (the full profile) moving from a rel
 3.14.2 to 3.14.2 or later (one Magnus migration; see
 [Suite 3.14.2](#suite-3142-magnus-335-agent-definitions-and-ardent-321)), and every installation
 moving from a release before 3.15.0 to 3.15.0 or later (Oathweave 2.6.0's and HiveSkills 1.11.1's
-data formats; see [Suite 3.15.0](#suite-3150-product-security-round)). An
+data formats; see [Suite 3.15.0](#suite-3150-product-security-round)), and an installation with
+a suite-managed Magnus moving from a release before 3.15.2 to 3.15.2 or later (one Magnus
+migration; see [Suite 3.15.2](#suite-3152-emberpath-client-keys-for-agents-and-step-up-only-before-a-change)). An
 installation that runs Magnus moves to 3.9.0 or later (Magnus 3) from 3.8.1 only, after its nodes
 have their keys; see [Suite 3.9.0](#suite-390-magnus-301-node-keys-only). A failed or uncertain step
 holds its transaction for recovery, as described in
@@ -179,6 +181,82 @@ first, on the stopped store, after a backup.
 **Rolling back across this release.** A rollback restores the pre-upgrade backup, which holds the
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
+
+## Suite 3.15.2: Emberpath client keys for agents, and step-up only before a change
+
+3.15.2 pins Emberpath 2.11.0, Magnus 3.5.0 (server, fleet gateway and host agent; the host agents
+keep staging Ardent 3.5.1, so managed Ardent profiles need nothing), Ardent Project Studio 0.8.0
+and HiveXUI 0.15.0. Every other pin, the datastore profile and the Hive Registry are those of
+3.15.1. From 3.15.0, also read "Suite 3.15.1" below and run `post-upgrade` after the upgrade; from
+3.14.x, the `--allow-migrations` of 3.15.0 applies.
+
+- **Agents with an Emberpath model alias get their Emberpath client key.** In HiveXUI, New Agent,
+  resume and Create agent from definition (Studio > Gallery) ask for the key when the model is an
+  Emberpath alias, and an alias agent has **Set Emberpath key** to set or rotate it. Create the key
+  in Emberpath > API Keys first (issuing a key asks you to verify your identity). Magnus checks the
+  key with Emberpath and writes it only to the agent profile's `.env`; Magnus and Studio never
+  store, log or return it. Without a key, New Agent answers `400 EMBERPATH_KEY_REQUIRED`.
+  Alias agents created before 3.15.2 got no key and every model request failed with 401: give
+  them one with Set Emberpath key.
+- **Step-up only before a change.** Emberpath 2.11.0 asks for a recent sign-in only for writes, so
+  opening API Keys, Clients or Roles with an older sign-in no longer shows "Verify your identity";
+  issuing or changing a key still does. Identity writes through Emberpath's own Oathweave proxy
+  (`/api/emberpath/iam/users`, `service-accounts`, `system-users`, `groups`, `enrollments`) now
+  need a recent sign-in as well; HiveXUI is not affected (it calls Oathweave directly), but a
+  script that keeps a long-lived Emberpath administrator session must step up.
+  `EMBERPATH_RECENT_AUTH_SECONDS` (default 900, 60 to 43200) sets the window; nothing needs to be set.
+- **Migration.** A suite-managed Magnus (the full profile) applies one fast migration
+  (`20261127120000_ardent_agent_operation_model_credential_kind`, which widens one check
+  constraint), so on such an installation `plan`, `rehearse` and `upgrade` need
+  `--allow-migrations`. Existing rows are unchanged, and Magnus 3.4.1 runs on the migrated
+  database. Emberpath, Ardent Project Studio and HiveXUI have no migration.
+- **Console routes.** The ingress forwards Magnus 3.5.0's new Set Emberpath key route; the upgrade
+  installs the new Caddyfile.
+- **`admin-access setup`** works again on an installation that has been upgraded before (it
+  refused with "active deployment inputs changed").
+
+**Steps.** `ID` is your installation.
+
+1. Where the installation manages the Magnus host agent (the full profile, or an installation that
+   ran `magnus-agent install`), install the 3.5.0 agent first; setting a key needs it:
+
+   ```bash
+   ./hive.sh magnus-agent install --config ~/.config/hive/ID/installation.json --release 3.15.2
+   ```
+
+2. Upgrade. With a suite-managed Magnus:
+
+   ```bash
+   ./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.15.2 --allow-migrations
+   ```
+
+   Without Magnus, or with an external Magnus, leave out `--allow-migrations`.
+3. Run `./hive.sh post-upgrade --config ~/.config/hive/ID/installation.json --release 3.15.2`. From
+   3.15.1 it has nothing to add; from 3.15.0 it adds the browser sign-in settings of 3.15.1.
+4. Check with `./hive.sh doctor --config ...` and `./hive.sh console-clients check --config ...`
+   (exit 0).
+
+**An external Magnus** (`external.magnus`) is not upgraded by the suite: upgrade that Magnus fleet
+on its own host, agents first, as Magnus's own notes for 3.5.0 describe, and set
+`MAGNUS_ARDENT_EMBERPATH_URL` explicitly on its server (Magnus sends a key only to that address).
+HiveXUI 0.15.0's Emberpath alias features (New Agent with an alias, Set Emberpath key and Create
+agent from definition with an alias) need that Magnus and the agents of the chosen nodes at 3.5.0;
+until then they fail, while agents with a model URL work as before.
+
+**Rolling back.** A code-only rollback to 3.15.1 is allowed: the Magnus migration stays applied
+and Magnus 3.4.1 runs on it. Anything that changed the configuration since the upgrade (for
+example `admin-access setup`, `console-clients add`, or `post-upgrade` from 3.15.0) moves the
+pinned deployment inputs, and a rollback with the same configuration then stops at staging with
+"Deployment input artifacts changed for this plan". So set a new `configurationRevision` in
+`installation.json` first (a value it has not had before), then roll back from the retained 3.15.1
+checkout:
+
+```bash
+./hive.sh rollback --config ~/.config/hive/ID/installation.json --release 3.15.1
+```
+
+The 3.5.0 host agent stays and works with Magnus 3.4.1, and agents created with an Emberpath key
+keep it and keep working. Upgrading again later needs nothing more than the steps above.
 
 ## Suite 3.15.1: browser sign-in on every installation, no password relay
 
