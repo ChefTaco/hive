@@ -6,6 +6,34 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Fixed
+
+- `uninstall --purge` and `magnus-agent remove` remove what the installer set up for the Magnus
+  host agent, so a later install, upgrade or Ardent setup on that host starts clean. Before, they
+  left `/opt/magnus-agent.native-owner.json`, `/opt/magnus-agent-artifacts`, the `hive-agent`
+  account with its home and the Ardent setup receipts, and the next install or upgrade failed its
+  native discovery, agent install or Ardent setup. The ownership record now names the
+  installation that created the account and the agent directory, and only what it proves goes:
+  the agent, its unit and directory, its staged Ardent packages, the account and its home (only
+  while its UID, home and groups are the recorded ones and no other agent names it), then the
+  record. An account that holds Ardent profiles stays with them unless `--delete-agent-profiles`
+  is given (with `uninstall --purge`, or to `magnus-agent remove` after typing the installation
+  name). A separately managed fleet agent (no record), another installation's account, and an
+  agent recorded by an earlier release (no installation in its record) are left untouched; the
+  command lists them with the reason and exits non-zero. See
+  [what uninstall removes from the Magnus host](deployment/README.md#what-uninstall-removes-from-the-magnus-host).
+- `uninstall --purge` deletes this installation's Ardent setup receipts (`ardent-setup/` beside the
+  installation file), which made Ardent setup of a reinstalled installation refuse with "belongs to
+  a different installation or node", and the web terminal approval log when nothing else is left.
+- A removed host agent whose account keeps its profiles no longer stops backups and upgrades:
+  native discovery reports its profiles as not included (`agent-removed`), and a restore of an
+  archive with native profiles asks for the agent first.
+- A repeated install of the same installation file and release (for example `install --config`
+  after `uninstall` without `--purge`) has the plan of the install before it. When one of its
+  read-only checks failed, the abort refused over that install's `bootstrap.PLAN.json`, staged
+  agent files and receipt and left the transaction open. A new transaction now records those
+  files with their digests, and the abort ignores them while they are unchanged.
+
 ## [3.15.1] - 2026-11-27
 
 Browser sign-in on every installation, and no product handles a password any more. Pins

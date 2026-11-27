@@ -97,6 +97,13 @@ native_backup_discover() {
     jq -nc --arg root "$root" '{available:false,present:false,included:false,reason:"not-installer-owned",root:$root}'; return
   fi
   native_backup_plain_path "$root" || native_backup_error "Installer-owned native root $root is not a plain path" || return 1
+  # magnus-agent remove keeps the account while it holds profiles, and its record with it. With
+  # the agent gone (no directory, no service) nothing runs them, and they are reported as not
+  # included, as for an agent Hive did not install; an archive that holds them still needs the agent.
+  if [[ ! -e "$root" && ! -L "$root" && "$load" != loaded ]]; then
+    [[ "$required" != true ]] || native_backup_error "This archive holds native profiles, but the Magnus agent at $root was removed; install it again first (magnus-agent install)" || return 1
+    jq -nc --arg root "$root" --arg owner "$(jq -r '.username // ""' "$marker" 2>/dev/null || true)" '{available:false,present:false,included:false,reason:"agent-removed",root:$root,owner:$owner}'; return
+  fi
   [[ -d "$root" && $(stat -c %u "$root") == 0 && $(stat -c %a "$root") == 700 ]] || native_backup_error "Installer-owned native root $root must be a root-owned directory with mode 700" || return 1
   for file in "$root/.env" "$marker"; do
     [[ -f "$file" && ! -L "$file" && $(stat -c %u "$file") == 0 && $(stat -c %a "$file") == 600 ]] || native_backup_error 'Native installation provenance is missing or unsafe' || return 1
@@ -148,6 +155,7 @@ native_backup_notice() {
   case $(jq -r '.reason // ""' <<< "$1") in
     no-magnus-component) printf 'Hive native backup: native profiles not included: this host runs no Magnus component of the installation. Agents installed outside the Hive installer are not part of Hive backups.\n' >&2;;
     no-native-snapshot) printf 'Hive native backup: native profiles not included: the installed Magnus agent %s has no native-snapshot; upgrade Magnus to include agent profiles in backups.\n' "$(jq -r .agentVersion <<< "$1")" >&2;;
+    agent-removed) printf 'Hive native backup: native profiles not included: the Magnus agent at %s was removed; its ownership record %s.native-owner.json remains for the %s account. Install the agent again (magnus-agent install) to include its profiles, or remove what is left (deployment/README.md#uninstalling).\n' "$(jq -r .root <<< "$1")" "$(jq -r .root <<< "$1")" "$(jq -r '.owner // "native"' <<< "$1")" >&2;;
     not-installer-owned) printf 'Hive native backup: native profiles not included: the Magnus agent at %s was installed outside the Hive installer (it has no %s.native-owner.json). Agents installed outside the Hive installer are not part of Hive backups; back them up with their own tooling.\n' "$(jq -r .root <<< "$1")" "$(jq -r .root <<< "$1")" >&2;;
   esac
   return 0

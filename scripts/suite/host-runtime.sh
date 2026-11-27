@@ -136,6 +136,26 @@ record() {
   jq -n --arg plan "$plan" --arg phase "$1" --arg version "$version" --arg operation "$(jq -r '.operation' <<< "$input")" \
     '{schema:1,plan:$plan,phase:$phase,version:$version,operation:$operation}' | atomic_json "$transaction"
 }
+# What a plan leaves on this host that an abort must not close over: its data initialization
+# receipt, its staged native agent files and an activation receipt. Plans are content digests, so a
+# repeated install of the same file and release (after uninstall, say) has the plan of the install
+# before it, whose files are still here. A new transaction records the ones that already exist,
+# with their digests, and its abort tells those, unchanged, from what it wrote itself.
+plan_evidence() {
+  local file
+  {
+    [[ ! -f "$directory/bootstrap.$plan.json" || -L "$directory/bootstrap.$plan.json" ]] || printf 'bootstrap.%s.json\n' "$plan"
+    find "$directory/agents" -mindepth 2 -maxdepth 2 -type f \( -name "candidate.$plan.json" -o -name "run.$plan*" -o -name "preflight.$plan.log" \) -printf 'agents/%P\n' 2>/dev/null || true
+    if [[ -f "$directory/receipt.json" && ! -L "$directory/receipt.json" && $(jq -r .plan "$directory/receipt.json" 2>/dev/null) == "$plan" ]]; then printf 'receipt.json\n'; fi
+  } | LC_ALL=C sort | while IFS= read -r file; do
+    jq -nc --arg path "$file" --arg sha "$(digest "$directory/$file")" '{path:$path,sha256:$sha}'
+  done | jq -sc .
+}
+# True when RELATIVE_PATH was on this host, unchanged, before the open transaction began.
+plan_evidence_earlier() {
+  [[ -f "$directory/$1" && ! -L "$directory/$1" ]] || return 1
+  jq -e --arg path "$1" --arg sha "$(digest "$directory/$1")" '(.earlierPlanFiles // []) | any(.path==$path and .sha256==$sha)' "$transaction" >/dev/null 2>&1
+}
 assert_transaction() {
   jq -e --arg plan "$plan" --arg operation "$(jq -r .operation <<< "$input")" '.plan==$plan and .operation==$operation' "$transaction" >/dev/null || die 'A different transaction requires recovery'
 }
@@ -328,7 +348,11 @@ case "$action" in
     if [[ -f "$directory/receipt.json" && $(jq -r .version "$directory/receipt.json") != "$version" ]]; then
       [[ $(jq -r .operation <<< "$input") =~ ^(upgrade|rollback|restore|rehearse)$ ]] || die 'Use upgrade or rollback for a different release'
     fi
-    if [[ ! -f "$transaction" ]] || closed; then record prepared; fi
+    if [[ ! -f "$transaction" ]] || closed; then
+      earlier=$(plan_evidence)
+      record prepared
+      jq --argjson earlier "$earlier" '.earlierPlanFiles=$earlier' "$transaction" | atomic_json "$transaction"
+    fi
     ;;
   compatibility)
     assert_transaction
@@ -572,9 +596,12 @@ case "$action" in
       [[ ! -e "$NATIVE_BACKUP_META" && ! -L "$NATIVE_BACKUP_META" && ! -e "$NATIVE_BACKUP_SESSION" && ! -L "$NATIVE_BACKUP_SESSION" ]] || die "Native preparation reserved its session; it needs recovery: $NATIVE_BACKUP_SESSION"
       [[ ! -e "$directory/native-capture.$plan.$archive" && ! -L "$directory/native-capture.$plan.$archive" ]] || die 'Native preparation staged a capture; it needs recovery: repeat the same command'
     fi
-    [[ ! -e "$directory/bootstrap.$plan.json" ]] || die 'This plan initialized data; it needs recovery: repeat the same command'
-    [[ -z $(find "$directory/agents" -mindepth 2 -maxdepth 2 \( -name "candidate.$plan.json" -o -name "run.$plan*" -o -name "preflight.$plan.log" \) -print -quit 2>/dev/null) ]] || die 'This plan staged native agents; it needs recovery: repeat the same command'
-    [[ ! -f "$directory/receipt.json" || $(jq -r .plan "$directory/receipt.json") != "$plan" ]] || die 'This plan is already active; it needs recovery: repeat the same command'
+    # What an earlier, closed transaction of this same plan left, unchanged, is not this one's.
+    [[ ! -e "$directory/bootstrap.$plan.json" ]] || plan_evidence_earlier "bootstrap.$plan.json" || die 'This plan initialized data; it needs recovery: repeat the same command'
+    while IFS= read -r staged; do
+      plan_evidence_earlier "agents/$staged" || die 'This plan staged native agents; it needs recovery: repeat the same command'
+    done < <(find "$directory/agents" -mindepth 2 -maxdepth 2 \( -name "candidate.$plan.json" -o -name "run.$plan*" -o -name "preflight.$plan.log" \) -printf '%P\n' 2>/dev/null || true)
+    [[ ! -f "$directory/receipt.json" || $(jq -r .plan "$directory/receipt.json") != "$plan" ]] || plan_evidence_earlier receipt.json || die 'This plan is already active; it needs recovery: repeat the same command'
     jq --arg step "$step" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.phase="aborted" | .abortedStep=$step | .abortedAt=$at' "$transaction" | atomic_json "$transaction"
     cp -p -- "$transaction" "$directory/aborted-transaction.$plan.json"
     ;;

@@ -163,6 +163,8 @@ Usage: hive.sh [init|plan|install|status|doctor|logs|support-bundle|upgrade|post
   --apply                backups prune: remove what the dry run lists
   --purge                uninstall: also delete every host's installation directory and the
                          installation file, after you type the installation name
+  --delete-agent-profiles  uninstall --purge and magnus-agent remove: also delete the native
+                         account the installer created with every Ardent profile in it
   --at HH:MM             backups schedule enable: the daily prune's local time (default
                          retention.schedule, else 03:40)
   --file FILE            Entry for registry add/update; entries never contain credentials
@@ -192,7 +194,9 @@ uninstall [--purge] [--yes] stops and removes every host's containers, the insta
 agent, the daily prune crontab line, this machine's console certificate renewal service when it
 renews this installation, and the hive command's record. Data, configuration and backups stay;
 --purge also deletes them, only after you type the installation name (--yes never does).
-See deployment/README.md#uninstalling.
+The agent, its staged packages and its native account go only where the host's ownership record
+names this installation; the account stays while it holds Ardent profiles, unless --purge comes
+with --delete-agent-profiles. See deployment/README.md#uninstalling.
 magnus-agent install|status|remove [--host TARGET] [--install-node] [--trust] runs the Magnus agent on a
 fleet host (default: the Magnus host): Node.js check (and NodeSource install with consent), the
 release's verified agent package, its root-only environment and service, a new agent's own node
@@ -1091,7 +1095,7 @@ hive_main() {
   HIVE_AGENT_CONFIG_DIRECTORY='' HIVE_AGENT_SECRETS='' HIVE_AGENT_ENROLLMENT='' HIVE_ADD_TEMPORARY='' HIVE_ADD_INPUT=''
   HIVE_JSON=false HIVE_LOGS_SINCE='' HIVE_LOGS_TAIL='' HIVE_BUNDLE_OUTPUT='' HIVE_DIAGNOSTICS_INPUT=''
   HIVE_BACKUP_TO='' HIVE_BACKUP_ENCRYPT='' HIVE_BACKUP_FROM='' HIVE_BACKUP_IDENTITY='' HIVE_BACKUP_TRANSFER_INPUT=''
-  HIVE_UNINSTALL_PURGE=false HIVE_UNINSTALL_INPUT=''
+  HIVE_UNINSTALL_PURGE=false HIVE_UNINSTALL_INPUT='' HIVE_AGENT_DELETE_PROFILES=false
   local -a registry_arguments=() trust_arguments=()
   if (($#)) && [[ "$1" != --* ]]; then command=$1; shift; fi
   if [[ "$command" == entry-point ]]; then hive_entry_point_command "$@"; return; fi
@@ -1118,6 +1122,9 @@ hive_main() {
         case $1 in --to) HIVE_BACKUP_TO=$2;; --encrypt) HIVE_BACKUP_ENCRYPT=$2;; --from) HIVE_BACKUP_FROM=$2;; --identity) HIVE_BACKUP_IDENTITY=$2;; esac
         shift 2;;
       --purge) [[ "$command" == uninstall ]] || hive_die '--purge applies only to uninstall'; HIVE_UNINSTALL_PURGE=true; shift;;
+      --delete-agent-profiles)
+        [[ "$command" == uninstall || "$command" == magnus-agent ]] || hive_die '--delete-agent-profiles applies only to uninstall --purge and magnus-agent remove'
+        HIVE_AGENT_DELETE_PROFILES=true; shift;;
       --apply) [[ "$command" == backups ]] || hive_die '--apply applies only to backups prune'; HIVE_RETENTION_APPLY=true; shift;;
       --json) [[ "$command" == status || "$command" == doctor ]] || hive_die '--json applies only to status and doctor'; HIVE_JSON=true; shift;;
       --since|--tail)
@@ -1191,6 +1198,7 @@ hive_main() {
   done
   case "$command" in init|plan|install|status|doctor|logs|support-bundle|upgrade|post-upgrade|setup|rollback|backup|backups|adopt|restore|rehearse|add|remove|uninstall|agents-accept|skills-prepare|registry|magnus-trust|migrate-native|tls-refresh|cindertrace-collector|magnus-agent|ardent|console-clients|admin-access) ;; *) hive_die 'Unknown command';; esac
   [[ "$HIVE_PREPARE_RECONCILIATION" != true || -z "$HIVE_RECONCILIATION" ]] || hive_die 'Choose --prepare-reconciliation or --reconciliation, not both'
+  [[ "$command" != uninstall || "$HIVE_AGENT_DELETE_PROFILES" != true || "$HIVE_UNINSTALL_PURGE" == true ]] || hive_die '--delete-agent-profiles needs --purge: uninstall without it keeps all data'
   if [[ "$HIVE_RELAX_AUTH_LIMITS" == true ]]; then
     case "$command" in plan|install|upgrade) ;; *) hive_die '--relax-auth-limits applies only to plan, install and upgrade';; esac
   fi

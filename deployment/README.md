@@ -432,12 +432,48 @@ backups, as does the installation file, and records `uninstalled.json`; `./hive.
 the same file brings the installation back.
 
 `--purge` also deletes every host's installation directory, with all data and backups, and on
-this machine the installation file and what Hive wrote beside it (the `additions/` journals and
-the copies `remove` keeps); that directory goes only when nothing else is left in it. It asks you to type the installation name, and
+this machine the installation file and what Hive wrote beside it (the `additions/` journals, the
+copies `remove` keeps, this installation's Ardent setup receipts in `ardent-setup/`, and the web
+terminal approval log `magnus-trust.log` when nothing else is left); that directory goes only when
+nothing else is left in it. It asks you to type the installation name, and
 `--yes` never answers that question. Export any backup you want to keep first
 (`./hive.sh backups export ARCHIVE --to DESTINATION`). Deleting files the products own needs
 root: on this machine through sudo, on another host through its `sudoPasswordFile` or
 passwordless sudo.
+
+### What uninstall removes from the Magnus host
+
+The installer records what it creates for the Magnus host agent in an ownership record beside the
+agent directory, `/opt/magnus-agent.native-owner.json`, which names the installation. `uninstall`
+and `magnus-agent remove` remove only what that record shows this installation created:
+
+| What | Removed when |
+|---|---|
+| The `magnus-agent` service, its unit and `/opt/magnus-agent` | The record names this installation and says it created that directory |
+| The staged Ardent packages in `/opt/magnus-agent-artifacts` | The agent is removed; only the version directories the installer stages go, so other files keep the directory |
+| The `hive-agent` account and its home | The record names this installation; the account's UID, home and groups are still the recorded ones; no other agent on the host names it; and it holds no Ardent profile (`~/.ardent/profiles/*` or an `ardent@` user unit). With profiles, only `uninstall --purge --delete-agent-profiles` or `magnus-agent remove --delete-agent-profiles` deletes it, after you type the installation name |
+| The ownership record | Nothing it describes is left. While the account stays with its profiles, the record stays too and notes that the agent was removed; a later install of the same installation takes the account over again, and backups report its profiles as not included |
+
+Anything else stays, and the command lists it with the reason and exits non-zero (a purge still
+finishes): an agent other tooling installed, such as a separately managed fleet agent (it has no
+record); an account or agent recorded for another installation; and an agent installed by an
+earlier release, whose record names no installation, so Hive cannot prove which installation
+created it. Remove such leftovers with the tooling that installed them. For an agent that an
+earlier release of this installer set up, check that nothing else uses it, keep a copy of any
+profiles you want (`~hive-agent/.ardent`), then, on that host:
+
+```bash
+sudo systemctl disable --now magnus-agent
+sudo rm -f /etc/systemd/system/magnus-agent.service && sudo systemctl daemon-reload
+sudo rm -rf /opt/magnus-agent /opt/magnus-agent-artifacts
+sudo loginctl disable-linger hive-agent && sudo userdel -r hive-agent
+sudo rm -f /opt/magnus-agent.native-owner.json
+```
+
+A later install on that host then creates a new agent, account and record. Until the leftover
+record is gone, an install that finds it without its account stops and names it. Agents installed
+on other fleet hosts with `magnus-agent install --host` are not part of `uninstall`; remove them
+with `magnus-agent remove --host TARGET` before uninstalling.
 
 `./hive.sh remove PRODUCT` takes a product out of an installation: an online backup first, then
 its containers are stopped and removed, its components leave the installation file (the previous

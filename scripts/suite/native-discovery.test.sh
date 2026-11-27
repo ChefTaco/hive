@@ -17,7 +17,7 @@ cat > "$temporary/bin/systemctl" <<'SYSTEMCTL'
 printf '%s\n' "$*" >> "$FIXTURE_SYSTEMCTL"
 case "$*" in
   *WorkingDirectory*) printf '%s\n' "$FIXTURE_AGENT";;
-  *LoadState*) printf 'loaded\n';;
+  *LoadState*) if [[ -n "${FIXTURE_UNIT_GONE:-}" ]]; then printf 'not-found\n'; else printf 'loaded\n'; fi;;
 esac
 SYSTEMCTL
 cat > "$temporary/bin/docker" <<'DOCKER'
@@ -119,6 +119,18 @@ installer_agent() {
   if native_backup_discover > /dev/null 2> "$temporary/refused"; then fail 'An installer-owned root that is not root-owned was accepted'; fi
   grep -q 'must be a root-owned directory with mode 700' "$temporary/refused" || fail 'A broken installer-owned root failed silently'
   if native_backup_begin 2> "$temporary/refused"; then fail 'Backup preparation accepted a broken installer-owned root'; fi
+  # magnus-agent remove keeps the record while the account holds profiles. With the agent gone
+  # (no directory, no unit) its profiles are not included, and an archive that holds them is refused.
+  mv -- "$FIXTURE_AGENT" "$temporary/removed-agent"
+  found=$(FIXTURE_UNIT_GONE=1 native_backup_discover) || fail 'A removed agent with its kept record failed discovery'
+  jq -e --arg root "$FIXTURE_AGENT" '.included==false and .reason=="agent-removed" and .root==$root and .owner=="nobody"' <<< "$found" >/dev/null || fail "Unexpected discovery of a removed agent: $found"
+  FIXTURE_UNIT_GONE=1 native_backup_begin 2> "$temporary/notice" || fail 'Backup preparation failed after the agent was removed'
+  grep -qF "the Magnus agent at $FIXTURE_AGENT was removed" "$temporary/notice" || fail 'The removed agent was silent'
+  if FIXTURE_UNIT_GONE=1 native_backup_discover true > /dev/null 2> "$temporary/refused"; then fail 'A native archive was restored without its agent'; fi
+  grep -q 'install it again first' "$temporary/refused" || fail 'A required discovery without the agent was not explained'
+  # A unit that is still loaded is not a removed agent: the missing root still fails.
+  if native_backup_discover > /dev/null 2>&1; then fail 'A missing root with a loaded unit was accepted'; fi
+  mv -- "$temporary/removed-agent" "$FIXTURE_AGENT"
   rm -- "$FIXTURE_AGENT.native-owner.json"; ln -s "$temporary/elsewhere" "$FIXTURE_AGENT.native-owner.json"
   if native_backup_discover > /dev/null 2>&1; then fail 'A symlinked ownership record was treated as absent'; fi
   rm -- "$FIXTURE_AGENT.native-owner.json"
