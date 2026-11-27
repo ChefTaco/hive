@@ -6,8 +6,44 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [3.15.2] - 2026-11-27
+
+Emberpath client keys for agents, and Emberpath asks for a step-up only before a change. Pins
+Emberpath 2.11.0, Magnus 3.5.0 (server, fleet gateway and host agent; the agents keep staging
+Ardent 3.5.1), Ardent Project Studio 0.8.0 and HiveXUI 0.15.0; every other pin, the datastore
+profile and the Hive Registry are those of 3.15.1. An installation whose Magnus the suite manages
+(the full profile) applies one fast Magnus migration, so its upgrade needs `--allow-migrations`;
+the migration is safe under the Magnus 3.4.1 of 3.15.1, so a code-only rollback to 3.15.1 is
+allowed. Install the 3.5.0 host agent first. Read `UPGRADING.md`, "Suite 3.15.2", first.
+
+### Products
+
+- **Magnus 3.5.0** (from 3.4.1): New Agent and agent definition installs take the Emberpath client
+  key (`emberpath_client_key`) that an agent with an Emberpath model alias needs, check it with
+  Emberpath and write it to the new profile through the 3.5.0 host agent, without storing, logging
+  or returning it; without a key they answer `400 EMBERPATH_KEY_REQUIRED`. A new route sets or
+  rotates the key of an existing alias agent (Set Emberpath key). One fast migration
+  (`20261127120000_ardent_agent_operation_model_credential_kind`), safe under 3.4.1.
+- **Emberpath 2.11.0** (from 2.10.0): a step-up is needed only for writes: reading client keys,
+  Oathweave clients, roles, the password policy and Hive actors no longer answers
+  `403 STEP_UP_REQUIRED`. Identity writes through Emberpath's Oathweave proxy
+  (`/api/iam/users`, `service-accounts`, `system-users`, `groups`, `enrollments`) now need a recent
+  sign-in. New optional `EMBERPATH_RECENT_AUTH_SECONDS` (default 900). No migration.
+- **Ardent Project Studio 0.8.0** (from 0.7.0): relays the Emberpath client key on Create agent from
+  definition (deploy check, deploy and `POST /agents`), never storing it. No migration.
+- **HiveXUI 0.15.0** (from 0.14.0): an Emberpath key field in New Agent, resume and Create agent
+  from definition, Set Emberpath key on an alias agent, and the step-up outcome ("Identity
+  verified") shown inside the open drawer beside its actions instead of a toast over them. No
+  migration and no `runtime.json` change.
+
 ### Fixed
 
+- The console ingress forwards Magnus 3.5.0's Set Emberpath key route
+  (`POST /api/magnus/ardent/installations/NODE/profiles/NAME/model-credential`); it answered 404.
+- `admin-access setup` refused every installation that had been upgraded at least once with
+  "administrator configuration publication refused: active deployment inputs changed": its check of
+  the deployment inputs counted the `Caddyfile.previous` and `Caddyfile.pre-registry` copies that an
+  upgrade keeps beside the live Caddyfile, which the plan's own pin leaves out.
 - `uninstall --purge` and `magnus-agent remove` remove what the installer set up for the Magnus
   host agent, so a later install, upgrade or Ardent setup on that host starts clean. Before, they
   left `/opt/magnus-agent.native-owner.json`, `/opt/magnus-agent-artifacts`, the `hive-agent`

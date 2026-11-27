@@ -471,6 +471,7 @@
 				|| {path}.matches("^/api/v1/ardent/agents/operations/[^/]+/resume$")
 				|| {path}.matches("^/api/v1/ardent/installations/[^/]+/profiles/[^/]+/action$")
 				|| {path}.matches("^/api/v1/ardent/installations/[^/]+/profiles/[^/]+/hivemem$")
+				|| {path}.matches("^/api/v1/ardent/installations/[^/]+/profiles/[^/]+/model-credential$")
 				|| {path} == "/api/v1/assistant/insights/pins"
 				|| {path}.matches("^/api/v1/codex/installations/[^/]+/device-auth$")
 				|| {path}.matches("^/api/v1/codex/installations/[^/]+/device-auth/[^/]+/cancel$")

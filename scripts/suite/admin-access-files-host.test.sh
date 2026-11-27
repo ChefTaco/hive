@@ -66,6 +66,22 @@ before=$(find "$directory" -type f -printf '%p %T@\n' | sort)
 admin_access_publish '{}' "$journal" >/dev/null; admin_access_recover "$journal" >/dev/null
 [[ $(find "$directory" -type f -printf '%p %T@\n' | sort) == "$before" ]] || fail 'A completed publication wrote files again'
 
+# An installation upgraded at least once keeps the earlier Caddyfiles beside the live one
+# (refresh_ingress). The deployment pin leaves them out, so publication must too.
+fixture retained-caddyfiles
+mkdir -m 700 "$config/ingress"
+printf 'live routes\n' > "$config/ingress/Caddyfile"; printf 'earlier release\n' > "$config/ingress/Caddyfile.previous"; printf 'before the registry\n' > "$config/ingress/Caddyfile.pre-registry"
+jq --arg source "$config/ingress" '.services.ingress={volumes:[{source:$source,read_only:true}]}' "$compose" > "$compose.next" && mv "$compose.next" "$compose"
+sha=$(deployment_inputs_digest "$compose")
+jq -n --arg sha "$sha" '{schema:1,sha256:$sha}' > "$directory/deployment-inputs.$plan.json"
+jq --arg sha "$sha" '.deploymentInputSHA256=$sha' "$directory/receipt.json" > "$directory/receipt.next" && mv "$directory/receipt.next" "$directory/receipt.json"
+[[ $(admin_access_files_inputs_digest) == "$sha" ]] || fail 'Retained Caddyfile copies changed the publication input digest'
+admin_access_publish "$updates" "$journal" >/dev/null || fail 'Publication refused an installation with retained Caddyfile copies'
+[[ $(admin_access_env_value "$config/product.env" SELECTED) == 'new value' ]] || fail 'Environment values were not updated beside retained Caddyfile copies'
+verify_pins
+printf 'changed again\n' > "$config/ingress/Caddyfile.previous"
+[[ $(admin_access_files_inputs_digest) == "$(deployment_inputs_digest "$compose")" ]] || fail 'A retained Caddyfile copy counted as an input'
+
 fixture quotes
 value=$'apostrophe\x27 dollar$USER literal$(command) double" slash\\ newline\nlast'
 updates=$(jq -nc --arg path "$config/product.env" --arg value "$value" '{($path):{SELECTED:$value}}')
