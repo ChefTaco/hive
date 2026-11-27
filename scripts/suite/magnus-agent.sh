@@ -185,10 +185,33 @@ hive_magnus_agent_enroll() (
   trap - EXIT
 )
 
+# Removes on the agent host what this installation's installer set up there, as the ownership
+# record on that host proves it (magnus-agent-host.sh remove_agent): the agent, its staged
+# packages, and the native account with its home unless that holds Ardent profiles and
+# DELETE_PROFILES is not true. Prints what was removed and what was kept, with the reason. Fails
+# when something was kept for any reason but its profiles, so the operator sees what is left.
+hive_magnus_agent_remove_owned() { # DELETE_PROFILES
+  local result
+  result=$(hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-remove \
+    "$(jq -nc --arg root "${HIVE_MAGNUS_AGENT_ROOT:-}" --argjson profiles "${1:-false}" '{deleteProfiles:$profiles}+(if $root!="" then {root:$root} else {} end)')" true) ||
+    { printf 'Hive: nothing more was removed on %s; see above.\n' "$HIVE_AGENT_HOST" >&2; return 1; }
+  jq -e '(.removed|type=="array") and (.kept|type=="array")' <<< "$result" >/dev/null 2>&1 || { printf 'Hive: the agent host returned no removal report.\n' >&2; return 1; }
+  if jq -e '(.removed|length)==0 and (.kept|length)==0' <<< "$result" >/dev/null; then
+    printf 'No Magnus agent, staged packages or native account of this installation is on %s.\n' "$HIVE_AGENT_HOST"
+  fi
+  jq -r --arg host "$HIVE_AGENT_HOST" '.removed[] | "Removed \(.) on \($host)."' <<< "$result"
+  jq -r --arg host "$HIVE_AGENT_HOST" '.kept[] | "Kept \(.what) on \($host): \(.reason)."' <<< "$result" >&2
+  if jq -e '[.kept[]|select(.code!="profiles" and .code!="record-guard")]|length>0' <<< "$result" >/dev/null; then
+    printf 'Hive: Hive removes only what the ownership record on %s shows this installation created. Remove what is left with the tooling that installed it, or by hand as deployment/README.md#uninstalling describes.\n' "$HIVE_AGENT_HOST" >&2
+    return 1
+  fi
+}
+
 hive_magnus_agent() {
   local subcommand=${1:-} port origin console_name preflight package fqdn request certificate magnus_directory started record fingerprint result
   jq -e '.components.magnus!=null' "$HIVE_CONFIG" >/dev/null || hive_die 'This installation has no Magnus'
-  case "$subcommand" in install|status|remove|prepare-ardent|enroll) ;; *) hive_die 'Use: magnus-agent install|status|remove|prepare-ardent|enroll --config FILE [--host TARGET] [--install-node] [--trust] [--yes]';; esac
+  case "$subcommand" in install|status|remove|prepare-ardent|enroll) ;; *) hive_die 'Use: magnus-agent install|status|remove|prepare-ardent|enroll --config FILE [--host TARGET] [--install-node] [--trust] [--delete-agent-profiles] [--yes]';; esac
+  [[ "${HIVE_AGENT_DELETE_PROFILES:-false}" != true || "$subcommand" == remove ]] || hive_die '--delete-agent-profiles applies only to magnus-agent remove'
   port=$(jq -r '[.console.nativeListeners // [] | .[] | select(.component=="magnus") | .port][0] // empty' "$HIVE_CONFIG")
   [[ -n "$port" || "$subcommand" != install ]] || hive_die 'This installation publishes no Magnus agent port, so an agent could not reach Magnus. A fresh installation gets one from the setup question "Port for Magnus host agents" (console.nativeListeners in the installation file); adding it to an existing installation is not supported yet. See deployment/FULL.md#magnus-host-agents'
   origin=$(jq -r .origin "$HIVE_CONFIG"); console_name=${origin#https://}; console_name=${console_name%%:*}
@@ -219,15 +242,23 @@ hive_magnus_agent() {
         '{host:$host,hostFqdn:$fqdn,installedVersion:(($preflight.installedVersion|if .=="" then null else . end) // $node.agentVersion?),service:$preflight.service,node:$node,webTerminalApproval:$approval}'
       return;;
     remove)
-      hive_magnus_agent_confirm "$HIVE_CONFIRMED" "Stop and remove the Magnus agent on $HIVE_AGENT_HOST?" || hive_die 'Cancelled; nothing was changed'
+      local delete_profiles=${HIVE_AGENT_DELETE_PROFILES:-false} answer='' removal=0
+      if [[ "$delete_profiles" == true ]]; then
+        hive_magnus_agent_confirm "$HIVE_CONFIRMED" "Stop and remove the Magnus agent on $HIVE_AGENT_HOST, and delete the native account the installer created with its home and every Ardent profile in it?" || hive_die 'Cancelled; nothing was changed'
+        # As for uninstall --purge, --yes never answers this.
+        read -r -p "Type the installation name, $HIVE_ID, to delete its Ardent profiles: " answer || true
+        [[ "$answer" == "$HIVE_ID" ]] || hive_die 'The installation name was not typed; nothing was changed'
+      else
+        hive_magnus_agent_confirm "$HIVE_CONFIRMED" "Stop and remove the Magnus agent on $HIVE_AGENT_HOST?" || hive_die 'Cancelled; nothing was changed'
+      fi
       record=$(hive_magnus_agent_node_record "$fqdn" 2>/dev/null || printf 'null\n')
-      hive_magnus_agent_action "$HIVE_AGENT_HOST" magnus-agent-remove \
-        "$(jq -nc --arg root "${HIVE_MAGNUS_AGENT_ROOT:-}" 'if $root!="" then {root:$root} else {} end')" true >/dev/null || hive_die 'The agent could not be removed; see above'
-      printf 'Removed the Magnus agent from %s. Magnus keeps its record of the node.\n' "$HIVE_AGENT_HOST"
+      hive_magnus_agent_remove_owned "$delete_profiles" || removal=$?
+      printf 'Magnus keeps its record of the node.\n'
       if [[ "$HIVE_AGENT_TRUST" == true && -n "$record" && "$record" != null ]] && jq -e '.components["magnus-gateway"]!=null' "$HIVE_CONFIG" >/dev/null; then
         hive_magnus_agent_trust remove --node-id "$(jq -r .id <<< "$record")" --approved-by "${USER:-operator}" --approval-ref magnus-agent-remove &&
           printf 'Revoked the web terminal approval for this node.\n'
       fi
+      ((removal == 0)) || hive_die 'Not everything on the host was removed; see above'
       return;;
   esac
 

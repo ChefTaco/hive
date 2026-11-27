@@ -912,8 +912,12 @@ lock. It verifies the npm integrity and prepares the package manifest the node a
 public package files live beside the protected agent directory, readable by the native owner;
 credentials stay root-only. In **Magnus > Ardent installations**, choose **Install package**, then
 create a profile with **New Agent**, after the enrollment review below. Staging never installs or starts an Ardent runtime. A custom
-`ARDENT_STAGED_PACKAGE` remains operator-managed. Removing the host agent retains its native owner
-record, runtime artifacts and profiles, so a reinstall can recover the same ownership.
+`ARDENT_STAGED_PACKAGE` remains operator-managed. The native owner record
+(`/opt/magnus-agent.native-owner.json`) names the installation that created the account and the
+agent directory. Removing the host agent removes its staged packages too, and the account when it
+holds no Ardent profiles; an account with profiles stays with its record, so a reinstall of the
+same installation recovers the same ownership (see
+[what uninstall removes from the Magnus host](README.md#what-uninstall-removes-from-the-magnus-host)).
 
 For full node capabilities on an installer-owned single-host installation, run:
 
@@ -950,8 +954,12 @@ Running it again repairs the installation, or upgrades the agent in place to the
 release pins. `./hive.sh magnus-agent status --config FILE` prints one JSON document: the
 installed version, the service state, Magnus's last heartbeat (with the node key state, when
 Magnus has per-node credentials) and the web terminal approval;
-`remove` stops and removes the agent, and with `--trust` also revokes the approval. Magnus keeps
-its record of the node.
+`remove` stops and removes the agent, its staged packages and, unless it holds Ardent profiles,
+its native account, each only where the host's ownership record shows this installation created
+it; `--delete-agent-profiles` also deletes an account with profiles, after you type the
+installation name. With `--trust` it also revokes the approval. Magnus keeps its record of the
+node. An agent the record does not prove, such as one other tooling installed, stays and is
+listed with the reason.
 
 The agent's listener certificate is the console certificate on the console host, renewed with it:
 `console-certificate.sh renew` and its weekly timer restart the agent after a renewal; after a

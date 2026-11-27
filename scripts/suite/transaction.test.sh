@@ -57,6 +57,44 @@ printf '{"version":"0.1.0","plan":"%s"}' "$(id "$plan")" > "$directory/receipt.j
 if host abort "$(id "$plan")" stage; then fail 'An active plan aborted'; fi
 rm "$directory/receipt.json"
 
+# A repeated install of the same file and release has the plan of the install before it, whose
+# initialization receipt, staged agent files and activation receipt are still on the host (after
+# uninstall without --purge, say). A failed read-only check of the repeat still aborts; only what
+# this transaction wrote or changed keeps it open.
+host abort "$(id "$plan")" stage || { cat "$temporary/host.log" >&2; fail 'The open plan could not abort before its repeat'; }
+repeat=$(id "$plan")
+printf '{"schema":1,"plan":"%s","phase":"ready"}\n' "$repeat" > "$directory/bootstrap.$repeat.json"
+mkdir -p "$directory/agents/agent-1"; printf 'run\n' > "$directory/agents/agent-1/run.$repeat"; printf 'ok\n' > "$directory/agents/agent-1/preflight.$repeat.log"
+printf '{"version":"0.1.0","plan":"%s"}' "$repeat" > "$directory/receipt.json"
+host prepare "$repeat" "" install || { cat "$temporary/host.log" >&2; fail 'A repeated install could not start'; }
+jq -e '.earlierPlanFiles|map(.path)|sort==(["agents/agent-1/preflight.'"$repeat"'.log","agents/agent-1/run.'"$repeat"'","bootstrap.'"$repeat"'.json","receipt.json"]|sort)' "$directory/transaction.json" >/dev/null ||
+  { cat "$directory/transaction.json" >&2; fail 'The repeated install did not record what the install before it left'; }
+host abort "$repeat" stage install || { cat "$temporary/host.log" >&2; fail 'A repeated install was held for files the install before it left'; }
+[[ $(phase) == aborted ]] || fail 'The repeated install did not abort'
+# What the open transaction itself changed or added still holds it.
+host prepare "$repeat" "" install || fail 'The repeated install could not start again'
+printf '{"schema":1,"plan":"%s","phase":"started"}\n' "$repeat" > "$directory/bootstrap.$repeat.json"
+if host abort "$repeat" stage install; then fail 'A repeat that changed the initialization receipt aborted'; fi
+grep -q 'This plan initialized data' "$temporary/host.log" || fail 'The changed initialization receipt was not the reason'
+printf '{"schema":1,"plan":"%s","phase":"ready"}\n' "$repeat" > "$directory/bootstrap.$repeat.json"
+touch "$directory/agents/agent-1/candidate.$repeat.json"
+if host abort "$repeat" stage install; then fail 'A repeat that staged a new agent file aborted'; fi
+rm "$directory/agents/agent-1/candidate.$repeat.json"
+printf 'changed\n' > "$directory/agents/agent-1/run.$repeat"
+if host abort "$repeat" stage install; then fail 'A repeat that changed a staged agent file aborted'; fi
+printf 'run\n' > "$directory/agents/agent-1/run.$repeat"
+printf '{"version":"0.1.0","plan":"%s","changed":true}' "$repeat" > "$directory/receipt.json"
+if host abort "$repeat" stage install; then fail 'A repeat that rewrote the activation receipt aborted'; fi
+printf '{"version":"0.1.0","plan":"%s"}' "$repeat" > "$directory/receipt.json"
+host abort "$repeat" stage install || { cat "$temporary/host.log" >&2; fail 'Restored earlier files still held the repeat'; }
+# A transaction recorded before this check (no earlierPlanFiles) keeps the strict refusal.
+host prepare "$repeat" "" install || fail 'The repeated install could not start a third time'
+jq 'del(.earlierPlanFiles)' "$directory/transaction.json" > "$temporary/next.json"; mv "$temporary/next.json" "$directory/transaction.json"
+if host abort "$repeat" stage install; then fail 'A transaction without its earlier files record aborted over them'; fi
+jq '.phase="aborted"' "$directory/transaction.json" > "$temporary/next.json"; mv "$temporary/next.json" "$directory/transaction.json"
+rm -rf "$directory/agents" "$directory/bootstrap.$repeat.json" "$directory/receipt.json"
+host prepare "$(id "$plan")" && [[ $(phase) == prepared ]] || fail 'The plan could not start after the repeat'
+
 # From quiescence on, recovery is unchanged: no abort, and no other plan starts.
 host quiesce "$(id "$plan")" || { cat "$temporary/host.log" >&2; fail 'quiesce failed'; }
 [[ $(phase) == quiesced ]] || fail 'quiesce did not record its phase'
@@ -106,4 +144,4 @@ if HIVE_OPERATION=upgrade controller stage; then fail 'hive_stage passed a faile
 cp "$temporary/plain.json" "$temporary/config.json"
 grep -q 'closed as aborted' "$temporary/controller.log" || { cat "$temporary/controller.log" >&2; fail 'A migrated installation did not abort its failed stage'; }
 grep -q '^alpha abort stage$' "$temporary/actions.log" && grep -q '^beta abort stage$' "$temporary/actions.log" || { cat "$temporary/actions.log" >&2; fail 'A migrated installation left a prepared host open'; }
-printf 'Passed: read-only-check failures abort and keep their record, the next plan proceeds, and host changes or quiescence keep the transaction for recovery.\n'
+printf 'Passed: read-only-check failures abort and keep their record, the next plan proceeds, a repeated install aborts over the unchanged files of the install before it, and host changes or quiescence keep the transaction for recovery.\n'

@@ -14,7 +14,12 @@ log="$temporary/log/calls"
 stub() { printf '#!/usr/bin/env bash\nprintf "%%s %%s\\n" "%s" "$*" >> "%s"\n%s\n' "$1" "$log" "$2" > "$bin/$1"; chmod +x "$bin/$1"; }
 stub id 'case "$*" in -u) echo 0;; "-u hive-agent") echo 1234;; "-u terminal-fixture") echo 1235;; "-G terminal-fixture") echo 1235;; "-nG hive-agent") echo hive-agent;; hive-agent) [[ -f "'"$temporary"'/native-user-created" ]];; *) exec /usr/bin/id "$@";; esac'
 mkdir -p "$temporary/native-home"
-stub useradd 'touch "'"$temporary"'/native-user-created"'
+stub useradd 'touch "'"$temporary"'/native-user-created"; mkdir -p "'"$temporary"'/native-home"'
+stub userdel 'rm -f "'"$temporary"'/native-user-created"'
+stub groupdel 'exit 0'
+stub pkill 'exit 0'
+# The fixture account's home belongs to its fixture UID.
+stub stat 'if [[ "$1 $2" == "-c %u" && "${@: -1}" == "'"$temporary"'/native-home" ]]; then echo 1234; else exec /usr/bin/stat "$@"; fi'
 stub getent 'printf "hive-agent:x:1234:1234:Native runtimes:%s:/bin/bash\n" "'"$temporary"'/native-home"'
 stub loginctl 'exit 0'
 stub systemctl 'case "$1" in is-active) [[ -f "'"$temporary"'/active" ]] && echo active || echo inactive;; restart) touch "'"$temporary"'/active";; disable) rm -f "'"$temporary"'/active";; esac; exit 0'
@@ -57,7 +62,7 @@ case "$2" in
   identity) if [[ -f "$AGENT_INSTALL_DIR/identity/node.key" ]]; then echo "{\"state\":\"bound\",\"nodeId\":\"node-1\",\"keyFingerprint\":\"SHA256:fixture-node-key\"}"; else echo "{\"state\":\"none\"}"; fi;;
   check) [[ -f "$4" ]];;
   install-service) dir=$4 unit=$6; v=$(jq -r .version "$dir/node_modules/@hivemagnus/magnus-agent/package.json")
-    mkdir -p "$dir/versions/$v"; mv "$dir/node_modules" "$dir/versions/$v/"; ln -s "versions/$v" "$dir/current"; ln -s current/node_modules "$dir/node_modules"; printf "[Unit]\n" > "$unit";;
+    mkdir -p "$dir/versions/$v"; mv "$dir/node_modules" "$dir/versions/$v/"; ln -s "versions/$v" "$dir/current"; ln -s current/node_modules "$dir/node_modules"; printf "[Unit]\n[Service]\nWorkingDirectory=%s\n" "$dir" > "$unit";;
 esac'
 nodes() { printf '%s\n' "$1" > "$temporary/node-version"; }
 export PATH="$bin:$PATH"
@@ -82,7 +87,7 @@ for version in 2.1.1 2.1.2 2.1.3; do
 done
 integrity() { printf 'sha512-%s' "$(openssl dgst -sha512 -binary "$temporary/fixtures/magnus-agent-$1.tgz" | base64 -w0)"; }
 host() { # ACTION REQUEST
-  jq -nc --arg action "$1" --argjson request "$2" '{action:$action,magnusAgent:$request}' |
+  jq -nc --arg action "$1" --argjson request "$2" '{action:$action,installation:"example-suite",magnusAgent:$request}' |
     bash "$ROOT/scripts/suite/magnus-agent-host.sh" > "$temporary/out" 2> "$temporary/err"
 }
 request() { # VERSION [INTEGRITY]
@@ -278,15 +283,15 @@ grep -qx 'MAGNUS_AGENT_MANAGED_TERMINAL_USER=terminal-fixture' "$agent/.env" || 
 host magnus-agent-install "$(request 2.1.2 | jq -c 'del(.magnusEnvironment)')" && fail 'Installed without credentials' || true
 grep -q 'credentials are missing' "$temporary/err" || fail 'Missing credentials were not refused'
 /usr/bin/jq -nc --arg action magnus-agent-install --argjson request "$(request 2.1.2 | jq -c 'del(.magnusEnvironment)')" --arg node "${node_secret}x" --arg result "${result_secret}x" \
-  '{action:$action,magnusAgent:$request,secret:{NODE_MANAGER_SECRET:$node,RESULT_SIGNING_SECRET:$result}}' | bash "$ROOT/scripts/suite/magnus-agent-host.sh" > "$temporary/out" 2>&1 || fail 'A remote-style install failed'
+  '{action:$action,installation:"example-suite",magnusAgent:$request,secret:{NODE_MANAGER_SECRET:$node,RESULT_SIGNING_SECRET:$result}}' | bash "$ROOT/scripts/suite/magnus-agent-host.sh" > "$temporary/out" 2>&1 || fail 'A remote-style install failed'
 /usr/bin/grep -qx "NODE_MANAGER_SECRET=${node_secret}x" "$agent/.env" || fail 'Credentials from the request were not written'
 # A Magnus host without a reconciliation key (an older installation) gives the agent none.
 ! /usr/bin/grep -q '^COMMAND_RECONCILIATION_SECRET=' "$agent/.env" || fail 'An absent reconciliation key was written'
 /usr/bin/jq -nc --arg action magnus-agent-install --argjson request "$(request 2.1.2 | jq -c 'del(.magnusEnvironment)')" --arg node "$node_secret" --arg result "$result_secret" --arg reconcile "$reconcile_secret" \
-  '{action:$action,magnusAgent:$request,secret:{NODE_MANAGER_SECRET:$node,RESULT_SIGNING_SECRET:$result,COMMAND_RECONCILIATION_SECRET:$reconcile}}' | bash "$ROOT/scripts/suite/magnus-agent-host.sh" > "$temporary/out" 2>&1 || fail 'A remote-style install with a reconciliation key failed'
+  '{action:$action,installation:"example-suite",magnusAgent:$request,secret:{NODE_MANAGER_SECRET:$node,RESULT_SIGNING_SECRET:$result,COMMAND_RECONCILIATION_SECRET:$reconcile}}' | bash "$ROOT/scripts/suite/magnus-agent-host.sh" > "$temporary/out" 2>&1 || fail 'A remote-style install with a reconciliation key failed'
 /usr/bin/grep -qx "COMMAND_RECONCILIATION_SECRET=$reconcile_secret" "$agent/.env" || fail 'The reconciliation key from the request was not written'
 if /usr/bin/jq -nc --arg action magnus-agent-install --argjson request "$(request 2.1.2 | jq -c 'del(.magnusEnvironment)')" --arg node "$node_secret" --arg result "$result_secret" \
-  '{action:$action,magnusAgent:$request,secret:{NODE_MANAGER_SECRET:$node,RESULT_SIGNING_SECRET:$result,COMMAND_RECONCILIATION_SECRET:"too-short"}}' | bash "$ROOT/scripts/suite/magnus-agent-host.sh" > "$temporary/out" 2>&1; then fail 'A short reconciliation key was accepted'; fi
+  '{action:$action,installation:"example-suite",magnusAgent:$request,secret:{NODE_MANAGER_SECRET:$node,RESULT_SIGNING_SECRET:$result,COMMAND_RECONCILIATION_SECRET:"too-short"}}' | bash "$ROOT/scripts/suite/magnus-agent-host.sh" > "$temporary/out" 2>&1; then fail 'A short reconciliation key was accepted'; fi
 grep -q 'shorter than 32 characters' "$temporary/out" || fail 'The short reconciliation key refusal is unclear'
 /usr/bin/grep -qx "COMMAND_RECONCILIATION_SECRET=$reconcile_secret" "$agent/.env" || fail 'A refused key replaced the agent environment'
 # The Magnus host hands over all three node credentials for an agent on another host.
@@ -296,10 +301,14 @@ host magnus-agent-secrets "$(jq -nc --arg env "$temporary/magnus.env" '{magnusEn
 no_secret "$temporary/out"
 
 host magnus-agent-host-key '{}' && [[ $(jq -r .fingerprint "$temporary/out") == SHA256:* ]] || fail 'The host key fingerprint was not read'
+mkdir -p "$temporary/native-home/.ardent-custom/profiles/assistant"
 host magnus-agent-remove "$(jq -nc --arg root "$agent" '{root:$root}')" || fail 'remove failed'
-[[ ! -e "$agent" && ! -e "$MAGNUS_AGENT_UNIT" ]] || fail 'remove left the agent behind'
-[[ -f "$agent.native-owner.json" ]] || fail 'Removal orphaned the account that owns native profiles'
+[[ ! -e "$agent" && ! -e "$MAGNUS_AGENT_UNIT" && ! -e "$agent-artifacts" ]] || fail 'remove left the agent or its staged packages behind'
+[[ -f "$agent.native-owner.json" && -f "$temporary/native-user-created" && -d "$temporary/native-home/.ardent-custom/profiles/assistant" ]] || fail 'Removal orphaned or deleted the account that owns native profiles'
+jq -e '.agentRemovedAt|type=="string"' "$agent.native-owner.json" >/dev/null || fail 'The kept ownership record does not say the agent was removed'
+jq -e 'any(.kept[]; .code=="profiles")' "$temporary/out" >/dev/null || fail 'The kept profiles were not reported'
 /usr/bin/grep -q 'systemctl disable --now magnus-agent' "$log" || fail 'remove did not stop the service'
+rm -rf "$temporary/native-home/.ardent-custom"
 
 # The controller: no agent port, no install; Node.js without consent, no install.
 jq -n --arg dir "$temporary/install" '{schema:1,installation:"example-suite",origin:"https://hive.example.com",hosts:{control:{target:"local",directory:$dir}},
@@ -464,7 +473,7 @@ grep -q 'needs a one-time enrollment token, and none was given' "$temporary/err"
 [[ ! -e "$agent/.env" && ! -e "$MAGNUS_AGENT_UNIT" ]] || fail 'A refused keys-only install changed the host'
 touch "$temporary/agent-node-credentials" "$temporary/agent-token-file"; rm -f "$temporary/received-token"; : > "$log"
 /usr/bin/jq -nc --arg action magnus-agent-install --argjson request "$(request 2.1.1 | jq -c '.nodeKeysOnly=true | .nodeCredentials="token"')" --arg node "$node_secret" --arg result "$result_secret" --arg reconcile "$reconcile_secret" --arg token "$token" \
-  '{action:$action,magnusAgent:$request,secret:{NODE_MANAGER_SECRET:$node,RESULT_SIGNING_SECRET:$result,COMMAND_RECONCILIATION_SECRET:$reconcile,enrollmentToken:$token}}' |
+  '{action:$action,installation:"example-suite",magnusAgent:$request,secret:{NODE_MANAGER_SECRET:$node,RESULT_SIGNING_SECRET:$result,COMMAND_RECONCILIATION_SECRET:$reconcile,enrollmentToken:$token}}' |
   bash "$ROOT/scripts/suite/magnus-agent-host.sh" > "$temporary/out" 2> "$temporary/err" || { cat "$temporary/err" >&2; fail 'A keys-only install with a token failed'; }
 [[ -z $(secret_lines) ]] || fail 'A keys-only install wrote a fleet-wide node secret'
 [[ $(cat "$temporary/received-token") == "$token" && -f "$agent/identity/node.key" ]] || fail 'The keys-only agent was not enrolled'

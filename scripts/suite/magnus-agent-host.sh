@@ -8,7 +8,9 @@
 #   magnus-agent-install    install, repair or upgrade the agent and its service
 #   magnus-agent-host-key   this host's SSH host key fingerprint, for the web terminal
 #   magnus-agent-local      installed version and service state
-#   magnus-agent-remove     stop, disable and remove the agent
+#   magnus-agent-remove     stop and remove what this installation's installer set up here: the
+#                           agent, its staged packages and the native account, each only where the
+#                           ownership record names this installation (see remove_agent)
 #   magnus-agent-secrets    (Magnus host) the node credentials, for another host only
 #   magnus-agent-heartbeat  (Magnus host) Magnus's record of a node, read inside its container
 #   magnus-agent-identity   this host's node key: its state and fingerprint, never the key
@@ -34,7 +36,11 @@ root=$(jq -r '.root // "/opt/magnus-agent"' <<< "$request")
 package=$(jq -r '.package.name // "@hivemagnus/magnus-agent"' <<< "$request")
 port=$(jq -r '.agentPort // 4100' <<< "$request")
 keys_only=$(jq -r '.nodeKeysOnly==true' <<< "$request")
+# The installation the controller acts for: the native ownership record names it, so removal
+# can prove what this installation created. Requests from older controllers carry none.
+installation=$(jq -r '.installation // ""' <<< "$input")
 die() { printf 'Magnus agent: %s\n' "$*" >&2; exit 1; }
+[[ -z "$installation" || "$installation" =~ ^[a-z][a-z0-9-]{0,47}$ ]] || die 'Invalid installation identity'
 [[ "$root" =~ ^/[A-Za-z0-9_./-]+$ && "$root" != *'/../'* && "$root" != / ]] || die 'Invalid agent directory'
 [[ "$port" =~ ^[0-9]{2,5}$ ]] || die 'Invalid agent port'
 NODESOURCE_FINGERPRINT=6F71F525282841EEDAF851B42F59B5F99B1BE0B4
@@ -293,28 +299,38 @@ stage_ardent_package() {
 
 # Native profiles run as an unprivileged account, never as the root management daemon.
 # Existing explicit ownership is retained. A new account is installation-owned and marked,
-# so a same-named unrelated account cannot silently become the runtime owner.
+# so a same-named unrelated account cannot silently become the runtime owner. The record names
+# the installation that created the account, and (agentRoot) the agent directory it created, so
+# removal deletes exactly those and nothing a fleet tool or another installation set up.
 prepare_native_owner() {
   # Keep the ownership record beside the agent directory: removing the management
   # daemon must not orphan the account that still owns native profiles.
-  local environment="$root/.env" marker="$root.native-owner.json" home uid recorded_uid temporary
+  local environment="$root/.env" marker="$root.native-owner.json" home uid recorded_uid recorded temporary
   [[ ! -L "$environment" && ! -L "$marker" ]] || die 'Native owner configuration cannot be a symlink'
   native_owner=''
   if [[ -f "$environment" ]]; then
     native_owner=$(get "$environment" ARDENT_OWNER_USER)
     [[ -n "$native_owner" ]] || native_owner=$(get "$environment" HERMES_USER)
   fi
-  if [[ -z "$native_owner" && -f "$marker" ]]; then native_owner=$(jq -er .username "$marker"); fi
+  if [[ -z "$native_owner" && -f "$marker" ]]; then
+    native_owner=$(jq -er .username "$marker")
+    # An account another installation created stays that installation's.
+    recorded=$(jq -r '.installation // ""' "$marker")
+    [[ -z "$recorded" || -z "$installation" || "$recorded" == "$installation" ]] ||
+      die "The $native_owner account on this host belongs to Hive installation $recorded ($marker); uninstall that installation first, or set ARDENT_OWNER_USER explicitly"
+  fi
   if [[ -z "$native_owner" ]]; then
     native_owner=hive-agent
     if id "$native_owner" >/dev/null 2>&1; then die 'The hive-agent account already exists without an ownership record; set ARDENT_OWNER_USER explicitly before installing'; fi
-    (set -o noclobber; jq -nc --arg username "$native_owner" '{schema:1,username:$username,phase:"preparing"}' > "$marker")
+    (set -o noclobber; jq -nc --arg username "$native_owner" --arg installation "$installation" \
+      '{schema:1,username:$username,phase:"preparing"}+(if $installation!="" then {installation:$installation} else {} end)' > "$marker")
     chmod 600 "$marker"
     sync -f "$marker"
   fi
   [[ "$native_owner" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || die 'Invalid native runtime owner'
   if ! id "$native_owner" >/dev/null 2>&1; then
-    [[ -f "$marker" ]] && jq -e --arg name "$native_owner" '.username==$name and .phase=="preparing"' "$marker" >/dev/null || die 'The configured native owner account is missing'
+    [[ -f "$marker" ]] && jq -e --arg name "$native_owner" '.username==$name and .phase=="preparing"' "$marker" >/dev/null ||
+      die "The native owner account $native_owner is missing. If an earlier uninstall left its ownership record $marker, review and remove it (deployment/README.md#uninstalling) before installing"
     useradd --create-home --user-group --shell /bin/bash --comment 'Hive agent runtimes' "$native_owner"
   fi
   uid=$(id -u "$native_owner")
@@ -327,12 +343,24 @@ prepare_native_owner() {
     [[ $(id -nG "$native_owner") == "$native_owner" ]] || die 'The dedicated native account has additional groups; review its privileges before retrying'
     if [[ -z "$recorded_uid" ]]; then
       temporary=$(mktemp "$marker.XXXXXX")
-      jq --argjson uid "$uid" '.phase="complete" | .uid=$uid' "$marker" > "$temporary"
+      jq --argjson uid "$uid" --arg home "$home" '.phase="complete" | .uid=$uid | if has("installation") then .home=$home else . end' "$marker" > "$temporary"
       sync -f "$temporary"; mv -T -- "$temporary" "$marker"
     fi
   fi
   loginctl enable-linger "$native_owner"
   systemctl start "user@$uid.service"
+}
+
+# A fresh agent directory (none, or one an interrupted install left without an agent in it) that
+# this installation's own account record covers is recorded as created by this installation.
+fresh_agent_root() { [[ ! -e "$root" ]] || [[ -d "$root" && ! -L "$root" && ! -e "$root/.env" && ! -e "$root/node_modules" && ! -e "$root/current" ]]; }
+claim_agent_root() {
+  local marker="$root.native-owner.json" temporary
+  [[ -n "$installation" && -f "$marker" && ! -L "$marker" ]] || return 0
+  jq -e --arg id "$installation" --arg name "$native_owner" '.installation==$id and .username==$name' "$marker" >/dev/null || return 0
+  temporary=$(mktemp "$marker.XXXXXX")
+  jq --arg root "$root" '.agentRoot=$root | del(.agentRemovedAt)' "$marker" > "$temporary"
+  sync -f "$temporary"; mv -T -- "$temporary" "$marker"
 }
 
 prepare_certificate() {
@@ -364,9 +392,13 @@ install_agent() {
     die 'The Magnus of this release accepts node keys only: an agent without a node key needs a one-time enrollment token, and none was given; nothing was changed'
   fi
   [[ ! -L "$root" ]] || die 'The agent directory cannot be a symlink'
+  local created=false
+  if fresh_agent_root; then created=true; fi
   install -d -m 0700 "$root"
   prepare_certificate
   prepare_native_owner
+  # Recorded before anything is installed in it, so even an interrupted install can be removed.
+  if [[ "$created" == true ]]; then claim_agent_root; fi
   if write_environment; then changed=true; fi
   current=$(installed_version)
   if [[ "$current" != "$wanted" ]]; then
@@ -445,13 +477,130 @@ host_key() {
   ssh-keygen -lf "$file" | awk '{print $2}' | jq -Rc '{fingerprint:.}'
 }
 
+# Removes what this installation's installer set up on this host, and nothing else. The ownership
+# record beside the agent directory (ROOT.native-owner.json) must name this installation:
+# - the agent (its service, unit and directory) and its staged Ardent packages (ROOT-artifacts)
+#   go when the record says this installation created that directory (agentRoot);
+# - the native account and its home go when the record says this installation created the
+#   account, its UID, home and groups are still the recorded ones, no other agent on this host
+#   names it, no agent stays behind using it, and it holds no Ardent profile, unless the request
+#   deletes profiles (deleteProfiles: uninstall --purge --delete-agent-profiles, after the typed
+#   installation name);
+# - the record goes once nothing it describes is left.
+# A fleet agent installed by other tooling (no record), a record from a release before
+# installation records, or one naming another installation keeps everything. Each item kept is
+# reported with its reason; the output is one JSON document {removed:[...], kept:[...]}.
 remove_agent() {
   need_root
-  systemctl disable --now magnus-agent >/dev/null 2>&1 || true
-  rm -f -- "$unit"
-  systemctl daemon-reload
-  [[ ! -e "$root" ]] || rm -rf -- "$root"
-  jq -nc '{removed:true}'
+  local marker="$root.native-owner.json" artifacts="$root-artifacts" record='' owned=false agent=false present=false why=''
+  local owner='' uid='' home='' profile_root='' profiles=0 account=keep account_reason='' delete_profiles entry other name
+  local -a removed=() kept=()
+  delete_profiles=$(jq -r '.deleteProfiles==true' <<< "$request")
+  removed_item() { removed+=("$(jq -nc --arg what "$1" '$what')"); }
+  kept_item() { kept+=("$(jq -nc --arg code "$1" --arg what "$2" --arg reason "$3" '{code:$code,what:$what,reason:$reason}')"); }
+  [[ ! -L "$root" && ! -L "$marker" && ! -L "$artifacts" ]] || die 'The agent directory, its ownership record or its staged packages is a symbolic link; nothing was removed'
+  if [[ -e "$marker" ]]; then
+    [[ -f "$marker" && -O "$marker" ]] && record=$(jq -ce 'select(.schema==1 and (.username|type=="string"))' "$marker" 2>/dev/null) ||
+      die "The ownership record $marker is unreadable or not root's; nothing was removed"
+  fi
+  if [[ -n "$record" && -n "$installation" ]] && jq -e --arg id "$installation" '.installation==$id' <<< "$record" >/dev/null; then owned=true; fi
+  if [[ "$owned" == true ]] && jq -e --arg root "$root" '.agentRoot==$root' <<< "$record" >/dev/null; then agent=true; fi
+  if [[ -z "$record" ]]; then why="no ownership record $marker shows that the Hive installer set it up"
+  elif [[ "$owned" != true ]] && jq -e 'has("installation")' <<< "$record" >/dev/null; then why="the ownership record $marker names Hive installation $(jq -r .installation <<< "$record"), not ${installation:-this one}"
+  elif [[ "$owned" != true ]]; then why="the ownership record $marker names no installation (an earlier release wrote it), so Hive cannot prove which installation created it"
+  else why="the ownership record $marker does not show that this installation created $root"; fi
+  [[ -e "$root" || -f "$unit" ]] && present=true
+  # The service must be the one the installer set up for this directory.
+  if [[ "$agent" == true && -f "$unit" ]] && ! grep -qxF -- "WorkingDirectory=$root" "$unit"; then
+    agent=false; why="the unit $unit runs another agent directory"
+  fi
+
+  # Decide everything before changing anything. The account's profiles are counted from the
+  # agent's own settings, read before its directory goes.
+  if [[ "$owned" == true ]]; then
+    owner=$(jq -r .username <<< "$record")
+    [[ "$owner" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die 'Invalid native owner in the ownership record; nothing was removed'
+    if ! id "$owner" >/dev/null 2>&1; then account=absent
+    else
+      uid=$(id -u "$owner"); home=$(getent passwd "$owner" | cut -d: -f6)
+      if [[ "$present" == true && "$agent" != true ]]; then account_reason="the Magnus agent at $root, which this installation did not create, still uses it"
+      elif [[ "$uid" == 0 || "$uid" != "$(jq -r '.uid // ""' <<< "$record")" ]]; then account_reason="its UID is not the recorded $(jq -r '.uid // "none"' <<< "$record")"
+      elif [[ $(id -nG "$owner") != "$owner" ]]; then account_reason='it has groups besides its own'
+      elif [[ "$home" != /* || "$home" == / || "$home" =~ (^|/)\.\.?(/|$) || ! -d "$home" || -L "$home" ]]; then account_reason="its home $home is not a plain directory"
+      elif [[ -n $(jq -r '.home // ""' <<< "$record") && $(jq -r .home <<< "$record") != "$home" ]]; then account_reason="its home is no longer the recorded $(jq -r .home <<< "$record")"
+      elif [[ $(stat -c %u -- "$home") != "$uid" ]]; then account_reason="its home $home belongs to another account"
+      else
+        for other in "$(dirname -- "$root")"/*.native-owner.json "$(dirname -- "$root")"/*/.env; do
+          [[ -f "$other" && "$other" != "$marker" && "$other" != "$root/.env" ]] || continue
+          if [[ "$other" == *.native-owner.json ]]; then name=$(jq -r '.username // ""' "$other" 2>/dev/null || true)
+          else name=$(get "$other" ARDENT_OWNER_USER); fi
+          if [[ "$name" == "$owner" ]]; then account_reason="$other names it too"; break; fi
+        done
+      fi
+      if [[ -z "$account_reason" ]]; then
+        [[ ! -f "$root/.env" ]] || profile_root=$(get "$root/.env" ARDENT_HOME)
+        profile_root=${profile_root:-$home/.ardent}
+        if [[ -d "$profile_root/profiles" ]]; then profiles=$(find "$profile_root/profiles" -mindepth 1 -maxdepth 1 | wc -l); fi
+        if [[ -d "$home/.config/systemd/user" ]]; then profiles=$((profiles + $(find "$home/.config/systemd/user" -maxdepth 1 -name 'ardent@*.service' | wc -l))); fi
+        if ((profiles > 0)) && [[ "$delete_profiles" != true ]]; then account=profiles; else account=delete; fi
+      fi
+    fi
+  fi
+
+  # The agent: its service, unit and directory.
+  if [[ "$present" == true && "$agent" == true ]]; then
+    systemctl disable --now magnus-agent >/dev/null 2>&1 || true
+    rm -f -- "$unit"
+    systemctl daemon-reload
+    rm -rf --one-file-system -- "$root"
+    [[ ! -e "$root" ]] || die "$root could not be deleted completely; review it"
+    removed_item "the Magnus agent service and $root"
+  elif [[ "$present" == true ]]; then
+    kept_item agent "the Magnus agent at $root" "$why"
+  fi
+  # Its staged Ardent packages: only the directories the installer stages, and its own staging.
+  if [[ "$agent" == true && -d "$artifacts" ]]; then
+    for entry in "$artifacts"/* "$artifacts"/.stage-*; do
+      [[ -e "$entry" || -L "$entry" ]] || continue
+      if [[ -d "$entry" && ! -L "$entry" && $(basename -- "$entry") =~ ^([0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{16}|\.stage-[A-Za-z0-9]{6})$ ]]; then rm -rf --one-file-system -- "$entry"; fi
+    done
+    if rmdir -- "$artifacts" 2>/dev/null; then removed_item "the staged Ardent packages in $artifacts"
+    else kept_item artifacts "$artifacts" 'it holds files the installer did not stage'; fi
+  elif [[ -d "$artifacts" ]]; then
+    kept_item artifacts "$artifacts" "it goes only with an agent this installation created, and $why"
+  fi
+  # The account and its home, with every Ardent profile in it.
+  if [[ "$owned" == true ]]; then
+    case "$account" in
+      delete)
+        loginctl disable-linger "$owner" >/dev/null 2>&1 || true
+        systemctl stop "user@$uid.service" >/dev/null 2>&1 || true
+        loginctl terminate-user "$owner" >/dev/null 2>&1 || true
+        pkill -KILL -u "$uid" >/dev/null 2>&1 || true
+        if userdel "$owner"; then
+          if getent group "$owner" >/dev/null 2>&1; then groupdel "$owner" >/dev/null 2>&1 || true; fi
+          rm -rf --one-file-system -- "$home"
+          if ((profiles > 0)); then removed_item "the $owner account and its home $home with $profiles Ardent profile entries"
+          else removed_item "the $owner account and its home $home"; fi
+          account=absent
+        else kept_item account "the $owner account" 'userdel refused it; see above'; fi;;
+      profiles) kept_item profiles "the $owner account and its home $home" "it holds $profiles Ardent profile entries; --delete-agent-profiles deletes them";;
+      keep) kept_item account "the $owner account" "$account_reason";;
+    esac
+    if [[ "$account" == absent && ! -e "$root" && ! -e "$artifacts" ]]; then rm -f -- "$marker"; removed_item "the ownership record $marker"
+    elif [[ "$agent" == true ]]; then
+      # The account stays with its profiles: the record keeps guarding it, and notes that the agent is gone.
+      entry=$(mktemp "$marker.XXXXXX")
+      jq --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.agentRemovedAt=$at' "$marker" > "$entry"
+      sync -f "$entry"; mv -T -- "$entry" "$marker"
+      kept_item record-guard "the ownership record $marker" 'it guards the account that stays'
+    else
+      kept_item record "the ownership record $marker" 'what it describes is still on this host'
+    fi
+  elif [[ -n "$record" ]]; then
+    kept_item record "the ownership record $marker and the $(jq -r .username <<< "$record") account it names" "$why"
+  fi
+  jq -n --argjson removed "$(printf '%s\n' "${removed[@]}" | jq -sc .)" --argjson kept "$(printf '%s\n' "${kept[@]}" | jq -sc .)" '{removed:$removed,kept:$kept}'
 }
 
 # The fleet-wide secrets, copied to every agent of a release pinning Magnus before 3.0.0: mixed
