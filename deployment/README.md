@@ -454,6 +454,13 @@ and `magnus-agent remove` remove only what that record shows this installation c
 | The `hive-agent` account and its home | The record names this installation; the account's UID, home and groups are still the recorded ones; no other agent on the host names it; and it holds no Ardent profile (`~/.ardent/profiles/*` or an `ardent@` user unit). With profiles, only `uninstall --purge --delete-agent-profiles` or `magnus-agent remove --delete-agent-profiles` deletes it, after you type the installation name |
 | The ownership record | Nothing it describes is left. While the account stays with its profiles, the record stays too and notes that the agent was removed; a later install of the same installation takes the account over again, and backups report its profiles as not included |
 
+After `uninstall --purge`, which also deletes Magnus's data, a later install of the same
+installation over an account that kept its profiles installs and starts the agent in that account, but the guided full-node enrollment (`magnus-agent enroll`, and
+`prepare-ardent`) then stops with "Existing work needs a prior reviewed Ardent scope": the new
+Magnus has no record of those profiles, so it does not adopt them on its own. Review that node in
+Magnus's independent workflow (see [Magnus host agents](FULL.md#magnus-host-agents)), or, when you
+do not need the profiles, uninstall with `--purge --delete-agent-profiles` and install again.
+
 Anything else stays, and the command lists it with the reason and exits non-zero (a purge still
 finishes): an agent other tooling installed, such as a separately managed fleet agent (it has no
 record); an account or agent recorded for another installation; and an agent installed by an
