@@ -97,7 +97,11 @@ admin_access_files_inputs_digest() (
     if [[ -d "$path" ]]; then
       printf '%s\0' "$path"; stat -c '%a:%u:%g' -- "$path" || return 1
       find "$path" -mindepth 1 -type d -print0 | sort -z | while IFS= read -r -d '' item; do printf '%s\0' "$item"; stat -c '%a:%u:%g' -- "$item" || exit 1; done || return 1
-      find "$path" -type f -print0 | sort -z | while IFS= read -r -d '' item; do admin_access_files_input_file "$item" "$journal" || exit 1; done || return 1
+      # As deployment_inputs_digest: the Caddyfile copies refresh_ingress keeps are not inputs.
+      find "$path" -type f -print0 | sort -z | while IFS= read -r -d '' item; do
+        [[ "$item" != "$directory/config/ingress/Caddyfile.previous" && "$item" != "$directory/config/ingress/Caddyfile.pre-registry" ]] || continue
+        admin_access_files_input_file "$item" "$journal" || exit 1
+      done || return 1
     else admin_access_files_input_file "$path" "$journal" || return 1; fi
   done <<< "$rows" | sha256sum | cut -d ' ' -f1
 )
