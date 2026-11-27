@@ -67,6 +67,19 @@ grep -qx 'disable --now hive-console-certificate.timer' "$temporary/systemctl.ca
 [[ ! -e "$XDG_STATE_HOME/hive/uninstall-proof/controller.json" ]] || fail 'The hive command record was kept'
 grep -q 'its data is kept' "$temporary/result" || fail 'uninstall did not say the data is kept'
 
+# The note that the installation file still sets retention.schedule is for a file that stays:
+# uninstall prints it, a purge, which deletes the file right after, does not.
+fixture
+jq '.retention={keep:5,schedule:"03:40"}' "$config" > "$config.next"; mv -- "$config.next" "$config"
+hive uninstall --yes < /dev/null > "$temporary/result" 2>&1 || { cat "$temporary/result" >&2; fail 'uninstall --yes with retention.schedule failed'; }
+grep -qF "The installation file $config still sets retention.schedule" "$temporary/result" || { cat "$temporary/result" >&2; fail 'uninstall did not say that the kept file still schedules pruning'; }
+fixture
+jq '.retention={keep:5,schedule:"03:40"}' "$config" > "$config.next"; mv -- "$config.next" "$config"
+printf 'uninstall-proof\n' | hive uninstall --purge --yes > "$temporary/result" 2>&1 || { cat "$temporary/result" >&2; fail 'A purge with retention.schedule failed'; }
+grep -q 'Daily backup pruning is disabled' "$temporary/result" || { cat "$temporary/result" >&2; fail 'The purge did not remove the prune line'; }
+! grep -q 'still sets retention.schedule' "$temporary/result" || { cat "$temporary/result" >&2; fail 'The purge spoke of the installation file it deletes as if it stayed'; }
+[[ ! -e "$config" ]] || fail 'The purge kept the installation file'
+
 # A certificate service for another installation is never touched.
 fixture
 sed -i "s#--config $config#--config /opt/other/installation.json#" "$temporary/systemd/hive-console-certificate.service"
@@ -146,4 +159,4 @@ grep -q 'remove supports cindertrace-collector so far' "$temporary/result" || { 
   grep -qx -- "compose -f $directory/compose.json rm --stop --force -- cindertrace-collector" "$temporary/docker.calls" || exit 4
   [[ -f "$directory/data/oathweave/store" ]] || exit 5
 ) || fail "remove did not refuse or remove as expected (status $?)"
-printf 'Passed: uninstall shows its plan, removes containers, the prune line, the renewal service and the command record while keeping data; --purge deletes only after the typed name; hosts refuse foreign directories and open transactions; remove refuses what it does not support.\n'
+printf 'Passed: uninstall shows its plan, removes containers, the prune line (noting a retention.schedule only in a file it keeps), the renewal service and the command record while keeping data; --purge deletes only after the typed name; hosts refuse foreign directories and open transactions; remove refuses what it does not support.\n'

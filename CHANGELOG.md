@@ -6,6 +6,27 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ardent setup` on a node that is not enrolled no longer blocks the profile name.** It sent the
+  package installation anyway, Magnus refused it (`503`), and the receipt it kept at `installing`
+  refused every later run of that profile ("interrupted around a request whose outcome needs
+  review"). Setup now reads Magnus's enrollment and admission records for the node first and stops,
+  with nothing sent and no receipt written, unless its Ardent scope is active, the node is enrolled
+  (or draining for enrollment) and its admission is open; it reads them again right before the
+  package installation and **New Agent**. A package installation that setup does not send (the
+  node became unenrolled, its admission closed or it holds an unsettled command), or that Magnus
+  refuses while the node then holds no command and no installed package, is recorded as
+  `install-refused` with the reason (`ardent status` shows it), and the next `ardent setup` starts
+  over. A reply that never came back still keeps the `installing` hold.
+- New `ardent setup --retry-install` recovers a receipt left at `installing`, including those that
+  earlier releases left after such a refusal: once Magnus holds no command on the node and the
+  profile does not exist, it installs the same verified package again and continues. Receipts at
+  `creating` or later stay held. See `deployment/FULL.md`, "Create an Ardent assistant".
+- `uninstall --purge` no longer prints "the installation file still sets retention.schedule" right
+  before it deletes that file. `uninstall` without `--purge` keeps the file and still names it in
+  the note.
+
 ## [3.15.2] - 2026-11-27
 
 Emberpath client keys for agents, and Emberpath asks for a step-up only before a change. Pins

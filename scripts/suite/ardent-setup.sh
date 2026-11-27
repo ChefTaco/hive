@@ -69,10 +69,35 @@ hive_ardent_wait() { # OPERATION_ID
   hive_die "Operation $operation is still running. Run ./hive.sh ardent setup --profile $HIVE_ARDENT_PROFILE again to follow the same operation"
 }
 
+# Magnus admits the package installation and New Agent only on a node enrolled for managed Ardent
+# actions (its Ardent scope active, the whole node draining for enrollment or enrolled) whose
+# admission is open. Check that before anything is sent, so the refusal never becomes a receipt.
+hive_ardent_require_enrolled() { # INVENTORY
+  local enrollment
+  enrollment=$(jq -c '.enrollment // null' <<< "$1")
+  [[ "$enrollment" != null ]] || hive_die 'Magnus did not report whether this node is enrolled for managed Ardent actions; no setup request was sent. Check Magnus and the host agent, then run ardent setup again'
+  if ! jq -e '.ardentScope=="active" and (.wholeNode=="draining" or .wholeNode=="enrolled")' <<< "$enrollment" >/dev/null; then
+    hive_die "$(jq -r '"This node is not enrolled for managed Ardent actions in Magnus (Ardent scope \(.ardentScope), node enrollment \(.wholeNode)), so Magnus would refuse the package installation."' <<< "$enrollment") Enroll it first: ./hive.sh magnus-agent enroll, or magnus-agent prepare-ardent on a fresh single-host installation (deployment/FULL.md#magnus-host-agents). No setup request was sent"
+  fi
+  if jq -e '.admissionClosed==true' <<< "$enrollment" >/dev/null; then
+    hive_die 'Magnus has closed admission on this node for maintenance (an enrollment, upgrade or release in progress), so it would refuse the package installation. Run ardent setup again once it has finished; no setup request was sent'
+  fi
+}
+
+# Receipt phases written before any profile was requested: planned (nothing sent), install-refused
+# (Magnus refused the package installation and then held no command and no package) and installing
+# (the package installation was sent and returned no result). With no command held on the node and
+# no such profile, setup starts again after the first two by itself, and after installing only with
+# --retry-install, once the operator has reviewed it. Creating and later phases stay held.
+hive_ardent_retryable_phase() { [[ "$1" == planned || "$1" == installing || "$1" == install-refused ]]; }
+
 hive_ardent_check() {
   local result operation phase
   if [[ -n "${HIVE_ARDENT_STATE:-}" ]]; then
     phase=$(jq -r .phase <<< "$HIVE_ARDENT_STATE")
+    if hive_ardent_retryable_phase "$phase"; then
+      hive_die "Setup of this profile stopped before its profile was requested (receipt phase $phase). Run ./hive.sh ardent setup --profile $HIVE_ARDENT_PROFILE to continue it"
+    fi
     case "$phase" in profile-ready|complete|checking) ;; *) hive_die 'The retained deployment needs review before a model check. Use ardent status, setup or explicit resume; its intent was preserved';; esac
     operation=$(jq -er '.operationId|select(type=="string" and length>0)' <<< "$HIVE_ARDENT_STATE") || hive_die 'The setup receipt has no owning deployment operation'
     result=$(hive_ardent_api operation "$operation") || hive_die 'The owning deployment could not be verified; its intent was preserved'
@@ -91,8 +116,9 @@ hive_ardent_check() {
 hive_ardent() (
   umask 077
   local subcommand=${1:-setup} requested_operation=${2:-} record inventory existing original parent lock phase plan operation result installation dependencies code
-  case "$subcommand" in setup|status|check|resume) ;; *) hive_die 'Use: ardent setup|status|check|resume OPERATION_ID [--profile NAME] [--model-url URL --model MODEL]';; esac
+  case "$subcommand" in setup|status|check|resume) ;; *) hive_die 'Use: ardent setup|status|check|resume OPERATION_ID [--profile NAME] [--model-url URL --model MODEL] [--retry-install]';; esac
   [[ "$subcommand" == setup || ( -z "$HIVE_ARDENT_MODEL_URL" && -z "$HIVE_ARDENT_MODEL" ) ]] || hive_die 'Model settings apply only to ardent setup'
+  [[ "$subcommand" == setup || "${HIVE_ARDENT_RETRY_INSTALL:-false}" != true ]] || hive_die '--retry-install applies only to ardent setup'
   [[ $# -le 2 && ( "$subcommand" == resume || -z "$requested_operation" ) ]] || hive_die 'Unexpected Ardent arguments'
   [[ "$subcommand" != resume || -n "$requested_operation" ]] || hive_die 'ardent resume needs the retained operation ID'
   [[ "$HIVE_ARDENT_PROFILE" =~ ^[a-z][a-z0-9_-]{0,47}$ ]] || hive_die 'Use a profile ID of 1-48 lowercase letters, digits, underscores or hyphens, starting with a letter'
@@ -147,6 +173,29 @@ hive_ardent() (
   jq -e '.reachable==true and (.commandOwners|length==0)' <<< "$inventory" >/dev/null || hive_die 'This node is unavailable or held by existing work. Review its owners in Magnus; no work was replayed'
   if [[ "$subcommand" == check ]]; then hive_ardent_check; return; fi
 
+  # A receipt left before any profile was requested does not block the profile for good. The node
+  # holds no command (checked above), so nothing of the earlier run is running: setup starts again,
+  # reusing the retained model settings unless new ones are given. An installing receipt (earlier
+  # releases also left one when Magnus refused the installation) needs --retry-install.
+  if [[ -n "$HIVE_ARDENT_STATE" ]]; then phase=$(jq -r .phase <<< "$HIVE_ARDENT_STATE"); else phase=''; fi
+  if [[ "${HIVE_ARDENT_RETRY_INSTALL:-false}" == true && -n "$phase" ]] && ! hive_ardent_retryable_phase "$phase"; then
+    hive_die "--retry-install applies only to a setup that stopped at its package installation; this profile's receipt is at $phase"
+  fi
+  if [[ "$subcommand" == setup && -n "$phase" ]] && hive_ardent_retryable_phase "$phase"; then
+    if [[ "$phase" == installing && "${HIVE_ARDENT_RETRY_INSTALL:-false}" != true ]]; then
+      hive_die "An earlier setup run sent the package installation and got no result back (receipt phase installing); no request was repeated. Magnus holds no command on this node now, so it is not running. Review the installation in Magnus > Ardent > Installations, then run ./hive.sh ardent setup --profile $HIVE_ARDENT_PROFILE --retry-install to install the package again and continue"
+    fi
+    jq -e --arg profile "$HIVE_ARDENT_PROFILE" 'all(.profiles[]; .id!=$profile)' <<< "$inventory" >/dev/null ||
+      hive_die 'This profile exists although its setup receipt shows that none was requested; it is preserved. Inspect it in Magnus and its receipt with ./hive.sh ardent status'
+    printf 'Setup of profile %s stopped earlier at %s, before the profile was requested, and Magnus holds no command on this node: starting it again.\n' \
+      "$HIVE_ARDENT_PROFILE" "$(jq -r 'if .phase=="install-refused" then "a refused package installation (\(.refusal.code // "refused"))" elif .phase=="installing" then "its package installation" else "its plan" end' <<< "$HIVE_ARDENT_STATE")"
+    if [[ -z "$HIVE_ARDENT_MODEL_URL" && -z "$HIVE_ARDENT_MODEL" ]]; then
+      HIVE_ARDENT_MODEL_URL=$(jq -r '.model.base_url // ""' <<< "$HIVE_ARDENT_STATE")
+      HIVE_ARDENT_MODEL=$(jq -r '.model.model // ""' <<< "$HIVE_ARDENT_STATE")
+    fi
+    HIVE_ARDENT_STATE=''
+  fi
+
   if [[ -n "$HIVE_ARDENT_STATE" ]]; then
     HIVE_ARDENT_MODEL_JSON=$(jq -c .model <<< "$HIVE_ARDENT_STATE")
     if [[ -n "$HIVE_ARDENT_MODEL_URL" || -n "$HIVE_ARDENT_MODEL" ]]; then
@@ -177,6 +226,7 @@ hive_ardent() (
   else
     [[ "$subcommand" != resume ]] || hive_die 'No retained Ardent operation belongs to this profile'
     jq -e --arg profile "$HIVE_ARDENT_PROFILE" 'all(.profiles[]; .id!=$profile)' <<< "$inventory" >/dev/null || hive_die 'This profile already exists and is preserved. Choose another --profile, or manage it through Magnus'
+    hive_ardent_require_enrolled "$inventory"
     if [[ -z "$HIVE_ARDENT_MODEL_URL" || -z "$HIVE_ARDENT_MODEL" ]]; then
       [[ ${HIVE_ARDENT_INTERACTIVE:-true} == true && -t 0 ]] || hive_die 'Supply --model-url URL and --model NAME for unattended Ardent setup'
     fi
@@ -191,7 +241,22 @@ hive_ardent() (
       --arg digest "$(jq -er .requestSHA256 <<< "$plan")" '{schema:1,installation:$installation,nodeId:$node,profile:$profile,model:$model,requestSHA256:$digest,phase:"planned"}')"
     if ! jq -e '.installed==true' <<< "$inventory" >/dev/null; then
       hive_ardent_phase installing
-      result=$(hive_ardent_api package-install) || hive_die 'Package installation did not return a completed receipt. Inspect its command in Magnus before continuing'
+      if ! result=$(hive_ardent_api package-install); then
+        # Refused, with the node then holding no command and no package: nothing was installed or is
+        # running. The receipt records the refusal, and the next setup run starts again.
+        if code=$(jq -er 'select(.success==false and .error.ambiguous==false) | .error.code | select(test("^ARDENT_SETUP_[A-Z_]{1,64}$"))' <<< "$result" 2>/dev/null); then
+          hive_ardent_write_state "$(jq -c --argjson error "$(jq -c '.error' <<< "$result")" \
+            '.phase="install-refused" | .refusal=(($error|{code,httpStatus,apiCode}|with_entries(select(.value!=null)))+{at:(now|todate)})' <<< "$HIVE_ARDENT_STATE")"
+          case "$code" in
+            ARDENT_SETUP_PACKAGE_REFUSED) hive_die "Magnus refused the package installation ($code$(jq -r '.error | if .httpStatus then ", HTTP \(.httpStatus)" else "" end + if .apiCode then " \(.apiCode)" else "" end' <<< "$result")), and the node then held no command and no installed package: nothing was installed or created. The receipt records the refusal. Resolve its reason in Magnus (Ardent > Installations), then run ./hive.sh ardent setup --profile $HIVE_ARDENT_PROFILE again";;
+            ARDENT_SETUP_NODE_NOT_ENROLLED) hive_die 'The package installation was not sent: Magnus reports that this node is not enrolled for managed Ardent actions. Enroll it (./hive.sh magnus-agent enroll), then run ardent setup again; nothing was installed or created';;
+            ARDENT_SETUP_ADMISSION_CLOSED) hive_die 'The package installation was not sent: Magnus has closed admission on this node for maintenance. Run ardent setup again once it has finished; nothing was installed or created';;
+            ARDENT_SETUP_NODE_NOT_READY) hive_die 'The package installation was not sent: the node holds a command that has not settled. Review its owners in Magnus (Ardent > Installations), then run ardent setup again; nothing was installed or created';;
+          esac
+          hive_die "The package installation was not sent ($code); nothing was installed or created, and the receipt records the refusal. Check Magnus and the host agent, then run ./hive.sh ardent setup --profile $HIVE_ARDENT_PROFILE again"
+        fi
+        hive_die 'Package installation did not return a completed receipt. Inspect its command in Magnus before continuing'
+      fi
       jq -e '.installed==true' <<< "$result" >/dev/null || hive_die 'Magnus did not verify the installed package; the setup receipt was retained'
     fi
     hive_ardent_phase creating

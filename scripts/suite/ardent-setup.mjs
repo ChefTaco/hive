@@ -13,12 +13,18 @@ const STEP_STATES = new Set(['pending', 'running', 'succeeded', 'skipped', 'fail
 const API_CODES = new Set(['UNAUTHORIZED', 'FORBIDDEN', 'NOT_FOUND', 'VALIDATION_ERROR', 'CONFLICT',
   'DEPENDENCY_UNAVAILABLE', 'ARDENT_NOT_INSTALLED', 'PROFILE_EXISTS', 'PORT_IN_USE', 'OPERATION_RUNNING',
   'OPERATION_NOT_RESUMABLE', 'COMMAND_OWNER_UNSETTLED', 'AGENT_UPGRADE_REQUIRED', 'HIVEMEM_ENROLLMENT_UNAVAILABLE',
-  'EMBERPATH_UNAVAILABLE', 'RESOURCE_LEASE_HELD', 'ARDENT_OUTCOME_UNKNOWN', 'ADMISSION_FENCED']);
+  'EMBERPATH_UNAVAILABLE', 'RESOURCE_LEASE_HELD', 'RESOURCE_LEASE_CONFLICT', 'ARDENT_OUTCOME_UNKNOWN', 'ADMISSION_FENCED',
+  'ARDENT_SCOPE_REQUIRED']);
+// Magnus admits managed Ardent actions only on a node whose Ardent scope is active while the whole
+// node is draining for enrollment or enrolled (assertArdentScope), and only while its admission is open.
+const WHOLE_NODE_STATES = new Set(['legacy', 'draining', 'enrolled']);
 const MAX_RESPONSE = 512 * 1024;
 
 export class ArdentSetupError extends Error {
-  constructor(code, { httpStatus, apiCode, ambiguous = false } = {}) {
+  constructor(code, { httpStatus, apiCode, ambiguous = false, settled = false } = {}) {
     super(code); this.name = 'ArdentSetupError'; this.code = code; this.ambiguous = ambiguous;
+    // A refusal Magnus answered after a POST, where the node was then seen to hold nothing.
+    if (settled) Object.defineProperty(this, 'settled', { value: true });
     if (httpStatus !== undefined) this.httpStatus = httpStatus;
     if (apiCode !== undefined) this.apiCode = apiCode;
   }
@@ -138,13 +144,14 @@ export async function runArdentSetup(raw, { apiSecret, port = '4000', fetchImpl 
   const maxTimeout = request.mode === 'package-install' ? 660_000 : 180_000;
   requireValue(/^[0-9]{1,5}$/.test(String(port)) && Number(port) > 0 && Number(port) <= 65535
     && Number.isSafeInteger(timeoutMs) && timeoutMs >= 1 && timeoutMs <= maxTimeout, 'ARDENT_SETUP_TRANSPORT_INVALID');
-  const base = `https://localhost:${Number(port)}/api/v1/ardent`;
+  const api = `https://localhost:${Number(port)}/api/v1`;
+  const base = api + '/ardent';
   const common = { schema: 1, mode: request.mode, nodeId: request.nodeId, profile: request.profile };
   let postAttempted = false;
   async function call(path, method = 'GET', body, optional = false) {
     let response;
     if (method === 'POST') postAttempted = true;
-    try { response = await fetchImpl(base + path, { method, redirect: 'error', signal: AbortSignal.timeout(method === 'POST' && request.mode === 'package-install' ? packageTimeout : timeoutMs),
+    try { response = await fetchImpl((path.startsWith('/resource-leases/') ? api : base) + path, { method, redirect: 'error', signal: AbortSignal.timeout(method === 'POST' && request.mode === 'package-install' ? packageTimeout : timeoutMs),
       headers: { 'x-api-secret': apiSecret, accept: 'application/json', ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); }
     catch { throw new ArdentSetupError('ARDENT_SETUP_TRANSPORT_FAILED', { ambiguous: method === 'POST' }); }
@@ -161,31 +168,74 @@ export async function runArdentSetup(raw, { apiSecret, port = '4000', fetchImpl 
   }
   const installation = async () => installationView(await call('/installations/' + encodeURIComponent(request.nodeId)), request.nodeId);
   const actionPath = '/installations/' + encodeURIComponent(request.nodeId) + '/profiles/' + encodeURIComponent(request.profile) + '/action';
+  // Whether Magnus would admit a managed Ardent action on this node now, from its own enrollment
+  // and admission records. Reading them changes nothing.
+  const readiness = async () => {
+    const node = encodeURIComponent(request.nodeId);
+    const scope = await call('/resource-leases/enrollment/' + node + '/ardent-scope');
+    const admission = await call('/resource-leases/admission/' + node);
+    requireValue(object(scope) && scope.nodeId === request.nodeId && typeof scope.wholeNodeState === 'string'
+      && object(scope.scope) && ['active', 'pending'].includes(scope.scope.state)
+      && object(admission) && admission.nodeId === request.nodeId && typeof admission.closed === 'boolean');
+    const wholeNode = WHOLE_NODE_STATES.has(scope.wholeNodeState) ? scope.wholeNodeState : 'unknown';
+    const enrolled = scope.scope.state === 'active' && ['draining', 'enrolled'].includes(wholeNode);
+    return { ardentScope: scope.scope.state, wholeNode, admissionClosed: admission.closed, ready: enrolled && !admission.closed };
+  };
+  const requireReady = async () => {
+    const ready = await readiness();
+    requireValue(ready.ardentScope === 'active' && ['draining', 'enrolled'].includes(ready.wholeNode), 'ARDENT_SETUP_NODE_NOT_ENROLLED');
+    requireValue(!ready.admissionClosed, 'ARDENT_SETUP_ADMISSION_CLOSED');
+  };
+  // A command that just finished (such as this setup's own package install) releases its owner
+  // shortly after it answers. Wait a bounded time for reserved or running owners to settle; an
+  // unknown owner is held work and is returned at once, as is any owner still there afterwards.
+  const settled = async () => {
+    let current = await installation();
+    for (const deadline = Date.now() + settleMs; current.reachable && current.commandOwners.length > 0
+      && current.commandOwners.every(owner => owner.state === 'reserved' || owner.state === 'running') && Date.now() < deadline;) {
+      await sleep(pollMs);
+      current = await installation();
+    }
+    return current;
+  };
   try {
     let result;
     if (request.mode === 'plan') {
       const payload = ardentSetupDeployPayload(request);
       result = { ...common, requestSHA256: payloadDigest(payload), model: payload.model };
-    } else if (request.mode === 'inspect') result = { ...common, ...await installation() };
+    } else if (request.mode === 'inspect') {
+      const current = await installation();
+      // Status still answers from a Magnus whose enrollment records cannot be read: null.
+      let enrollment = null;
+      try { enrollment = await readiness(); } catch { /* reported as null; setup refuses it before any POST */ }
+      result = { ...common, ...current, enrollment };
+    }
     else if (request.mode === 'create' || request.mode === 'package-install') {
-      let current = await installation();
-      // A command that just finished (such as this setup's own package install) releases its owner
-      // shortly after it answers. Wait a bounded time for reserved or running owners to settle; an
-      // unknown owner is held work and refuses at once, as does any owner still there afterwards.
-      for (const deadline = Date.now() + settleMs; current.reachable && current.commandOwners.length > 0
-        && current.commandOwners.every(owner => owner.state === 'reserved' || owner.state === 'running') && Date.now() < deadline;) {
-        await sleep(pollMs);
-        current = await installation();
-      }
+      const current = await settled();
       requireValue(current.reachable && current.commandOwners.length === 0, 'ARDENT_SETUP_NODE_NOT_READY');
       if (request.mode === 'create') {
         requireValue(current.installed && !current.profiles.some(profile => profile.id === request.profile), 'ARDENT_SETUP_PROFILE_CONFLICT');
+        await requireReady();
         const payload = ardentSetupDeployPayload(request); const data = await call('/agents', 'POST', payload);
         requireValue(object(data) && typeof data.operationId === 'string' && UUID.test(data.operationId));
         result = { ...common, operationId: data.operationId, requestSHA256: payloadDigest(payload) };
       } else {
         requireValue(current.stagedPackage !== null && !current.stagedPackageError, 'ARDENT_SETUP_PACKAGE_UNAVAILABLE');
-        const data = await call(actionPath, 'POST', { action: 'package-install' });
+        await requireReady();
+        let data;
+        try { data = await call(actionPath, 'POST', { action: 'package-install' }); }
+        catch (error) {
+          // Magnus answered with a refusal. When the node then holds no command and has no package,
+          // nothing is running and nothing was installed: the install may simply be tried again (it
+          // installs the same verified package). Anything else stays ambiguous.
+          if (!(error instanceof ArdentSetupError) || error.code !== 'ARDENT_SETUP_API_REFUSED' || error.httpStatus === undefined
+            || error.apiCode === 'ARDENT_OUTCOME_UNKNOWN') throw error;
+          let after;
+          try { after = await settled(); } catch { throw error; }
+          if (!after.reachable || after.commandOwners.length > 0 || after.installed) throw error;
+          throw new ArdentSetupError('ARDENT_SETUP_PACKAGE_REFUSED', { httpStatus: error.httpStatus,
+            ...(error.apiCode ? { apiCode: error.apiCode } : {}), settled: true });
+        }
         requireValue(object(data) && data.installed === true && typeof data.changed === 'boolean');
         requireValue(version(data.version) === current.stagedPackage.version);
         result = { ...common, installed: true, version: data.version, changed: data.changed };
@@ -217,7 +267,7 @@ export async function runArdentSetup(raw, { apiSecret, port = '4000', fetchImpl 
     return result;
   } catch (error) {
     if (error instanceof ArdentSetupError) {
-      if (postAttempted) error.ambiguous = true;
+      if (postAttempted && !error.settled) error.ambiguous = true;
       throw error;
     }
     throw new ArdentSetupError('ARDENT_SETUP_FAILED', { ambiguous: postAttempted });

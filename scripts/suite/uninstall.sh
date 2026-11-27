@@ -121,7 +121,8 @@ hive_uninstall() {
     fi
   fi
   if [[ "$schedule" == true ]]; then
-    (HIVE_CONFIG=$HIVE_OPERATOR_CONFIG; hive_retention_schedule_disable) || { status=1; printf 'Hive: the daily prune line was not removed; remove it with crontab -e.\n' >&2; }
+    # A purge deletes the installation file below, so its retention.schedule is no longer worth a note.
+    (HIVE_CONFIG=$HIVE_OPERATOR_CONFIG HIVE_RETENTION_FILE_DELETED=$purge; hive_retention_schedule_disable) || { status=1; printf 'Hive: the daily prune line was not removed; remove it with crontab -e.\n' >&2; }
   fi
   if [[ "$certificate" == true ]]; then
     local systemd=${HIVE_SYSTEMD_DIRECTORY:-/etc/systemd/system}

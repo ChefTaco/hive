@@ -1302,7 +1302,14 @@ and consent:
 
 Use `--config FILE` when this controller manages several installations. The current flow selects
 Magnus on the console host, with HiveMem and Oathweave configured. It never grants enrollment
-capabilities itself: use the host-agent enrollment workflow first.
+capabilities itself: use the host-agent enrollment workflow first. Before it asks for anything or
+sends a request, setup reads Magnus's enrollment and admission records for the node (`GET
+/api/v1/resource-leases/enrollment/NODE/ardent-scope` and `/admission/NODE`) and stops, with
+nothing sent and no receipt written, unless the node's Ardent scope is active, the node is
+enrolled (or draining for enrollment, as after `magnus-agent prepare-ardent`) and its admission is
+open: Magnus refuses the package installation and **New Agent** on any other node. Run
+`./hive.sh magnus-agent enroll` first, or wait for the maintenance that closed admission.
+`ardent status` shows the same reading as `inventory.enrollment`.
 
 An existing profile without this controller's setup receipt is preserved and refused; choose a
 new name or manage it in Magnus. Repeating completed setup reads its receipt and does not recreate
@@ -1311,6 +1318,23 @@ A failed operation needs review, then explicit `./hive.sh ardent resume OPERATIO
 Magnus skips steps it already completed and refuses unresolved command owners. A request interrupted
 before its operation ID was retained remains held for independent review. Do not delete its
 protected `ardent-setup/NAME.json` beside the owning installation file to force another creation.
+
+Setup that stopped before the profile was requested does not hold the profile name:
+
+- **Refused package installation.** When setup does not send the package installation (the node
+  became unenrolled, its admission closed or it holds an unsettled command), or Magnus refuses it
+  and afterwards the node holds no command and no installed package, the receipt records
+  `phase: "install-refused"` with the reason in `refusal` (`ardent status` shows it). Nothing was
+  installed or created. Resolve the reason and run `./hive.sh ardent setup --profile NAME` again:
+  it starts over, with the retained model settings unless you give new ones.
+- **Package installation without a result** (`phase: "installing"`). A lost reply may hide work
+  that is still running, so setup does not repeat it by itself. Releases up to 3.15.2 also left
+  this phase when Magnus refused the installation, as on a node that was not enrolled. Once
+  Magnus holds no command on the node (setup checks; Magnus > Ardent > Installations lists command
+  owners) and the profile does not exist, review the installation and run
+  `./hive.sh ardent setup --profile NAME --retry-install`. It installs the same verified package
+  again (or skips it when the package is now installed) and continues. It applies only to this
+  phase; a receipt at `creating` or later stays held.
 The `check` command performs a new real inference probe; it does not resume or replay a failed task.
 
 ### Agent dependencies

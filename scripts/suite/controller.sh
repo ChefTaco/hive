@@ -211,6 +211,9 @@ assistant profile through Magnus, including its identity, HiveMem, model connect
 It asks for an OpenAI-compatible model API URL and model name; --model-url URL --model NAME
 supplies them unattended. --profile NAME chooses another new profile. Existing profiles are
 preserved. Repeating setup follows its retained operation; uncertain requests are never repeated.
+A setup Magnus refused before the profile was requested (such as on a node not yet enrolled) runs
+again by itself; --retry-install repeats a package installation that returned no result, once
+Magnus holds no command on the node.
 ardent status shows the profile, retained setup and the agent dependencies Magnus resolved, check
 tests its real model connection, and resume OPERATION_ID explicitly resumes a reviewed failed
 operation without repeating completed steps. doctor lists the same agent dependencies.
@@ -1086,7 +1089,7 @@ hive_status_hosts() { # REGISTRY_REPORT
 hive_main() {
   local command=install confirmed=false interactive=true hold_on_failure=false
   HIVE_ADMIN_ACCESS_SUDO_FILE=''
-  HIVE_ARDENT_PROFILE=assistant HIVE_ARDENT_MODEL_URL='' HIVE_ARDENT_MODEL=''
+  HIVE_ARDENT_PROFILE=assistant HIVE_ARDENT_MODEL_URL='' HIVE_ARDENT_MODEL='' HIVE_ARDENT_RETRY_INSTALL=false
   HIVE_RETENTION_KEEP='' HIVE_RETENTION_KEEP_DAYS='' HIVE_RETENTION_KEEP_FULL='' HIVE_RETENTION_APPLY=false HIVE_RETENTION_AT='' HIVE_RETENTION_CONTROLLER='' HIVE_RETENTION_TRIGGER='' HIVE_OPERATOR_CONFIG=''
   HIVE_ARCHIVE='' HIVE_RECONCILIATION='' HIVE_NATIVE_RECOVERY_FILE='' HIVE_NATIVE_RECOVERY_INPUT=null HIVE_NATIVE_RECOVERY_CONFIGURATION_SHA='' HIVE_NATIVE_RECOVERY_MANIFEST_SEMANTIC_SHA='' HIVE_NATIVE_BACKUP_TOOL='' HIVE_ALLOW_MIGRATIONS=false HIVE_RELAX_AUTH_LIMITS=false HIVE_BACKUP_STOPPED=false HIVE_PREPARE_RECONCILIATION=false
   HIVE_CONFIG='' HIVE_VERSION='' HIVE_MANIFEST='' HIVE_SIGNATURE='' HIVE_TRUST_KEY='' HIVE_CINDERTRACE_SOURCES='' HIVE_CINDERTRACE_RUN=false HIVE_AGENT_TARGET='' HIVE_AGENT_SSH_CONFIG='' HIVE_AGENT_SUDO_FILE='' HIVE_AGENT_INSTALL_NODE=false HIVE_AGENT_TRUST=false
@@ -1156,6 +1159,7 @@ hive_main() {
         (($#>=2)) && [[ -n $2 && $2 != --* ]] || hive_die "Missing value: $1"
         case $1 in --profile) HIVE_ARDENT_PROFILE=$2;; --model-url) HIVE_ARDENT_MODEL_URL=$2;; --model) HIVE_ARDENT_MODEL=$2;; esac
         shift 2;;
+      --retry-install) [[ "$command" == ardent ]] || hive_die '--retry-install applies only to ardent setup'; HIVE_ARDENT_RETRY_INSTALL=true; shift;;
       --)
         [[ "$command" == admin-access ]] || hive_die 'Unexpected option delimiter'
         shift; registry_arguments+=("$@"); break;;
