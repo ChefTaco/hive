@@ -194,8 +194,8 @@ and HiveXUI 0.15.0. Every other pin, the datastore profile and the Hive Registry
   resume and Create agent from definition (Studio > Gallery) ask for the key when the model is an
   Emberpath alias, and an alias agent has **Set Emberpath key** to set or rotate it. Create the key
   in Emberpath > API Keys first (issuing a key asks you to verify your identity). Magnus checks the
-  key with Emberpath and writes it only to the agent profile's `.env`; Magnus and Studio never
-  store, log or return it. Without a key, New Agent answers `400 EMBERPATH_KEY_REQUIRED`.
+  key with Emberpath and writes it only to the agent profile's `.env` (which backups of the profile
+  include, like the rest of it); Magnus and Studio never store, log or return it. Without a key, New Agent answers `400 EMBERPATH_KEY_REQUIRED`.
   Alias agents created before 3.15.2 got no key and every model request failed with 401: give
   them one with Set Emberpath key.
 - **Step-up only before a change.** Emberpath 2.11.0 asks for a recent sign-in only for writes, so
