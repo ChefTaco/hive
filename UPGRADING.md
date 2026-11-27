@@ -190,6 +190,25 @@ installation, which fresh setup has always written but an installation moved wit
 `migrate-native`, extended with `add` or edited by hand may lack. `post-upgrade` adds what is
 missing; see [browser sign-in settings](deployment/FULL.md#browser-sign-in-settings).
 
+3.15.1 pins Oathweave 2.7.0, Emberpath 2.10.0 and HiveXUI 0.14.0, which work only together: HiveXUI
+re-authenticates through Oathweave's `prompt=login` and Emberpath accepts that step-up instead of a
+password. Every other pin is that of 3.15.0. None of the three changes a data format, so the
+upgrade from 3.15.0 needs no `--allow-migrations` (from 3.14.x, the flag of 3.15.0 applies) and a
+code-only rollback to 3.15.0 is allowed.
+
+- **Emberpath signing in through Oathweave (`HIVE_ROUTER_AUTH_MODE=iam-oidc`, as `migrate-native`
+  sets it).** After `post-upgrade`, `POST /api/emberpath/auth/login` and
+  `/api/emberpath/auth/reauthenticate` answer `410 PASSWORD_RELAY_DISABLED`. A script or tool that
+  signs in to Emberpath with an Oathweave password stops working; use an Oathweave token or an
+  Emberpath client key instead. An installation in OS mode keeps its PAM sign-in.
+- **Re-authentication.** Emberpath treats a sign-in as recent for 15 minutes. After that, a
+  credential or policy change (such as issuing an Emberpath API key) shows "Verify your identity":
+  confirm with your password and authenticator code, or with a passkey alone, then submit the
+  change again. Cancelling leaves it undone. Step-ups are kept in memory, so after an Emberpath
+  restart you verify again.
+- **Passkeys.** Account security registers a passkey; "Sign in with a passkey" then needs no
+  password (`IAM_PASSWORDLESS_PASSKEYS`, on by default in Oathweave 2.7.0).
+
 **What `post-upgrade` does** (it runs `./hive.sh console-clients add`), adding only what is
 missing and keeping every key you set:
 
@@ -239,12 +258,49 @@ everything (every fresh installation) shows "nothing to add" and is not changed.
   example an Emberpath key change): it sends you to Oathweave's page again, also with MFA or a
   passkey, and never shows a password form of its own.
 
-**Rolling back.** Undo the settings first, because a rollback restores the pre-upgrade backup,
-which refuses configuration that changed since it was taken: copy the files in
-`config/.browser-signin/STAMP/` back as its `changes.json` lists them (the environment files, and
-`receipt.json` and the plan's `deployment-inputs` file when listed under `pinned`), keeping owner
-and mode, and recreate Oathweave and Emberpath. Then roll back as usual. The browser clients that
-were created stay in Oathweave's store; they are harmless without their policies.
+**Rolling back.** A code-only rollback to 3.15.0 is allowed, but `post-upgrade` changed
+environment files that 3.15.0's own plan pinned, so a rollback with the same configuration stops
+at staging with "Deployment input artifacts changed for this plan". Set a new
+`configurationRevision` in `installation.json` first (a value it has not had before), then roll
+back from the retained 3.15.0 checkout:
+
+```bash
+./hive.sh rollback --config ~/.config/hive/ID/installation.json --release 3.15.0
+```
+
+The added settings stay: 3.15.0's Oathweave and HiveXUI use them as they are, and its Emberpath
+2.9.0 does not know `EMBERPATH_PASSWORD_RELAY`, so its password sign-in works again. If a rollback
+already stopped that way, the transaction stays open (on an installation that fresh setup
+initialized with 3.15.0's plan it cannot close as aborted): put back the pinned files, which are
+the `config` directory of the upgrade's `pre-upgrade-*` backup when nothing else changed
+configuration between that backup and the 3.15.0 plan, and repeat the same rollback command. To
+remove the added settings themselves, use the undo in
+[browser sign-in settings](deployment/FULL.md#browser-sign-in-settings) while nothing else changed
+those files since `post-upgrade`. The browser clients that were created stay in Oathweave's store;
+they are harmless without their policies.
+
+**From 3.14.x, and going back.** An upgrade from 3.14.x crosses 3.15.0's data formats: run it
+with `--allow-migrations`, read "Suite 3.15.0" below first, and keep the `pre-upgrade-*` backup it
+takes, because no code-only rollback reaches 3.14.x. The way back is a restore of that backup, from
+the 3.15.1 release checkout. Restore refuses configuration that changed since the backup ("Secrets/
+configuration changed since backup"), and the upgrade and `post-upgrade` both change it (the
+browser sign-in settings and `config/.browser-signin/`, and HiveMem's
+`config/.memory-identity-renames.json`). So put the archive's configuration back while the
+services are held, between the two restore commands of [backups](deployment/BACKUPS.md#preparing-a-restore-approval):
+
+```bash
+./hive.sh restore --config ~/.config/hive/ID/installation.json --archive pre-upgrade-STAMP --prepare-reconciliation --yes
+# Services are held. Keep the current configuration beside it and put back the archive's:
+sudo mv /opt/hive/config /opt/hive/config.before-restore
+sudo tar -xzf /opt/hive/backups/pre-upgrade-STAMP/state.tar.gz -C /opt/hive --same-owner --same-permissions config
+# Save the printed template as approval.json, review it, set subsequentWritesReconciled to true:
+./hive.sh restore --config ~/.config/hive/ID/installation.json --archive pre-upgrade-STAMP --reconciliation approval.json --yes
+```
+
+The installation then runs 3.14.x again with the data and configuration of the backup; check it
+with `./hive.sh doctor` from the 3.14.x release checkout. To upgrade again, first set a new
+`configurationRevision` in `installation.json`: the earlier upgrade's plan pinned the configuration
+`post-upgrade` wrote, so repeating it stops with "Deployment input artifacts changed for this plan".
 
 ## Suite 3.15.0: product security round
 

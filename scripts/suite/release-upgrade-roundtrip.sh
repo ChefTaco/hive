@@ -104,6 +104,15 @@ if [[ "$rollback" == true && -n "$crossing" ]]; then
   step "rollback skipped: $from cannot read the storage format of ${crossing% } after $to"
   rollback=false
 fi
+# post-upgrade can add settings (from 3.15.1, the browser sign-in settings), which changes the
+# deployment inputs FROM's plan pinned. A rollback to that plan then stops with "Deployment input
+# artifacts changed for this plan" until the configuration has a new revision, as UPGRADING.md
+# tells operators; the round trip does the same.
+if [[ "$rollback" == true ]] && grep -q '^Added in ' "$output/post-upgrade.log"; then
+  revision=$(jq -r '.configurationRevision // "1"' "$config")
+  jq --arg revision "$revision-rollback" '.configurationRevision=$revision' "$config" > "$config.next" && mv -- "$config.next" "$config"
+  step "post-upgrade changed the configuration: configurationRevision $revision -> $revision-rollback before the rollback"
+fi
 if [[ "$rollback" == true ]]; then
   run "$old" rollback --release "$from" --yes
   run "$old" doctor --release "$from"

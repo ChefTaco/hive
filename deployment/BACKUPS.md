@@ -140,6 +140,11 @@ This verifies the archive, stops the installation and native writers, and prints
 for each host. It replaces no data and deliberately leaves services held for review. Save the
 templates as one private JSON document with a `hosts` object; retain every printed field. Review
 and reconcile writes made since the backup, including any profiles added or changed since then.
+Restore also requires the configuration directory to be exactly the archive's ("Secrets/
+configuration changed since backup" otherwise), so configuration written since the backup, such as
+by an upgrade and `post-upgrade` before you restore their `pre-upgrade-*` archive, must be put back
+first: while the services are held, move `config` aside and extract the archive's `config` from its
+`state.tar.gz` in its place (as root, keeping owners and modes; see UPGRADING, "Suite 3.15.1").
 Only after that review, set each host's `subsequentWritesReconciled` to `true` and apply:
 
 ```bash

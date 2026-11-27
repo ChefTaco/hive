@@ -6,6 +6,30 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [3.15.1] - 2026-11-27
+
+Browser sign-in on every installation, and no product handles a password any more. Pins
+Oathweave 2.7.0, Emberpath 2.10.0 and HiveXUI 0.14.0, which must move together; every other pin,
+the datastore profile and the Hive Registry are those of 3.15.0. None of the three changes a data
+format, so the upgrade from 3.15.0 needs no `--allow-migrations` and a binary rollback to 3.15.0
+is allowed. Run `post-upgrade` after the upgrade: it adds the browser sign-in settings an
+installation may lack. Read `UPGRADING.md`, "Suite 3.15.1", first.
+
+### Products
+
+- **Oathweave 2.7.0** (from 2.6.0): OpenID Connect `prompt=login` and `max_age` (answered with
+  `LOGIN_REQUIRED` and a login ticket), `/oauth/authorize/cancel`, and re-authentication with a
+  user-verified passkey alone (`IAM_PASSWORDLESS_PASSKEYS`, on by default). No migration.
+- **Emberpath 2.10.0** (from 2.9.0): the Oathweave password relay is off. With
+  `HIVE_ROUTER_AUTH_MODE=iam-oidc`, `POST /api/auth/login` and `POST /api/auth/reauthenticate`
+  answer `410 PASSWORD_RELAY_DISABLED` with `Deprecation` and `Sunset` headers unless
+  `EMBERPATH_PASSWORD_RELAY=true` (deprecated, removed in the next major); sensitive changes take a
+  step-up with a fresh Oathweave ID token (`POST /api/auth/step-up`). Step-ups are kept in memory,
+  so a restart asks again. No migration.
+- **HiveXUI 0.14.0** (from 0.13.0): passkey sign-in, re-authentication before a sensitive action
+  through Oathweave's `prompt=login` (password and code, or a passkey alone), and no Emberpath
+  password sign-in. No migration and no `runtime.json` change.
+
 ### Added
 
 - Browser sign-in on every installation. `console-clients add`, which `post-upgrade` runs, now
@@ -26,6 +50,15 @@ All notable changes to this project are documented in this file. The format is b
 - Fresh setup writes Oathweave's browser discovery URLs (`IAM_BROWSER_AUTHORIZATION_URL`,
   `IAM_BROWSER_API_BASE_URL`), and fresh setup and `migrate-native` write
   `EMBERPATH_PASSWORD_RELAY=false`: people sign in and re-authenticate on Oathweave's own page.
+
+### Fixed
+
+- `console-clients add` keeps fresh setup's previous initialization record
+  (`initializer-receipt.json`, named in `changes.json`) with the files it changes, so an undo from
+  `config/.browser-signin/STAMP/` restores it too; before, certificate renewal refused the
+  restored environment files.
+- The release upgrade round trip sets a new `configurationRevision` before rolling back when
+  `post-upgrade` added settings, as an operator must (see UPGRADING, Suite 3.15.1).
 
 ## [3.15.0] - 2026-11-26
 

@@ -15,4 +15,6 @@ if crossing "$temporary/from.json" 2>/dev/null; then fail 'A missing manifest wa
 # Signed releases: 3.14.2 -> 3.14.3 rolls back; 3.14.3 -> 3.15.0 crosses Oathweave's and HiveSkills' formats.
 [[ -z $(crossing "$ROOT/releases/3.14.2.json" "$ROOT/releases/3.14.3.json") ]] || fail '3.14.3 should roll back to 3.14.2'
 [[ $(crossing "$ROOT/releases/3.14.3.json" "$ROOT/releases/3.15.0.json" | sort | tr '\n' ' ') == 'hiveskills oathweave ' ]] || fail '3.15.0 should cross the Oathweave and HiveSkills formats'
+# 3.15.0 -> 3.15.1 changes no data format, so a binary rollback is allowed.
+[[ -z $(crossing "$ROOT/releases/3.15.0.json" "$ROOT/releases/3.15.1.json") ]] || fail '3.15.1 should roll back to 3.15.0'
 printf 'Passed: rollback crossings of synthetic and signed releases.\n'

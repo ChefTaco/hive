@@ -110,6 +110,13 @@ printf "JWT_ISSUER='oathweave-example-suite'\nIAM_BROWSER_CLIENT_POLICIES='%s'\n
 chmod 600 "$config"/*.env
 cp "$config/oathweave-embermend-v2.env" "$temporary/oathweave-before.env"; cp "$config/emberpath.env" "$temporary/emberpath-before.env"
 value "$config/oathweave-embermend-v2.env" IAM_BROWSER_CLIENT_POLICIES > "$HIVE_TEST_RUNNING"
+# Fresh setup's record of the files it wrote: a changed file is recorded again, the old record kept.
+mkdir -p "$config/.initializer"
+jq -n --arg oath "$config/oathweave-embermend-v2.env" --arg ember "$config/emberpath.env" --arg other "$config/hivemem.env" \
+  --arg o "$(sha256sum "$config/oathweave-embermend-v2.env" | cut -d ' ' -f1)" --arg e "$(sha256sum "$config/emberpath.env" | cut -d ' ' -f1)" --arg h "$(sha256sum "$config/hivemem.env" | cut -d ' ' -f1)" \
+  '{schema:1,phase:"complete",files:{($oath):$o,($ember):$e,($other):$h}}' > "$config/.initializer/receipt.json"
+chmod 600 "$config/.initializer/receipt.json"
+cp -p "$config/.initializer/receipt.json" "$temporary/initializer-before.json"
 pin
 cp "$directory/receipt.json" "$temporary/receipt-before.json"
 snapshot "$temporary/before.sums"
@@ -142,6 +149,10 @@ grep -q 'compose -f .* up -d --no-deps --force-recreate oathweave' "$HIVE_TEST_D
 now=$(directory=$directory deployment_inputs_digest "$directory/compose.json")
 [[ $(jq -r .sha256 "$(pin_file)") == "$now" && $(jq -r .deploymentInputSHA256 "$directory/receipt.json") == "$now" ]] || fail 'The active plan pin did not follow the change'
 cmp -s "$backup/receipt.json" "$temporary/receipt-before.json" && jq -e '.pinned|length==2' "$backup/changes.json" >/dev/null || fail 'The previous receipt and pin were not kept for an undo'
+jq -e --arg oath "$oath" --arg ember "$config/emberpath.env" --arg other "$config/hivemem.env" --arg o "$(sha256sum "$oath" | cut -d ' ' -f1)" --arg e "$(sha256sum "$config/emberpath.env" | cut -d ' ' -f1)" --arg h "$(sha256sum "$config/hivemem.env" | cut -d ' ' -f1)" \
+  '.files[$oath]==$o and .files[$ember]==$e and .files[$other]==$h' "$config/.initializer/receipt.json" >/dev/null || fail 'The initialization record does not name the new bytes'
+cmp -s "$backup/initializer-receipt.json" "$temporary/initializer-before.json" && jq -e --arg path "$config/.initializer/receipt.json" '.initializer==$path' "$backup/changes.json" >/dev/null ||
+  fail 'The previous initialization record was not kept for an undo'
 # The recreated Oathweave has the new policies, so the clients step created the missing clients.
 grep -q 'Created clients: hivexui-emberpath, hivexui-hivemem, hivexui-registry' "$temporary/apply.log" || { cat "$temporary/apply.log" >&2; fail 'The missing clients were not created after the settings'; }
 grep -q 'Left as it is: hivexui-oathweave' "$temporary/apply.log" || fail 'The hand-set Oathweave client policy was not named'
@@ -200,4 +211,6 @@ HIVE_TEST_HEALTH=unhealthy refused 'oathweave did not become healthy with the ne
 [[ $(value "$config/oathweave.env" IAM_BROWSER_API_BASE_URL) == "$origin/api/oathweave" ]] || fail 'The discovery URL was not added before the restart'
 backup=$(find "$config/.browser-signin" -mindepth 1 -maxdepth 1 -type d)
 [[ -f "$backup/oathweave.env" && -f "$backup/changes.json" ]] || fail 'The unhealthy restart left no backup'
+# Without an initialization record (a migrated installation) none is kept or named.
+[[ ! -e "$backup/initializer-receipt.json" ]] && jq -e 'has("initializer")|not' "$backup/changes.json" >/dev/null || fail 'An initialization record was named where none exists'
 printf 'Passed: browser sign-in settings added only where missing, in the file Oathweave reads, with operator keys kept, check read-only, changed services recreated, the active pin moved only when unchanged, and inconsistencies named.\n'

@@ -181,10 +181,13 @@ installation (fresh, moved with `migrate-native`, extended with `add`, or edited
   installation it needs `hosts.HOST.sudoPasswordFile`, as other configuration changes do.
 - **Undo.** Copy the files from `config/.browser-signin/STAMP/` back over the ones named in its
   `changes.json` (`SERVICE.env` to that service's `file`; `receipt.json` and
-  `deployment-inputs.PLAN.json`, when listed under `pinned`, to the installation directory), keeping
-  their owner and mode, and recreate those services
-  (`docker compose -f compose.json up -d --no-deps --force-recreate oathweave emberpath`). The
-  clients it created stay; they are harmless without their policy.
+  `deployment-inputs.PLAN.json`, when listed under `pinned`, to the installation directory;
+  `initializer-receipt.json`, when `changes.json` names `initializer`, to that path),
+  keeping their owner and mode, and recreate those services
+  (`docker compose -f compose.json up -d --no-deps --force-recreate oathweave emberpath`). Copy
+  them back only while nothing else changed those files since (for example `admin-access setup` or
+  an upgrade); otherwise remove the added keys by hand. The clients it created stay; they are
+  harmless without their policy.
 
 ## Magnus web terminal
 
@@ -1328,7 +1331,12 @@ enablement still need their own steps and credentials.
 The suite configures HiveMem, HiveSkills and (from 3.14.1) Emberpath for a suite-managed Magnus
 explicitly, so they report `source: override`; Emberpath's address is
 `MAGNUS_ARDENT_EMBERPATH_URL=<console origin>/v1`, the model route agents reach from their own
-hosts. An installation set up before 3.14.1 keeps its Magnus environment and adds that line by hand
+hosts. Magnus checks that address from inside its own container, so a console that listens only on
+the host's loopback (`console.bindAddress` `127.0.0.1`, for example behind another proxy, or the
+release round trip's `*.localhost` console) shows `emberpath: missing ... does not answer
+(ECONNREFUSED)` although agents on other hosts reach Emberpath through the public origin. A
+console bound to an address the containers can reach shows `usable`. Agents send an Emberpath
+client key with their requests; `/v1` answers 401 without one. An installation set up before 3.14.1 keeps its Magnus environment and adds that line by hand
 (`UPGRADING.md`, "Suite 3.14.1"). The suite does not set Magnus's Registry discovery
 (`MAGNUS_HIVE_REGISTRY_URL` and `MAGNUS_HIVE_REGISTRY_TOKEN_FILE`): the Registry's internal
 endpoints are private-network addresses that agents on fleet hosts cannot reach.
