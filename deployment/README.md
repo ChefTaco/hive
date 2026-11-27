@@ -429,7 +429,9 @@ crontab, this machine's console certificate renewal service and timer when they 
 installation, and the `hive` command's record. Each host refuses while a transaction is open or
 another controller runs. Every installation directory stays with its data, configuration and
 backups, as does the installation file, and records `uninstalled.json`; `./hive.sh install` with
-the same file brings the installation back.
+the same file brings the installation back. When that file sets `retention.schedule`, uninstall
+says so: installing it again also schedules the daily prune again. `--purge` deletes the file, so
+it does not print that note.
 
 `--purge` also deletes every host's installation directory, with all data and backups, and on
 this machine the installation file and what Hive wrote beside it (the `additions/` journals, the

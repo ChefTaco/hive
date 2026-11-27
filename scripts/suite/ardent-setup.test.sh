@@ -19,6 +19,7 @@ if [[ ${1:-setup} == setup ]]; then model_url_default=https://models.example.com
 HIVE_ARDENT_MODEL_URL=${TEST_URL-$model_url_default}
 HIVE_ARDENT_MODEL=${TEST_MODEL-$model_default}
 HIVE_ARDENT_INTERACTIVE=${TEST_INTERACTIVE:-true}
+HIVE_ARDENT_RETRY_INSTALL=${TEST_RETRY_INSTALL:-false}
 hive_die() { printf '%s\n' "$*" >&2; exit 1; }
 hive_magnus_agent_target() { HIVE_MAGNUS_HOST=control; }
 hive_magnus_agent_node_record() { printf '{"id":"fixture-node","status":"ONLINE"}\n'; }
@@ -50,12 +51,17 @@ hive_ardent_api() {
   [[ ${TEST_HELD:-false} != true ]] || owners='[{"commandId":"fixture-unknown","state":"unknown"}]'
   case "$1" in
     inspect) jq -nc --argjson installed "$installed" --argjson profiles "$profiles" --argjson owners "$owners" \
-      '{reachable:true,installed:$installed,profiles:$profiles,commandOwners:$owners}';;
+      --argjson enrollment "${TEST_ENROLLMENT:-{\"ardentScope\":\"active\",\"wholeNode\":\"enrolled\",\"admissionClosed\":false,\"ready\":true\}}" \
+      '{reachable:true,installed:$installed,profiles:$profiles,commandOwners:$owners,enrollment:$enrollment}';;
     plan)
       [[ ${TEST_PLAN_REFUSED:-false} != true ]] || return 1
       printf '{"requestSHA256":"%064d"}\n' 0;;
     package-install)
       [[ ${TEST_INSTALL_INTERRUPTED:-false} != true ]] || return 1
+      if [[ -n ${TEST_INSTALL_REFUSED:-} ]]; then
+        jq -nc --arg code "$TEST_INSTALL_REFUSED" '{schema:1,success:false,error:({code:$code,ambiguous:false}+(if $code=="ARDENT_SETUP_PACKAGE_REFUSED" then {httpStatus:503,apiCode:"DEPENDENCY_UNAVAILABLE"} else {} end))}'
+        return 1
+      fi
       touch "$TEST_CASE/installed"; printf '{"installed":true}\n';;
     create)
       [[ ${TEST_CREATE_INTERRUPTED:-false} != true ]] || return 1
@@ -248,9 +254,102 @@ for boundary in INSTALL CREATE; do
   expected_phase=installing; [[ $boundary != CREATE ]] || expected_phase=creating
   [[ $(receipt .phase) == "$expected_phase" ]] || fail 'Ambiguous request phase was lost'
   cp "$case_directory/api.calls" "$case_directory/before.calls"
-  refused 'interrupted around a request' -- setup
+  message='interrupted around a request'; [[ $boundary != INSTALL ]] || message='got no result back.*--retry-install'
+  refused "$message" -- setup
   diff -u <(cat "$case_directory/before.calls"; printf 'inspect \n') "$case_directory/api.calls" || fail 'An uncertain POST was repeated'
 done
+# Only an explicit --retry-install repeats a package installation that returned no result, once
+# Magnus holds no command on the node; the profile request is never repeated that way.
+cp "$case_directory/ardent-setup/assistant.json" "$case_directory/receipt.before"
+: > "$case_directory/api.calls"
+refused 'applies only to a setup that stopped at its package installation' TEST_RETRY_INSTALL=true -- setup
+sequence inspect
+cmp -s "$case_directory/receipt.before" "$case_directory/ardent-setup/assistant.json" || fail '--retry-install changed a creating receipt'
+fixture retry-install-held
+refused 'did not return a completed receipt' TEST_INSTALL_INTERRUPTED=true -- setup
+: > "$case_directory/api.calls"
+refused 'held by existing work' TEST_HELD=true TEST_RETRY_INSTALL=true -- setup
+sequence inspect
+[[ $(receipt .phase) == installing ]] || fail '--retry-install dropped the receipt while Magnus held a command'
+: > "$case_directory/api.calls"
+run 0 TEST_RETRY_INSTALL=true -- setup
+sequence inspect plan package-install create "operation $operation" "operation $operation" "operation $operation" check
+grep -q 'stopped earlier at its package installation' "$case_directory/result" || fail '--retry-install did not say what it retried'
+[[ $(receipt .phase) == complete ]] || fail '--retry-install did not complete the setup'
+for command in status check; do
+  fixture "retry-install-$command"
+  refused '--retry-install applies only to ardent setup' TEST_RETRY_INSTALL=true -- "$command"
+  no_calls
+done
+
+# Magnus admits the installation and New Agent only on an enrolled node with open admission. Setup
+# checks that before asking for anything or writing a receipt, so no refusal is left behind.
+for enrollment in pending-legacy draining-without-scope admission-closed unreported; do
+  fixture "not-admitted-$enrollment"
+  case "$enrollment" in
+    pending-legacy) state='{"ardentScope":"pending","wholeNode":"legacy","admissionClosed":false,"ready":false}'; message='not enrolled for managed Ardent actions in Magnus (Ardent scope pending, node enrollment legacy).*magnus-agent enroll';;
+    draining-without-scope) state='{"ardentScope":"pending","wholeNode":"draining","admissionClosed":false,"ready":false}'; message='not enrolled for managed Ardent actions';;
+    admission-closed) state='{"ardentScope":"active","wholeNode":"enrolled","admissionClosed":true,"ready":false}'; message='closed admission on this node';;
+    unreported) state=null; message='did not report whether this node is enrolled';;
+  esac
+  refused "$message" TEST_ENROLLMENT="$state" -- setup
+  sequence inspect
+  [[ ! -e "$case_directory/ardent-setup/assistant.json" && ! -e "$case_directory/confirm.calls" ]] || fail 'A node Magnus would refuse got a setup receipt or a question'
+  grep -qi 'no setup request was sent' "$case_directory/result" || fail 'The refusal did not say that nothing was sent'
+done
+
+# A package installation Magnus refused (the node then holds no command and no package) is recorded
+# as install-refused, never as a hold: the next run starts again with the retained model settings.
+for code in ARDENT_SETUP_PACKAGE_REFUSED ARDENT_SETUP_NODE_NOT_ENROLLED ARDENT_SETUP_ADMISSION_CLOSED ARDENT_SETUP_NODE_NOT_READY ARDENT_SETUP_PACKAGE_UNAVAILABLE; do
+  fixture "install-refused-${code,,}"
+  case "$code" in
+    ARDENT_SETUP_PACKAGE_REFUSED) message='refused the package installation (ARDENT_SETUP_PACKAGE_REFUSED, HTTP 503 DEPENDENCY_UNAVAILABLE).*nothing was installed or created';;
+    ARDENT_SETUP_NODE_NOT_ENROLLED) message='was not sent: Magnus reports that this node is not enrolled.*magnus-agent enroll';;
+    ARDENT_SETUP_ADMISSION_CLOSED) message='was not sent: Magnus has closed admission';;
+    ARDENT_SETUP_NODE_NOT_READY) message='was not sent: the node holds a command that has not settled';;
+    *) message="was not sent ($code); nothing was installed or created";;
+  esac
+  refused "$message" TEST_INSTALL_REFUSED="$code" -- setup
+  sequence inspect plan package-install
+  [[ $(receipt .phase) == install-refused && $(receipt .refusal.code) == "$code" ]] || fail 'The refused installation was not recorded'
+  receipt '.refusal.at|test("^[0-9]{4}-")' > /dev/null || fail 'The refusal has no time'
+  [[ ! -e "$case_directory/installed" ]] || fail 'A refused installation installed the package'
+  : > "$case_directory/api.calls"
+  run 0 TEST_URL= TEST_MODEL= TEST_INTERACTIVE=false -- setup
+  sequence inspect plan package-install create "operation $operation" "operation $operation" "operation $operation" check
+  grep -q "stopped earlier at a refused package installation ($code)" "$case_directory/result" || fail 'The rerun did not say what it retried'
+  [[ $(receipt .phase) == complete && $(receipt .model.model) == fixture-model ]] || fail 'The rerun after a refused installation did not complete with the retained model'
+  [[ $(receipt '.refusal // "none"') == none ]] || fail 'The completed receipt kept an old refusal'
+done
+fixture install-refused-status
+refused 'refused the package installation' TEST_INSTALL_REFUSED=ARDENT_SETUP_PACKAGE_REFUSED -- setup
+run 0 -- status
+[[ $(jq -r '.setup.phase + " " + .setup.refusal.apiCode' "$case_directory/result.json") == 'install-refused DEPENDENCY_UNAVAILABLE' ]] || fail 'Status did not show the recorded refusal'
+refused 'stopped before its profile was requested' -- check
+# New model settings replace the retained ones of a setup that never requested its profile.
+: > "$case_directory/api.calls"
+run 0 TEST_MODEL=other-model -- setup
+[[ $(receipt .model.model) == other-model ]] || fail 'New model settings did not replace those of a refused setup'
+fixture install-refused-profile-appeared
+refused 'refused the package installation' TEST_INSTALL_REFUSED=ARDENT_SETUP_PACKAGE_REFUSED -- setup
+touch "$case_directory/profile-exists"
+: > "$case_directory/api.calls"
+refused 'exists although its setup receipt shows that none was requested' -- setup
+sequence inspect
+[[ $(receipt .phase) == install-refused ]] || fail 'A profile that appeared later lost the receipt'
+
+# Receipts that earlier releases left at installing after Magnus refused the installation, as on a
+# node that was not enrolled: --retry-install recovers them; nothing else changes.
+fixture legacy-installing-receipt
+mkdir -m 700 "$case_directory/ardent-setup"
+jq -nc '{schema:1,installation:"example-suite",nodeId:"fixture-node",profile:"assistant",model:{base_url:"https://models.example.com/v1",model:"fixture-model"},requestSHA256:("0"*64),phase:"installing"}' > "$case_directory/ardent-setup/assistant.json"
+chmod 600 "$case_directory/ardent-setup/assistant.json"
+refused 'retry-install' -- setup
+sequence inspect
+: > "$case_directory/api.calls"
+run 0 TEST_RETRY_INSTALL=true TEST_URL= TEST_MODEL= TEST_INTERACTIVE=false -- setup
+sequence inspect plan package-install create "operation $operation" "operation $operation" "operation $operation" check
+[[ $(receipt .phase) == complete ]] || fail 'A legacy installing receipt was not recovered'
 
 fixture interrupted-check
 refused 'model check did not complete' TEST_CHECK_INTERRUPTED=true -- setup

@@ -199,6 +199,8 @@ hive_retention_schedule_enable() {
   printf 'Each run is logged to %s. ./hive.sh backups schedule status shows it.\n' "$log"
 }
 
+# HIVE_RETENTION_FILE_DELETED=true: the caller (uninstall --purge) deletes the installation file
+# next, so its retention.schedule needs no note.
 hive_retention_schedule_disable() {
   local config status=0
   config=$(hive_retention_schedule_config) || hive_die 'The installation file cannot be resolved'
@@ -214,8 +216,8 @@ hive_retention_schedule_disable() {
     10) printf 'Daily backup pruning was not enabled for %s; the crontab was not changed.\n' "$config";;
     *) hive_die "The crontab was not changed. Remove the line ending in '$hive_retention_schedule_marker$config' from $(id -un)'s crontab with crontab -e";;
   esac
-  if jq -e '.retention.schedule!=null' "$HIVE_CONFIG" >/dev/null; then
-    printf 'The installation file still sets retention.schedule; a later install of this file would schedule pruning again.\n'
+  if [[ "${HIVE_RETENTION_FILE_DELETED:-false}" != true ]] && jq -e '.retention.schedule!=null' "$HIVE_CONFIG" >/dev/null; then
+    printf 'The installation file %s still sets retention.schedule; a later install of this file would schedule pruning again.\n' "$config"
   fi
 }
 

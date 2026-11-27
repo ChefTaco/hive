@@ -17,9 +17,20 @@ const op = () => ({ id: operationId, nodeId: 'fixture-node', profile: 'assistant
   steps: [{ name: 'profile-create', status: 'succeeded', receipt: { token: secret } }, { name: 'config-save', status: 'running' }],
   error: secret, request: { token: secret } });
 const reply = (data, status = 200) => new Response(JSON.stringify({ success: true, data }), { status, headers: { 'content-type': 'application/json' } });
-function fake(responses) {
-  const calls = [];
+// Magnus's enrollment and admission records, which create and package-install read before any POST
+// (and inspect reports). They answer from these values and are recorded apart from `calls`.
+const scopeOf = (patch = {}) => ({ nodeId: 'fixture-node', nodeFqdn: 'fixture.example.com', wholeNodeState: 'enrolled', epoch: 1,
+  barrierId: 'barrier', schedulerSnapshotSha256: 'b'.repeat(64), scope: { state: 'active', decisionId: 'decision' }, ...patch });
+const admissionOf = (patch = {}) => ({ nodeId: 'fixture-node', nodeFqdn: 'fixture.example.com', closed: false, releaseId: null, ...patch });
+function fake(responses, { scope = scopeOf(), admission = admissionOf() } = {}) {
+  const calls = []; const readiness = [];
   const fetchImpl = async (url, options) => {
+    if (url.startsWith('https://localhost:4000/api/v1/resource-leases/')) {
+      readiness.push({ url, ...options }); assert.equal(options.method ?? 'GET', 'GET'); assert.equal(options.headers['x-api-secret'], secret);
+      const value = url.endsWith('/ardent-scope') ? scope : admission;
+      if (value instanceof Error) throw value;
+      return value instanceof Response ? value : reply(value);
+    }
     calls.push({ url, ...options });
     assert.equal(options.redirect, 'error'); assert.equal(options.headers['x-api-secret'], secret);
     assert(options.signal instanceof AbortSignal);
@@ -28,7 +39,7 @@ function fake(responses) {
     assert(next, 'Unexpected additional HTTP request');
     return typeof next === 'function' ? next(url, options) : next;
   };
-  return { calls, options: { apiSecret: secret, fetchImpl } };
+  return { calls, readiness, options: { apiSecret: secret, fetchImpl } };
 }
 async function rejectsWithoutNetwork(input) {
   let calls = 0;
@@ -195,7 +206,8 @@ test('a package result cannot silently claim a version other than the inspected 
 });
 test('an actual AbortSignal deadline terminates the one POST attempt and retains uncertainty', async () => {
   let calls = 0;
-  const fetchImpl = async (_url, options) => {
+  const fetchImpl = async (url, options) => {
+    if (url.includes('/resource-leases/')) return reply(url.endsWith('/ardent-scope') ? scopeOf() : admissionOf());
     calls++;
     if (calls === 1) return reply(state());
     return new Promise((_resolve, reject) => {
@@ -223,4 +235,80 @@ test('explicit resume never repurposes a different operation kind on the same pr
   const f = fake([reply({ ...op(), kind: 'hivemem', status: 'failed' })]);
   await assert.rejects(runArdentSetup(request('resume'), f.options), { code: 'ARDENT_SETUP_RESPONSE_INVALID', ambiguous: false });
   assert.equal(f.calls.length, 1); assert.equal(f.calls[0].method, 'GET');
+});
+
+test('inspect reports whether Magnus admits managed Ardent actions on the node, or null when it cannot tell', async () => {
+  const f = fake([reply(state())]);
+  const result = await runArdentSetup(request('inspect'), f.options);
+  assert.deepEqual(result.enrollment, { ardentScope: 'active', wholeNode: 'enrolled', admissionClosed: false, ready: true });
+  assert.deepEqual(f.readiness.map(call => call.url), ['https://localhost:4000/api/v1/resource-leases/enrollment/fixture-node/ardent-scope',
+    'https://localhost:4000/api/v1/resource-leases/admission/fixture-node']);
+  const pending = fake([reply(state())], { scope: scopeOf({ wholeNodeState: 'legacy', scope: { state: 'pending' } }) });
+  assert.deepEqual((await runArdentSetup(request('inspect'), pending.options)).enrollment,
+    { ardentScope: 'pending', wholeNode: 'legacy', admissionClosed: false, ready: false });
+  for (const scope of [new Error(secret), new Response(JSON.stringify({ success: false, error: { code: 'FORBIDDEN' } }), { status: 403 }),
+    scopeOf({ nodeId: 'foreign' }), scopeOf({ scope: { state: secret } })]) {
+    const unknown = fake([reply(state())], { scope });
+    const result = await runArdentSetup(request('inspect'), unknown.options);
+    assert.equal(result.enrollment, null); assert(!JSON.stringify(result).includes(secret));
+  }
+});
+test('create and package-install refuse a node Magnus would not admit before any POST, unambiguously', async () => {
+  const cases = [[{ scope: scopeOf({ wholeNodeState: 'legacy', scope: { state: 'pending' } }) }, 'ARDENT_SETUP_NODE_NOT_ENROLLED'],
+    [{ scope: scopeOf({ wholeNodeState: 'draining', scope: { state: 'pending' } }) }, 'ARDENT_SETUP_NODE_NOT_ENROLLED'],
+    [{ scope: scopeOf({ wholeNodeState: 'legacy' }) }, 'ARDENT_SETUP_NODE_NOT_ENROLLED'],
+    [{ admission: admissionOf({ closed: true, releaseId: 'maintenance' }) }, 'ARDENT_SETUP_ADMISSION_CLOSED']];
+  for (const mode of ['create', 'package-install']) {
+    for (const [records, code] of cases) {
+      const s = state(); if (mode === 'package-install') s.installed = false;
+      const f = fake([reply(s)], records);
+      await assert.rejects(runArdentSetup(request(mode), f.options), error => error.code === code && error.ambiguous === false);
+      assert.equal(f.calls.filter(call => call.method === 'POST').length, 0);
+    }
+    const s = state(); if (mode === 'package-install') s.installed = false;
+    const unread = fake([reply(s)], { scope: new Response(JSON.stringify({ success: false, error: { code: 'DEPENDENCY_UNAVAILABLE' } }), { status: 503 }) });
+    await assert.rejects(runArdentSetup(request(mode), unread.options), error => error.ambiguous === false);
+    assert.equal(unread.calls.filter(call => call.method === 'POST').length, 0);
+  }
+  // A whole node draining for enrollment with its Ardent scope active (prepare-ardent) is admitted.
+  const draining = fake([reply(state()), reply({ operationId }, 202)], { scope: scopeOf({ wholeNodeState: 'draining' }) });
+  assert.equal((await runArdentSetup(request('create'), draining.options)).operationId, operationId);
+});
+test('a package installation Magnus refused is settled only when the node then holds no command and no package', async () => {
+  const refusal = () => new Response(JSON.stringify({ success: false, error: { code: 'DEPENDENCY_UNAVAILABLE', message: secret } }), { status: 503 });
+  const fresh = () => ({ ...state(), installed: false });
+  const f = fake([reply(fresh()), refusal(), reply(fresh())]);
+  await assert.rejects(runArdentSetup(request('package-install'), f.options), error => {
+    assert.equal(error.code, 'ARDENT_SETUP_PACKAGE_REFUSED'); assert.equal(error.ambiguous, false);
+    assert.equal(error.httpStatus, 503); assert.equal(error.apiCode, 'DEPENDENCY_UNAVAILABLE'); assert(!JSON.stringify(error).includes(secret)); return true;
+  });
+  assert.deepEqual(f.calls.map(call => call.method ?? 'GET'), ['GET', 'POST', 'GET']);
+  // The owner of the refused command still releasing: wait for it, as before a create.
+  const releasing = { ...fresh(), commandOwners: [{ commandId: 'native-install', state: 'running', profile: null, action: 'package-install', ardent: true }] };
+  const w = fake([reply(fresh()), refusal(), reply(releasing), reply(fresh())]);
+  await assert.rejects(runArdentSetup(request('package-install'), { ...w.options, sleep: async () => undefined }),
+    error => error.code === 'ARDENT_SETUP_PACKAGE_REFUSED' && error.ambiguous === false);
+  // Anything that may have started or finished stays ambiguous: a held owner, an installed package,
+  // an unknown outcome, no answer, or a node that cannot be read again.
+  const unknownOwner = { ...fresh(), commandOwners: [{ commandId: 'native-install', state: 'unknown', profile: null, action: 'package-install', ardent: true }] };
+  const outcomeUnknown = new Response(JSON.stringify({ success: false, error: { code: 'ARDENT_OUTCOME_UNKNOWN' } }), { status: 409 });
+  for (const [answer, after] of [[refusal(), reply(unknownOwner)], [refusal(), reply(state())], [outcomeUnknown, reply(fresh())],
+    [new Error(secret), reply(fresh())], [new Response(secret, { status: 502 }), reply(fresh())], [refusal(), new Error(secret)]]) {
+    const x = fake([reply(fresh()), answer, after]);
+    await assert.rejects(runArdentSetup(request('package-install'), { ...x.options, settleMs: 0 }), error => {
+      assert.notEqual(error.code, 'ARDENT_SETUP_PACKAGE_REFUSED'); assert.equal(error.ambiguous, true); return true;
+    });
+    assert.equal(x.calls.filter(call => call.method === 'POST').length, 1);
+  }
+});
+test('the CLI reports a settled package refusal as unambiguous', async () => {
+  const realFetch = globalThis.fetch; const lines = []; const previous = process.exitCode;
+  const responses = [reply({ ...state(), installed: false }), new Response(JSON.stringify({ success: false, error: { code: 'DEPENDENCY_UNAVAILABLE' } }), { status: 503 }),
+    reply({ ...state(), installed: false })];
+  globalThis.fetch = async url => url.includes('/resource-leases/') ? reply(url.endsWith('/ardent-scope') ? scopeOf() : admissionOf()) : responses.shift();
+  try { await ardentSetupCLI({ HIVE_ARDENT_SETUP: JSON.stringify(request('package-install')), API_SECRET: secret }, line => lines.push(line)); }
+  finally { globalThis.fetch = realFetch; }
+  assert.deepEqual(JSON.parse(lines[0]), { schema: 1, success: false,
+    error: { code: 'ARDENT_SETUP_PACKAGE_REFUSED', ambiguous: false, httpStatus: 503, apiCode: 'DEPENDENCY_UNAVAILABLE' } });
+  assert.equal(process.exitCode, 1); process.exitCode = previous;
 });
