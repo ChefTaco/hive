@@ -51,6 +51,15 @@ installation may lack. Read `UPGRADING.md`, "Suite 3.15.1", first.
   `IAM_BROWSER_API_BASE_URL`), and fresh setup and `migrate-native` write
   `EMBERPATH_PASSWORD_RELAY=false`: people sign in and re-authenticate on Oathweave's own page.
 
+### Fixed
+
+- `console-clients add` keeps fresh setup's previous initialization record
+  (`initializer-receipt.json`, named in `changes.json`) with the files it changes, so an undo from
+  `config/.browser-signin/STAMP/` restores it too; before, certificate renewal refused the
+  restored environment files.
+- The release upgrade round trip sets a new `configurationRevision` before rolling back when
+  `post-upgrade` added settings, as an operator must (see UPGRADING, Suite 3.15.1).
+
 ## [3.15.0] - 2026-11-26
 
 Product update with the controller changes below. Pins Oathweave 2.6.0, Emberpath 2.9.0,
