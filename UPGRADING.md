@@ -237,7 +237,12 @@ apply.
    ```
 
 3. Run `./hive.sh post-upgrade --config ~/.config/hive/ID/installation.json --release 3.15.3`. From
-   3.15.2 it has nothing to add.
+   3.15.2 it adds nothing, but it lists each Ardent installation whose node agent now stages
+   Ardent 3.6.0 and leaves the setup checklist item `ardent-packages-updated` pending. Move those
+   profiles when you choose: in HiveXUI, Magnus > Ardent > Installations, stop the running
+   profiles, choose Update package and start them again; then run `post-upgrade` again to settle
+   the item, or record it with `./hive.sh setup done ardent-packages-updated`. Profiles left on
+   Ardent 3.5.1 keep working.
 4. Check with `./hive.sh doctor --config ...` and `./hive.sh console-clients check --config ...`
    (exit 0).
 
