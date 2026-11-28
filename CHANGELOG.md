@@ -6,6 +6,23 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [3.15.3] - 2026-11-28
+
+Magnus 3.5.1, and two controller fixes: `ardent setup` checks the node's enrollment before it
+sends anything, and agent removal deletes only the agent directory the installer itself created.
+Pins Magnus 3.5.1 (server, fleet gateway and host agent); every other pin, the datastore profile
+and the Hive Registry are those of 3.15.2. No product has a migration or a data format change, so
+the upgrade from 3.15.2 needs no `--allow-migrations` and a code-only rollback to 3.15.2 is
+allowed. Install the 3.5.1 host agent first. Read `UPGRADING.md`, "Suite 3.15.3", first.
+
+### Products
+
+- **Magnus 3.5.1** (from 3.5.0): pins Ardent 3.6.0, so the host agent stages Ardent 3.6.0 for the
+  Ardent profiles it installs; existing profiles keep their Ardent until you upgrade them, and a
+  3.5.1 agent still manages Ardent 3.5.1 profiles. From Ardent 3.6.0 a profile's
+  `GET /health/ready` says `status: not_ready` with its 503 instead of `degraded` (status codes are
+  unchanged). No Magnus code, route, setting or migration change.
+
 ### Fixed
 
 - **`magnus-agent remove` and `uninstall --purge` no longer delete an agent directory the installer
