@@ -28,7 +28,7 @@ holds its transaction for recovery, as described in
 delete transaction or runtime receipts to force another attempt. See also
 [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
 
-## Emberpath's security exporter issuer setting (from the release that pins Emberpath 2.12.0)
+## Emberpath's security exporter issuer setting (from 3.16.0)
 
 Emberpath 2.12.0 reads the native Oathweave issuer names its security exporter
 (`GET /api/security/events`) accepts from `OATHWEAVE_NATIVE_ISSUERS`, and deprecates
@@ -37,7 +37,7 @@ a one-time warning at startup when it is set. Only installations moved from a na
 with `migrate-native` have the old name in `config/emberpath.env`; fresh installations never wrote
 it and nothing changes for them.
 
-From the first suite release that pins Emberpath 2.12.0 or later, nothing is for you to do:
+From 3.16.0, the first suite release that pins Emberpath 2.12.0, nothing is for you to do:
 
 - `upgrade` moves `HIVE_ROUTER_IAM_ISSUER` to `OATHWEAVE_NATIVE_ISSUERS` with the same value, after
   the pre-change backup (which keeps the old file) and before any service starts. When
@@ -232,6 +232,83 @@ first, on the stopped store, after a backup.
 **Rolling back across this release.** A rollback restores the pre-upgrade backup, which holds the
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
+
+## Suite 3.16.0: HiveCommon 0.11 across the suite
+
+3.16.0 pins Oathweave 2.8.0, Emberpath 2.12.0, HiveXUI 0.16.0, Magnus 3.6.0 (server, fleet gateway
+and host agent), Cindertrace 0.11.0, ChatterMost 0.11.0 and its migrator, Emberfold 0.5.1 and
+Ardent Project Studio 0.9.0. HiveMem, HiveSkills, Embermend, the Hive Registry, the ingress and the
+datastore profile are those of 3.15.3. From 3.15.2 or earlier, also read the sections of the
+releases in between (from 3.15.0 or 3.15.1, "Suite 3.15.2" and its `--allow-migrations` with a
+suite-managed Magnus).
+
+- **Migration.** None: no product changes its data format or applies a migration, so `plan`,
+  `rehearse` and `upgrade` from 3.15.3 need no `--allow-migrations`.
+- **Emberpath's issuer setting.** On an installation moved with `migrate-native`, the upgrade moves
+  `HIVE_ROUTER_IAM_ISSUER` in `config/emberpath.env` to `OATHWEAVE_NATIVE_ISSUERS`; see
+  [Emberpath's security exporter issuer setting](#emberpaths-security-exporter-issuer-setting-from-3160).
+  Fresh installations have neither and nothing changes.
+- **Security exporter tokens.** Emberpath 2.12.0 verifies the tokens of its security exporter
+  client with HiveCommon's verifier, which refuses a lifetime above 15 minutes. Oathweave issues
+  client_credentials tokens for at most its `JWT_ACCESS_TTL` (900 seconds unless you changed it),
+  whatever the client's `lifetimeSeconds`, so a default Oathweave is unaffected. If you raised
+  `JWT_ACCESS_TTL` in `config/oathweave.env` above 900 and collect Emberpath's security events
+  (for example with Cindertrace's `hive` source), set that client's `lifetimeSeconds` in
+  `IAM_MACHINE_CLIENT_POLICIES` to 900 or less before upgrading.
+- **Proxy and rate-limit settings you edited yourself.** The suite writes only CIDR ranges and
+  host names that the new parsers accept. If you edited them: Oathweave 2.8.0 leaves out each
+  `TRUSTED_PROXY_IPS` entry it cannot read (the log names it: `TRUSTED_PROXY_IPS: ignoring`), and
+  stops at startup on a `RATE_LIMIT_WINDOW_MS` or `RATE_LIMIT_MAX_ATTEMPTS` that is not a whole
+  number above zero; ChatterMost 0.11.0 stops at startup on a `TRUSTED_PROXIES` entry it cannot
+  read, such as `192.0.2.0/`. Check `config/oathweave.env` and `config/chattermost.env` first.
+- **Magnus 3.6.0.** No migration and no setting to add. `MAGNUS_TRUSTED_PROXIES` is new and
+  optional; the suite does not set it, so Magnus keeps limiting by the connecting address. It still
+  pins Ardent 3.6.0, so Ardent profiles need no update.
+- **HiveXUI 0.16.0.** Live streams renew the session once on a 401 and then ask you to sign in
+  again ("Sign in again to receive live updates"), instead of retrying three times.
+- **Ardent Project Studio 0.9.0.** Its audit export now writes actions with underscores inside a
+  segment (`template.import_definition`), as the suite's record pattern requires. A collector that
+  matched the hyphenated form should match the new one.
+
+**Steps.** `ID` is your installation.
+
+1. Where the installation manages the Magnus host agent (the full profile, or an installation that
+   ran `magnus-agent install`), install the 3.6.0 agent first:
+
+   ```bash
+   ./hive.sh magnus-agent install --config ~/.config/hive/ID/installation.json --release 3.16.0
+   ```
+
+2. Upgrade:
+
+   ```bash
+   ./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.16.0
+   ```
+
+3. Run `./hive.sh post-upgrade --config ~/.config/hive/ID/installation.json --release 3.16.0`. From
+   3.15.3 it adds nothing.
+4. Check with `./hive.sh doctor --config ...` and `./hive.sh console-clients check --config ...`
+   (exit 0). On an installation moved with `migrate-native`, check the issuer setting as described
+   in [Emberpath's security exporter issuer
+   setting](#emberpaths-security-exporter-issuer-setting-from-3160).
+
+**An external Magnus** (`external.magnus`) is not upgraded by the suite: upgrade that Magnus fleet
+on its own host, agents first, as Magnus's own notes for 3.6.0 describe. Nothing in this release
+requires it; HiveXUI 0.16.0 and Ardent Project Studio 0.9.0 work with a Magnus 3.5.x fleet.
+
+**Rolling back.** A code-only rollback to 3.15.3 is allowed: nothing was migrated. On an
+installation whose upgrade moved the issuer setting, read [rolling back across that
+change](#emberpaths-security-exporter-issuer-setting-from-3160) first: with a native issuer other
+than `hive-iam`, add `HIVE_ROUTER_IAM_ISSUER` back. As the upgrade changed a pinned environment
+file there, and as after anything else that changed the configuration since the upgrade, set a new
+`configurationRevision` in `installation.json` first (a value it has not had before), then roll
+back from the retained 3.15.3 checkout:
+
+```bash
+./hive.sh rollback --config ~/.config/hive/ID/installation.json --release 3.15.3
+```
+
+The 3.6.0 host agent stays and works with Magnus 3.5.1.
 
 ## Suite 3.15.3: Magnus 3.5.1, Ardent setup and agent directory fixes
 

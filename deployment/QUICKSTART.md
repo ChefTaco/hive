@@ -29,7 +29,7 @@ cd hive
 ```
 
 Run the preparation commands from this checkout. `--release latest` resolves the published
-release once and runs its matching tagged controller; an exact `--release 3.15.3` selects that
+release once and runs its matching tagged controller; an exact `--release 3.16.0` selects that
 version instead. The launcher prints the version and retained checkout path, under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hive/releases/`. The signed release still pins the exact
 controller source. After setup, switch to the retained release checkout printed by the launcher
@@ -155,7 +155,7 @@ questions. Press Enter to accept the default shown in brackets.
 | Deploy the Magnus web terminal gateway | `no`. For `yes`, first create the restricted account and key in [preparing nodes](FULL.md#preparing-nodes-and-the-gateway-key) |
 | Port for Magnus host agents | blank for none. Give a port, such as `4000`, to let hosts join the Magnus fleet; see [Magnus host agents](FULL.md#magnus-host-agents) |
 | Existing external inference HTTPS endpoint | blank to skip; see [external inference](INFERENCE.md) |
-| Native agent runtime | Release 3.15.3 skips this question because it pins no native runtime artifacts; the guided local setup offers a Magnus host agent after installation, as in [Magnus host agents](FULL.md#magnus-host-agents) |
+| Native agent runtime | Release 3.16.0 skips this question because it pins no native runtime artifacts; the guided local setup offers a Magnus host agent after installation, as in [Magnus host agents](FULL.md#magnus-host-agents) |
 | Prune old backups and rehearsals daily | the default, `yes`: from 3.9.4, a line in your crontab removes old backup and rehearsal pairs every day at 03:40, local time, keeping the newest 5 restorable pairs, everything from the last 14 days and anything a recovery needs. Give another time such as `04:15`, or `no`. Asked only for a single-host installation; see [daily pruning](BACKUPS.md#daily-pruning) |
 | Write protected installation configuration to | the default, `~/.config/hive/hive/installation.json` |
 
@@ -166,10 +166,10 @@ If it stops after writing the configuration file, fix the cause and run `./hive.
 X.Y.Z` again from the retained checkout, replacing `X.Y.Z` with the exact version it reported.
 After the installation name,
 it offers to continue with the saved file instead of asking everything again. Use that exact version for retries and for planning then applying,
-so a new release cannot change the plan between commands. Unattended, for example with 3.15.3:
+so a new release cannot change the plan between commands. Unattended, for example with 3.16.0:
 
 ```bash
-./hive.sh install --config ~/.config/hive/hive/installation.json --release 3.15.3
+./hive.sh install --config ~/.config/hive/hive/installation.json --release 3.16.0
 ```
 
 After setup, change to the retained release checkout path printed by the launcher before
@@ -309,6 +309,7 @@ across several releases needs the flag when any release it crosses does):
 | [3.15.1](../UPGRADING.md#suite-3151-browser-sign-in-on-every-installation-no-password-relay) | 3.15.0 | No | Oathweave 2.7.0, Emberpath 2.10.0 and HiveXUI 0.14.0 together, none with a data format change; new controller. Run `post-upgrade` afterwards: it adds the browser sign-in settings and turns the Emberpath password relay off. From 3.14.x, the flag of 3.15.0 applies. |
 | [3.15.2](../UPGRADING.md#suite-3152-emberpath-client-keys-for-agents-and-step-up-only-before-a-change) | 3.15.0 or 3.15.1 | Only when the installation has a suite-managed Magnus (the full profile): one fast Magnus migration, safe under 3.15.1's Magnus | Emberpath 2.11.0, Magnus 3.5.0, Ardent Project Studio 0.8.0 and HiveXUI 0.15.0: Emberpath client keys for agents, and a step-up only before a change. Install the 3.5.0 Magnus host agent first. From 3.15.0, run `post-upgrade` afterwards (3.15.1's browser sign-in settings); from 3.14.x, the flag of 3.15.0 applies. |
 | [3.15.3](../UPGRADING.md#suite-3153-magnus-351-ardent-setup-and-agent-directory-fixes) | 3.15.2 | No | Magnus 3.5.1 (its host agents stage Ardent 3.6.0; no migration) and controller fixes: `ardent setup` checks enrollment first, and agent removal deletes only the directory the installer created. Install the 3.5.1 Magnus host agent first. From 3.15.0 or 3.15.1, the flag of 3.15.2 applies. |
+| [3.16.0](../UPGRADING.md#suite-3160-hivecommon-011-across-the-suite) | 3.15.3 | No | Oathweave 2.8.0, Emberpath 2.12.0, HiveXUI 0.16.0, Magnus 3.6.0, Cindertrace 0.11.0, ChatterMost 0.11.0, Emberfold 0.5.1 and Ardent Project Studio 0.9.0 on HiveCommon 0.11, none with a migration; on a `migrate-native` installation the upgrade moves Emberpath's `HIVE_ROUTER_IAM_ISSUER` to `OATHWEAVE_NATIVE_ISSUERS`. Install the 3.6.0 Magnus host agent first. From 3.15.2 or earlier, the flags of the releases in between apply. |
 <!-- upgrade-matrix:end -->
 
 Use an exact version instead of `latest` to review and apply a specific release. Existing
@@ -322,8 +323,8 @@ installation that runs Magnus when moving from a release before 3.8.0 (see
 and every installation when moving to 3.14.0 or later from an earlier release:
 
 ```bash
-./hive.sh plan --config ~/.config/hive/hive/installation.json --release 3.15.3 --allow-migrations
-./hive.sh upgrade --config ~/.config/hive/hive/installation.json --release 3.15.3 --allow-migrations
+./hive.sh plan --config ~/.config/hive/hive/installation.json --release 3.16.0 --allow-migrations
+./hive.sh upgrade --config ~/.config/hive/hive/installation.json --release 3.16.0 --allow-migrations
 ```
 
 An installation that runs Magnus moves from 3.8.1 to 3.9.0 or later, which pin Magnus 3
@@ -360,16 +361,16 @@ existing local Hive certificate-renewal service to its verified controller check
 
 When two releases share the same controller source, the checkout retains the compatible release
 named in the installation file. Pass the new exact version to later commands to keep using its
-product pins, for example `./hive.sh doctor --config FILE --release 3.15.3`. Certificate renewal
+product pins, for example `./hive.sh doctor --config FILE --release 3.16.0`. Certificate renewal
 uses a unique matching release tag in this case, so its receipt follows that checkout.
 
 Then finish maintenance from the retained release checkout with the individual commands:
 
 ```bash
-./hive.sh magnus-agent status --config ~/.config/hive/hive/installation.json --release 3.15.3
-./hive.sh magnus-agent install --config ~/.config/hive/hive/installation.json --release 3.15.3
-./hive.sh console-clients add --config ~/.config/hive/hive/installation.json --release 3.15.3
-./hive.sh doctor --config ~/.config/hive/hive/installation.json --release 3.15.3
+./hive.sh magnus-agent status --config ~/.config/hive/hive/installation.json --release 3.16.0
+./hive.sh magnus-agent install --config ~/.config/hive/hive/installation.json --release 3.16.0
+./hive.sh console-clients add --config ~/.config/hive/hive/installation.json --release 3.16.0
+./hive.sh doctor --config ~/.config/hive/hive/installation.json --release 3.16.0
 ```
 
 Run the Magnus commands only when this installation hosts Magnus and has a host agent to update;

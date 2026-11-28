@@ -6,10 +6,60 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [3.16.0] - 2026-11-28
+
+The products move to HiveCommon 0.11 together: client addresses, rate limits, service tokens,
+token verification and live streams now come from the suite's shared kit. Pins Oathweave 2.8.0,
+Emberpath 2.12.0, HiveXUI 0.16.0, Magnus 3.6.0 (server, fleet gateway and host agent; it still
+stages Ardent 3.6.0), Cindertrace 0.11.0, ChatterMost 0.11.0 and its migrator, Emberfold 0.5.1 and
+Ardent Project Studio 0.9.0. HiveMem, HiveSkills, Embermend, the Hive Registry, the ingress and the
+datastore profile are those of 3.15.3. No product has a migration or a data format change, so the
+upgrade from 3.15.3 needs no `--allow-migrations` and a code-only rollback to 3.15.3 is allowed.
+Install the 3.6.0 host agent first. Read `UPGRADING.md`, "Suite 3.16.0", first.
+
+### Products
+
+- **Oathweave 2.8.0** (from 2.7.0): client addresses (rate limits, IP allowlists, session risk and
+  audit) and the Redis sign-in limiter are HiveCommon's, with the same keys, limits and 429 answers.
+  `TRUSTED_PROXY_IPS` entries HiveCommon refuses are left out with a startup warning
+  (`TRUSTED_PROXY_IPS: ignoring "<entry>": <reason>`) instead of being misread, and
+  `RATE_LIMIT_WINDOW_MS` and `RATE_LIMIT_MAX_ATTEMPTS` must be whole numbers above zero. The
+  suite's own settings (CIDR ranges) are unaffected. A Redis error reply now fails the request
+  with 500 instead of letting it through. No migration.
+- **Emberpath 2.12.0** (from 2.11.0): the security exporter (`GET /api/security/events`) verifies its
+  Oathweave tokens with HiveCommon's verifier: exactly one audience, a lifetime of at most 15
+  minutes, `jti` required, and the key set only over HTTPS. Oathweave client secrets go to HTTPS
+  token URLs only, loopback included (the suite already uses `https://oathweave:4200`).
+  `OATHWEAVE_NATIVE_ISSUERS` replaces `HIVE_ROUTER_IAM_ISSUER` (see Changed). No migration.
+- **HiveXUI 0.16.0** (from 0.15.0): live streams (Magnus events, log tail, agent operations, Studio
+  feeds) and the Studio agent preview read their server-sent events with HiveCommon's `/sse`: a
+  401 renews the session once and reconnects, the backoff resets after a connection that delivered
+  an event, and a 4xx other than 401, 403, 404, 408 and 429 stops the stream. No server change is
+  needed.
+- **Magnus 3.6.0** (from 3.5.1): HiveCommon 0.11.1 for rate limits, request IDs and service tokens.
+  When Redis is unavailable, routes that are not fail-closed are limited per process instead of
+  unlimited; an inbound `x-request-id` is reused only when it is 1-128 safe characters. The new
+  `MAGNUS_TRUSTED_PROXIES` is optional and the suite does not set it. The Hive IAM mode
+  (`IAM_CORE_URL`) is deprecated; suite installations use Oathweave mode. Still pins Ardent 3.6.0.
+  No migration.
+- **Cindertrace 0.11.0** (from 0.10.0): the collector's Oathweave tokens are cached and renewed
+  through HiveCommon, the API rate limiter and client address are HiveCommon's with the same
+  keys, limits and answers, and a Redis error now answers 503 on the sign-in and API routes. No
+  migration.
+- **ChatterMost 0.11.0** (from 0.10.0, migrator too): rate limiting on HiveCommon 0.11.1 with the
+  same Mattermost 429; `TRUSTED_PROXIES` is parsed strictly, so an entry such as `192.0.2.0/` (an
+  empty prefix, which used to trust every address) stops startup. The suite writes CIDR ranges. No
+  database migration.
+- **Emberfold 0.5.1** (from 0.5.0): HiveCommon 0.10.0 for the bearer check; no behaviour change.
+- **Ardent Project Studio 0.9.0** (from 0.8.0): `ARDENT_STUDIO_OATHWEAVE_TOKEN_URL` must be `https:`
+  (the suite already writes one); Magnus event streams are read with HiveCommon's parser; the audit
+  export builds its records with the suite's audit kit, so an action such as
+  `template.import-definition` is exported as `template.import_definition`. No migration.
+
 ### Changed
 
 - **Emberpath's security exporter issuer setting takes its new name once the release pins
-  Emberpath 2.12.0 or later.** Emberpath 2.12.0 reads Oathweave's native issuer names from
+  Emberpath 2.12.0 or later, from this release.** Emberpath 2.12.0 reads Oathweave's native issuer names from
   `OATHWEAVE_NATIVE_ISSUERS` and deprecates `HIVE_ROUTER_IAM_ISSUER` (still read while the new name
   is unset, with a warning at startup). With such a release, `migrate-native` writes the native
   Router's `HIVE_ROUTER_IAM_ISSUER` value (`hive-iam` on a default native install) to

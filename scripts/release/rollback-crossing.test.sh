@@ -21,4 +21,6 @@ if crossing "$temporary/from.json" 2>/dev/null; then fail 'A missing manifest wa
 [[ -z $(crossing "$ROOT/releases/3.15.1.json" "$ROOT/releases/3.15.2.json") ]] || fail '3.15.2 should roll back to 3.15.1'
 # 3.15.2 -> 3.15.3: Magnus 3.5.1 has no migration and changes no data format.
 [[ -z $(crossing "$ROOT/releases/3.15.2.json" "$ROOT/releases/3.15.3.json") ]] || fail '3.15.3 should roll back to 3.15.2'
+# 3.15.3 -> 3.16.0: no product migrates or changes its data format.
+[[ -z $(crossing "$ROOT/releases/3.15.3.json" "$ROOT/releases/3.16.0.json") ]] || fail '3.16.0 should roll back to 3.15.3'
 printf 'Passed: rollback crossings of synthetic and signed releases.\n'
