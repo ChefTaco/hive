@@ -1486,7 +1486,7 @@
       }
     }
   },
-  "controllerSHA256": "bdf7eb3626e8b82066169bae32c0220946d7c32d2bbbaf838111296d267ec4b8",
+  "controllerSHA256": "b684e8a71fbeb93078e9a5fa2a68fa0d991aa6c531973aee95879765ba412691",
   "withdrawn": [
     {
       "version": "3.2.1",
