@@ -28,6 +28,44 @@ holds its transaction for recovery, as described in
 delete transaction or runtime receipts to force another attempt. See also
 [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
 
+## Emberpath's security exporter issuer setting (from the release that pins Emberpath 2.12.0)
+
+Emberpath 2.12.0 reads the native Oathweave issuer names its security exporter
+(`GET /api/security/events`) accepts from `OATHWEAVE_NATIVE_ISSUERS`, and deprecates
+`HIVE_ROUTER_IAM_ISSUER`: the old name still works while the new one is unset, and Emberpath logs
+a one-time warning at startup when it is set. Only installations moved from a native Hive Router
+with `migrate-native` have the old name in `config/emberpath.env`; fresh installations never wrote
+it and nothing changes for them.
+
+From the first suite release that pins Emberpath 2.12.0 or later, nothing is for you to do:
+
+- `upgrade` moves `HIVE_ROUTER_IAM_ISSUER` to `OATHWEAVE_NATIVE_ISSUERS` with the same value, after
+  the pre-change backup (which keeps the old file) and before any service starts. When
+  `OATHWEAVE_NATIVE_ISSUERS` is already set, the new image ignores the old name, so the upgrade only
+  removes it. An https value (no native name) is left as it is, since the suite sets
+  `OATHWEAVE_ISSUER` beside it. The exporter accepts the same issuers as before, without the warning.
+- `migrate-native` writes `OATHWEAVE_NATIVE_ISSUERS` in place of the old name.
+
+An upgrade into a release that still pins an older Emberpath, or a code-only rollback to one,
+changes nothing: those images read only `HIVE_ROUTER_IAM_ISSUER`.
+
+To check after the upgrade:
+
+```bash
+sudo grep -E '^(OATHWEAVE_NATIVE_ISSUERS|HIVE_ROUTER_IAM_ISSUER)=' DIRECTORY/config/emberpath.env
+```
+
+shows `OATHWEAVE_NATIVE_ISSUERS='hive-iam'` (or your native issuer) and no `HIVE_ROUTER_IAM_ISSUER`.
+
+**Rolling back across this change.** A restore of the pre-upgrade backup brings the old file back.
+A code-only rollback to a release with an Emberpath before 2.12.0 keeps `OATHWEAVE_NATIVE_ISSUERS`,
+which that image ignores, so its exporter falls back to its default `hive-iam`. That is the value a
+default native install has, and nothing changes. If yours named another native issuer, add
+`HIVE_ROUTER_IAM_ISSUER='VALUE'` back to `config/emberpath.env` before the rollback. As after any
+upgrade that changed a pinned environment file, a rollback with the same configuration can stop at
+staging with "Deployment input artifacts changed for this plan": set a new `configurationRevision`
+in `installation.json` first, as described for the rollback to 3.15.0 below.
+
 ## Magnus agent directories recorded by 3.15.2 or earlier (from 3.15.3)
 
 Releases up to 3.15.2 could record an agent directory that already held files as created by the

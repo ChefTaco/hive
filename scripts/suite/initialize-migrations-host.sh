@@ -118,6 +118,17 @@ hive_identity_env_stage() {
     die 'The environment file could not be staged'
   hive_identity_staged[$file]=$staged
 }
+# Stages the removal of every KEY= line of an environment file in the same way.
+hive_identity_env_unset_stage() {
+  local file=$1 key=$2 source staged="$1.memory-identity-staged"
+  [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ ]] || die 'A setting name cannot be represented in an environment file'
+  [[ ! -L "$staged" ]] || die 'Unsafe staged environment file'
+  source=${hive_identity_staged[$file]:-$file}
+  { grep -vE "^$key=" -- "$source" || true; } > "$staged.next" &&
+    chown --reference="$file" -- "$staged.next" && chmod 600 -- "$staged.next" && sync -f "$staged.next" && mv -T -- "$staged.next" "$staged" ||
+    die 'The environment file could not be staged'
+  hive_identity_staged[$file]=$staged
+}
 # The initializer's record of a replaced file follows its new content.
 hive_identity_receipt_update() {
   local file=$1 receipt="$directory/config/.initializer/receipt.json"
@@ -149,7 +160,42 @@ hive_memory_identity_relink() {
   [[ ! -f "$journal" ]] || hive_identity_resume "$1" "$journal"
   declare -gA hive_identity_staged=()
   hive_memory_identity_relink_files "$@"
+  hive_emberpath_issuer_files "$@"
   (( ${#hive_identity_staged[@]} == 0 )) || hive_identity_commit "$1" "$journal"
+}
+# Emberpath 2.12.0 and later read Oathweave's native issuer names for the security exporter from
+# OATHWEAVE_NATIVE_ISSUERS and deprecate HIVE_ROUTER_IAM_ISSUER: it still works while the new name
+# is unset, with a warning at startup. Older images read only the old name. So only an upgrade
+# into a release that pins such an Emberpath (emberpathNativeIssuers, set by the controller from the
+# signed manifest) moves the setting, after the pre-change backup, which keeps the old file, and
+# with the memory identity change above (staged, journaled and pinned the same way):
+#   - a native name (no URL scheme) becomes OATHWEAVE_NATIVE_ISSUERS, unless that is already set,
+#     in which case the new image ignores the old name anyway; the old name is removed
+#   - an https value is left as it is: the suite sets OATHWEAVE_ISSUER beside it, which wins
+# The new image accepts exactly the issuers it accepted before, and no longer warns.
+hive_emberpath_issuer_files() {
+  local candidate=$1 file source legacy native
+  jq -e '.placements.emberpath!=null and .emberpathNativeIssuers==true' <<< "$input" >/dev/null || return 0
+  while IFS= read -r file; do
+    [[ -n "$file" && -f "$file" && ! -L "$file" ]] || continue
+    source=${hive_identity_staged[$file]:-$file}
+    grep -qE '^HIVE_ROUTER_IAM_ISSUER=' -- "$source" || continue
+    legacy=$(hive_identity_env_get "$source" HIVE_ROUTER_IAM_ISSUER | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [[ -n "$legacy" ]] || continue
+    if [[ "$legacy" =~ ^[A-Za-z][A-Za-z0-9+.-]*: ]]; then
+      printf 'Emberpath issuer: HIVE_ROUTER_IAM_ISSUER in %s is a URL and was left as it is; Emberpath uses it only while OATHWEAVE_ISSUER is unset\n' "$file" >&2
+      continue
+    fi
+    assert_deployment_inputs "$candidate"
+    native=$(hive_identity_env_get "$source" OATHWEAVE_NATIVE_ISSUERS | tr -d '[:space:],')
+    if [[ -z "$native" ]]; then
+      hive_identity_env_stage "$file" OATHWEAVE_NATIVE_ISSUERS "$legacy"
+      printf 'Emberpath issuer: HIVE_ROUTER_IAM_ISSUER in %s is now OATHWEAVE_NATIVE_ISSUERS\n' "$file" >&2
+    else
+      printf 'Emberpath issuer: HIVE_ROUTER_IAM_ISSUER was removed from %s; its OATHWEAVE_NATIVE_ISSUERS already applies\n' "$file" >&2
+    fi
+    hive_identity_env_unset_stage "$file" HIVE_ROUTER_IAM_ISSUER
+  done < <(jq -r '.services.emberpath.env_file[]? | if type=="string" then . else .path end' "$candidate")
 }
 # Every fallible step, token issuance included, ran while only staged files changed. The journal
 # records the pinned digest before and the digest with the staged files in place (computed before

@@ -182,7 +182,7 @@ jq -e '(.identity.links.applied|length)==0 and (.identity.links.refused|length)=
 input() { jq -nc --arg action "$1" --slurpfile c "$temporary/config.json" --slurpfile links "$temporary/links.json" --slurpfile r "$temporary/release.json" --arg template "$(base64 -w0 "$ROOT/deployment/Caddyfile")" --arg script "$(base64 -w0 "$ROOT/scripts/suite/set-admin-password.sh")" --arg tool "$(base64 -w0 "$ROOT/scripts/suite/migrate-native-data.mjs")" '
   $c[0] as $config | {directory:$config.hosts.control.directory,installation:$config.installation,host:"control",action:$action,plan:("a"*64),origin:$config.origin,version:"0.1.0",operation:"install",
   placements:$config.components,console:$config.console,nativeMigration:$config.nativeMigration,reviewedLinks:$links[0],ingressTemplate:$template,adminScript:$script,dataTool:$tool,
-  bootstrapServiceUsers:($r[0].components|map_values(.service.user)),bootstrapImages:($r[0].components|map_values(.image))}'; }
+  bootstrapServiceUsers:($r[0].components|map_values(.service.user)),bootstrapImages:($r[0].components|map_values(.image))} + (if env.HIVE_TEST_NATIVE_ISSUERS=="true" then {emberpathNativeIssuers:true} else {} end)'; }
 host_action() { input "$1" | PATH="$temporary/bin:$PATH" bash "$ROOT/scripts/suite/migrate-native-host.sh"; }
 host_action native-configure 2> "$temporary/configure.log" || { cat "$temporary/configure.log" >&2; fail 'configure'; }
 env_of() { sed -n "s/^$2='\(.*\)'$/\1/p" "$directory/config/$1.env"; }
@@ -196,6 +196,17 @@ env_of() { sed -n "s/^$2='\(.*\)'$/\1/p" "$directory/config/$1.env"; }
 [[ $(env_of emberpath HIVE_ROUTER_SECURITY_EXPORT_TOKEN_HASH) == '$argon2id$v=19$m=65536$fakesalt$fakehash' ]] || fail 'A dollar sign must survive literally'
 [[ $(env_of emberpath HIVE_ROUTER_SECURITY_EXPORTER_CLIENT_ID) == legacy-exporter-name ]] || fail 'The kept client name must carry over'
 ! grep -q OS_AUTH_COMMAND "$directory/config/emberpath.env" || fail 'The host authentication helper must not carry over'
+# The native security exporter issuer: an Emberpath before 2.12.0 reads only HIVE_ROUTER_IAM_ISSUER;
+# from 2.12.0 (emberpathNativeIssuers) the same value goes to OATHWEAVE_NATIVE_ISSUERS instead.
+[[ $(env_of emberpath HIVE_ROUTER_IAM_ISSUER) == hive-iam ]] && ! grep -q '^OATHWEAVE_NATIVE_ISSUERS=' "$directory/config/emberpath.env" || fail 'An older Emberpath must keep HIVE_ROUTER_IAM_ISSUER'
+HIVE_TEST_NATIVE_ISSUERS=true host_action native-configure 2> "$temporary/configure.log" || { cat "$temporary/configure.log" >&2; fail 'configure for Emberpath 2.12.0'; }
+[[ $(env_of emberpath OATHWEAVE_NATIVE_ISSUERS) == hive-iam ]] && ! grep -q '^HIVE_ROUTER_IAM_ISSUER=' "$directory/config/emberpath.env" || fail 'Emberpath 2.12.0 must get OATHWEAVE_NATIVE_ISSUERS in place of HIVE_ROUTER_IAM_ISSUER'
+[[ $(env_of emberpath HIVE_ROUTER_IAM_CLIENT_ID) == hive-router && $(env_of emberpath HIVE_ROUTER_SECURITY_EXPORTER_CLIENT_ID) == legacy-exporter-name ]] || fail 'The other native settings must carry over with Emberpath 2.12.0'
+sed -i "s|^HIVE_ROUTER_IAM_ISSUER=.*|HIVE_ROUTER_IAM_ISSUER=https://identity.example.com/api/oathweave|" "$source_root/opt/hive-router/shared/.env"
+HIVE_TEST_NATIVE_ISSUERS=true host_action native-configure 2> "$temporary/configure.log" || { cat "$temporary/configure.log" >&2; fail 'configure with an https issuer'; }
+[[ $(env_of emberpath HIVE_ROUTER_IAM_ISSUER) == https://identity.example.com/api/oathweave ]] && ! grep -q '^OATHWEAVE_NATIVE_ISSUERS=' "$directory/config/emberpath.env" || fail 'An https issuer must stay as it is'
+sed -i "s|^HIVE_ROUTER_IAM_ISSUER=.*|HIVE_ROUTER_IAM_ISSUER=hive-iam|" "$source_root/opt/hive-router/shared/.env"
+host_action native-configure 2> "$temporary/configure.log" || { cat "$temporary/configure.log" >&2; fail 'configure again'; }
 grep -qx "EMBERPATH_PASSWORD_RELAY='false'" "$directory/config/emberpath.env" || fail 'The migrated Emberpath keeps its password relay'
 [[ $(env_of emberpath EMBERPATH_OATHWEAVE_IDENTITIES_JSON) == "[{\"issuer\":\"https://$fqdn/api/oathweave\",\"subject\":\"subject-admin\",\"localId\":\"local-admin\"}]" ]] || fail 'Reviewed link'
 [[ $(env_of hivemem HIVEMEM_JWT_SECRET) == effective-fake-secret ]] || fail 'The last assignment wins, as in systemd'
