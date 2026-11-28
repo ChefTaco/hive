@@ -354,36 +354,49 @@ prepare_native_owner() {
 # Only an agent directory the installer itself makes is recorded as this installation's. A
 # directory that already exists stays the operator's, empty or not, whatever it holds: removal
 # must never delete files the installer did not put there. The creation note beside it
-# (ROOT.hive-creating.json) names the installation and, once made, the directory's device and
-# inode; it is dropped once the ownership record claims the directory. A rerun after an
-# interrupted install (which may already have put the listener certificate in it) trusts the note
-# only for that very directory, not for one made again in its place.
+# (ROOT.hive-creating.json) names the installation and, once made, the directory's device, inode
+# and creation time; it is dropped once the ownership record claims the directory. A rerun after
+# an interrupted install (which may already have put the listener certificate in it) trusts the
+# note only for that very directory, not for one made again in its place.
 creation_note="$root.hive-creating.json"
+# A directory's identity: its device and inode, and its creation (birth) time. A file system
+# reuses the inode of a deleted directory for the next one made, often at once, so the inode
+# alone does not tell the directory created from one made again after it was deleted. The birth
+# time, to the nanosecond, does; it is empty where the file system does not record it.
+directory_inode() { stat -c %d:%i -- "$1"; }
+directory_birth() {
+  local birth
+  birth=$(stat -c %.9W -- "$1" 2>/dev/null) || birth=''
+  [[ "$birth" =~ ^[1-9][0-9]*\.[0-9]{9}$ ]] || birth=''
+  printf '%s' "$birth"
+}
 agent_root_is_ours_to_create() {
   [[ -n "$installation" && ! -L "$creation_note" ]] || return 1
   if [[ ! -e "$root" && ! -L "$root" ]]; then return 0; fi
   [[ -d "$root" && ! -L "$root" && -f "$creation_note" && -O "$creation_note" ]] &&
-    jq -e --arg id "$installation" --arg root "$root" --arg inode "$(stat -c %d:%i -- "$root")" \
-      '.installation==$id and .root==$root and .inode==$inode' "$creation_note" >/dev/null 2>&1
+    jq -e --arg id "$installation" --arg root "$root" --arg inode "$(directory_inode "$root")" --arg birth "$(directory_birth "$root")" \
+      '.installation==$id and .root==$root and .inode==$inode and (.birth // "")==$birth' "$creation_note" >/dev/null 2>&1
 }
-write_creation_note() { # [INODE]
+write_creation_note() { # [INODE BIRTH]
   local temporary
   install -d -m 0755 "$(dirname -- "$root")"
   temporary=$(mktemp "$creation_note.XXXXXX")
-  jq -n --arg id "$installation" --arg root "$root" --arg inode "${1:-}" '{schema:1,installation:$id,root:$root}+(if $inode!="" then {inode:$inode} else {} end)' > "$temporary"
+  jq -n --arg id "$installation" --arg root "$root" --arg inode "${1:-}" --arg birth "${2:-}" \
+    '{schema:1,installation:$id,root:$root}+(if $inode!="" then {inode:$inode,birth:$birth} else {} end)' > "$temporary"
   sync -f "$temporary"; mv -T -- "$temporary" "$creation_note"
 }
 # agentRootCreated marks a claim made under that rule; a record that names agentRoot without it
 # comes from a release that also claimed directories it found, so removal does not trust it. The
-# claim also records the directory's device and inode (agentRootInode): removal deletes only that
-# very directory, never one made again at the same path after the install.
+# claim also records the directory's device and inode (agentRootInode) and its birth time
+# (agentRootBirth, empty where the file system keeps none): removal deletes only that very
+# directory, never one made again at the same path after the install, even on a reused inode.
 claim_agent_root() {
   local marker="$root.native-owner.json" temporary
   [[ -n "$installation" && -f "$marker" && ! -L "$marker" && -d "$root" && ! -L "$root" ]] || return 0
   jq -e --arg id "$installation" --arg name "$native_owner" '.installation==$id and .username==$name' "$marker" >/dev/null || return 0
   temporary=$(mktemp "$marker.XXXXXX")
-  jq --arg root "$root" --arg inode "$(stat -c %d:%i -- "$root")" \
-    '.agentRoot=$root | .agentRootCreated=true | .agentRootInode=$inode | del(.agentRemovedAt)' "$marker" > "$temporary"
+  jq --arg root "$root" --arg inode "$(directory_inode "$root")" --arg birth "$(directory_birth "$root")" \
+    '.agentRoot=$root | .agentRootCreated=true | .agentRootInode=$inode | .agentRootBirth=$birth | del(.agentRemovedAt)' "$marker" > "$temporary"
   sync -f "$temporary"; mv -T -- "$temporary" "$marker"
 }
 
@@ -423,7 +436,7 @@ install_agent() {
     # Noted before the directory exists, then pinned to the directory made.
     [[ -e "$root" ]] || write_creation_note
     install -d -m 0700 "$root"
-    write_creation_note "$(stat -c %d:%i -- "$root")"
+    write_creation_note "$(directory_inode "$root")" "$(directory_birth "$root")"
   fi
   install -d -m 0700 "$root"
   prepare_certificate
@@ -523,7 +536,7 @@ host_key() {
 # reported with its reason; the output is one JSON document {removed:[...], kept:[...]}.
 remove_agent() {
   need_root
-  local marker="$root.native-owner.json" artifacts="$root-artifacts" record='' owned=false agent=false present=false why='' root_inode=''
+  local marker="$root.native-owner.json" artifacts="$root-artifacts" record='' owned=false agent=false present=false why='' root_inode='' root_birth=''
   local owner='' uid='' home='' profile_root='' profiles=0 account=keep account_reason='' delete_profiles entry other name
   local -a removed=() kept=()
   delete_profiles=$(jq -r '.deleteProfiles==true' <<< "$request")
@@ -535,10 +548,12 @@ remove_agent() {
       die "The ownership record $marker is unreadable or not root's; nothing was removed"
   fi
   if [[ -n "$record" && -n "$installation" ]] && jq -e --arg id "$installation" '.installation==$id' <<< "$record" >/dev/null; then owned=true; fi
-  # The directory must be the very one the claim recorded (device and inode), not a replacement.
-  if [[ -e "$root" ]]; then root_inode=$(stat -c %d:%i -- "$root"); fi
-  if [[ "$owned" == true ]] && jq -e --arg root "$root" --arg inode "$root_inode" \
-    '.agentRoot==$root and .agentRootCreated==true and (.agentRootInode|type=="string") and ($inode=="" or .agentRootInode==$inode)' <<< "$record" >/dev/null; then agent=true; fi
+  # The directory must be the very one the claim recorded (device, inode and, where the claim
+  # recorded one, birth time), not a replacement.
+  if [[ -e "$root" ]]; then root_inode=$(directory_inode "$root"); root_birth=$(directory_birth "$root"); fi
+  if [[ "$owned" == true ]] && jq -e --arg root "$root" --arg inode "$root_inode" --arg birth "$root_birth" \
+    '.agentRoot==$root and .agentRootCreated==true and (.agentRootInode|type=="string")
+      and ($inode=="" or (.agentRootInode==$inode and ((.agentRootBirth // "")=="" or .agentRootBirth==$birth)))' <<< "$record" >/dev/null; then agent=true; fi
   if [[ -z "$record" ]]; then why="no ownership record $marker shows that the Hive installer set it up"
   elif [[ "$owned" != true ]] && jq -e 'has("installation")' <<< "$record" >/dev/null; then why="the ownership record $marker names Hive installation $(jq -r .installation <<< "$record"), not ${installation:-this one}"
   elif [[ "$owned" != true ]]; then why="the ownership record $marker names no installation (an earlier release wrote it), so Hive cannot prove which installation created it"
@@ -547,7 +562,7 @@ remove_agent() {
   elif jq -e --arg root "$root" '.agentRoot==$root and (.agentRootInode|type!="string")' <<< "$record" >/dev/null; then
     why="the ownership record $marker does not record which directory (device and inode) this installation created at $root; check what is in it and remove it by hand"
   elif jq -e --arg root "$root" '.agentRoot==$root' <<< "$record" >/dev/null; then
-    why="$root is not the directory this installation created (its device and inode are not the ones $marker recorded), so it was replaced after the install; check what is in it and remove it by hand"
+    why="$root is not the directory this installation created (its device, inode or creation time is not the one $marker recorded), so it was replaced after the install; check what is in it and remove it by hand"
   else why="the ownership record $marker does not show that this installation created $root"; fi
   [[ -e "$root" || -f "$unit" ]] && present=true
   # The service must be the one the installer set up for this directory.

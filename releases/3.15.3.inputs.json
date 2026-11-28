@@ -1,0 +1,161 @@
+{
+  "schema": 1,
+  "version": "3.15.3",
+  "user": "1000:1000",
+  "products": {
+    "hive-registry": {
+      "image": "ghcr.io/cheftaco/hive-registry:2.0.14",
+      "version": "1.6.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "ingress": {
+      "image": "ghcr.io/cheftaco/hive-ingress:2.0.7",
+      "version": "2.0.7",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "oathweave": {
+      "image": "ghcr.io/cheftaco/oathweave:2.7.0",
+      "version": "2.7.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "emberpath": {
+      "image": "ghcr.io/cheftaco/emberpath:2.11.0",
+      "version": "2.11.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "hivemem": {
+      "image": "ghcr.io/cheftaco/hivemem:1.12.0",
+      "version": "1.12.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "hiveskills": {
+      "image": "ghcr.io/cheftaco/hiveskills:1.11.1",
+      "version": "1.11.1",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "hivexui": {
+      "image": "ghcr.io/cheftaco/hivexui:0.15.0",
+      "version": "0.15.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "magnus": {
+      "image": "ghcr.io/cheftaco/magnus-server:3.5.1",
+      "version": "3.5.1",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ],
+      "embermendProtocol": 1
+    },
+    "magnus-gateway": {
+      "image": "ghcr.io/cheftaco/magnus-fleet-gateway:3.5.1",
+      "version": "3.5.1",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "cindertrace": {
+      "image": "ghcr.io/cheftaco/cindertrace:0.10.0",
+      "version": "0.10.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "chattermost": {
+      "image": "ghcr.io/cheftaco/chattermost:0.10.0",
+      "version": "0.10.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "chat-migrator": {
+      "image": "ghcr.io/cheftaco/chattermost-migrator:0.10.0",
+      "version": "0.10.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "emberfold": {
+      "image": "ghcr.io/cheftaco/emberfold:0.5.0",
+      "version": "0.5.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "ardentstudio": {
+      "image": "ghcr.io/cheftaco/ardent-studio:0.8.0",
+      "version": "0.8.0",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "embermend": {
+      "image": "ghcr.io/cheftaco/embermend:0.6.1",
+      "version": "0.6.1",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    }
+  },
+  "magnusAgent": {
+    "name": "@hivemagnus/magnus-agent",
+    "version": "3.5.1",
+    "integrity": "sha512-ne1UwKyb9nBG9mqZEmDKgp+kwhn/owZbali7ag6gS4QhSdWeyyaCSQuv38LOGaDIfGVmZqsRfrVnQztwcTgxPg=="
+  },
+  "datastoreProfile": "runtime-2026-11-pg1712-zstd-openssl",
+  "storageRecovery": "embermend-postgres-runtime2-unversioned",
+  "withdrawn": [
+    {
+      "version": "3.2.1",
+      "action": "refuse",
+      "reason": "Tagged but never published: a fresh image scan rejected its PostgreSQL libxslt dependency before publication",
+      "replacement": "3.2.2"
+    },
+    {
+      "version": "3.12.8",
+      "action": "refuse",
+      "reason": "Tagged but never published: the release image gate found CVE-2026-121707 in the effect package",
+      "replacement": "3.12.9"
+    },
+    {
+      "version": "3.14.0",
+      "action": "warn",
+      "reason": "Magnus 3.3.0 host agents hold native backups and upgrades of Ardent 3.2.0 profiles, and agent-definition installs fail with 500",
+      "replacement": "3.14.3"
+    },
+    {
+      "version": "3.14.1",
+      "action": "warn",
+      "reason": "Agent-definition installs fail with 500 (Magnus 3.3.3)",
+      "replacement": "3.14.3"
+    }
+  ]
+}

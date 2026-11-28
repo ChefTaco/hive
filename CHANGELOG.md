@@ -6,6 +6,23 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [3.15.3] - 2026-11-28
+
+Magnus 3.5.1, and two controller fixes: `ardent setup` checks the node's enrollment before it
+sends anything, and agent removal deletes only the agent directory the installer itself created.
+Pins Magnus 3.5.1 (server, fleet gateway and host agent); every other pin, the datastore profile
+and the Hive Registry are those of 3.15.2. No product has a migration or a data format change, so
+the upgrade from 3.15.2 needs no `--allow-migrations` and a code-only rollback to 3.15.2 is
+allowed. Install the 3.5.1 host agent first. Read `UPGRADING.md`, "Suite 3.15.3", first.
+
+### Products
+
+- **Magnus 3.5.1** (from 3.5.0): pins Ardent 3.6.0, so the host agent stages Ardent 3.6.0 for the
+  Ardent profiles it installs; existing profiles keep their Ardent until you upgrade them, and a
+  3.5.1 agent still manages Ardent 3.5.1 profiles. From Ardent 3.6.0 a profile's
+  `GET /health/ready` says `status: not_ready` with its 503 instead of `degraded` (status codes are
+  unchanged). No Magnus code, route, setting or migration change.
+
 ### Fixed
 
 - **`magnus-agent remove` and `uninstall --purge` no longer delete an agent directory the installer
@@ -14,13 +31,15 @@ All notable changes to this project are documented in this file. The format is b
   directory. The installer now records only a directory it makes itself: it writes a creation note
   beside the directory before making it and pins the note to that directory, so a rerun after an
   interrupted install still claims it, and a directory that was already there stays the operator's,
-  empty or not. The claim records the directory's device and inode (`agentRootCreated`,
-  `agentRootInode`), and removal deletes the directory only when the one at that path is still the
-  very directory the installer made, so a directory replaced at the same path after the install is
-  kept and reported. A claim from 3.15.2 or earlier is kept and reported too, to be checked and
+  empty or not. The claim records the directory's device and inode and its creation (birth) time
+  to the nanosecond (`agentRootCreated`, `agentRootInode`, `agentRootBirth`), and removal deletes
+  the directory only when the one at that path is still the very directory the installer made, so
+  a directory replaced at the same path after the install is kept and reported, even when the file
+  system gave it the inode of the deleted original (a lab reinstall got the same inode back). Where
+  the file system records no birth time, `agentRootBirth` is empty and the device and inode decide. A claim from 3.15.2 or earlier is kept and reported too, to be checked and
   removed by hand. Regression tests: install into a directory holding an unrelated file, and
-  install then replace the directory with one holding an unrelated file; after remove and purge
-  the file is still there.
+  install then replace the directory with one holding an unrelated file, also on the recorded
+  inode; after remove and purge the file is still there.
 - **`ardent setup` on a node that is not enrolled no longer blocks the profile name.** It sent the
   package installation anyway, Magnus refused it (`503`), and the receipt it kept at `installing`
   refused every later run of that profile ("interrupted around a request whose outcome needs

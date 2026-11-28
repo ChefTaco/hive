@@ -33,7 +33,7 @@ delete transaction or runtime receipts to force another attempt. See also
 Releases up to 3.15.2 could record an agent directory that already held files as created by the
 installer (the Magnus host agent installed into an existing directory), and `magnus-agent remove`
 or `uninstall --purge` then deleted it whole. From 3.15.3 removal trusts only claims the installer
-records when it makes the directory itself, pinned to that directory's device and inode (a
+records when it makes the directory itself, pinned to that directory's device, inode and creation time (a
 directory made again at the same path later is kept and reported as replaced), so a directory
 recorded by an earlier release is kept and reported (`comes from a Hive release (3.15.2 or
 earlier)`): check what is in it, back up
@@ -194,6 +194,76 @@ first, on the stopped store, after a backup.
 **Rolling back across this release.** A rollback restores the pre-upgrade backup, which holds the
 data and the credential settings from before the rename, so they stay consistent. A code-only
 rollback keeps the renamed data, which older HiveMem versions read, and the re-linked settings.
+
+## Suite 3.15.3: Magnus 3.5.1, Ardent setup and agent directory fixes
+
+3.15.3 pins Magnus 3.5.1 (server, fleet gateway and host agent). Every other pin, the datastore
+profile and the Hive Registry are those of 3.15.2. From 3.15.0 or 3.15.1, also read "Suite 3.15.2"
+below: its `--allow-migrations` (with a suite-managed Magnus) and, from 3.15.0, its `post-upgrade`
+apply.
+
+- **Magnus 3.5.1 pins Ardent 3.6.0.** The host agent stages Ardent 3.6.0 for the profiles it
+  installs from now on, such as the one `ardent setup` creates. Existing profiles keep running
+  their installed Ardent, and a 3.5.1 agent still manages Ardent 3.5.1 profiles. From Ardent
+  3.6.0 a profile's `GET /health/ready` answers `status: not_ready` with its 503 instead of
+  `degraded`; the status codes are unchanged, so a monitor that matched the word should match the
+  status code. Magnus has no code, route, setting or migration change.
+- **`ardent setup` checks the node first.** It reads Magnus's enrollment and admission records for
+  the node and stops, with nothing sent and no receipt written, unless the node is enrolled with
+  an active Ardent scope and open admission. A package installation that Magnus refuses no longer
+  leaves a receipt that holds the profile name. A receipt that an earlier release left at
+  `installing` after such a refusal is recovered with `ardent setup --retry-install` (see
+  `deployment/FULL.md`, "Create an Ardent assistant").
+- **Agent directories.** The installer now claims an agent directory only when it creates it, and
+  removal deletes only that very directory. A directory recorded by 3.15.2 or earlier is kept and
+  reported; see [Magnus agent directories recorded by 3.15.2 or
+  earlier](#magnus-agent-directories-recorded-by-3152-or-earlier-from-3153).
+- **Migration.** None: no product changes its data format or applies a migration, so `plan`,
+  `rehearse` and `upgrade` from 3.15.2 need no `--allow-migrations`.
+
+**Steps.** `ID` is your installation.
+
+1. Where the installation manages the Magnus host agent (the full profile, or an installation that
+   ran `magnus-agent install`), install the 3.5.1 agent first:
+
+   ```bash
+   ./hive.sh magnus-agent install --config ~/.config/hive/ID/installation.json --release 3.15.3
+   ```
+
+2. Upgrade:
+
+   ```bash
+   ./hive.sh upgrade --config ~/.config/hive/ID/installation.json --release 3.15.3
+   ```
+
+3. Run `./hive.sh post-upgrade --config ~/.config/hive/ID/installation.json --release 3.15.3`. From
+   3.15.2 it adds nothing, but it lists each Ardent installation whose node agent now stages
+   Ardent 3.6.0 and leaves the setup checklist item `ardent-packages-updated` pending. Move those
+   profiles when you choose: in HiveXUI, Magnus > Ardent > Installations, stop the running
+   profiles, choose Update package and start them again; then run `post-upgrade` again to settle
+   the item, or record it with `./hive.sh setup done ardent-packages-updated`. Profiles left on
+   Ardent 3.5.1 keep working.
+4. Check with `./hive.sh doctor --config ...` and `./hive.sh console-clients check --config ...`
+   (exit 0).
+
+**An external Magnus** (`external.magnus`) is not upgraded by the suite: upgrade that Magnus fleet
+on its own host, agents first, as Magnus's own notes for 3.5.1 describe. Nothing in this release
+requires it; HiveXUI and Ardent Project Studio work with a Magnus 3.5.0 fleet as with 3.5.1.
+
+**Rolling back.** A code-only rollback to 3.15.2 is allowed: nothing was migrated, and Magnus
+3.5.0 runs on the same database. Anything that changed the configuration since the upgrade (for
+example `admin-access setup` or `console-clients add`) moves the pinned deployment inputs, so set a
+new `configurationRevision` in `installation.json` first (a value it has not had before), then roll
+back from the retained 3.15.2 checkout:
+
+```bash
+./hive.sh rollback --config ~/.config/hive/ID/installation.json --release 3.15.2
+```
+
+The 3.5.1 host agent stays and works with Magnus 3.5.0, and profiles it installed on Ardent 3.6.0
+keep running. The 3.15.2 controller does not have this release's `ardent setup` and agent
+directory fixes, so until you upgrade again do not run `magnus-agent remove` or
+`uninstall --purge` on a host whose agent directory held other files before the install.
 
 ## Suite 3.15.2: Emberpath client keys for agents, and step-up only before a change
 
