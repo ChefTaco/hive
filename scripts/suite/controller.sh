@@ -22,6 +22,14 @@ hive_magnus_node_keys_only() {
   [[ -n "${HIVE_MANIFEST:-}" && -f "$HIVE_MANIFEST" ]] || return 1
   jq -e '(.components.magnus.version // "") as $v | ($v|type=="string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and (($v|split(".")|map(tonumber)) >= [3,0,0])' "$HIVE_MANIFEST" >/dev/null 2>&1
 }
+# True when the release pins Emberpath 2.12.0 or later. Its security exporter reads Oathweave's
+# native issuer names from OATHWEAVE_NATIVE_ISSUERS and deprecates HIVE_ROUTER_IAM_ISSUER (it still
+# works, with a warning at startup). Older images read only HIVE_ROUTER_IAM_ISSUER, so a release
+# pinning one, or no Emberpath, keeps that name. Hosts receive the answer as emberpathNativeIssuers.
+hive_emberpath_native_issuers() {
+  [[ -n "${HIVE_MANIFEST:-}" && -f "$HIVE_MANIFEST" ]] || return 1
+  jq -e '(.components.emberpath.version // "") as $v | ($v|type=="string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and (($v|split(".")|map(tonumber)) >= [2,12,0])' "$HIVE_MANIFEST" >/dev/null 2>&1
+}
 # The release's ingress configuration, base64-encoded for the host actions that install it:
 # deployment/Caddyfile as it is, except that with Magnus 3.0.0 or later the agent port no longer
 # relays the shared node secret (x-node-token) to Magnus. Its signature headers, the token
@@ -818,6 +826,7 @@ hive_host() {
     --argjson identityIds "${HIVE_BOOTSTRAP_IDENTITIES:-null}" \
     --arg ingressTemplate "${HIVE_BOOTSTRAP_INGRESS:-}" \
     --argjson magnusNodeKeysOnly "${HIVE_MAGNUS_NODE_KEYS_ONLY:-false}" \
+    --argjson emberpathNativeIssuers "$(if hive_emberpath_native_issuers; then printf true; else printf false; fi)" \
     --arg integrityScript "$(base64 -w0 "$HIVE_ROOT/scripts/suite/check-data.mjs")" \
     --arg snapshotTool "${HIVE_SNAPSHOT_TOOL:-}" \
     --arg skillsManifest "${HIVE_SKILLS_MANIFEST:-}" \

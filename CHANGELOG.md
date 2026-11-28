@@ -6,6 +6,22 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Changed
+
+- **Emberpath's security exporter issuer setting takes its new name once the release pins
+  Emberpath 2.12.0 or later.** Emberpath 2.12.0 reads Oathweave's native issuer names from
+  `OATHWEAVE_NATIVE_ISSUERS` and deprecates `HIVE_ROUTER_IAM_ISSUER` (still read while the new name
+  is unset, with a warning at startup). With such a release, `migrate-native` writes the native
+  Router's `HIVE_ROUTER_IAM_ISSUER` value (`hive-iam` on a default native install) to
+  `config/emberpath.env` as `OATHWEAVE_NATIVE_ISSUERS`, and `upgrade` moves an existing
+  `HIVE_ROUTER_IAM_ISSUER` there with the same value, after the pre-change backup and before any
+  service starts, staged, journaled and pinned like the memory identity change. When
+  `OATHWEAVE_NATIVE_ISSUERS` is already set, the new image ignores the old name and the upgrade
+  only removes it; an https value is left as it is. A release that pins an older Emberpath keeps
+  writing and leaving `HIVE_ROUTER_IAM_ISSUER`, the only name those images read. The controller
+  passes the decision to hosts as `emberpathNativeIssuers`. Fresh installations never wrote the
+  setting and still do not. See `UPGRADING.md`, "Emberpath's security exporter issuer setting".
+
 ## [3.15.3] - 2026-11-28
 
 Magnus 3.5.1, and two controller fixes: `ardent setup` checks the node's enrollment before it

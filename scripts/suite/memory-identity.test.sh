@@ -185,6 +185,72 @@ sed -i "s/^HIVE_ROUTER_MEMORY_PROXY_TOKEN=.*/HIVE_ROUTER_MEMORY_PROXY_TOKEN='$ot
 relink || fail 'The relink failed with another subject'
 [[ $(value "$config/emberpath.env" HIVE_ROUTER_MEMORY_PROXY_TOKEN) == "$other" ]] || fail 'A token for another subject was replaced'
 
+# ---- Emberpath 2.12.0 and later: HIVE_ROUTER_IAM_ISSUER becomes OATHWEAVE_NATIVE_ISSUERS. ----
+# Only when the controller says the release pins such an image (emberpathNativeIssuers), staged and
+# pinned with the memory identity change, and only for a native name.
+issuer_setup() { # DIRECTORY [EXTRA EMBERPATH LINE]
+  setup "$1"
+  printf "HIVE_ROUTER_IAM_ISSUER='hive-iam'\n%s" "${2:-}" >> "$config/emberpath.env"
+  rm "$directory/deployment-inputs.$plan.json"; pin_deployment_inputs "$directory/candidate.json"
+}
+input='{"placements":{"hivemem":{},"emberpath":{},"oathweave":{}},"emberpathNativeIssuers":true}'
+issuer_setup "$temporary/issuer"
+relink || { cat "$directory/relink.log" >&2; fail 'The relink with the issuer change failed'; }
+! grep -q '^HIVE_ROUTER_IAM_ISSUER=' "$config/emberpath.env" || fail 'The deprecated issuer setting stayed'
+grep -qx "OATHWEAVE_NATIVE_ISSUERS='hive-iam'" "$config/emberpath.env" || fail 'The native issuer did not move to OATHWEAVE_NATIVE_ISSUERS'
+claims "$(value "$config/emberpath.env" HIVE_ROUTER_MEMORY_PROXY_TOKEN)" | jq -e '.sub=="emberpath"' >/dev/null || fail 'The memory identity change was lost beside the issuer change'
+grep -q "^HIVE_ROUTER_SECRET='fake-router-secret-0123456789abcdef0123'$" "$config/emberpath.env" || fail 'Other Emberpath settings changed with the issuer'
+[[ $(stat -c %a "$config/emberpath.env") == 600 ]] || fail 'emberpath.env lost its mode'
+[[ $(jq -r --arg path "$config/emberpath.env" '.files[$path]' "$config/.initializer/receipt.json") == "$(sha256sum "$config/emberpath.env" | cut -d ' ' -f1)" ]] || fail 'The initializer receipt does not record the new emberpath.env'
+assert_deployment_inputs "$directory/candidate.json" || fail 'The issuer change is not pinned for activation'
+grep -q 'HIVE_ROUTER_IAM_ISSUER in .* is now OATHWEAVE_NATIVE_ISSUERS' "$directory/relink.log" || fail 'The issuer change was not reported'
+sums=$(sha256sum "$config/"*.env "$directory/deployment-inputs.$plan.json")
+relink || fail 'A repeat of the issuer change failed'
+[[ $(sha256sum "$config/"*.env "$directory/deployment-inputs.$plan.json") == "$sums" ]] || fail 'A repeat of the issuer change changed something'
+
+# Alone: a release whose HiveMem renames nothing still moves the issuer, and a custom name keeps its value.
+issuer_setup "$temporary/issuer-alone"
+sed -i "s/^HIVE_ROUTER_IAM_ISSUER=.*/HIVE_ROUTER_IAM_ISSUER=' fake-native-issuer '/" "$config/emberpath.env"
+rm "$directory/deployment-inputs.$plan.json"; pin_deployment_inputs "$directory/candidate.json"
+jq 'del(.components.hivemem.initialization)' "$directory/manifest.json" > "$directory/next.json"; mv "$directory/next.json" "$directory/manifest.json"
+memory=$(sha256sum "$config/hivemem.env")
+relink || { cat "$directory/relink.log" >&2; fail 'The issuer change alone failed'; }
+grep -qx "OATHWEAVE_NATIVE_ISSUERS='fake-native-issuer'" "$config/emberpath.env" && ! grep -q '^HIVE_ROUTER_IAM_ISSUER=' "$config/emberpath.env" || fail 'A custom native issuer did not move with its value'
+[[ $(sha256sum "$config/hivemem.env") == "$memory" && ! -e "$config/.memory-identity-renames.json" ]] || fail 'The issuer change alone touched HiveMem'
+assert_deployment_inputs "$directory/candidate.json" || fail 'The issuer change alone is not pinned'
+[[ -z $(find "$config" "$directory" -maxdepth 1 -name '*memory-identity*staged*' -o -maxdepth 1 -name "memory-identity.$plan.json") ]] || fail 'The issuer change left staged files or its journal'
+
+# OATHWEAVE_NATIVE_ISSUERS already set: the new image ignores the old name, which only goes.
+issuer_setup "$temporary/issuer-both" "OATHWEAVE_NATIVE_ISSUERS='fake-other-issuer,hive-iam'
+"
+relink || { cat "$directory/relink.log" >&2; fail 'The relink with both names failed'; }
+[[ $(grep -c '^OATHWEAVE_NATIVE_ISSUERS=' "$config/emberpath.env") == 1 ]] && grep -qx "OATHWEAVE_NATIVE_ISSUERS='fake-other-issuer,hive-iam'" "$config/emberpath.env" || fail 'An existing OATHWEAVE_NATIVE_ISSUERS changed'
+! grep -q '^HIVE_ROUTER_IAM_ISSUER=' "$config/emberpath.env" || fail 'The ignored old name stayed'
+assert_deployment_inputs "$directory/candidate.json" || fail 'The removal is not pinned'
+
+# An https value, an older Emberpath and Emberpath on another host leave the file as it is.
+issuer_setup "$temporary/issuer-url"
+sed -i "s|^HIVE_ROUTER_IAM_ISSUER=.*|HIVE_ROUTER_IAM_ISSUER='https://identity.example.com/api/oathweave'|" "$config/emberpath.env"
+rm "$directory/deployment-inputs.$plan.json"; pin_deployment_inputs "$directory/candidate.json"
+relink || { cat "$directory/relink.log" >&2; fail 'The relink with an https issuer failed'; }
+grep -qx "HIVE_ROUTER_IAM_ISSUER='https://identity.example.com/api/oathweave'" "$config/emberpath.env" && ! grep -q '^OATHWEAVE_NATIVE_ISSUERS=' "$config/emberpath.env" || fail 'An https issuer was moved'
+grep -q 'is a URL and was left as it is' "$directory/relink.log" || fail 'The kept https issuer was not reported'
+for case in '{"placements":{"hivemem":{},"emberpath":{},"oathweave":{}}}' '{"placements":{"hivemem":{},"emberpath":{},"oathweave":{}},"emberpathNativeIssuers":false}' '{"placements":{"hivemem":{}},"emberpathNativeIssuers":true}'; do
+  input=$case
+  issuer_setup "$temporary/issuer-kept-$(sha256sum <<< "$case" | cut -c1-8)"
+  relink || { cat "$directory/relink.log" >&2; fail "The relink failed for $case"; }
+  grep -qx "HIVE_ROUTER_IAM_ISSUER='hive-iam'" "$config/emberpath.env" && ! grep -q '^OATHWEAVE_NATIVE_ISSUERS=' "$config/emberpath.env" || fail "The issuer setting moved for $case"
+done
+
+# An edit since the pin still stops it, and nothing changes.
+input='{"placements":{"emberpath":{}},"emberpathNativeIssuers":true}'
+issuer_setup "$temporary/issuer-edit"
+printf 'EXTRA=1\n' >> "$config/emberpath.env"
+sums=$(sha256sum "$config/"*.env)
+if relink; then fail 'An unpinned edit was accepted with the issuer change'; fi
+grep -q 'Pinned deployment inputs changed' "$directory/relink.log" || fail 'The unpinned edit was not named for the issuer change'
+[[ $(sha256sum "$config/"*.env) == "$sums" ]] || fail 'A refused issuer change changed a file'
+
 # ---- The controller runs it right after the live schema migrations of an upgrade. ----
 grep -A3 'hive_upgrade_schema_migrations "$directory/candidate.$plan.json" "$manifest"' "$ROOT/scripts/suite/host-runtime.sh" | grep -q 'hive_memory_identity_relink' || fail 'The upgrade does not re-link after the rename'
 printf 'memory identity tests passed\n'

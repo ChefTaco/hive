@@ -402,7 +402,10 @@ action_configure() {
       IAM_ENROLLMENT_INSTALLATION_ID:$installation,
       IAM_ENROLLMENT_PRODUCTS_JSON:({emberpath:{url:"https://emberpath:9443/api",caFile:"/config/authority.pem"},hivemem:{url:"https://hivemem:18790/v1",caFile:"/config/authority.pem"}}|tojson)}' <<< "$iam")
   write_env oathweave "$directory/config/oathweave.env" "$oath_env"
-  ember_env=$(jq -c --argjson common "$common" --arg issuer "$issuer" --argjson links "$(link_env emberpath)" --arg rehearsal "$rehearsal" '
+  # Emberpath 2.12.0 and later read a native issuer name from OATHWEAVE_NATIVE_ISSUERS and warn about
+  # HIVE_ROUTER_IAM_ISSUER, which older images still need (emberpathNativeIssuers, from the
+  # release's pin). An https value is left as it is: the suite sets OATHWEAVE_ISSUER beside it.
+  ember_env=$(jq -c --argjson common "$common" --arg issuer "$issuer" --argjson links "$(link_env emberpath)" --arg rehearsal "$rehearsal" --argjson nativeIssuers "$(jq '.emberpathNativeIssuers==true' <<< "$input")" '
     with_entries(select((.key|test("^(HIVE_ROUTER_[A-Z_]+|HIVE_TYPESAFE_AI_[A-Z_]+|MAX_[A-Z_]+|CAPTURE_[A-Z_]+|LOG_LEVEL|REQUIRE_TLS|PROMETHEUS_PREFIX|DEFAULT_TRACE_RETENTION_DAYS|PUBLIC_API_URL|PUBLIC_ADMIN_URL|HIVE_UI_PUBLIC_URL|HIVEMEM_PUBLIC_URL|HIVE_IAM_PUBLIC_URL)$")) and .key!="HIVE_ROUTER_OS_AUTH_COMMAND")) + $common + {
       HOST:"0.0.0.0",API_HOST:"0.0.0.0",ADMIN_HOST:"0.0.0.0",API_PORT:"4020",ADMIN_PORT:"9443",
       DATABASE_URL:"file:/data/router/router.db",DATA_DIR:"/data/router",TRACE_DIR:"/data/router/traces",
@@ -414,7 +417,9 @@ action_configure() {
       # People sign in and re-authenticate on the Oathweave sign-in page; Emberpath never relays a password.
       EMBERPATH_PASSWORD_RELAY:"false"} +
       # Accounts move to Oathweave: Emberpath sign-in uses it, never PAM on the host.
-      (if ((.HIVE_ROUTER_IAM_CLIENT_ID // "")|length)>0 and ((.HIVE_ROUTER_IAM_CLIENT_SECRET // "")|length)>=24 then {HIVE_ROUTER_AUTH_MODE:"iam-oidc"} else {} end) + (if $rehearsal=="true" then {HIVE_ROUTER_DECISION_MODE:"off",OTEL_SDK_DISABLED:"true"} else {} end) | if $rehearsal=="true" then del(.HIVE_ROUTER_OPENROUTER_KEY,.HIVE_TYPESAFE_AI_KEY) else . end' <<< "$router")
+      (if ((.HIVE_ROUTER_IAM_CLIENT_ID // "")|length)>0 and ((.HIVE_ROUTER_IAM_CLIENT_SECRET // "")|length)>=24 then {HIVE_ROUTER_AUTH_MODE:"iam-oidc"} else {} end) + (if $rehearsal=="true" then {HIVE_ROUTER_DECISION_MODE:"off",OTEL_SDK_DISABLED:"true"} else {} end) | if $rehearsal=="true" then del(.HIVE_ROUTER_OPENROUTER_KEY,.HIVE_TYPESAFE_AI_KEY) else . end |
+      ((.HIVE_ROUTER_IAM_ISSUER // "")|gsub("^\\s+|\\s+$";"")) as $legacy |
+      if $nativeIssuers and $legacy!="" and ($legacy|test("^[a-z][a-z0-9+.-]*:";"i")|not) then del(.HIVE_ROUTER_IAM_ISSUER)+{OATHWEAVE_NATIVE_ISSUERS:$legacy} else . end' <<< "$router")
   write_env emberpath "$directory/config/emberpath.env" "$ember_env"
   mem_env=$(jq -c --argjson common "$common" --arg issuer "$issuer" --arg origin "$origin" --rawfile qdrant "$secrets/qdrant-key" --argjson links "$(link_env hivemem 0)" --arg rehearsal "$rehearsal" '
     with_entries(select(.key|test("^HIVEMEM_(JWT_[A-Z_]+|RENEWAL_[A-Z_]+|ADMIN_TOKEN|METRICS_[A-Z_]+|VECTOR_DIM|DEDUP_[A-Z_]+|PRUNE_[A-Z_]+|CONFIDENCE_[A-Z_]+|IMPORTANCE_[A-Z_]+|DASHBOARD_[A-Z_]+|TOKEN_EXPIRE_HOURS|LOG_LEVEL|ADMIN_OS_USERS)$"))) + $common + {

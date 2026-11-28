@@ -16,7 +16,7 @@ Nothing here touches inference services or model files.
 | Users, password hashes, roles, client registrations | Rows are compared before and after. Additions are listed below |
 | Migration history, audit rows and audit files | Copied. Product migrations only add to the history |
 | Memory vectors | Restored through Qdrant's own snapshots; counts and content digests are compared |
-| Machine-client policies and kept client names | `IAM_MACHINE_CLIENT_POLICIES` and `HIVE_ROUTER_*` are copied byte for byte |
+| Machine-client policies and kept client names | `IAM_MACHINE_CLIENT_POLICIES` and `HIVE_ROUTER_*` are copied byte for byte, except that a release pinning Emberpath 2.12.0 or later gets a native `HIVE_ROUTER_IAM_ISSUER` as `OATHWEAVE_NATIVE_ISSUERS` with the same value |
 | Redis records | Restored with their absolute expiry, never extended |
 | The previous runtime, units and data | Kept. Native files are only read, except the markers listed under "Cutover" |
 

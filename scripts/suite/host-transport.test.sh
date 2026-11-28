@@ -85,6 +85,16 @@ grep -q owner-only "$temporary/refused" || fail 'The password file refusal was u
 printf 'payload\n' > "$temporary/payload"
 if ( hive_transfer control "$temporary/payload" payload ) > "$temporary/refused" 2>&1; then fail 'A transfer continued after its password file was refused'; fi
 chmod 600 "$temporary/password"
+# Hosts learn whether the release pins an Emberpath that reads OATHWEAVE_NATIVE_ISSUERS (2.12.0 or
+# later); otherwise the request has no such field.
+jq 'del(.hosts.control.sudoPasswordFile)' "$HIVE_CONFIG" > "$temporary/plain.json"; mv "$temporary/plain.json" "$HIVE_CONFIG"
+request_script=$'IFS= read -r packet\njq -c \'{issuers:(.emberpathNativeIssuers // "absent")}\' <<< "$packet"\n'
+for case in '2.12.0 true' '2.13.1 true' '3.0.0 true' '2.11.0 absent' '2.12.0-rc.1 absent' 'none absent'; do
+  read -r version expected <<< "$case"
+  jq -n --arg version "$version" 'if $version=="none" then {components:{}} else {components:{emberpath:{version:$version}}} end' > "$temporary/release.json"
+  [[ $(HIVE_MANIFEST=$temporary/release.json hive_host control "$request_script" | jq -r .issuers) == "$expected" ]] || fail "Emberpath $version did not send emberpathNativeIssuers=$expected"
+done
+[[ $(env -u HIVE_MANIFEST bash -c 'source "$0"; HIVE_ROOT=$1 HIVE_CONFIG=$2 HIVE_VERSION=0.1.0 HIVE_ID=example-suite; hive_host control "$3"' "$ROOT/scripts/suite/controller.sh" "$temporary" "$HIVE_CONFIG" "$request_script" | jq -r .issuers) == absent ]] || fail 'A run without a release sent emberpathNativeIssuers'
 export CORRUPT_HOST_FRAME=true
 jq 'del(.hosts.control.sudoPasswordFile)' "$HIVE_CONFIG" > "$temporary/plain.json"; mv "$temporary/plain.json" "$HIVE_CONFIG"
 if hive_host control "$script" > "$temporary/corruption" 2>&1; then fail 'Corrupt transport frame was accepted'; fi

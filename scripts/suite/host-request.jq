@@ -61,3 +61,4 @@
 + (if $backupTransfer!=null then {backupTransfer:$backupTransfer} else {} end)
 + (if $uninstall!=null then {uninstall:$uninstall} else {} end)
 + (if $magnusNodeKeysOnly==true then {magnusNodeKeysOnly:true} else {} end)
++ (if $emberpathNativeIssuers==true then {emberpathNativeIssuers:true} else {} end)
