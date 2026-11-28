@@ -209,10 +209,57 @@ host magnus-agent-remove "$(remove_request true)" || fail 'remove of a repaired 
 jq -e 'any(.kept[]; .code=="agent") and any(.kept[]; .code=="account" and (.reason|test("still uses it")))' "$temporary/out" >/dev/null || { cat "$temporary/out" >&2; fail 'The repaired agent or its account was not kept'; }
 untouched 'A repaired agent'
 # Our account and our agent, but another agent on this host names the account: the account stays.
-jq --arg root "$agent" '.agentRoot=$root' "$agent.native-owner.json" > "$temporary/next.json"; mv "$temporary/next.json" "$agent.native-owner.json"
+jq --arg root "$agent" '.agentRoot=$root | .agentRootCreated=true' "$agent.native-owner.json" > "$temporary/next.json"; mv "$temporary/next.json" "$agent.native-owner.json"
 mkdir -p "$temporary/opt/second-agent"; printf 'ARDENT_OWNER_USER=hive-agent\n' > "$temporary/opt/second-agent/.env"
 host magnus-agent-remove "$(remove_request true)" || fail 'remove beside a second agent failed outright'
 jq -e 'any(.kept[]; .code=="account" and (.reason|test("second-agent/.env names it too")))' "$temporary/out" >/dev/null || { cat "$temporary/out" >&2; fail 'An account another agent names was not kept'; }
 account_exists && [[ ! -e "$agent" && -f "$agent.native-owner.json" ]] || fail 'The account another agent names was deleted, or our agent was kept'
 ! grep -q '^userdel ' "$log" || fail 'userdel ran for an account another agent names'
-printf 'Passed: uninstall --purge removes the agent, its staged packages, the Ardent setup receipts and (with --delete-agent-profiles, or without profiles) the native account and its record that this installation created; reinstall and Ardent setup then succeed; fleet agents, earlier releases'"'"' records, other installations'"'"' accounts and shared accounts are left untouched and reported.\n'
+# ---- A directory that existed before the installer stays the operator's. ----
+fresh_host() { rm -rf -- "$agent" "$agent-artifacts" "$agent.native-owner.json" "$agent.hive-creating.json" "$MAGNUS_AGENT_UNIT" "$temporary/opt/second-agent" "$home"; rm -f "$temporary/account"; }
+fresh_host
+# A directory that already holds files: the install uses it but never records it as its own,
+# and neither uninstall --purge --delete-agent-profiles nor magnus-agent remove deletes the file.
+mkdir -p "$agent"; printf 'operator data\n' > "$agent/unrelated.txt"
+installation preexisting
+jq -e --arg root "$agent" '(.agentRoot // "") != $root and (has("agentRootCreated")|not)' "$agent.native-owner.json" >/dev/null ||
+  { cat "$agent.native-owner.json" >&2; fail 'The install claimed a directory that already held files'; }
+[[ ! -e "$agent.hive-creating.json" ]] || fail 'The install wrote a creation note for a directory it did not make'
+printf 'purge-proof\n' | uninstall true true || true
+[[ -f "$agent/unrelated.txt" && $(cat "$agent/unrelated.txt") == 'operator data' ]] || { cat "$temporary/uninstall.log" >&2; fail 'uninstall --purge deleted a file in a directory the installer did not create'; }
+grep -q 'Kept the Magnus agent at' "$temporary/uninstall.log" || { cat "$temporary/uninstall.log" >&2; fail 'The kept pre-existing directory was not reported'; }
+host magnus-agent-remove "$(remove_request true)" || fail 'remove beside a pre-existing directory failed outright'
+[[ -f "$agent/unrelated.txt" ]] || fail 'magnus-agent remove deleted a file in a directory the installer did not create'
+# An empty directory that was there before is not the installer's either.
+fresh_host; mkdir -p "$agent"
+installation empty-preexisting
+jq -e --arg root "$agent" '(.agentRoot // "") != $root' "$agent.native-owner.json" >/dev/null || fail 'The install claimed an empty directory it did not make'
+# A record an earlier release wrote, naming the directory without proof that it was created:
+# removal keeps the directory and says why.
+jq --arg root "$agent" '.agentRoot=$root' "$agent.native-owner.json" > "$temporary/next.json"; mv "$temporary/next.json" "$agent.native-owner.json"
+printf 'operator data\n' > "$agent/unrelated.txt"
+host magnus-agent-remove "$(remove_request true)" || fail 'remove beside an unproven claim failed outright'
+jq -e 'any(.kept[]; .code=="agent" and (.reason|test("3.15.2 or earlier")))' "$temporary/out" >/dev/null || { cat "$temporary/out" >&2; fail 'An unproven earlier claim was not reported'; }
+[[ -f "$agent/unrelated.txt" ]] || fail 'remove trusted an unproven earlier claim'
+# An install that stopped after making the directory (its certificate already in it), before
+# claiming it: the rerun still claims that directory, and removal then deletes it.
+fresh_host; mkdir -p "$agent/certs"; : > "$agent/certs/agent.crt"
+jq -n --arg root "$agent" --arg inode "$(stat -c %d:%i -- "$agent")" '{schema:1,installation:"purge-proof",root:$root,inode:$inode}' > "$agent.hive-creating.json"
+installation resumed
+jq -e --arg root "$agent" '.agentRoot==$root and .agentRootCreated==true' "$agent.native-owner.json" >/dev/null || { cat "$agent.native-owner.json" >&2; fail 'The rerun did not claim the directory its interrupted install made'; }
+[[ ! -e "$agent.hive-creating.json" ]] || fail 'The creation note was kept after the claim'
+host magnus-agent-remove "$(remove_request true)" || fail 'remove of a resumed install failed outright'
+[[ ! -e "$agent" ]] || fail 'remove kept a directory this installation created'
+# A note for a directory made again in its place (another inode), or another installation's
+# note, proves nothing.
+fresh_host; mkdir -p "$agent"; printf 'x\n' > "$agent/unrelated.txt"
+jq -n --arg root "$agent" '{schema:1,installation:"purge-proof",root:$root,inode:"0:0"}' > "$agent.hive-creating.json"
+installation replaced-directory
+jq -e --arg root "$agent" '(.agentRoot // "") != $root' "$agent.native-owner.json" >/dev/null || fail 'A note for another directory let the install claim this one'
+fresh_host; mkdir -p "$agent"; printf 'x\n' > "$agent/unrelated.txt"
+jq -n --arg root "$agent" --arg inode "$(stat -c %d:%i -- "$agent")" '{schema:1,installation:"other-suite",root:$root,inode:$inode}' > "$agent.hive-creating.json"
+installation foreign-note
+jq -e --arg root "$agent" '(.agentRoot // "") != $root' "$agent.native-owner.json" >/dev/null || fail 'Another installation'"'"'s creation note let the install claim the directory'
+[[ -f "$agent/unrelated.txt" ]] || fail 'A foreign note cost a file'
+
+printf 'Passed: a directory the installer did not make (with files, empty, claimed by an earlier release, or noted for another directory or installation) is never deleted, and an interrupted install still claims its own; uninstall --purge removes the agent, its staged packages, the Ardent setup receipts and (with --delete-agent-profiles, or without profiles) the native account and its record that this installation created; reinstall and Ardent setup then succeed; fleet agents, earlier releases'"'"' records, other installations'"'"' accounts and shared accounts are left untouched and reported.\n'
