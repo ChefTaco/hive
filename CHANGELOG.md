@@ -14,10 +14,13 @@ All notable changes to this project are documented in this file. The format is b
   directory. The installer now records only a directory it makes itself: it writes a creation note
   beside the directory before making it and pins the note to that directory, so a rerun after an
   interrupted install still claims it, and a directory that was already there stays the operator's,
-  empty or not. Removal deletes the directory only for a claim carrying that proof
-  (`agentRootCreated`); a claim from 3.15.2 or earlier is kept and reported, to be checked and
-  removed by hand. Regression test: install into a directory holding an unrelated file, then
-  remove and purge, and the file is still there.
+  empty or not. The claim records the directory's device and inode (`agentRootCreated`,
+  `agentRootInode`), and removal deletes the directory only when the one at that path is still the
+  very directory the installer made, so a directory replaced at the same path after the install is
+  kept and reported. A claim from 3.15.2 or earlier is kept and reported too, to be checked and
+  removed by hand. Regression tests: install into a directory holding an unrelated file, and
+  install then replace the directory with one holding an unrelated file; after remove and purge
+  the file is still there.
 - **`ardent setup` on a node that is not enrolled no longer blocks the profile name.** It sent the
   package installation anyway, Magnus refused it (`503`), and the receipt it kept at `installing`
   refused every later run of that profile ("interrupted around a request whose outcome needs
