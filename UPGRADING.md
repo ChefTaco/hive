@@ -33,7 +33,7 @@ delete transaction or runtime receipts to force another attempt. See also
 Releases up to 3.15.2 could record an agent directory that already held files as created by the
 installer (the Magnus host agent installed into an existing directory), and `magnus-agent remove`
 or `uninstall --purge` then deleted it whole. From 3.15.3 removal trusts only claims the installer
-records when it makes the directory itself, pinned to that directory's device and inode (a
+records when it makes the directory itself, pinned to that directory's device, inode and creation time (a
 directory made again at the same path later is kept and reported as replaced), so a directory
 recorded by an earlier release is kept and reported (`comes from a Hive release (3.15.2 or
 earlier)`): check what is in it, back up
