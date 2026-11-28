@@ -351,15 +351,36 @@ prepare_native_owner() {
   systemctl start "user@$uid.service"
 }
 
-# A fresh agent directory (none, or one an interrupted install left without an agent in it) that
-# this installation's own account record covers is recorded as created by this installation.
-fresh_agent_root() { [[ ! -e "$root" ]] || [[ -d "$root" && ! -L "$root" && ! -e "$root/.env" && ! -e "$root/node_modules" && ! -e "$root/current" ]]; }
+# Only an agent directory the installer itself makes is recorded as this installation's. A
+# directory that already exists stays the operator's, empty or not, whatever it holds: removal
+# must never delete files the installer did not put there. The creation note beside it
+# (ROOT.hive-creating.json) names the installation and, once made, the directory's device and
+# inode; it is dropped once the ownership record claims the directory. A rerun after an
+# interrupted install (which may already have put the listener certificate in it) trusts the note
+# only for that very directory, not for one made again in its place.
+creation_note="$root.hive-creating.json"
+agent_root_is_ours_to_create() {
+  [[ -n "$installation" && ! -L "$creation_note" ]] || return 1
+  if [[ ! -e "$root" && ! -L "$root" ]]; then return 0; fi
+  [[ -d "$root" && ! -L "$root" && -f "$creation_note" && -O "$creation_note" ]] &&
+    jq -e --arg id "$installation" --arg root "$root" --arg inode "$(stat -c %d:%i -- "$root")" \
+      '.installation==$id and .root==$root and .inode==$inode' "$creation_note" >/dev/null 2>&1
+}
+write_creation_note() { # [INODE]
+  local temporary
+  install -d -m 0755 "$(dirname -- "$root")"
+  temporary=$(mktemp "$creation_note.XXXXXX")
+  jq -n --arg id "$installation" --arg root "$root" --arg inode "${1:-}" '{schema:1,installation:$id,root:$root}+(if $inode!="" then {inode:$inode} else {} end)' > "$temporary"
+  sync -f "$temporary"; mv -T -- "$temporary" "$creation_note"
+}
+# agentRootCreated marks a claim made under that rule; a record that names agentRoot without it
+# comes from a release that also claimed directories it found, so removal does not trust it.
 claim_agent_root() {
   local marker="$root.native-owner.json" temporary
   [[ -n "$installation" && -f "$marker" && ! -L "$marker" ]] || return 0
   jq -e --arg id "$installation" --arg name "$native_owner" '.installation==$id and .username==$name' "$marker" >/dev/null || return 0
   temporary=$(mktemp "$marker.XXXXXX")
-  jq --arg root "$root" '.agentRoot=$root | del(.agentRemovedAt)' "$marker" > "$temporary"
+  jq --arg root "$root" '.agentRoot=$root | .agentRootCreated=true | del(.agentRemovedAt)' "$marker" > "$temporary"
   sync -f "$temporary"; mv -T -- "$temporary" "$marker"
 }
 
@@ -392,13 +413,20 @@ install_agent() {
     die 'The Magnus of this release accepts node keys only: an agent without a node key needs a one-time enrollment token, and none was given; nothing was changed'
   fi
   [[ ! -L "$root" ]] || die 'The agent directory cannot be a symlink'
+  [[ ! -L "$creation_note" ]] || die 'The agent creation note cannot be a symlink'
   local created=false
-  if fresh_agent_root; then created=true; fi
+  if agent_root_is_ours_to_create; then
+    created=true
+    # Noted before the directory exists, then pinned to the directory made.
+    [[ -e "$root" ]] || write_creation_note
+    install -d -m 0700 "$root"
+    write_creation_note "$(stat -c %d:%i -- "$root")"
+  fi
   install -d -m 0700 "$root"
   prepare_certificate
   prepare_native_owner
   # Recorded before anything is installed in it, so even an interrupted install can be removed.
-  if [[ "$created" == true ]]; then claim_agent_root; fi
+  if [[ "$created" == true ]]; then claim_agent_root; rm -f -- "$creation_note"; fi
   if write_environment; then changed=true; fi
   current=$(installed_version)
   if [[ "$current" != "$wanted" ]]; then
@@ -504,10 +532,12 @@ remove_agent() {
       die "The ownership record $marker is unreadable or not root's; nothing was removed"
   fi
   if [[ -n "$record" && -n "$installation" ]] && jq -e --arg id "$installation" '.installation==$id' <<< "$record" >/dev/null; then owned=true; fi
-  if [[ "$owned" == true ]] && jq -e --arg root "$root" '.agentRoot==$root' <<< "$record" >/dev/null; then agent=true; fi
+  if [[ "$owned" == true ]] && jq -e --arg root "$root" '.agentRoot==$root and .agentRootCreated==true' <<< "$record" >/dev/null; then agent=true; fi
   if [[ -z "$record" ]]; then why="no ownership record $marker shows that the Hive installer set it up"
   elif [[ "$owned" != true ]] && jq -e 'has("installation")' <<< "$record" >/dev/null; then why="the ownership record $marker names Hive installation $(jq -r .installation <<< "$record"), not ${installation:-this one}"
   elif [[ "$owned" != true ]]; then why="the ownership record $marker names no installation (an earlier release wrote it), so Hive cannot prove which installation created it"
+  elif jq -e --arg root "$root" '.agentRoot==$root and .agentRootCreated!=true' <<< "$record" >/dev/null; then
+    why="the ownership record $marker comes from a Hive release (3.15.2 or earlier) that could also claim a directory that already held files, so Hive cannot prove it created $root; check what is in it and remove it by hand"
   else why="the ownership record $marker does not show that this installation created $root"; fi
   [[ -e "$root" || -f "$unit" ]] && present=true
   # The service must be the one the installer set up for this directory.
@@ -558,6 +588,10 @@ remove_agent() {
   elif [[ "$present" == true ]]; then
     kept_item agent "the Magnus agent at $root" "$why"
   fi
+  # A creation note an install of this installation left (it stopped before claiming the
+  # directory): it proves nothing once that directory is gone, so it goes with the agent.
+  if [[ -f "$creation_note" && ! -L "$creation_note" && ! -e "$root" ]] &&
+    jq -e --arg id "$installation" '.installation==$id' "$creation_note" >/dev/null 2>&1; then rm -f -- "$creation_note"; fi
   # Its staged Ardent packages: only the directories the installer stages, and its own staging.
   if [[ "$agent" == true && -d "$artifacts" ]]; then
     for entry in "$artifacts"/* "$artifacts"/.stage-*; do

@@ -8,6 +8,16 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **`magnus-agent remove` and `uninstall --purge` no longer delete an agent directory the installer
+  did not create.** Releases up to 3.15.2 recorded a directory as installer-created when it already
+  existed without an agent in it, even when it held other files, and removal then deleted the whole
+  directory. The installer now records only a directory it makes itself: it writes a creation note
+  beside the directory before making it and pins the note to that directory, so a rerun after an
+  interrupted install still claims it, and a directory that was already there stays the operator's,
+  empty or not. Removal deletes the directory only for a claim carrying that proof
+  (`agentRootCreated`); a claim from 3.15.2 or earlier is kept and reported, to be checked and
+  removed by hand. Regression test: install into a directory holding an unrelated file, then
+  remove and purge, and the file is still there.
 - **`ardent setup` on a node that is not enrolled no longer blocks the profile name.** It sent the
   package installation anyway, Magnus refused it (`503`), and the receipt it kept at `installing`
   refused every later run of that profile ("interrupted around a request whose outcome needs

@@ -28,6 +28,17 @@ holds its transaction for recovery, as described in
 delete transaction or runtime receipts to force another attempt. See also
 [the upgrade procedure](deployment/QUICKSTART.md#8-upgrade).
 
+## Magnus agent directories recorded by 3.15.2 or earlier (from 3.15.3)
+
+Releases up to 3.15.2 could record an agent directory that already held files as created by the
+installer (the Magnus host agent installed into an existing directory), and `magnus-agent remove`
+or `uninstall --purge` then deleted it whole. From 3.15.3 removal trusts only claims the installer
+records when it makes the directory itself, so a directory recorded by an earlier release is kept
+and reported (`comes from a Hive release (3.15.2 or earlier)`): check what is in it, back up
+anything that is not the agent's, and remove it by hand. Until you upgrade, do not run
+`magnus-agent remove` or `uninstall --purge` on a host whose agent directory held other files
+before the install (`--delete-agent-profiles` does not change this).
+
 ## Daily backups and off-host copies (from 3.15.0)
 
 Nothing changes until you opt in. `"retention": {"backup": {"keep": 7}}` has the daily prune take
